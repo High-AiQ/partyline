@@ -8,7 +8,9 @@ from __future__ import annotations
 import asyncio
 import time
 
-from .hierarchy import lead_attachment, parent_id_of
+from .hierarchy import lead_attachment
+from .return_captain import parent_captain
+from . import captain_idle
 from .goal_stall import wait_until_quiet
 from .mention_relay import LIVE, is_foreign, post_private, reaches_a_process, speaker_attachment
 from .mentions import addressees, line_addressed, mentioned_names
@@ -123,18 +125,6 @@ class ReturnPath:
         self.real_wake.discard(att_id)
         self.notify_parent.discard(att_id)
 
-    def _parent_captain(self, finisher: dict) -> dict | None:
-        """The live captain above this child captain, never the finisher itself."""
-        if not finisher.get("is_lead"):
-            return None
-        parent = parent_id_of(self.runtime.db.get_conversation(finisher["conv_id"]))
-        if not parent:
-            return None
-        manager = lead_attachment(self.runtime.db, parent)
-        if manager and manager["status"] in LIVE and manager["id"] != finisher["id"]:
-            return manager
-        return None
-
     def note_spoke(self, att_id: str, body: str) -> None:
         """The process said something; a mention of a live process settles the turn."""
         me = self._row(att_id)
@@ -178,6 +168,7 @@ class ReturnPath:
             self.presence.goal_stall.handed_off(finisher)
         if handed_off:
             owed = []  # it handed off during the turn; the stale notices are superseded
+        delivered_deferred = bool(owed)
         for line_id, body, source_att in owed:
             source = self._row(source_att) or {}
             if self.presence is not None:
@@ -187,6 +178,8 @@ class ReturnPath:
             await post_private(self.runtime, line_id, "system", "system", body,
                                audience=att_id, source=(source_att, source.get("conv_id")))
         if att_id in self.pending:
+            if not delivered_deferred:
+                await captain_idle.safe_check(self.runtime, self.presence, finisher)
             return
         real = att_id in self.real_wake
         manager = lead_attachment(self.runtime.db, finisher["conv_id"]) if finisher else None
@@ -194,7 +187,7 @@ class ReturnPath:
             undeliverable and manager and manager["status"] in LIVE
             and manager["id"] != att_id and not finisher.get("is_lead")
         )
-        parent = self._parent_captain(finisher) if finisher and real and not said else None
+        parent = parent_captain(self.runtime.db, finisher) if finisher and real and not said else None
         owed = bool(self.requesters.get(att_id) or self.askers.get(att_id) or line_captain or parent)
         # A hand-off, or a turn a notice alone woke, carries unreached requesters and
         # sends nothing. Silence after a real wake still owes those requesters.
@@ -205,10 +198,14 @@ class ReturnPath:
                 self._close_speech(att_id)
             else:
                 self._clear(att_id)
+            if not delivered_deferred:
+                await captain_idle.safe_check(self.runtime, self.presence, finisher)
             return
         if parent:
             self.notify_parent.add(att_id)
         self.pending[att_id] = asyncio.create_task(self._settle(att_id))
+        if not delivered_deferred:
+            await captain_idle.safe_check(self.runtime, self.presence, finisher)
 
     def _working(self, att_id: str) -> bool:
         return bool(self.presence is not None and self.presence.is_working(att_id))
@@ -230,7 +227,7 @@ class ReturnPath:
         return state
 
     def _add_parent(self, att_id: str, finisher: dict, requesters: dict) -> None:
-        parent = self._parent_captain(finisher)
+        parent = parent_captain(self.runtime.db, finisher)
         if parent is None or parent["id"] in requesters or parent["id"] == att_id:
             return
         since = [row.get("since_id") for row in requesters.values() if row.get("since_id") is not None]

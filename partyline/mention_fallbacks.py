@@ -21,24 +21,29 @@ from .mention_relay import (
 )
 from .orchestrator_store import task
 from .task_ghost_mentions import report_detached
+from .unreached import explain
 
 logger = logging.getLogger(__name__)
 GONE = ("detached", "exited")
 RESTART = {"reviewer": "restart_reviewer", "implementer": "restart_implementer"}
 
 
-async def route_fallbacks(runtime, conv_id: str, message: dict, names: set[str]) -> set[str]:
+async def route_fallbacks(
+    runtime, conv_id: str, message: dict, names: set[str], unreached=None
+) -> set[str]:
     """Handle ``names`` that reached nobody on a task line; return those handled."""
     row = task(runtime.db, conv_id)
     if row is None or message.get("sender_type") == "system" or not names:
         return set()
-    handled = await _own_staff(runtime, conv_id, row, message, names)
+    handled = await _own_staff(runtime, conv_id, row, message, names, unreached)
     if message.get("sender_type") == "agent" and not is_foreign(message):
-        handled |= await _former_captain(runtime, conv_id, row, message, names - handled)
+        handled |= await _former_captain(runtime, conv_id, row, message, names - handled, unreached)
     return handled
 
 
-async def _own_staff(runtime, conv_id: str, row: dict, message: dict, names: set[str]) -> set[str]:
+async def _own_staff(
+    runtime, conv_id: str, row: dict, message: dict, names: set[str], unreached=None
+) -> set[str]:
     handled: set[str] = set()
     for role in ("reviewer", "implementer"):
         att = runtime.db.get_attachment(row[f"{role}_id"]) if row[f"{role}_id"] else None
@@ -51,8 +56,13 @@ async def _own_staff(runtime, conv_id: str, row: dict, message: dict, names: set
         tail = ("it is being revived for this review round and will read this"
                 if revived else
                 f"it will read this when revived — the root captain revives it with {RESTART[role]}")
-        await runtime.post_message(
-            conv_id, "system", "system", f"⚠ @{att['name']} is {att['status']}; {tail}")
+        if unreached is not None and not revived:
+            # Nobody is reading it yet: wake the speaker, with the concrete revive.
+            unreached.add(att["name"], explain(runtime.db, conv_id, att["name"], unreached.speaker["id"])
+                           or att["status"])
+        else:
+            await runtime.post_message(
+                conv_id, "system", "system", f"⚠ @{att['name']} is {att['status']}; {tail}")
         await report_detached(runtime, conv_id, message, att["name"])
     return handled
 
@@ -75,7 +85,9 @@ async def _revive_in_review(runtime, conv_id: str) -> bool:
     return True
 
 
-async def _former_captain(runtime, conv_id: str, row: dict, message: dict, names: set[str]) -> set[str]:
+async def _former_captain(
+    runtime, conv_id: str, row: dict, message: dict, names: set[str], unreached=None
+) -> set[str]:
     db = runtime.db
     speaker = speaker_attachment(db, conv_id, message)
     root = task_root_captain(db, conv_id)
@@ -93,8 +105,12 @@ async def _former_captain(runtime, conv_id: str, row: dict, message: dict, names
                 f"↪ @{att['name']} is no longer attached on the root line; "
                 f"delivered to the current captain @{root['name']}:\n" + message["body"],
                 audience=root["id"], source=(speaker["id"], conv_id), private=True)
-        await post_private(
-            runtime, conv_id, "system", "system",
-            f"⚠ @{att['name']} is not attached; the root captain is @{root['name']}",
-            audience=speaker["id"], route=False)
+        if unreached is not None:
+            unreached.add(att["name"], f"not attached; the root captain is @{root['name']} — "
+                          "mention that handle (it was passed a copy of your message)")
+        else:
+            await post_private(
+                runtime, conv_id, "system", "system",
+                f"⚠ @{att['name']} is not attached; the root captain is @{root['name']}",
+                audience=speaker["id"], route=False)
     return handled

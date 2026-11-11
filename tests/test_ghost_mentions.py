@@ -117,8 +117,10 @@ class GhostMentionTest(TaskFixture):
         self.assertIn(f"@{self.worker.name} mentioned @review-{tag}", notices[0])
         self.assertIn("no reviewer is staffed", notices[0])
         hints = [m["body"] for m in self.db.message_page(self.conv_id, limit=100)[0]
-                 if "reached nobody" in m["body"]]
-        self.assertEqual(len(hints), 2)  # the sender's hint still fires every time
+                 if "did not reach" in m["body"]
+                 and m.get("audience_attachment_id") == self.worker.attachment_id]
+        self.assertEqual(len(hints), 2)  # the sender's notice still fires every time
+        self.assertTrue(all(f"@review-{tag}: unknown handle" in hint for hint in hints))
 
     async def test_pack_tells_the_implementer_the_reviewer_is_server_staffed(self):
         await self.create(policy="captain")

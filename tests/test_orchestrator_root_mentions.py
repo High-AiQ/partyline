@@ -89,10 +89,11 @@ class RootMentionTest(TaskFixture):
         await self.setUp_task()
         await self.say('ping @argon')
         hints = [m for m in self.posts(self.conv_id)
-                 if 'reached nobody' in m['body']
+                 if 'did not reach' in m['body']
                  and m['audience_attachment_id'] == self.worker.attachment_id]
         self.assertEqual(len(hints), 1)
-        self.assertIn('@captain', hints[0]['body'])
+        self.assertIn('@argon: unknown handle', hints[0]['body'])
+        self.assertIn('mention @captain', hints[0]['body'])
 
     async def test_unresolved_captain_name_explains_routing_failure(self):
         from partyline.mention_relay import hint_root_captain

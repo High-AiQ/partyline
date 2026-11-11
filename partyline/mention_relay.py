@@ -37,6 +37,7 @@ from .mentions import known_mention_names
 from .message_visibility import is_reaction_notice
 from .task_ack_limit import RULE, withheld_ack
 from .task_mention_guard import notify_cross_task, split_cross_task
+from .task_remedy import task_remedy
 from .resume_backlog import WORKER_PACK_NOTICE_PREFIX
 
 LIVE = ("starting", "running")
@@ -208,13 +209,15 @@ async def ring_workers(runtime, line_id: str, captain: dict) -> dict | None:
     return msg
 
 
-async def hint_root_captain(runtime, conv_id: str, message: dict, unresolved: set[str]) -> None:
+async def hint_root_captain(
+    runtime, conv_id: str, message: dict, unresolved: set[str], unreached=None
+) -> set[str]:
     """Tell a task process whom to mention when its @name reached nobody, and
     file the same once-per-handle incident notice the API refusal sends."""
     speaker = speaker_attachment(runtime.db, conv_id, message)
     root = task_root_captain(runtime.db, conv_id)
     if speaker is None or root is None or speaker["id"] == root["id"]:
-        return
+        return set()
     unresolved = unresolved - {speaker["name"].lower()}
     unresolved -= known_mention_names(runtime.db, conv_id, unresolved)
     # The parser offers both the literal spelling and the spelling without
@@ -224,24 +227,28 @@ async def hint_root_captain(runtime, conv_id: str, message: dict, unresolved: se
     known = known_mention_names(runtime.db, conv_id, stripped)
     unresolved = {name for name in unresolved if name.rstrip(".-_") not in known}
     if not unresolved:
-        return
+        return set()
     handles = ", ".join(f"@{name}" for name in sorted(unresolved))
     if root["name"].lower() in unresolved:
-        body = (f"⚠ {handles} reached nobody — the root captain could not be routed; "
-                "check the captain's connection and retry")
+        tail = "the root captain could not be routed; check the captain's connection and retry"
     else:
-        body = (f"⚠ {handles} reached nobody — line names are not mentionable; "
+        tail = ("line names are not mentionable; "
                 f"to reach the root captain, mention @{root['name']}")
-    await post_private(
-        runtime, conv_id, "system", "system",
-        body,
-        audience=speaker["id"], route=False,
-    )
+    if unreached is not None:
+        unreached.add(handles, f"unknown handle — {tail}")  # one waking notice carries it
+    else:
+        await post_private(
+            runtime, conv_id, "system", "system", f"⚠ {handles} reached nobody — {tail}",
+            audience=speaker["id"], route=False,
+        )
     from .task_ghost_mentions import report_ghost_incidents  # it imports this module
     await report_ghost_incidents(runtime, conv_id, speaker, unresolved)
+    return unresolved
 
 
-async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) -> set[str]:
+async def relay_mentions(
+    runtime, conv_id: str, message: dict, names: set[str], unreached=None
+) -> set[str]:
     """Copy the message to each reachable process it names on another line.
 
     Returns the handles that live elsewhere in the tree, reached or not, so
@@ -262,7 +269,7 @@ async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) 
         # reply mentioning three workers cost six held-back notices, every one
         # false, for copies that had just been delivered.
         crossed, withheld = split_cross_task(runtime.db, conv_id, speaker, withheld)
-        await notify_cross_task(runtime, conv_id, speaker, crossed)
+        await notify_cross_task(runtime, conv_id, speaker, crossed, unreached)
     withheld_all = withheld + crossed
     if is_foreign(message):
         return {att["name"].lower() for att in reached + withheld_all}
@@ -281,5 +288,8 @@ async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) 
         )
     for target in withheld:
         notice = withheld_notice(runtime.db, conv_id, target, crossing)
-        await runtime.post_message(conv_id, "system", "system", notice)
+        if unreached is not None:
+            unreached.note(notice + task_remedy(runtime.db, target))
+        else:
+            await runtime.post_message(conv_id, "system", "system", notice)
     return {att["name"].lower() for att in reached + withheld_all}

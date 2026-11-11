@@ -50,4 +50,6 @@ class CrossTaskNoticeTest(TaskFixture):
             self.assertIn(f"«{name}»", notices[0])
             self.assertEqual(self.copies(row), [])
         self.assertIn('«first»', notices[0])
-        self.assertEqual(notices[0].count('message_task'), 1)
+        for row in (second, third):  # the exact call for each target, with its own task
+            self.assertIn(f"message_task(conv_id={row['conv_id']}, text, to='implementer')", notices[0])
+        self.assertEqual(notices[0].count('message_task'), 2)

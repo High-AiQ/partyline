@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+from . import captain_idle
 from .hierarchy import ancestors, parent_id_of, subtree_conversation_ids
 from .mention_relay import LIVE, lead_attachment, live_manager, post_private
 
@@ -35,6 +36,7 @@ class GoalStallGuard:
         self.notified, self.woken, self.suppressed, self.pending = set(), {}, {}, {}
 
     def activity(self, conv_id: str, actor_id: str | None = None) -> None:
+        captain_idle.activity(self.runtime, conv_id, actor_id)
         if getattr(self.runtime, "db", None) is None:
             return
         if actor_id and actor_id in self.woken:

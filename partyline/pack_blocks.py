@@ -116,6 +116,9 @@ FENCE = (
 
 ORCHESTRATOR = (
     "## Orchestrator captain pack\n"
+    "Do not end a turn promising future work unless something will actually wake you, "
+    "such as a live worker, task wait or scheduled deadline. Otherwise do the work now "
+    "or tell the person plainly what blocks you. Act on the idle alert. "
     "Create tasks, read their structured results, merge and push. Do not implement. "
     "Use create_task(name, goal, implementer, review) to create a task line with exactly one "
     "implementer; tasks() lists status, reviewer and round count without reading every line. "

@@ -2140,3 +2140,26 @@ had from a finished operation, so `SIGUSR1` prints every thread's stack on deman
 only). Time at the choke point (the base adapter's callbacks, the websocket sends), not per tail: round after round
 found another adapter path that called the runtime directly. Keep log names to route templates and fixed words; a hook URL carries a capability token. Tests:
 `tests/test_op_timing.py` (fake clock, no waits, and a check that the idle path creates no timer).
+
+## 2026-11-11 — A "nothing was delivered" notice posted to the line wakes nobody
+
+The false assumption was that telling the line is telling the speaker. A captain @mentioned a task worker that had
+already detached; the router noticed and posted `⚠ @name was mentioned but is not attached — nothing was delivered`
+as an ordinary line message. That wakes no process, so the captain ended its turn believing the work was handed off,
+and the line sat idle until a person read it. The captain saw the notice only on the next human message and then
+guessed a cause (that the server holds mentions back) that had nothing to do with it. Every "reached nobody" outcome
+(not attached, held back on another line, a former captain, an unknown handle) was a line message or a non-waking
+private one. For an agent speaker they are now collected per spoken message and sent once as a private system
+notice that rings the speaker — the same path the held-back notice for another task's worker already used — naming
+each handle, why, and the concrete remedy (`restart_implementer` / `restart_reviewer` / `message_task` with the
+task's `conv_id`, or the reachable captain). People keep the line notice. The notice is a system message, so it
+cannot start a loop or count as a request on the return path. A notice meant to change what its reader does next
+must reach the reader as a wake, not as text on a page it may not read. Tests: `tests/test_unreached_notice.py`.
+
+### A promise is not a wake
+
+A captain promised to integrate work after checks completed, but every worker was
+detached and no wake was registered. The false assumption was that a future action
+in a status message would arrange its own continuation. Check structured open work
+at turn end and surface a stranded tree immediately; register an actual wake for
+future work rather than relying on prose.

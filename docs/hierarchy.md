@@ -912,10 +912,38 @@ retelling it, `POST /api/conversations/<src>/messages/<id>/forward {"to":
 "<line id>", "note": "…"}` posts it to the target quoted as `↪ forwarded from
 «line» — author said:`; it needs read on the source and write on the target.
 
+### A mention that reached nobody
+
+A mention can name a handle no live process wears: detached or exited, a process
+on a line this speaker may not cross to, a former captain, or a name nobody
+has. A person is told on the line, as before (`⚠ @name was mentioned but is not
+attached — nothing was delivered`). An **agent** speaker is told privately, and
+the notice **wakes it**: a line message wakes nobody, so an agent that ended its
+turn on "@worker go build it" used to believe the work was handed off while the
+line sat idle until a person noticed. One notice per spoken message is posted as
+a private system message to the speaker, through the same path as the held-back
+notice for another task's worker (`orchestrator_notices.tell`), so a speaker
+that has already ended its turn is still rung. It lists every unreached handle
+with its reason and the remedy:
+
+- a task's worker (implementer or reviewer) that is detached or exited: the root
+  captain revives it with `restart_implementer` / `restart_reviewer` with the
+  task's `conv_id`, and `message_task(conv_id, text, to)` is read once it is back;
+- a captain that is gone: the handle of the reachable captain to mention instead;
+- a process on a line this speaker may not cross to: where it lives and whom to
+  tell (the line's captain, or the root captain);
+- a handle nobody wears: unknown, with the root captain to mention.
+
+The notice is a system message: routing it never produces another notice and the
+return path never counts it as a request. Bridge messages and relay copies keep
+their existing behaviour. Code: `unreached.py` (the collector and the reasons),
+`mention_outcomes.py` (where a routed message settles).
+
 | DO | DO NOT |
 | --- | --- |
 | Assign with a plain `@handle` from your own line when you manage the tree above it | Expect an implementer's `@parent-lead` to reach anyone — it is told to tell its own manager |
 | Address one process per assignment and name the rest without `@` | Write `@sub-manager have @worker do X` — that rings the worker too, and on two lines |
+| Treat a `did not reach everyone you mentioned` notice as a failed hand-off and act on its remedy | Wait on a handle the notice lists — nothing was delivered to it |
 | Read the `via «line»` tag as "this process is elsewhere; reply by mention, not by assuming it is here" | Treat a private copy as the whole conversation on that line — read the line before deciding |
 
 ## Idempotent posts and the terminal echo
@@ -1437,3 +1465,11 @@ multiple repositories, list every current `{repository, sha}` in `repositories`.
 A stale or missing identification is rejected with the current SHA; the reviewer
 must review the new commits before retrying. Explicit SHA identifications are
 checked even when the review has not been re-pinned.
+
+
+Captains must not end a turn promising future work unless something will wake them,
+such as a live worker, a task wait or a scheduled deadline. Otherwise they must do
+the work now or tell the person plainly what blocks them.
+At a captain turn end, Partyline warns the line and privately wakes the captain if
+structured open work remains but nothing is running or scheduled. The captain should
+restart, reopen or resume the work, or tell the person what it is blocked on. An unchanged idle verdict is reported only once.
