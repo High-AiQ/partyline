@@ -183,8 +183,9 @@ async def lifespan(app):
     app.state.automatic_reattach_task = automatic_task
     from .captain_handover import expire_offers
     from .browser_snapshots import resource_updates
-    tasks = [asyncio.create_task(resource_updates(runtime)), automatic_task,
-             asyncio.create_task(expire_offers(runtime)),
+    from . import docker_events
+    tasks = [asyncio.create_task(resource_updates(runtime)), asyncio.create_task(docker_events.run(runtime)),
+             automatic_task, asyncio.create_task(expire_offers(runtime)),
              asyncio.create_task(maintenance(runtime)),
              asyncio.create_task(monitor_event_loop_lag()),
              asyncio.create_task(run_memory_sampler(runtime)),
@@ -199,8 +200,7 @@ async def lifespan(app):
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
-        from .docker_workloads import inventory
-        inventory.deadlines.close()
+        docker_events.close()
         await runtime.shutdown()
 app = FastAPI(lifespan=lifespan)
 app.state.bind = BindConfig()
