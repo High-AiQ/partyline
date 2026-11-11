@@ -21,6 +21,7 @@ class HandoverTest(unittest.TestCase):
         for conv in ('line', 'other'):
             self.db.create_conversation(conv, conv)
         for name, conv in (('old', 'line'), ('new', 'line'), ('third', 'line'), ('foreign', 'other')):
+            self.db.save_preset(name, name, name, 'fake', '', can_manage=True)
             self.db.add_attachment(name, conv, name, 'fake', [], '/tmp')
             self.db.set_attachment_status(name, 'running', None)
         self.now = time.time()
@@ -37,6 +38,19 @@ class HandoverTest(unittest.TestCase):
 
     def accept(self, ident, caller='new', **kwargs):
         return accept(self.db, 'line', caller, ident, self.live, now=self.now, **kwargs)
+
+    def test_accept_checks_current_captain_trait(self):
+        ident, _ = self.offer()
+        for implements, manage in ((0, 0), (1, 0)):
+            self.db._exec('UPDATE presets SET implements=?,can_manage=? WHERE name=?',
+                          (implements, manage, 'new'))
+            with self.assertRaises(HTTPException) as error:
+                self.accept(ident)
+            self.assertIn('Can manage a line', error.exception.detail)
+            self.assertTrue(self.db.get_attachment('old')['is_lead'])
+        self.db._exec("UPDATE presets SET can_manage=1 WHERE name='new'")
+        self.accept(ident)
+        self.assertTrue(self.db.get_attachment('new')['is_lead'])
 
     def test_success_and_restart_persistence(self):
         self.db._exec('INSERT INTO line_bridges VALUES(?,?,?,?,?,?,?,?,?,?)',

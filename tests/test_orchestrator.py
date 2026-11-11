@@ -236,7 +236,8 @@ class WorkflowTest(TaskFixture):
             await ensure_reviewer(self.runtime, invalid)
         with patch('partyline.orchestrator_staff.claim_resume', AsyncMock(return_value=False)):
             with self.assertRaises(HTTPException):
-                await restart(self.runtime, self.db.get_attachment(self.worker.attachment_id))
+                await restart(self.runtime, self.db.get_attachment(self.worker.attachment_id),
+                              'implementer', 'builder')
 
     async def test_restart_uses_disk_session_when_cli_session_is_missing(self):
         from partyline.adapters.base import Adapter
@@ -258,11 +259,11 @@ class WorkflowTest(TaskFixture):
             patch('partyline.server._resume_adapter', AsyncMock()) as resumed,
             patch('partyline.server._start_attachment', AsyncMock()) as started,
         ):
-            await restart(self.runtime, self.db.get_attachment(att['id']))
+            await restart(self.runtime, self.db.get_attachment(att['id']), 'implementer', 'builder')
             resumed.assert_awaited_once_with(att['id'])
             started.assert_not_awaited()
             DiskSessionAdapter.exists = False
             resumed.reset_mock()
-            await restart(self.runtime, self.db.get_attachment(att['id']))
+            await restart(self.runtime, self.db.get_attachment(att['id']), 'implementer', 'builder')
             resumed.assert_not_awaited()
             self.assertTrue(started.await_args.kwargs['fresh'])

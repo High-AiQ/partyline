@@ -150,10 +150,10 @@ class ApiTest(TaskFixture):
     async def test_orchestrator_pack_spreads_implementers_and_the_rider_lists_free_workers(self):
         from partyline.pack_blocks import ORCHESTRATOR
         from partyline.staffing import staffing_line
-        for phrase in ("free workers", "list_presets", "do not default to your own",
+        for phrase in ("free implementers", "list_presets", "do not default to your own",
                        "different model", "which preset took which task"):
             self.assertIn(phrase, ORCHESTRATOR)
-        self.assertIn('free workers: ', staffing_line(self.db, 'root'))
+        self.assertIn('free implementers: ', staffing_line(self.db, 'root'))
         self.assertIn('builder', staffing_line(self.db, 'root'))
 
     async def test_shared_branch_override_stays_refused_on_task_lines(self):

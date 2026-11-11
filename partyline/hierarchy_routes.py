@@ -7,6 +7,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from .attachment_broadcast import broadcast_captain
+from .preset_roles import require_captain_assignment
 from .auth_guard import request_principal
 from .captain_handover import HandoverIdIn, OfferIn
 from .contracts import (
@@ -62,14 +63,12 @@ from .capability_version_routes import router_for as capability_version_router
 def _http(exc: HierarchyError | ReportError) -> HTTPException:
     return HTTPException(exc.status_code, exc.detail)
 
-
 def hierarchy_router(runtime) -> APIRouter:
     router = APIRouter()
     db = runtime.db
     from .captain_handover_completion import router_for
     router.include_router(router_for(runtime))
     router.include_router(capability_version_router(runtime))
-
     @router.get("/api/capabilities", response_model=CapabilityState)
     def get_capabilities(request: Request, conv_id: str | None = Query(default=None)):
         return for_request(runtime, db, request, conv_id, capabilities_for)
@@ -102,6 +101,7 @@ def hierarchy_router(runtime) -> APIRouter:
         principal = request_principal(request)
         deny_unless(db, principal, conv_id, "appoint_lead")
         before = lead_attachment(db, conv_id)
+        require_captain_assignment(db, conv_id, body.attachment_id, before, person=principal.kind == "user")
         prior = db.get_conversation(conv_id)
         restyled = False
         if body.captain_mode is not None:

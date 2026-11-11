@@ -98,6 +98,8 @@ async def restart_implementer(runtime, actor, conv_id):
         if row['status'] not in ('implementing', 'idle', 'blocked'):
             raise HTTPException(
                 409, 'only an implementing, idle or blocked task has an implementer to restart')
+        from .preset_roles import require_named_role
+        require_named_role(db, row['implementer_preset'], 'implementer')
         att = db.get_attachment(row['implementer_id']) if row['implementer_id'] else None
         if att is None:
             raise HTTPException(409, 'this task has no implementer attachment to restart')
@@ -118,7 +120,7 @@ async def restart_implementer(runtime, actor, conv_id):
             from .line_process_routes import detach_attachment
             await detach_attachment(runtime, att['id'], survivors=False)
             att = db.get_attachment(att['id'])
-        await restart(runtime, att)
+        await restart(runtime, att, 'implementer', row['implementer_preset'])
     await tell(runtime, att['id'],
                f"resumed by {actor.name}; continue the task: {row['what']} — {row['location']}",
                source=(actor.attachment_id, actor.conv_id) if actor.attachment_id else None)

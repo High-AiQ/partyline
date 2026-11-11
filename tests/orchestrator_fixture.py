@@ -50,7 +50,7 @@ class TaskFixture(unittest.IsolatedAsyncioTestCase):
                                  attachment_id='captain', is_lead=True)
         self.human = Principal(kind='user', name='human')
         for name in ('builder', 'inspector'):
-            self.db.save_preset(name, name, name, 'fake', 'fake')
+            self.db.save_preset(name, name, name, 'fake', 'fake', can_manage=name == 'inspector')
         for target, value in (('runtime', self.runtime), ('ADAPTERS', {'fake': Adapter}),
                               ('ADAPTER_METADATA', {'fake': {'command': ['fake']}}),
                               ('_start_attachment', self.start), ('_resume_adapter', self.resume)):

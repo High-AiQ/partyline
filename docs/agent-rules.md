@@ -117,6 +117,9 @@ request.
 | Trust the automatic mid-turn mark and private continue notice to resume interrupted work | Delay approval waiting for every participant to go idle first |
 | Prove recovery afterward: identity, continuation receipts, live attachment state | Report success without checking `/api/running` |
 
+A durable rule given by a person must be written into partyline doctrine, not kept only
+in an agent’s private memory.
+
 ## Self-learning
 
 A surprising failure must become a durable lesson. The full protocol and the distilled

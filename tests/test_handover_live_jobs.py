@@ -35,6 +35,7 @@ class LiveJobsTest(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.db.create_conversation('line', 'test')
         for name in ('old', 'new'):
+            self.db.save_preset(name, name, name, 'fake', '', can_manage=True)
             self.db.add_attachment(name, 'line', name, 'fake', [], self.tmp.name)
             self.db.set_attachment_status(name, 'running', None)
         self.db._exec('UPDATE attachments SET created_at=?', (time.time() - 100,))

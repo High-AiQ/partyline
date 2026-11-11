@@ -35,8 +35,8 @@ class AttachIn(BaseModel):
     # 2.14: a captain may deliberately put a second implementer on one branch.
     allow_shared_branch: bool = False
     successor: bool = False
-
-
+    preset_name: str | None = None
+    staffing_role: Literal["implementer", "captain"] = "implementer"
 class TopicIn(BaseModel):
     topic: str = ""
 

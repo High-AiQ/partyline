@@ -160,7 +160,6 @@ async def _run_automatic_reattachment() -> None:
             "automatic reattachment stopped unexpectedly; the durable plan was preserved "
             "and will retry on the next restart"
         )
-
 @asynccontextmanager
 async def lifespan(app):
     deployment.prime()  # pin the served checkout's HEAD to this boot, before any pull
@@ -428,13 +427,12 @@ async def remove_adapter(adapter_name: str):
     return {"ok": True, "message": "adapter source remains installed; remove its checkout then reload"}
 
 
-async def _start_attachment(att, *, checkpoint="", fresh=False):
+async def _start_attachment(att, **kwargs):
     return await start_attachment(
         att, runtime=runtime, presence=presence, make_adapter=make_adapter,
         hook_url=lambda ident, owner: _hook_url(ident, app.state.bind, owner),
-        checkpoint=checkpoint, fresh=fresh,
+        **kwargs,
     )
-
 
 register_conversation_routes(
     app,
@@ -467,6 +465,8 @@ register_attachment_lifecycle_routes(
 @app.post("/api/attachments/{att_id}/resume", response_model=AttachmentResponse)
 async def resume_attachment(request: Request, att_id: str):
     deny_unless_attachment(runtime.db, request_principal(request), att_id, "attach")
+    from .preset_roles import require_resume
+    require_resume(runtime.db, att_id, person=request_principal(request).kind == "user")
     await resume_with_backlog(runtime, att_id, _resume_adapter)
     # An explicit resume is the operator saying "this one is back". Automatic
     # recovery leaves an unconfirmed attachment in `reattaching`, which routing

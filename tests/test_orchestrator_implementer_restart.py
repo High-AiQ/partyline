@@ -44,6 +44,7 @@ class ImplementerRestartTest(TaskFixture):
         ident = self.row()['implementer_id']
         self.db._exec("UPDATE attachments SET adapter='opencode-v2',cli_session='session' WHERE id=?",
                       (ident,))
+        self.db._exec("UPDATE presets SET adapter='opencode-v2' WHERE name='builder'")
         live = self.runtime.live[ident]
         live.resume = True
         live._claim_proven = True
@@ -62,6 +63,7 @@ class ImplementerRestartTest(TaskFixture):
         await self.create()
         ident = self.row()['implementer_id']
         self.db._exec("UPDATE attachments SET adapter='opencode-v2' WHERE id=?", (ident,))
+        self.db._exec("UPDATE presets SET adapter='opencode-v2' WHERE name='builder'")
         live = self.runtime.live[ident]
         clock = SimpleNamespace(monotonic=lambda: 2000)
         with patch("partyline.orchestrator_revive.time", clock):
@@ -76,6 +78,7 @@ class ImplementerRestartTest(TaskFixture):
         await self.create()
         ident = self.row()['implementer_id']
         self.db._exec("UPDATE attachments SET adapter='opencode-v2' WHERE id=?", (ident,))
+        self.db._exec("UPDATE presets SET adapter='opencode-v2' WHERE name='builder'")
         self.assertEqual(self.client.post(self.url()).status_code, 409)
         live = self.runtime.live[ident]
         live.last_transcript_progress = 0

@@ -59,7 +59,10 @@ def tool_list(state: dict) -> list[dict]:
                   "fallback"]["inputSchema"]}]
     for op in permitted(state):
         descriptions = {
-            "attach_worker": "Staff a worker. For handover, attach on your own line with successor=true, "
+            "create_child": "Create a child line; its captain requires Can manage a line checked.",
+            "attach_worker": "Staff an implementer with Fast implementer checked; "
+                "for visual work prefer Reads images. Set staffing_role=captain for a sub-captain. "
+                "For handover, attach on your own line with successor=true, "
                 "wait 60 seconds, then use offer_handover to offer captainship.",
             "process_overview": "Inspect lines and live processes, including every task workspace's real and "
                 "mirror tips. The mirror tip is where the worker's commits live until accept.",

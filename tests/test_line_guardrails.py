@@ -37,6 +37,8 @@ class GuardrailTest(unittest.TestCase):
         self.db = Db(f"{self.directory.name}/partyline.db")
         self.addCleanup(self.db.close)
         self.runtime = ChatRuntime(self.db)
+        self.db.save_preset("fixture-manager", "Fixture", "fixture", "fake", "fake", can_manage=True)
+        self.db.save_preset("fixture-raw", "Fixture raw", "fixture-raw", "raw", "sh", can_manage=True)
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
@@ -97,6 +99,29 @@ class GuardrailTest(unittest.TestCase):
         self.assertNotIn("create_child", caps.json()["actions"])
         self.assertEqual(goal_rider(self.db, leaf["id"]), "")
         self.assertEqual(goal_rider(self.db, mid["id"]), "")
+
+    def test_role_traits_refuse_agent_staffing_but_allow_person_attach(self):
+        child = self.child('root', 'roles')
+        path = f"/api/conversations/{child['id']}/attachments"
+        self.db._exec("UPDATE presets SET implements=0,can_manage=0 WHERE id='fixture-raw'")
+        payload = {'name': 'unassigned', 'adapter': 'raw', 'command': 'sh'}
+        refused = self.client.post(path, json=payload, headers=self.machine('root-lead'))
+        self.assertEqual(refused.status_code, 403, refused.text)
+        self.assertIn('Fast implementer', refused.text)
+        allowed = self.client.post(path, json=payload, headers=self.human)
+        self.assertEqual(allowed.status_code, 200, allowed.text)
+
+    def test_captain_only_preset_can_staff_a_subcaptain(self):
+        child = self.child('root', 'roles')
+        path = f"/api/conversations/{child['id']}/attachments"
+        self.db._exec("UPDATE presets SET implements=0,can_manage=1 WHERE id='fixture-raw'")
+        payload = {'name': 'leader', 'adapter': 'raw', 'command': 'sh'}
+        refused = self.client.post(path, json=payload, headers=self.machine('root-lead'))
+        self.assertEqual(refused.status_code, 403, refused.text)
+        payload['staffing_role'] = 'captain'
+        allowed = self.client.post(path, json=payload, headers=self.machine('root-lead'))
+        self.assertEqual(allowed.status_code, 200, allowed.text)
+        self.assertTrue(self.db.get_attachment(allowed.json()['id'])['is_lead'])
 
     # -- sideways staffing -------------------------------------------------------
 

@@ -32,7 +32,9 @@ _WHO = {'deliver': 'the implementer of an express task',
 
 _DESCRIBE = {
     'create_task': ('START new work: creates a new task line (conv_id defaults to your root line) with one '
-                    'implementer. Its goal is stored on the task line and sent to the implementer '
+                    'implementer with Fast implementer checked; select a free one. Reviewers require '
+                    'Can manage a line. Prefer Reads images for visual work. Its goal is stored on the task '
+                    'line and sent to the implementer '
                     'at birth and on wakes until delivery is proven, then on change or restart. '
                     'Goals allow 20000 characters. '
                     'Media on your root line (a walkthrough\'s frames, uploads) is readable by the '

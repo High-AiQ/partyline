@@ -113,8 +113,11 @@ def execute(client, op, args, state):
             body["allow_shared_branch"] = True
         if args.get("successor") is True:
             body["successor"] = True
+        if args.get("staffing_role"):
+            body["staffing_role"] = args["staffing_role"]
         preset_name = args.get("preset_name")
         if preset_name:
+            body["preset_name"] = preset_name
             presets = client.request("GET", "/api/presets")
             matches = [item for item in presets if item.get("name") == preset_name]
             if len(matches) != 1 or matches[0].get("adapter") != body["adapter"]:

@@ -48,6 +48,8 @@ class WorktreeLifecycleTest(unittest.TestCase):
         self.db = Db(f"{self.directory.name}/partyline.db")
         self.addCleanup(self.db.close)
         self.runtime = ChatRuntime(self.db)
+        self.db.save_preset("fixture-manager", "Fixture", "fixture", "fake", "fake", can_manage=True)
+        self.db.save_preset("fixture-raw", "Fixture raw", "fixture-raw", "raw", "sh", can_manage=True)
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))

@@ -1127,6 +1127,15 @@ while children exist. The root's `default_review_policy` defaults to `captain`;
 it may also be `none` or an exact reviewer preset name. A task's mode (full, light or
 express) is chosen separately at creation (see Task modes below).
 
+Preset role traits govern agent staffing: implementers need **Fast implementer**; captains,
+sub-captains and reviewers need **Can manage a line**. Choose a free Fast implementer
+for implementation. A person may attach, resume, replace or appoint a process directly
+without those role traits; agents cannot staff presets with neither role trait. When attaching a sub-captain, select the captain role; the server appoints it on a
+vacant line. **Reads images** is advisory; prefer it for image and screenshot work. Existing
+processes are not stopped when traits change, but subsequent staffing checks the current
+preset. A named default review policy must satisfy the reviewer requirement; `captain`
+and `none` remain available.
+
 An orchestrator creates tasks through `create_task(name, goal, implementer, review)`.
 The task goal is capped at 20,000 characters; longer briefs live in a committed file
 that the goal names: see `docs/task-briefs.md`.
