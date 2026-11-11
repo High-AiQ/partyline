@@ -112,11 +112,17 @@
     aria-live="polite"
   >
     <span class="min-w-0 truncate"
-      >@{writeSet.request.requester} asks to grant write-set scope for {writeSet.request.path}</span
+      >@{writeSet.request.requester} asks to grant write-set scope for {writeSet.request.paths.length
+        ? writeSet.request.paths.join(", ")
+        : writeSet.request.path}{writeSet.request.human_only ? " — a person decides" : ""}</span
     >
-    <button type="button" class="primary flex-none" onclick={() => dialogs.open(WriteSetGrantApprovalDialog)}
-      >review</button
-    >
+    {#if !writeSet.request.human_only}
+      <button
+        type="button"
+        class="primary flex-none"
+        onclick={() => dialogs.open(WriteSetGrantApprovalDialog)}>review</button
+      >
+    {/if}
   </div>
 {/if}
 

@@ -584,6 +584,7 @@ the CLI's own sandbox stays.
 
 ```
 POST /api/conversations/<id>/write-set   {"path": "/abs/normalized/path"}
+POST /api/conversations/<id>/write-set   {"paths": ["/abs/normalized/path", "/other/path"]}
 GET  /api/conversations/<id>/write-set
 GET  /api/conversations/<id>/write-set/request
 POST /api/conversations/<id>/write-set/request/<id>/approve   (person, or ancestor captain inside its grants/checkout)
@@ -594,9 +595,17 @@ DELETE /api/conversations/<id>/write-set/request/<id>         (person only)
 
 A **person** POST grants directly and the grant is recorded immediately. A
 **machine** on the line, or the captain of an ancestor line, POST files a
-pending request instead — at most one per line; a second filing is **409**.
-Every open tab on that line shows the banner; a person approves or declines.
-Approval inserts the grant row, posts a system notice, privately rings the
+pending request instead — one row may contain up to 32 paths, decided together.
+A later filing merges into that pending request. Already-granted paths (including
+paths covered by a granted parent directory) are reported as `already_granted`
+and do not open a request; the worker should re-attach or restart to pick up an
+existing widened bind. Every refusal identifies the paths not filed and what to
+correct. Every open tab on that line shows the banner. Filing checks every ancestor
+captain's authority over every path: when no captain can grant the whole request,
+the banner says a person decides and has no captain mention or unusable links. When an
+ancestor captain can decide, the root notice mentions that eligible captain. The
+person-facing approvals list remains actionable for humans. Approval inserts each grant row,
+posts a system notice, privately rings the
 requester on its home line (by attachment id, never by name), and detaches
 and resumes every live process on the line so the widened bind applies.
 Decline clears the request and rings the requester the same way; `deny` does the
@@ -604,7 +613,7 @@ same with a reason (1–500 characters) posted on the requesting line, and the
 process that filed a request may `withdraw` it. A **captain** may approve or deny
 too, but only inside a grant it already holds: it must be the live lead of a
 strict ancestor of the requesting line, must not be the requester, and the
-requested path — resolved through symlinks — must lie inside a write grant on its
+every requested path — resolved through symlinks — must lie inside a write grant on its
 own line. Anything wider is refused with `outside your grants; a person decides`. Grants are
 rows in `conversation_write_grants` with the grantor recorded. Paths must be
 absolute and normalized, and must name an existing regular file or directory.
@@ -614,6 +623,13 @@ first. The server never creates the path or widens the request automatically.
 For new directories, request an existing directory that will contain them.
 If a recorded grant disappears before spawn, it binds nothing and logs a warning
 naming the path and the reason `path does not exist`.
+
+Approving returns `{"granted":[{"path":"…","granted_at":…}]}`. A task's
+`wait_reason` is cleared when its write-set request is approved, denied, or withdrawn, and
+when the worker reports a new blocker or resumes work (`blocked(reason)` or
+`resume_work(note)`). A fresh `waiting(reason, seconds)` replaces the previous wait reason;
+an inferred idle transition does not erase a declared wait. This
+keeps task listings from carrying an old blocker after circumstances change.
 
 ## Feature flag
 

@@ -5,6 +5,7 @@ import unittest
 from partyline.mcp.client import ApiError
 from partyline.mcp.server import MCPServer
 from partyline.mcp import tools_captain
+from partyline.mcp.captain_schemas import validate as validate_captain_args
 
 
 class Client:
@@ -32,6 +33,15 @@ class Client:
 
 
 class CaptainToolTests(unittest.TestCase):
+    def test_request_write_set_mcp_schema_accepts_a_path_list(self):
+        args = {"conv_id": "child", "paths": ["/repo/a", "/repo/b"]}
+        self.assertEqual(validate_captain_args("request_write_set", args), args)
+        with self.assertRaisesRegex(ValueError, "none of these paths were filed"):
+            validate_captain_args("request_write_set", {
+                "conv_id": "child", "paths": [f"/repo/{n}" for n in range(33)]})
+        with self.assertRaisesRegex(ValueError, "provide paths"):
+            validate_captain_args("request_write_set", {"conv_id": "child"})
+
     def test_dispatcher_is_always_listed_and_named_tools_follow_live_lead(self):
         client = Client()
         self.assertIn("captain", {tool["name"] for tool in tools_captain.tool_list(client.state)})

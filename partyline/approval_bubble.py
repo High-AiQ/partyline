@@ -13,6 +13,8 @@ is still waiting anywhere in a line's subtree, for the staffing line.
 
 from __future__ import annotations
 
+import json
+
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
@@ -41,7 +43,8 @@ def _clip(text: str, limit: int = DETAIL_LIMIT) -> str:
 
 async def bubble_approval(runtime, conv_id: str, *, kind: str, requester: str,
                           detail: str, approve: str, decline: str = "",
-                          actor=None) -> None:
+                          actor=None, human_only: bool = False,
+                          decider_name: str = "") -> None:
     """Post the pending-approval notice on the tree's root and ring its captain.
 
     The forced mention route is what wakes: system notices are otherwise
@@ -61,13 +64,16 @@ async def bubble_approval(runtime, conv_id: str, *, kind: str, requester: str,
         return
     line = db.get_conversation(conv_id)
     captain = lead_attachment(db, root_id)
-    ring = f" @{captain['name']}" if captain else ""
+    captain_name = decider_name or (captain["name"] if captain else "")
+    ring = f" @{captain_name}" if captain_name and not human_only else ""
     decline_part = f"; decline: {decline}" if decline else ""
+    action = ("a person decides" if human_only else
+              f"(approve: {approve}{decline_part})")
     body = (f"⚑ approval pending on «{line['name'] if line else conv_id}»: {kind} "
             f"from @{requester} — {_clip(detail)} "
-            f"(approve: {approve}{decline_part}){ring}")
+            f"{action}{ring}")
     msg = await post_system_notice(runtime, root_id, body, actor=actor)
-    if captain:
+    if captain_name and not human_only:
         await runtime.route_mentions(root_id, msg, force=True)
 
 
@@ -81,13 +87,16 @@ def pending_approval_rows(db, conv_id: str, runtime=None) -> list[dict]:
     """
     items: list[dict] = []
     for row in db._exec(
-            "SELECT conv_id, id, requester, path, created_at "
+            "SELECT conv_id, id, requester, path, paths, human_only, decider_name, created_at "
             "FROM conversation_write_grant_requests").fetchall():
+        paths = json.loads(row["paths"] or "[]") or [row["path"]]
         items.append({
             "kind": "write-set", "conv_id": row["conv_id"], "request_id": row["id"],
             "requester": row["requester"],
-            "detail": f"write-set scope for `{row['path']}`",
+            "detail": f"write-set scope for `{', '.join(paths)}`",
             "created_at": row["created_at"],
+            "human_only": bool(row["human_only"]),
+            "decider": row["decider_name"] or None,
             "approve": f"/api/conversations/{row['conv_id']}"
                        f"/write-set/request/{row['id']}/approve",
             "decline": f"/api/conversations/{row['conv_id']}"

@@ -159,6 +159,13 @@ detail: `docs/write-fence.md`.
 | Review the child’s reported SHA in a Partyline-managed review worktree; mirrored refs are private per line and shared by its processes | Judge a child’s progress from its worktree as seen by the captain: accepted refs can make newer committed work appear uncommitted |
 | Replace a CLI sandbox that cannot nest (codex's bwrap) with `fence_args`, only while fenced | Run two sandboxes at once, or leave a CLI's sandbox as the only one on an unfenced host |
 
+Write-set requests accept `{"path":"/absolute/path"}` or `{"paths":["/absolute/path", ...]}`.
+Several paths are one decision, and a later request merges into the pending request. Read the
+API response: `already_granted` means no banner was opened; re-attach or restart the worker to
+pick up a widened bind. A refusal names the paths that were not filed and the corrective action.
+If no root captain in the chain can grant every path, the request is person-decided from filing
+time and the banner must not mention the captain with unusable decision links.
+
 ## Process and releases
 
 | DO | DO NOT |

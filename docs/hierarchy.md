@@ -330,8 +330,10 @@ cleanup; this feature never garbage-collects its recovery copies.
 
 Requests that need a person bubble to the root. A write-set, memory-cap or restart request
 filed on a child line posts its ordinary notice there plus one `⚑ approval pending` line on the
-tree's root, naming the line, the requester and the approve and decline calls, and @mentions the root's
-captain so that process wakes and can explain the request in context — the person talks to the
+tree's root, naming the line, the requester and (when a captain can decide) the approve and
+decline calls, and @mentions an eligible ancestor captain only when that captain may decide
+every path. If no ancestor captain can grant the full request, the notice says a person decides
+and has no captain mention or unusable links. The person talks to the
 root captain and never reads sublines. The one-click banner on the filing line and every
 ancestor updates live when a request is filed or decided. A request filed on the root itself does not bubble, and
 the staffing wake line counts what is still waiting anywhere below:
@@ -341,9 +343,13 @@ notices: `GET /api/conversations/<root id>/approvals` (people only) lists
 every pending request in the subtree — kind, line, requester, detail, and
 the approve/decline endpoints — and the root line's one-click approvals
 banner renders exactly that list with **Approve** and **Decline** buttons
-per row. A write-set row also carries `deny`, the machine-callable
+per row. A multi-path write-set request is one decision; later filings merge into it, and
+already-granted paths are omitted with an explicit `already_granted` response. A write-set row
+that needs a person has no captain decision links in its notice. Approve returns the grants and their
+`granted_at` timestamps. Task `wait_reason` clears on request decision, `blocked(reason)`, or
+`resume_work(note)`; a new `waiting(reason, seconds)` replaces it. A write-set row also carries `deny`, the machine-callable
 `POST …/deny {"reason"}`: a captain decides a child's write-set request itself
-when the path lies inside a grant its own line already holds or inside its
+when every path lies inside a grant its own line already holds or inside its
 own writable checkout (including `.git` carve-outs, `.review/` and `.scratch/`), and declines with
 a reason as easily as it approves (see `docs/write-fence.md`, Scope expansion).
 

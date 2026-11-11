@@ -55,7 +55,9 @@ class HandoverTest(unittest.TestCase):
     def test_success_and_restart_persistence(self):
         self.db._exec('INSERT INTO line_bridges VALUES(?,?,?,?,?,?,?,?,?,?)',
                       ('b', 'line', 'old', 'other', 'foreign', 1, 'human', None, None, None))
-        self.db._exec("INSERT INTO conversation_write_grant_requests VALUES('line','r','/x','old','old',1)")
+        self.db._exec("INSERT INTO conversation_write_grant_requests"
+                      "(conv_id,id,path,requester,requester_attachment_id,created_at) "
+                      "VALUES('line','r','/x','old','old',1)")
         ident, message = self.offer()
         self.assertIn('handover offer', message['body'])
         self.assertEqual(message['audience_attachment_id'], 'new')

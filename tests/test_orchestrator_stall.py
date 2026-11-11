@@ -388,6 +388,15 @@ class StallTest(TaskFixture):
         self.assertEqual(threads and len(threads), 1)
         self.assertNotEqual(threads[0], main)
 
+    async def test_worker_reported_blocked_status_clears_the_old_wait_reason(self):
+        await self.create('captain')
+        await self.wait(reason='waiting for write-set approval', seconds=600)
+        await blocked(self.runtime, self.worker, self.conv_id,
+                      BlockedIn(reason='new blocker'))
+        row = self.row()
+        self.assertEqual(row['wait_reason'], '')
+        self.assertIsNone(row['wait_until'])
+
     async def test_a_wait_redeclared_after_the_read_is_not_cleared_and_does_not_settle(self):
         """The reset matches the expired value it read, so a fresh wait survives it."""
         await self.create('captain')

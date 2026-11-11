@@ -126,7 +126,7 @@ are in its Decisions section (1 to 14):
   output, not speech, and the socket's own authorization was fixed in `bf8573a`.
 - Memory (rows 67 to 72): excluded in this slice; adjustment requests go through the root captain.
 - Root heartbeat (rows 37 to 41): the root manager's surface, not captain or worker scope.
-- Worker write-set requests (row 136): a worker keeps the direct POST that the fence message names.
+- Worker write-set requests (row 136): a worker keeps the direct POST that the fence message names; it accepts `path` or `paths` (up to 32). Captain `request_write_set` takes `paths` (or legacy `path`), and captain approval returns the granted paths with timestamps. A second filing merges; an eligible ancestor captain is mentioned, or a person-only notice has no captain mention or unusable links.
 - Chat socket (row 124): machines have no push feed in this slice. Agents poll `read_messages`.
 
 ## 4. Live capability listing and refresh

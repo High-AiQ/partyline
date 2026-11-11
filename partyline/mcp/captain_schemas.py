@@ -61,8 +61,9 @@ def schema(name):
             "name": text("Shared ref name: letters, digits, dot, underscore or dash.", 64, 1),
             "repository": text("Optional task workspace repository.", 4096),
             "replace": {"type": "boolean"}}, ["conv_id", "ref_or_sha", "name"]),
-        "request_write_set": obj({**line, "path": text("Requested writable path.", 4096)},
-                                  ["conv_id", "path"]),
+        "request_write_set": obj({**line, "path": text("One requested writable path.", 4096),
+            "paths": {"type": "array", "items": text("Requested writable path.", 4096),
+                      "minItems": 1, "maxItems": 32}}, ["conv_id"]),
         "decide_write_set": obj({**line, "request_id": text("Pending request id.", 80),
             "decision": {"type": "string", "enum": ["approve", "deny", "withdraw"]},
             "reason": text("Required for deny.", 500)}, ["conv_id", "request_id", "decision"]),
@@ -112,6 +113,15 @@ def validate(name, args):
             parts.append("missing required field(s) " + ", ".join(sorted(missing)))
         parts.append("accepted fields: " + ", ".join(props))
         raise ValueError(f"captain op '{name}': " + "; ".join(parts))
+    if name == "request_write_set":
+        if "path" in args and "paths" in args:
+            raise ValueError("request_write_set: pass paths or path, not both")
+        if not args.get("path") and not args.get("paths"):
+            raise ValueError("request_write_set: provide paths (or legacy path)")
+        if len(args.get("paths", [])) > 32:
+            requested = ", ".join(f"`{path}`" for path in args["paths"])
+            raise ValueError(
+                f"none of these paths were filed: {requested}; submit at most 32 paths per call")
     for key, value in args.items():
         rule = props[key]
         kind = rule["type"]
