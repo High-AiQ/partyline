@@ -14,6 +14,7 @@ from .orchestrator_notices import report, tell
 from .orchestrator_revive import reviewer_is_live, revive_reviewer, staffed_by_preset
 from .orchestrator_sha_check import flag
 from .review_worktrees import ReviewError
+from .review_install_sandbox import DependencyError
 from .task_review_checkout import move_task_review_worktrees, resolve_commit
 from .task_workspaces import anchor, moved, tip, workspaces
 from .worktree_paths import branch_name
@@ -57,6 +58,14 @@ async def repin(runtime, row, body, entries):
         checkouts = await asyncio.to_thread(move_task_review_worktrees, db, conv_id, entries,
                                             row['repositories'][0]['repository'])
     except ReviewError as exc:
+        if isinstance(exc, DependencyError):
+            # The checkout may already have moved; no verdict may use the old SHA.
+            db._exec("UPDATE task_reviews SET status='implementing' WHERE conv_id=?", (conv_id,))
+            message = f"{exc.detail}. Review stopped; retry request_review after fixing it."
+            from .orchestrator_notices import notify_root
+            await notify_root(runtime, row, message)
+            if row.get("reviewer_id"):
+                await tell(runtime, row["reviewer_id"], message)
         raise HTTPException(exc.status_code, exc.detail) from exc
     await asyncio.to_thread(anchor, db, conv_id)
     old = '; '.join(f"{x['repository']} {x['sha']}" for x in row['repositories'])

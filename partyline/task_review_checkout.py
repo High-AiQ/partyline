@@ -18,6 +18,7 @@ from .review_scope import (
     resolve_repository)
 from .nested_repositories import keep_reason
 from .review_worktrees import _SHA, _registered
+from .review_dependencies import provision, sources_for
 
 
 def task_review_path(root: str, conv_id: str) -> str:
@@ -86,6 +87,7 @@ def _move(db, conv_id: str, root: str, full: str) -> dict:
         _exclude(root, REVIEW_DIR)
         _git("worktree", "prune", cwd=root)
         _run(root, "worktree", "add", "--detach", path, full)
+    provision(path, sources_for(db, conv_id, root))
     db._exec(
         "INSERT INTO review_worktrees(conv_id,sha,path,created_at) VALUES(?,?,?,?) "
         "ON CONFLICT(path) DO UPDATE SET conv_id=excluded.conv_id, sha=excluded.sha, "

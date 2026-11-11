@@ -1,5 +1,9 @@
 # Lessons: the false-assumptions ledger
 
+## Review checkouts need their own JavaScript dependencies
+
+The false assumption was that Node would find usable dependencies in a fresh review checkout. Its upward search can instead reach the host checkout, where Vite writes are outside the reviewer’s fence. Give each locked package a real local dependency directory, verify installed lock data before linking, and surface installation failures before review. Package writes through those links are refused by the fence. Run fallback installers in a restricted sandbox with lifecycle scripts disabled: package-manager configuration can execute code.
+
 ## Text transcription is not timed narration
 
 The false assumption was that switching the default recognizer to GPT-Transcribe

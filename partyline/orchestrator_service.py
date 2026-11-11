@@ -13,6 +13,7 @@ from .contracts import ConversationsChangedEvent
 from .hierarchy_contracts import TaskChildIn
 from .task_workspaces import anchor, workspaces
 from .review_worktrees import ReviewError
+from .review_install_sandbox import DependencyError
 from .task_review_checkout import move_task_review_worktrees
 from .orchestrator_notices import handed_to, report, spawn_refused, tell
 from .orchestrator_sha_check import flag
@@ -165,6 +166,11 @@ async def request_review(runtime, actor, conv_id, body):
             checkouts = await asyncio.to_thread(
                 move_task_review_worktrees, db, conv_id, entries, primary)
         except ReviewError as exc:
+            if isinstance(exc, DependencyError):
+                from .orchestrator_notices import notify_root, tell
+                await notify_root(runtime, row, exc.detail)
+                if row.get("reviewer_id"):
+                    await tell(runtime, row["reviewer_id"], exc.detail)
             raise HTTPException(exc.status_code, exc.detail) from exc
         await asyncio.to_thread(anchor, db, conv_id)
         db._exec(

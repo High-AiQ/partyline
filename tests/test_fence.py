@@ -876,6 +876,18 @@ class FenceIntegrationTest(unittest.TestCase):
                            os.path.join(common, "worktrees"), True), pairs)
             self.assertNotIn((sibling_gitdir, sibling_gitdir, False), pairs)
 
+            modules = os.path.join(own["path"], "node_modules")
+            host_modules = os.path.join(self.fix["repo"], "node_modules")
+            os.makedirs(modules)
+            os.makedirs(host_modules)
+            marker = os.path.join(modules, ".vite-temp")
+            result = self.run_fenced("mkdir", marker)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(os.path.isdir(marker))
+            self.assertFalse(os.path.exists(os.path.join(host_modules, ".vite-temp")))
+            result = self.run_fenced("mkdir", os.path.join(host_modules, ".vite-temp"))
+            self.assertNotEqual(result.returncode, 0)
+
             own_marker = os.path.join(own["path"], "review-write.txt")
             self.assertEqual(self.run_fenced("touch", own_marker).returncode, 0)
             result = self.run_fenced("git", "-C", own["path"], "add", "review-write.txt")

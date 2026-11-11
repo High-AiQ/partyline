@@ -519,15 +519,28 @@ partyline owns the directory but nothing else in a repository's `.review`.
 Review checkouts are disposable by contract: pruning is forced, and the SHAs
 themselves stay in the repository, so no reviewed work is ever lost.
 
+Locked JavaScript packages get a local `node_modules` in the review checkout:
+verified matching npm installations are linked for reading, with writable caches
+kept local. This avoids copying dependency trees or sharing writable hard links.
+When the installed state cannot be verified, the package manager installs from
+the lockfile inside a restricted sandbox with lifecycle scripts disabled. If a
+package needs those scripts, the install or later build may fail; report that to
+the captain. Reviewers run the package's tests and build in the checkout. A
+package that writes inside its linked installation can be refused by the fence;
+report that failure. The checkout stays under the repository because its own
+local `node_modules` stops Node's upward search, and its location preserves the
+existing review fence and lifecycle. Install failures and timeouts are reported
+to the task and captain before review.
+
 ## Scratch worktrees
 
-A review checkout is for adversarial reads; verifying an integration needs a
-build, and a build writes. `POST /api/conversations/<id>/scratch-worktrees`
+Review checkouts are for adversarial review; verifying an integration of
+multiple changes needs a separate build checkout. `POST /api/conversations/<id>/scratch-worktrees`
 with `{"sha":"...", "repository":"<abs path>"?}` checks the SHA out detached
 and **writable** at `<repo>/.scratch/<full sha>` — same subtree rule, same
 creation permission, recorded on the calling line. The fence binds a line's
 recorded scratch checkouts writable, so the line's own process builds there
-without a write-set request; review checkouts stay exactly as they are.
+without a write-set request; review checkouts remain separate.
 `GET …/scratch-worktrees` lists them, `DELETE
 …/scratch-worktrees/<sha>` drops one early, and a scratch checkout is pruned
 when the line retires or is purged and swept at startup when its record or
