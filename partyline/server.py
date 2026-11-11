@@ -187,8 +187,7 @@ async def lifespan(app):
     from . import docker_events
     tasks = [asyncio.create_task(resource_updates(runtime)), asyncio.create_task(docker_events.run(runtime)),
              automatic_task, asyncio.create_task(expire_offers(runtime)),
-             asyncio.create_task(maintenance(runtime)),
-             asyncio.create_task(run_memory_events(runtime)),
+             asyncio.create_task(maintenance(runtime)), asyncio.create_task(run_memory_events(runtime)),
              asyncio.create_task(run_task_maintenance(runtime)),
              asyncio.create_task(run_resource_leases(runtime))]
     if features.enabled("heartbeat"):

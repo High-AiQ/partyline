@@ -13,7 +13,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 CATEGORY = re.compile(r'no-poll\s+\(([bcde])\):\s*\S')
 TIMERS = re.compile(r'\b(setInterval|setTimeout)\s*\(')
-# Phase 1 exceptions awaiting Greg's decision; docs/polling-audit.md explains each.
+# Exceptions awaiting Greg's decision; all three are decided (docs/polling-audit.md), so none remain.
 UNRESOLVED = {
 }
 
