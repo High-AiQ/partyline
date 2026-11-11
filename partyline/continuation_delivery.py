@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from .delivery_reservation import reserve_delivery
+from .delivery_credit_accounting import confirm_reserved
 
 
 async def deliver_continuation(runtime, adapter, att_id: str, messages: list[dict], timeout: float):
@@ -19,11 +20,10 @@ async def deliver_continuation(runtime, adapter, att_id: str, messages: list[dic
         if prepare is not None:
             prepare(message_ids)
         pasted = await adapter.deliver(messages)
-
-    if pasted is not False:
-        if not await runtime.confirm_delivery_ids(att_id, message_ids, owner):
-            raise RuntimeError("attachment ownership changed during continuation delivery")
-        return
+        if pasted is not False:
+            if not confirm_reserved(runtime, att_id, message_ids, owner):
+                raise RuntimeError("continuation delivery could not be credited")
+            return
 
     wait = getattr(adapter, "wait_delivery_received", None)
     if wait is None or not await asyncio.wait_for(wait(message_ids), timeout=timeout):

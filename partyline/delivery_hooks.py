@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .delivery_reservation import reserve_delivery
+from .delivery_credit_accounting import confirm_reserved
 
 
 def delivery_hooks(runtime, conv_id: str, att_id: str):
@@ -41,12 +42,11 @@ def delivery_hooks(runtime, conv_id: str, att_id: str):
                 return False
             if messages and outstanding:
                 runtime._record_unproved(att, live, messages)
+                confirm_reserved(runtime, att_id, [m["id"] for m in messages], runtime_owner)
             elif messages and not runtime.db.set_last_seen(
                 att_id, messages[-1]["id"], runtime_owner
             ):
                 raise RuntimeError("attachment ownership changed during held delivery")
-        if messages and outstanding:
-            await runtime.confirm_delivery_ids(att_id, [m["id"] for m in messages], runtime_owner)
         return True
 
     async def persist_ids(message_ids: list[int]) -> bool:

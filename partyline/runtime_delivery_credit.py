@@ -8,6 +8,7 @@ import time
 
 from .adapter_capabilities import transcript_claimed
 from .adapters import Adapter
+from .delivery_credit_accounting import confirm_reserved
 
 logger = logging.getLogger(__name__)
 CLAIM_RETRY_DIAGNOSTIC_SECONDS = 5.0
@@ -215,36 +216,7 @@ class DeliveryCreditMixin:
         async with self.db.reserve_attachment_delivery(att_id, runtime_owner) as reserved:
             if not reserved:
                 return False
-            entry = self.uncredited.get(att_id)
-            if entry is not None and entry["owner"] != runtime_owner:
-                del self.uncredited[att_id]
-                entry = None
-            if entry is None:
-                entry = {"owner": runtime_owner, "ids": set(), "confirmed": set()}
-                self.uncredited[att_id] = entry
-            entry.setdefault("confirmed", set())
-            ids = set(message_ids)
-            entry["ids"].update(ids)
-            entry["confirmed"].update(ids)
-            entry.get("claim_ids", set()).difference_update(ids)
-            attachment = self.db.get_attachment(att_id)
-            if attachment is None or attachment.get("runtime_owner") != runtime_owner:
-                return False
-            unresolved = entry["ids"] - entry["confirmed"]
-            frontier = min(unresolved) - 1 if unresolved else max(entry["ids"])
-            eligible = entry["confirmed"] & {mid for mid in entry["ids"] if mid <= frontier}
-            if eligible and not self.db.set_last_seen(att_id, max(eligible), runtime_owner):
-                return False
-            attachment = self.db.get_attachment(att_id)
-            high_water = attachment["last_seen"] if attachment is not None else 0
-            credited = {mid for mid in entry["confirmed"] if mid <= high_water}
-            entry["ids"].difference_update(credited)
-            entry["confirmed"].difference_update(credited)
-            self.db.clear_queued_delivery_ids(att_id, list(credited))
-            if not entry["ids"]:
-                self.uncredited.pop(att_id, None)
-                self.unclaimed_noticed.discard(att_id)
-            return max(message_ids) <= high_water
+            return confirm_reserved(self, att_id, message_ids, runtime_owner, boundary=_boundary)
 
     async def _hold_credit(self, conv_id: str, att: dict, adapter: Adapter, pending: list[dict]):
         """Remember pre-claim pastes and say so once."""

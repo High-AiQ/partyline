@@ -16,6 +16,7 @@ from .capability_versions import CapabilityVersions
 from .browser_snapshots import hello_payload
 from .db import Db
 from .delivery_hooks import delivery_hooks
+from .delivery_credit_accounting import confirm_reserved
 from .delivery_reservation import reserve_delivery
 from .message_routing import post_human_message, route_message
 from .reattach import ReattachCoordinator
@@ -173,12 +174,11 @@ class ChatRuntime(DeliveryCreditMixin):
                 return True
             if ours:
                 self._record_unproved(att, adapter, pending)
+                confirm_reserved(self, att["id"], [m["id"] for m in pending], runtime_owner)
             elif not self.db.set_last_seen(att["id"], pending[-1]["id"], runtime_owner):
                 raise RuntimeError("attachment ownership changed during mention delivery")
             else:
                 self.db.clear_queued_delivery_ids(att["id"], [m["id"] for m in pending])
-        if ours:
-            await self.confirm_delivery_ids(att["id"], [m["id"] for m in pending], runtime_owner)
         return True
 
     def held_wake_hooks(self, conv_id: str, att_id: str, name: str):

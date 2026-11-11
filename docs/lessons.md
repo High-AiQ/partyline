@@ -7,7 +7,10 @@ A wake could paste it again before transcript proof, while older persisted queue
 were left behind the new briefing. Register startup IDs as unproved before routing,
 merge queued IDs into the ordered briefing, and credit only confirmed IDs. A
 coordinator timeout must not cancel the receipt waiter: late transcript proof
-releases the cursor and any newer confirmed mail.
+releases the cursor and any newer confirmed mail. A write that can be credited
+immediately must update that frontier while the same ownership reservation is
+held; otherwise a waiting replacement can claim the process between paste and
+credit.
 
 ## Review checkouts need their own JavaScript dependencies
 
