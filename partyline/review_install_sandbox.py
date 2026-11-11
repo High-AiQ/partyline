@@ -66,7 +66,7 @@ def install_argv(checkout: str, command: tuple[str, ...], local: str) -> list[st
         if not os.access(tool, os.X_OK):
             raise DependencyError('bubblewrap is unavailable; cannot safely run the installer')
         argv = [tool, '--ro-bind', '/', '/', '--dev-bind', '/dev', '/dev', '--proc', '/proc',
-                '--unshare-user', '--bind', checkout, checkout]
+                '--unshare-user', '--unshare-pid', '--bind', checkout, checkout]
         for cache in caches:
             argv += ['--bind', cache, cache]
         return [*argv, '--die-with-parent', '--', *command]

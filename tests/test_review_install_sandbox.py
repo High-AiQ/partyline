@@ -23,6 +23,9 @@ class InstallerSandboxTest(unittest.TestCase):
         index = argv.index('--bind')
         self.assertEqual(argv[index + 1:index + 3], ['/review/tree', '/review/tree'])
         self.assertEqual(argv[-3:], ['npm', 'ci', '--ignore-scripts'])
+        # a grandchild that calls setsid dies with the sandbox's pid namespace
+        self.assertIn('--unshare-pid', argv)
+        self.assertIn('--die-with-parent', argv)
 
     def test_darwin_denies_writes_except_checkout_and_caches(self):
         with patch('partyline.review_install_sandbox.sys.platform', 'darwin'), \
