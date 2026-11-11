@@ -12,8 +12,11 @@ import { room } from "../../state/room.svelte.js";
 import { draft } from "../../state/draft.svelte.js";
 import { voicePresets } from "../../state/voice-presets.svelte.js";
 import { walkthrough } from "../../state/walkthrough.svelte.js";
+import { sendFailures } from "../../state/send-failures.svelte.js";
+import type { Transcript } from "../../lib/voice-api";
 
 const line = { id: "l", name: "L", topic: "", created_at: 1, archived_at: null, live_count: 0 };
+const other = { ...line, id: "b", name: "B" };
 const region = { x: 0, y: 0, width: 100, height: 100 };
 const share = { share_id: "s", handle: "alice", device_name: "Desk", status: "active" as const, region };
 
@@ -87,6 +90,8 @@ afterEach(() => {
   voicePresets.reset();
   vi.restoreAllMocks();
   room.leave({ clearRoute: false });
+  sendFailures.discard("l");
+  sendFailures.discard("b");
   walkthrough.last = null;
   draft.text = "";
   document.body.replaceChildren();
@@ -322,6 +327,123 @@ describe("walkthrough control", () => {
     await settle();
     expect(walkthroughApi.cancel).toHaveBeenCalledWith("l", "s");
     expect(document.body.textContent).toContain("Screen sharing ended before recording began.");
+    await unmount(component);
+  });
+});
+
+describe("a take in flight belongs to its own line", () => {
+  const transcript: Transcript = { text: "", duration: 1, language: "en", segments: [] };
+  /** Finish a walkthrough on line L, leaving its transcription pending, then start one on line B. */
+  async function finishThenStartElsewhere(): Promise<(value: Transcript) => void> {
+    let resolve: (value: Transcript) => void = () => undefined;
+    vi.mocked(walkthroughApi.transcribe).mockReturnValue(
+      new Promise<Transcript>((done) => {
+        resolve = done;
+      }),
+    );
+    await settle();
+    await startWalkthrough();
+    await settle();
+    button("Stop and send")?.click();
+    await settle();
+    expect(walkthroughApi.transcribe).toHaveBeenCalledOnce();
+    walkthrough.last = { line: "b", device: "d", region };
+    vi.mocked(screenApi.start).mockResolvedValue({ share_id: "s2", status: "waiting" });
+    vi.mocked(screenApi.current).mockResolvedValue({ share: { ...share, share_id: "s2" } });
+    room.conversation = other;
+    room.screenShare = null;
+    await settle();
+    await startWalkthrough();
+    await settle();
+    expect(screenApi.start).toHaveBeenLastCalledWith("b", "d", region, true);
+    return resolve;
+  }
+
+  it("posts the take to its line when another walkthrough began meanwhile", async () => {
+    const finish = vi.spyOn(walkthroughApi, "finish").mockResolvedValue({ message: { id: 1 } });
+    const component = setup();
+    const resolve = await finishThenStartElsewhere();
+    resolve({ ...transcript, segments: [{ start: 0, end: 1, text: "click" }] });
+    await settle();
+    expect(finish).toHaveBeenCalledExactlyOnceWith(
+      "l",
+      "s",
+      expect.objectContaining({ segments: [{ start: 0, end: 1, text: "click" }] }),
+    );
+    expect(walkthroughApi.cancel).not.toHaveBeenCalledWith("l", "s");
+    expect(button("Stop and send")).toBeDefined();
+    expect(walkthrough.line).toBe("b");
+    expect(walkthrough.shareId).toBe("s2");
+    await unmount(component);
+  });
+
+  it("keeps a take refused after the person left held for retry on its own line", async () => {
+    const finish = vi.spyOn(walkthroughApi, "finish").mockRejectedValue(new Error("refused"));
+    const component = setup();
+    const resolve = await finishThenStartElsewhere();
+    resolve(transcript);
+    await settle();
+    expect(finish).toHaveBeenCalledOnce();
+    expect(sendFailures.get("b")).toBeUndefined();
+    expect(sendFailures.get("l")?.take?.share).toBe("s");
+    expect(button("Stop and send")).toBeDefined();
+    finish.mockResolvedValue({ message: { id: 2 } });
+    button("Cancel")?.click();
+    await settle();
+    room.conversation = line;
+    await settle();
+    button("retry")?.click();
+    await settle();
+    expect(finish).toHaveBeenLastCalledWith("l", "s", expect.anything());
+    expect(sendFailures.get("l")).toBeUndefined();
+    await unmount(component);
+  });
+
+  it("drops a take the person cancels and releases its share", async () => {
+    const finish = vi.spyOn(walkthroughApi, "finish").mockResolvedValue({ message: { id: 1 } });
+    const component = setup();
+    let resolve: (value: Transcript) => void = () => undefined;
+    vi.mocked(walkthroughApi.transcribe).mockReturnValue(
+      new Promise<Transcript>((done) => {
+        resolve = done;
+      }),
+    );
+    await settle();
+    await startWalkthrough();
+    await settle();
+    button("Stop and send")?.click();
+    await settle();
+    expect(walkthroughApi.transcribe).toHaveBeenCalledOnce();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await settle();
+    expect(walkthroughApi.cancel).toHaveBeenCalledWith("l", "s");
+    resolve(transcript);
+    await settle();
+    expect(finish).not.toHaveBeenCalled();
+    expect(sendFailures.get("l")).toBeUndefined();
+    await unmount(component);
+  });
+
+  it("does not hold a take the person cancelled while it was being sent", async () => {
+    let refuse: (error: Error) => void = () => undefined;
+    const finish = vi.spyOn(walkthroughApi, "finish").mockReturnValue(
+      new Promise((_, reject) => {
+        refuse = reject;
+      }),
+    );
+    const component = setup();
+    await settle();
+    await startWalkthrough();
+    await settle();
+    button("Stop and send")?.click();
+    await settle();
+    expect(finish).toHaveBeenCalledOnce();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await settle();
+    expect(walkthroughApi.cancel).toHaveBeenCalledWith("l", "s");
+    refuse(new Error("share cancelled"));
+    await settle();
+    expect(sendFailures.get("l")).toBeUndefined();
     await unmount(component);
   });
 });
