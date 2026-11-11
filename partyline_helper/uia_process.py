@@ -45,7 +45,8 @@ def read(hwnd, frame=None, state=None, deep=True, popen=subprocess.Popen, platfo
 
             threading.Thread(target=initialized, name='uia-ready', daemon=True).start()
             wait_ready = ready_wait or ready_event.wait
-            if not wait_ready(START_LIMIT) or announcement != [b"READY\n"]:
+            # Windows text-mode stdout writes CRLF, so compare the stripped line.
+            if not wait_ready(START_LIMIT) or [line.strip() for line in announcement] != [b"READY"]:
                 process.kill()
                 process.wait()
                 return {"elements_unavailable": "timeout", "truncated": True}
