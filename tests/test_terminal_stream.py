@@ -76,15 +76,15 @@ class TerminalViewerRegistryTest(unittest.TestCase):
         second = registry.attach()
 
         registry.publish(b"same")
-        self.assertEqual(first.queue.get_nowait(), b"same")
-        self.assertEqual(second.queue.get_nowait(), b"same")
+        self.assertEqual(first.queue.get_nowait()[0], b"same")
+        self.assertEqual(second.queue.get_nowait()[0], b"same")
 
         for number in range(VIEWER_QUEUE_LIMIT):
-            first.queue.put_nowait(str(number).encode())
+            first.queue.put_nowait((str(number).encode(), 0.0))
         self.assertEqual(first.queue.qsize(), VIEWER_QUEUE_LIMIT)
         registry.publish(b"overflow")
         self.assertIsNone(first.queue.get_nowait())
-        self.assertEqual(second.queue.get_nowait(), b"overflow")
+        self.assertEqual(second.queue.get_nowait()[0], b"overflow")
 
     def test_late_viewer_gets_a_coherent_snapshot(self):
         registry = TerminalViewerRegistry(lambda: "screen state")
@@ -132,8 +132,8 @@ class TerminalDrainTest(unittest.IsolatedAsyncioTestCase):
         os.write(write_fd, b"hello")
         await eventually(lambda: first.queue.qsize() == 1, "first viewer data")
 
-        self.assertEqual(first.queue.get_nowait(), b"hello")
-        self.assertEqual(second.queue.get_nowait(), b"hello")
+        self.assertEqual(first.queue.get_nowait()[0], b"hello")
+        self.assertEqual(second.queue.get_nowait()[0], b"hello")
         self.assertIn("hello", adapter.screen_text())
 
         task.cancel()
@@ -237,8 +237,8 @@ class TerminalReplayTest(unittest.IsolatedAsyncioTestCase):
         registry.publish(b'first\xe2')
         late = registry.attach()
         registry.publish(b'\x82\xaclast')
-        self.assertEqual(late.replay + late.queue.get_nowait(), b'first\xe2\x82\xaclast')
-        self.assertEqual(early.queue.get_nowait() + early.queue.get_nowait(),
+        self.assertEqual(late.replay + late.queue.get_nowait()[0], b'first\xe2\x82\xaclast')
+        self.assertEqual(early.queue.get_nowait()[0] + early.queue.get_nowait()[0],
                          b'first\xe2\x82\xaclast')
         reconnect = registry.attach()
         self.assertEqual(reconnect.replay, b'first\xe2\x82\xaclast')
@@ -270,7 +270,7 @@ class TerminalReplayTest(unittest.IsolatedAsyncioTestCase):
         viewer = registry.attach()
         registry.publish(b'abcdef')
         self.assertEqual(registry.attach().replay, b'cdef')
-        self.assertEqual(viewer.queue.get_nowait(), b'abcdef')
+        self.assertEqual(viewer.queue.get_nowait()[0], b'abcdef')
         registry.publish(b'x' * 65537)
         self.assertIsNone(viewer.queue.get_nowait())
         with patch.dict(os.environ, {'PARTYLINE_TERMINAL_REPLAY_BYTES': 'invalid'}):

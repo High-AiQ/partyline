@@ -9,6 +9,7 @@ import re
 import time
 import uuid
 
+from .op_timing import pushed
 from . import local_tools_audit as audit
 from . import local_tools_media as media
 from . import local_tools_reference as reference
@@ -75,7 +76,7 @@ class LocalTools:
                    "requested_by": agent, "line_name": line_name, "checker": checker,
                    "scope_only": scope_only}
         try:
-            await device["socket"].send_json(message)
+            await pushed("local tool", device["socket"].send_json(message))
         except Exception as exc:
             item.scope_pending = False
             raise ValueError("the computer could not be reached") from exc
@@ -135,8 +136,9 @@ class LocalTools:
         device = self.hub.devices.get(item.device_id)
         if tell_helper and device:
             try:
-                await device["socket"].send_json({"type": "tools_revoked", "session_id": item.session_id,
-                                                  "reason": reason})
+                await pushed("local tool",
+                        device["socket"].send_json({"type": "tools_revoked", "session_id": item.session_id,
+                                                  "reason": reason}))
             except Exception:
                 pass
         if was_active:
@@ -200,14 +202,15 @@ class LocalTools:
         self.waiters[call_id] = (device["id"], item.session_id, future)
         try:
             async with self.deadline(timeout + GRACE):
-                await device["socket"].send_json(message)
+                await pushed("local tool", device["socket"].send_json(message))
                 answer = await future
         except (TimeoutError, asyncio.CancelledError):
             if asyncio.current_task().cancelling():
                 raise
             try:
-                await device["socket"].send_json({"type": "tool_cancel", "session_id": item.session_id,
-                                                  "call_id": call_id})
+                await pushed("local tool",
+                        device["socket"].send_json({"type": "tool_cancel", "session_id": item.session_id,
+                                                  "call_id": call_id}))
             except Exception:
                 pass
             ended = item.status == "revoked"

@@ -6,6 +6,7 @@ import re
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from .op_timing import pushed
 from .adapter_capabilities import claims_transcript, transcript_claimed
 from .adapters import Adapter
 from .attachment_broadcast import broadcast_attachment_state
@@ -20,6 +21,7 @@ from .delivery_credit_accounting import confirm_reserved
 from .delivery_reservation import reserve_delivery
 from .message_routing import post_human_message, route_message
 from .reattach import ReattachCoordinator
+from .ws_push import push_event
 from .runtime_delivery_credit import DeliveryCreditMixin
 from .task_privacy import hidden_from_people
 from .attachment_stop_audit import status_update
@@ -90,15 +92,7 @@ class ChatRuntime(DeliveryCreditMixin):
     async def broadcast(self, conv_id: str, event: Event):
         if hidden_from_people(self.db, conv_id, event):
             return  # bridge traffic and a task exchange's root side (message_visibility)
-        payload = event.model_dump(exclude_none=True)
-        for ws in list(self.sockets.get(conv_id, ())):
-            try:
-                await ws.send_json(payload)
-            except Exception:
-                self.sockets.get(conv_id, set()).discard(ws)
-                self.human_handles.get(conv_id, {}).pop(ws, None)
-                if not self.human_handles.get(conv_id):
-                    self.human_handles.pop(conv_id, None)
+        await push_event(self, conv_id, event.model_dump(exclude_none=True))
 
     async def broadcast_all(self, event: Event) -> None:
         for conv_id in list(self.sockets):
@@ -252,21 +246,21 @@ class ChatRuntime(DeliveryCreditMixin):
             while True:
                 data = await ws.receive_json()
                 if not isinstance(data, dict):
-                    await ws.send_json(
+                    await pushed("chat", ws.send_json(
                         ErrorEvent(
                             conversation_id=conv_id,
                             message="WebSocket commands must be JSON objects",
                         ).model_dump()
-                    )
+                    ))
                     continue
                 if data.get("type") == "hello":
                     client_id = str(data.get("client_id", "")).strip()
                     conv = self.db.get_conversation(conv_id)
                     if conv is None or conv["archived_at"]:
-                        await ws.send_json(ErrorEvent(
+                        await pushed("chat", ws.send_json(ErrorEvent(
                             conversation_id=conv_id,
                             message="this line is archived — restore it to talk here",
-                        ).model_dump())
+                        ).model_dump()))
                         continue
                     # A reconnect can arrive before a half-open old socket times
                     # out. Its durable client id proves it is the same browser, so
@@ -282,50 +276,50 @@ class ChatRuntime(DeliveryCreditMixin):
                                     pass  # a half-open socket cannot be closed cleanly
                     claims[ws] = (handle, client_id)
                     claimed_handle, claimed_client = handle, client_id
-                    await ws.send_json(await hello_payload(
+                    await pushed("chat", ws.send_json(await hello_payload(
                         self, conv_id, handle, frontend_build, server_version, instance_name
-                    ))
+                    )))
                     from .screen_snapshot import send_snapshot
                     await send_snapshot(self, ws, conv_id)
                     if reattacher is not None and (offer := reattacher.offer(conv_id)):
-                        await ws.send_json(offer.model_dump())
+                        await pushed("chat", ws.send_json(offer.model_dump()))
                     continue
 
                 # Preserve the useful archived-line error even for an old client
                 # which has not yet learned the hello handshake.
                 conv = self.db.get_conversation(conv_id)
                 if conv is None or conv["archived_at"]:
-                    await ws.send_json(
+                    await pushed("chat", ws.send_json(
                         ErrorEvent(
                             conversation_id=conv_id,
                             message="this line is archived — restore it to talk here",
                         ).model_dump()
-                    )
+                    ))
                     continue
                 if claimed_handle is None:
-                    await ws.send_json(
+                    await pushed("chat", ws.send_json(
                         ErrorEvent(
                             conversation_id=conv_id,
                             message="say hello before sending messages",
                         ).model_dump()
-                    )
+                    ))
                     continue
                 if self.human_handles.get(conv_id, {}).get(ws) != (claimed_handle, claimed_client):
-                    await ws.send_json(
+                    await pushed("chat", ws.send_json(
                         ErrorEvent(
                             conversation_id=conv_id,
                             message="this connection was superseded; reconnect to continue",
                         ).model_dump()
-                    )
+                    ))
                     continue
                 if data.get("type") == "reattach":
                     if reattacher is None:
-                        await ws.send_json(
+                        await pushed("chat", ws.send_json(
                             ErrorEvent(
                                 conversation_id=conv_id,
                                 message="reattachment is not available on this server",
                             ).model_dump()
-                        )
+                        ))
                         continue
                     error = await reattacher.choose(conv_id, data, claimed_handle)
                     if error is None:
@@ -333,12 +327,12 @@ class ChatRuntime(DeliveryCreditMixin):
 
                         await reconcile_after_restart(self)
                     if error is not None:
-                        await ws.send_json(
+                        await pushed("chat", ws.send_json(
                             ErrorEvent(
                                 conversation_id=conv_id,
                                 message=error,
                             ).model_dump()
-                        )
+                        ))
                     continue
                 body = str(data.get("body", "")).strip()
                 if not body:

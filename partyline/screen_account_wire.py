@@ -4,6 +4,7 @@ from fastapi import WebSocketDisconnect
 
 from .browser_snapshots import hello_payload
 from .screen_snapshot import send_snapshot
+from .op_timing import pushed
 
 ACCOUNT_WIRE = "~account"
 
@@ -15,8 +16,8 @@ async def serve_account_wire(runtime, ws, handle, build, version, instance):
         while True:
             message = await ws.receive_json()
             if isinstance(message, dict) and message.get("type") == "hello":
-                await ws.send_json(await hello_payload(
-                    runtime, ACCOUNT_WIRE, handle, build, version, instance))
+                await pushed("screen", ws.send_json(await hello_payload(
+                    runtime, ACCOUNT_WIRE, handle, build, version, instance)))
                 await send_snapshot(runtime, ws, ACCOUNT_WIRE)
     except WebSocketDisconnect:
         pass

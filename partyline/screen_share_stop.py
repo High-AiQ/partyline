@@ -5,6 +5,7 @@ import logging
 from .screen_requests import end_share
 from .screen_share_frames import store_last_frame
 from .screen_share_notices import share_stopped
+from .op_timing import pushed
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,8 @@ async def stop_share(hub, share, reason):
         device = hub.devices.get(share.device_id)
         if device:
             try:
-                await device["socket"].send_json({"type": "stop_share", "share_id": share.share_id})
+                await pushed("screen",
+                        device["socket"].send_json({"type": "stop_share", "share_id": share.share_id}))
             except Exception:
                 pass
         await hub._device_event({"id": share.device_id, "owner_id": share.owner_id},

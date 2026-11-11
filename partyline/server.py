@@ -93,7 +93,7 @@ from .approval_bubble import register_approval_routes
 from .tmp_reap_routes import register_tmp_reap_routes
 from .scratch_worktrees import register_scratch_routes
 from .startup_state import engage_startup
-from .event_loop_lag import monitor as monitor_event_loop_lag
+from . import op_timing
 from .line_gates import register_gates_routes
 from .prereview import register_prereview_route
 from .captain_docs import register_docs_route
@@ -164,6 +164,7 @@ async def _run_automatic_reattachment() -> None:
 @asynccontextmanager
 async def lifespan(app):
     deployment.prime()  # pin the served checkout's HEAD to this boot, before any pull
+    op_timing.register_stack_dump()  # kill -USR1 <pid>: every thread's stack, no timer
     probe_result = fence_probe.probe(
         check_fence=features.enabled("write_fence"),
         service_unit=service_guard.unit_from_cgroup(),
@@ -187,7 +188,6 @@ async def lifespan(app):
     tasks = [asyncio.create_task(resource_updates(runtime)), asyncio.create_task(docker_events.run(runtime)),
              automatic_task, asyncio.create_task(expire_offers(runtime)),
              asyncio.create_task(maintenance(runtime)),
-             asyncio.create_task(monitor_event_loop_lag()),
              asyncio.create_task(run_memory_events(runtime)),
              asyncio.create_task(run_task_maintenance(runtime)),
              asyncio.create_task(run_resource_leases(runtime))]
@@ -207,6 +207,7 @@ app.state.bind = BindConfig()
 user_sockets = UserSocketRegistry()
 install_auth_guard(app, runtime.db)
 install_static_cache(app)
+op_timing.install(app)  # outermost: times the whole request, auth included
 register_terminal_route(app, runtime)
 register_accept_route(app, runtime)
 register_accept_history_route(app, runtime)

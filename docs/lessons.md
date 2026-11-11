@@ -406,8 +406,9 @@ Assuming one fast replay update stayed cheap across many busy attachments
 missed event-loop contention. In a synthetic twelve-ring workload, synchronous
 truncation delayed message POSTs; skip plain runs in bulk while preserving the
 bytewise escape and UTF-8 parser at boundaries. Compare the optimized parser
-against the bytewise reference and monitor event-loop lag without logging
-callback arguments, which may contain secrets.
+against the bytewise reference and watch the slow-operation warnings
+(`partyline/op_timing.py`) without logging callback arguments, which may
+contain secrets.
 
 ## Request URLs in logs can carry live credentials
 
@@ -2125,3 +2126,17 @@ file is a resume, and only this activation's own nonce opens the speech gate. A 
 if this activation's nonce appears. Follow-up: count markers only in the user/prompt records the harness wrote, per
 adapter record vocabulary (claude, codex, opencode and the rest differ); until then, never print other processes'
 command lines into a transcript. Tests: `tests/test_claim_marker_adoption.py`.
+
+## 2026-11-11 — A probe that wakes an idle server to ask how it is doing is a poll
+
+The false assumption was that loop responsiveness needs a heartbeat. `event_loop_lag.py` slept 100 ms in a loop to
+see whether the sleep came back late, and `loop_watchdog.py` ran a thread that woke every 100 ms to read a beat the
+loop had to write: an idle server did ten wake-ups a second, twice, to learn nothing. Its warnings could not say
+what was slow either; they guessed from an overlapping tick. Delay is a property of an operation, so measure the
+operation: each HTTP request, websocket send (enqueue to send) and every adapter callback into the runtime reads a monotonic clock at both
+ends and warns past the same 250 ms, at most once per name per 10 s, compared on the next event rather than by a
+timer. An idle server now does nothing. The watchdog's one extra, a stack from a loop that never returns, cannot be
+had from a finished operation, so `SIGUSR1` prints every thread's stack on demand (`faulthandler`, code locations
+only). Time at the choke point (the base adapter's callbacks, the websocket sends), not per tail: round after round
+found another adapter path that called the runtime directly. Keep log names to route templates and fixed words; a hook URL carries a capability token. Tests:
+`tests/test_op_timing.py` (fake clock, no waits, and a check that the idle path creates no timer).

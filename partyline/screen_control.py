@@ -11,6 +11,7 @@ from .contracts import MessageEvent, MessageResponse
 from .screen_audit import publish, record
 from .screen_connections import notice
 from .screen_control_actions import ControlAction, command, describe
+from .op_timing import pushed
 
 CONTROL_VERSION = 1
 CONTROL_MESSAGES = ("control_granted", "control_revoked", "action_result")
@@ -107,8 +108,9 @@ class ControlHub:
             raise ValueError("a control request is already waiting for the person's answer")
         self.grants[share.share_id] = grant = Grant(share.share_id, agent, agent)
         try:
-            await device["socket"].send_json({"type": "control_request", "share_id": share.share_id,
-                                               "requested_by": agent, "line_name": line_name})
+            await pushed("screen",
+                    device["socket"].send_json({"type": "control_request", "share_id": share.share_id,
+                                               "requested_by": agent, "line_name": line_name}))
         except Exception as exc:
             self.grants.pop(share.share_id, None)
             raise ValueError("the sharing computer could not be reached") from exc
@@ -159,8 +161,9 @@ class ControlHub:
         device = self.hub.devices.get(share.device_id)
         if tell_helper and device:
             try:
-                await device["socket"].send_json({"type": "control_revoked", "share_id": share.share_id,
-                                                   "reason": reason})
+                await pushed("screen",
+                        device["socket"].send_json({"type": "control_revoked", "share_id": share.share_id,
+                                                   "reason": reason}))
             except Exception:
                 pass
         await self._changed(share)
@@ -217,8 +220,9 @@ class ControlHub:
         try:
             try:
                 async with asyncio.timeout(ACTION_TIMEOUT):
-                    await device["socket"].send_json({"type": "action", "share_id": share.share_id,
-                                                       "request_id": request_id, "action": cmd})
+                    await pushed("screen",
+                            device["socket"].send_json({"type": "action", "share_id": share.share_id,
+                                                       "request_id": request_id, "action": cmd}))
                     answer = await result
             except (TimeoutError, asyncio.CancelledError):
                 if asyncio.current_task().cancelling():

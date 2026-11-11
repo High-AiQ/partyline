@@ -2,7 +2,6 @@
 
 import asyncio
 
-from .periodic_timing import tick as timed_tick
 import logging
 import time
 
@@ -66,8 +65,7 @@ async def run(runtime):
             with events.processing():
                 failed = False
                 try:
-                    with timed_tick('resource lease sweep'):
-                        await maintain(runtime)
+                    await maintain(runtime)
                 except Exception:
                     failed = True
                     logging.getLogger(__name__).exception('resource lease sweep failed')

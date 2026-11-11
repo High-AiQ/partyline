@@ -2,7 +2,6 @@
 
 import asyncio
 
-from .periodic_timing import tick as timed_tick
 import logging
 import os
 
@@ -97,8 +96,7 @@ async def run(runtime):
 
     async def maintain(runtime):
         try:
-            with timed_tick('task maintenance'):
-                await tick(runtime)
+            await tick(runtime)
         except Exception:
             logger.exception('task maintenance failed; retrying after failure')
             return True

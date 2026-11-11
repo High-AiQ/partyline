@@ -28,6 +28,7 @@ from .screen_protocol import (
     HEARTBEAT_TIMEOUT, MAX_FRAME_BYTES, PROTOCOL_VERSION, HelperFrame,
     HelperHello, HelperPreview, ShareAccepted, ShareCommand, ShareEnded,
 )
+from .op_timing import pushed
 
 class ScreenHub:
     def __init__(self, runtime):
@@ -107,17 +108,17 @@ class ScreenHub:
                 except TimeoutError:
                     if time.monotonic() - current["last_seen"] >= HEARTBEAT_TIMEOUT:
                         break
-                    await ws.send_json({"type": "ping"})
+                    await pushed("screen", ws.send_json({"type": "ping"}))
                     last_ping = time.monotonic()
                     continue
                 current["last_seen"] = time.monotonic()
                 if current["last_seen"] - last_ping >= HEARTBEAT_SECONDS:
-                    await ws.send_json({"type": "ping"})
+                    await pushed("screen", ws.send_json({"type": "ping"}))
                     last_ping = current["last_seen"]
                 message = json.loads(raw)
                 kind = message.get("type")
                 if kind == "ping":
-                    await ws.send_json({"type": "pong"})
+                    await pushed("screen", ws.send_json({"type": "pong"}))
                     continue
                 if kind == "pong":
                     continue
@@ -125,8 +126,8 @@ class ScreenHub:
                     meta = HelperFrame.model_validate(message)
                     data = await asyncio.wait_for(ws.receive_bytes(), HEARTBEAT_TIMEOUT)
                     if len(data) > MAX_FRAME_BYTES:
-                        await ws.send_json({"type": "error", "request_id": meta.request_id,
-                                            "message": "frame exceeds 4 MB"})
+                        await pushed("screen", ws.send_json({"type": "error", "request_id": meta.request_id,
+                                            "message": "frame exceeds 4 MB"}))
                         continue
                     await self._frame(current, meta, data)
                 elif kind == "preview":
@@ -213,7 +214,7 @@ class ScreenHub:
                                long_edge=DEFAULT_LONG_EDGE, min_change=DEFAULT_MIN_CHANGE,
                                control=control and not walkthrough)
         try:
-            await device["socket"].send_json(command.model_dump())
+            await pushed("screen", device["socket"].send_json(command.model_dump()))
         except Exception:
             self.shares.pop(conv_id, None)
             self.walkthroughs.discard(share.share_id)
@@ -242,7 +243,7 @@ class ScreenHub:
                                      share.device_id in self.devices)
         for ws in list(self.runtime.sockets.get(conv_id, ())):
             try:
-                await ws.send_json(payload)
+                await pushed("screen", ws.send_json(payload))
             except Exception:
                 pass
 
@@ -259,8 +260,8 @@ class ScreenHub:
                 try:
                     if state is None:
                         state = owner_state(self, device["owner_id"])
-                    await ws.send_json(payload)
-                    await ws.send_json(snapshot(self, device["owner_id"], conv_id, state))
+                    await pushed("screen", ws.send_json(payload))
+                    await pushed("screen", ws.send_json(snapshot(self, device["owner_id"], conv_id, state)))
                 except Exception:
                     pass
 

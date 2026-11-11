@@ -1,5 +1,6 @@
 """Owner-scoped screen state delivered to each chat socket."""
 
+from .op_timing import pushed
 from .helper_release import update_available
 from .screen_grants import device_grants, window_share_indicators
 
@@ -48,4 +49,4 @@ async def send_snapshot(runtime, ws, conv_id):
     hub = getattr(runtime, "screen_hub", None)
     owner_id = getattr(ws, "screen_owner_id", None)
     if hub is not None and owner_id is not None:
-        await ws.send_json(snapshot(hub, owner_id, conv_id))
+        await pushed("screen", ws.send_json(snapshot(hub, owner_id, conv_id)))

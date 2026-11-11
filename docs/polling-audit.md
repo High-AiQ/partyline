@@ -33,7 +33,7 @@ scripts, excluding tests, generated static files and other worktrees.
 | (a) | `partyline/orchestrator_cleanup.py:102` | Task integration and waiting deadlines; SQL mutations, Git metadata notifications and persisted deadlines |
 | (a) | `partyline/heartbeat_scheduler.py:247` | Reminder due dates/eligibility; configuration/delivery changes and next-due deadline |
 | (a), resolved | Memory and Docker gauges | On-demand snapshots and native pressure/limit/Docker events; see below |
-| (a), decision pending | `partyline/event_loop_lag.py:27,47`, `loop_watchdog.py:51` | Continuous loop-responsiveness measurements; see below |
+| removed | `event_loop_lag.py`, `loop_watchdog.py` | Deleted by decision 2; delay is timed on real requests, pushes and dispatches in `op_timing.py`, with no timer |
 | (a) | `partyline/mcp/server.py:93` | Watcher initialization; blocking Event, set on shutdown too |
 | (a) | `partyline_helper/stopping.py:34,49` | Stop-file creation/helper exit; filesystem notification and native process wait |
 | (a) | `partyline_helper/links.py:82` | Old helper releasing run lock; native owner-exit notification followed by one lock attempt |
@@ -89,17 +89,20 @@ These remain visible rather than being relabeled as allowed timers:
    once after native pressure, limit, and Docker events. Those events do not
    report every change in the numbers. Warnings are event-driven, and hosts
    without an available event source have on-demand readings only.
-2. **Loop-lag diagnostics:** the existing monitor and watchdog actively measure
-   responsiveness against periodic probes. There is no passive event for every
-   otherwise-idle loop-lag sample. Replacing/removing this diagnostic requires
-   a decision about which measurements to retain.
+2. **Loop-lag diagnostics (decided and done):** the periodic probe and the
+   watchdog thread are deleted. Each HTTP request, websocket push and
+   transcript dispatch is timed on real traffic (`partyline/op_timing.py`) and
+   a slow one logs a warning at the old 250 ms threshold, so an idle server
+   does no work. The only surface the old numbers had was the log; no endpoint,
+   MCP resource or UI read them. The watchdog's stack sample is replaced by
+   `SIGUSR1` (`faulthandler`), a signal handler rather than a timer.
 3. **MSS screen capture:** MSS exposes individual captures, not a desktop-change
    stream. The current capture worker compares successive images. Eliminating
    that sampler requires new platform capture backends. Its original frame
    cadence lives in `partyline_helper/capture_loop.py`; local stop input now
    reacts to queue and consent-ownership events without periodic reads.
 
-The guard pins the exact existing lag and MSS sleep calls; the sibling-owned screen intervals were removed by 969006e8. It rejects additional calls; these audit
+The guard pins the exact existing MSS sleep call; the sibling-owned screen intervals were removed by 969006e8. It rejects additional calls; these audit
 exceptions are not (b)–(e) approvals. Windows-only native hook code is isolated
 from ordinary tests; hook consumers are exercised with explicit fake events.
 

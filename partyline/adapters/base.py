@@ -21,8 +21,9 @@ if sys.platform != "win32":
     import fcntl
     import termios
 
-from partyline import process_memory, process_exit, docker_shim_env
+from partyline import process_memory, process_exit, docker_shim_env, op_timing
 from partyline.adapters.events import AdapterEvents
+from partyline.adapters.timed_callbacks import TimedCallbacks
 from partyline.adapters import activation, fence, mcp_hooks, pty_io, startup_prompt
 from partyline.adapters.process_shutdown import stop_process_group
 from partyline.adapters.process_wait import wait_for_process
@@ -42,7 +43,7 @@ from partyline.terminal_viewers import TerminalViewer, TerminalViewerRegistry
 Post = Callable[[str, str, str], Awaitable[None]]
 Status = Callable[[str], Awaitable[None]]
 
-class Adapter(AdapterEvents, JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
+class Adapter(TimedCallbacks, AdapterEvents, JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
               startup_prompt.StartupPromptGuard, mcp_hooks.McpHooks):
     """Base class for a process connected through a pseudo-terminal."""
 
@@ -56,7 +57,7 @@ class Adapter(AdapterEvents, JsonlPasteReceipts, activation.Activation, pty_io.P
 
     def __init__(self, att: dict, post: Post, on_status: Status, on_cli_session=None):
         self._events_init()
-        self.att = att
+        self.att = op_timing.TimedAtt(att)
         self.resume = bool(att.get("resume"))
         self._post_to_chat = post
         # A process killed mid-turn comes back to a CLI that resumes the

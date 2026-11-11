@@ -15,6 +15,7 @@ from .mention_relay import post_private
 from .preset_traits import match_preset
 from .screen_grants import GRANTS
 from .screen_grant_store import replace_grant
+from .op_timing import pushed
 
 MESSAGES = ("list_share_targets", "window_grant", "window_revoked")
 
@@ -106,7 +107,8 @@ class WindowGrants:
             activations = {}
             lines = share_targets(self.hub.runtime.db, device["owner_id"], activations=activations)
             self.offers[device["id"]] = (device["socket"], ident, activations)
-            await device["socket"].send_json({"type": "share_targets", "request_id": ident, "lines": lines})
+            await pushed("screen", device["socket"].send_json(
+                {"type": "share_targets", "request_id": ident, "lines": lines}))
             return
         if kind == "window_revoked":
             try:
@@ -145,7 +147,7 @@ class WindowGrants:
         except (ValidationError, ValueError):
             response["error"] = "the selected process is unavailable; choose a live attached process"
         if self.connected(device):
-            await device["socket"].send_json(response)
+            await pushed("screen", device["socket"].send_json(response))
             if response["ok"] and self.known.get(body.grant_id) is entry:
                 # Let the helper activate its worker before the process can use the grant.
                 await self.notify(body.grant_id, entry)
@@ -186,7 +188,8 @@ class WindowGrants:
         device = self.hub.devices.get(device_id)
         if device and tell_helper:
             try:
-                await device["socket"].send_json({"type": "revoke_window", "grant_id": grant_id})
+                await pushed("screen",
+                        device["socket"].send_json({"type": "revoke_window", "grant_id": grant_id}))
             except (OSError, RuntimeError, WebSocketDisconnect):
                 pass  # Server authorization is already gone, even if the helper disconnected.
         if device_id:
