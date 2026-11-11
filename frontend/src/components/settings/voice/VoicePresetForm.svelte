@@ -55,9 +55,13 @@
 
   function submit(event: SubmitEvent): void {
     event.preventDefault();
+    save(event.currentTarget as HTMLFormElement);
+  }
+
+  /** The one save path: the submit button and the whisper-1 switch both come here. */
+  function save(form: HTMLFormElement): void {
     tried = true;
     if (Object.keys(validateDraft(draft, editing ? [] : takenNames)).length) {
-      const form = event.currentTarget as HTMLFormElement;
       // Errors render on the next tick; then focus the first field that has one.
       void tick().then(() => {
         form.querySelector<HTMLElement>("[aria-invalid='true']")?.focus();
@@ -183,10 +187,12 @@
           <button
             type="button"
             disabled={busy}
-            onclick={() => {
+            onclick={(event) => {
               draft.model = OPENAI_TRANSCRIBE_MODEL;
               draft.responseFormat = "json";
-            }}>update to gpt-transcribe</button
+              const form = event.currentTarget.form;
+              if (form) save(form);
+            }}>Switch to gpt-transcribe and save</button
           >
         </div>
       {/if}
@@ -259,10 +265,13 @@
     {/if}
   </div>
   <p class="line-status error" aria-live="polite">{error}</p>
-  <div class="flex flex-wrap justify-end gap-2">
+  <!-- Sticks to the bottom of the scrolling settings pane, so the actions stay in view however long the form is. -->
+  <div
+    class="sticky bottom-0 z-10 -mx-4 -mb-4 flex flex-wrap justify-end gap-2 rounded-b-md border-t border-line bg-ink px-4 py-3"
+  >
     <button type="button" onclick={oncancel} disabled={busy}>cancel</button>
     <button class="primary" type="submit" disabled={busy}
-      >{busy ? "saving…" : editing ? "save recognizer" : "add recognizer"}</button
+      >{busy ? "saving…" : initial ? "save recognizer" : "add recognizer"}</button
     >
   </div>
 </form>

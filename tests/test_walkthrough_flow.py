@@ -177,26 +177,33 @@ class WalkthroughFlowTest(unittest.TestCase):
             self.assertNotIn("imagined speech", message["body"])
             self.assertTrue(message["files"])
 
+    def finish_untimed(self, text, no_input):
+        with self.socket() as ws:
+            path, _ = self.start(ws)
+            result = self.client.post(path + "/finish", json={
+                "transcript_text": text, "no_input": no_input, "duration_ms": 31000})
+            self.assertEqual(result.status_code, 200, result.text)
+            message = result.json()["message"]
+            body = message["body"]
+            self.assertIn("Walkthrough · 0:31 ·", body)
+            self.assertTrue(message["files"])
+            self.assertNotIn(f'[0:00] "{text}"', body)
+            return body
+
     def test_untimed_transcript_keeps_frames_without_inventing_speech_timing(self):
-        for text, no_input, audible in (("click the gear", False, True),
-                                        ("Thanks for watching. Bye!", False, False),
-                                        ("click the gear", True, False)):
-            with self.subTest(text=text, no_input=no_input), self.socket() as ws:
-                path, _ = self.start(ws)
-                result = self.client.post(path + "/finish", json={
-                    "transcript_text": text, "no_input": no_input, "duration_ms": 31000})
-                self.assertEqual(result.status_code, 200, result.text)
-                message = result.json()["message"]
-                body = message["body"]
-                self.assertIn("Walkthrough · 0:31 ·", body)
-                self.assertTrue(message["files"])
-                self.assertNotIn(f'[0:00] "{text}"', body)
-                if audible:
-                    self.assertLess(body.index(text), body.index("→ frame"))
-                    self.assertNotIn("no speech detected", body)
-                else:
-                    self.assertNotIn(text, body)
-                    self.assertIn("no speech detected", body)
+        body = self.finish_untimed("click the gear", False)
+        self.assertLess(body.index("click the gear"), body.index("→ frame"))
+        self.assertNotIn("no speech detected", body)
+
+    def test_untimed_hallucinated_outro_reads_as_no_speech(self):
+        body = self.finish_untimed("Thanks for watching. Bye!", False)
+        self.assertNotIn("Thanks for watching. Bye!", body)
+        self.assertIn("no speech detected", body)
+
+    def test_untimed_transcript_without_input_reads_as_no_speech(self):
+        body = self.finish_untimed("click the gear", True)
+        self.assertNotIn("click the gear", body)
+        self.assertIn("no speech detected", body)
 
     def test_store_rejects_mismatched_titles(self):
         with self.assertRaises(ValueError):

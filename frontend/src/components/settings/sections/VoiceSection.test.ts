@@ -156,7 +156,7 @@ describe("voice tab", () => {
     await unmount(section);
   });
 
-  it("stages an OpenAI Whisper upgrade in the form and applies it on save", async () => {
+  it("saves an OpenAI Whisper upgrade at once, keeping the other draft edits", async () => {
     const update = vi.spyOn(asrApi, "update").mockResolvedValue(LISTING);
     const section = mount(VoiceSection, { target: document.body });
     await settle();
@@ -164,25 +164,38 @@ describe("voice tab", () => {
     flushSync();
     const form = document.querySelector<HTMLFormElement>("#setting-asr-presets form");
     if (!form) throw new Error("no edit form");
-    const model = form.querySelector<HTMLInputElement>("input[id$='model']");
-    const format = form.querySelector<HTMLSelectElement>("select[id$='format']");
-    expect(model?.value).toBe("whisper-1");
-    expect(format?.value).toBe("verbose_json");
-    const migrate = button(form, "update to gpt-transcribe");
+    expect(form.querySelector<HTMLInputElement>("input[id$='model']")?.value).toBe("whisper-1");
+    expect(form.querySelector<HTMLSelectElement>("select[id$='format']")?.value).toBe("verbose_json");
+    type(form.querySelector<HTMLInputElement>("input[id$='language']"), "de");
+    const migrate = button(form, "Switch to gpt-transcribe and save");
     expect(migrate).toBeDefined();
     migrate?.click();
-    await settle();
-    expect(model?.value).toBe("gpt-transcribe");
-    expect(format?.value).toBe("json");
-    expect(update).not.toHaveBeenCalled();
-    form.requestSubmit();
     await settle();
     expect(update).toHaveBeenCalledOnce();
     expect(update.mock.calls[0]?.[0]).toBe("cloud");
     expect(update.mock.calls[0]?.[1].fields).toMatchObject({
       model: "gpt-transcribe",
       response_format: "json",
+      language: "de",
+      base_url: "https://api.openai.com",
+      api_key_env: "OPENAI_API_KEY",
     });
+    expect(document.querySelector("#setting-asr-presets form")).toBeNull();
+    await unmount(section);
+  });
+
+  it("keeps the form and shows the refusal when the whisper switch fails to save", async () => {
+    const update = vi.spyOn(asrApi, "update").mockRejectedValue(new Error("disk is full"));
+    const section = mount(VoiceSection, { target: document.body });
+    await settle();
+    button(card("cloud"), "edit")?.click();
+    flushSync();
+    button(document.body, "Switch to gpt-transcribe and save")?.click();
+    await settle();
+    expect(update).toHaveBeenCalledOnce();
+    const form = document.querySelector<HTMLFormElement>("#setting-asr-presets form");
+    expect(form?.textContent).toContain("disk is full");
+    expect(form?.querySelector<HTMLInputElement>("input[id$='model']")?.value).toBe("gpt-transcribe");
     await unmount(section);
   });
 
