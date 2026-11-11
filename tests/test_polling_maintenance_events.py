@@ -116,7 +116,7 @@ class MaintenanceEventsTest(unittest.IsolatedAsyncioTestCase):
             model_dump=lambda: {'default': 'local', 'presets': []}))
         with patch.object(browser_snapshots, 'speech_snapshot', return_value=speech), \
                 patch.object(browser_snapshots, '_view', return_value={'live_processes': 3}), \
-                patch('partyline.docker_workloads.inventory.sample', new_callable=AsyncMock):
+                patch('partyline.docker_workloads.inventory.kick'):
             for line in ('~account', 'line'):
                 hello = await browser_snapshots.hello_payload(runtime, line, 'greg', 'build', '2.112.3', None)
                 self.assertEqual(hello['type'], 'hello')

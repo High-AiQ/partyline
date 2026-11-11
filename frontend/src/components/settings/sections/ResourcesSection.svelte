@@ -138,11 +138,11 @@
       case "memoryReserveGb":
         return `RAM kept back for the host and everything else.${gb(defaults?.memory_reserve_bytes)}`;
       case "defaultLeaseGb":
-        return `Per-process soft budget: warnings fire as a process nears and passes it. Linux kills only at a higher emergency backstop (1.5× or +1 GB, within ¾ of RAM); Windows enforces it as a hard limit; macOS is best-effort.${gb(defaults?.default_process_memory_bytes)}`;
+        return `Per-process soft budget: warnings follow pressure and limit events. Linux kills only at a higher emergency backstop (1.5× or +1 GB, within ¾ of RAM); Windows enforces it as a hard limit; macOS is best-effort.${gb(defaults?.default_process_memory_bytes)}`;
       case "reservationGb":
         return `Admission accounting estimate per process; it does not limit the process.${gb(defaults?.memory_reservation_bytes)}`;
       case "warnPercent":
-        return "Percent of a budget at which people are warned. Default: 80%.";
+        return "Budget percentage used to decide warnings after a pressure or limit event. Default: 80%.";
       default:
         return "Requests above this need a person. Default: twice the process cap, up to the host ceiling.";
     }

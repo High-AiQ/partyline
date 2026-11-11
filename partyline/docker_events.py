@@ -35,7 +35,6 @@ async def _chunks(reader, chunked):
 
 async def consume(runtime, inventory):
     """Arm the stream before the startup snapshot, then refresh on each event."""
-    from .browser_snapshots import push_resources
     reader, writer = await open_upstream(docker_relay.host_socket())
     try:
         writer.write(b"GET /events HTTP/1.1\r\nHost: docker\r\n\r\n")
@@ -43,8 +42,9 @@ async def consume(runtime, inventory):
         headers = await reader.readuntil(b"\r\n\r\n")
         if headers.split(b"\r\n", 1)[0].split()[1:2] != [b"200"]:
             raise OSError("Docker event stream rejected")
-        await inventory.sample(runtime, force=True)
+        inventory.kick(runtime)
         pending = b""
+        received = False
         async for chunk in _chunks(reader, b"transfer-encoding: chunked" in headers.lower()):
             pending += chunk
             while b"\n" in pending:
@@ -57,11 +57,11 @@ async def consume(runtime, inventory):
                     continue
                 if isinstance(event, dict) and event.get("Type") == "container" \
                         and event.get("Action") in WATCHED:
-                    await inventory.sample(runtime, force=True)
-                    if any(runtime.sockets.values()):
-                        await push_resources(runtime)
+                    received = True
+                    inventory.kick(runtime)
             if len(pending) > MAX_EVENT:
                 raise ValueError("Docker event too large")
+        return received
     finally:
         writer.close()
 
@@ -75,6 +75,7 @@ async def run(runtime, inventory=None):
         with runtime.db.events.subscribe("conversation_write_grants", "conversations") as db_events:
             stream = None
             failed = False
+            retried_eof = False
             db_wait = asyncio.create_task(db_events.wait())
             file_wait = asyncio.create_task(files.wait())
             try:
@@ -88,11 +89,16 @@ async def run(runtime, inventory=None):
                     done, _ = await asyncio.wait(watched, return_when=asyncio.FIRST_COMPLETED)
                     if stream in done:
                         try:
-                            stream.result()
+                            received = stream.result()
                         except Exception:
                             logger.exception("Docker event stream ended")
+                            failed = True
+                        else:
+                            if received:
+                                retried_eof = False
+                            failed = retried_eof
+                            retried_eof = True
                         stream = None
-                        failed = True
                     if db_wait in done:
                         db_wait.result()
                         db_wait = asyncio.create_task(db_events.wait())
@@ -102,6 +108,7 @@ async def run(runtime, inventory=None):
                             await asyncio.gather(stream, return_exceptions=True)
                             stream = None
                         failed = False
+                        retried_eof = False
                     if file_wait in done:
                         file_wait.result()
                         file_wait = asyncio.create_task(files.wait())
@@ -110,6 +117,7 @@ async def run(runtime, inventory=None):
                             await asyncio.gather(stream, return_exceptions=True)
                             stream = None
                         failed = False
+                        retried_eof = False
             finally:
                 for task in (stream, db_wait, file_wait):
                     if task is not None:
@@ -118,6 +126,6 @@ async def run(runtime, inventory=None):
                                        if task is not None), return_exceptions=True)
 
 
-def close():
+async def close():
     from .docker_workloads import inventory
-    inventory.deadlines.close()
+    await inventory.close()

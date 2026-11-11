@@ -21,12 +21,13 @@ async def hello_payload(runtime, *identity):
 
 
 async def resource_snapshot(runtime):
-    """Read exact gauges for an explicit request or a connecting client."""
+    """Read memory now and refresh the cached Docker inventory in the background."""
     from .docker_workloads import inventory
     from .memory_snapshot import refresh
-    await inventory.sample(runtime, force=True)
     await refresh(runtime)
-    return await asyncio.to_thread(_view, runtime)
+    view = await asyncio.to_thread(_view, runtime)
+    inventory.kick(runtime)
+    return view
 
 
 async def push_resources(runtime):

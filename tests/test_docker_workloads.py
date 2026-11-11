@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 from urllib.parse import unquote
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 from fastapi import FastAPI
@@ -106,20 +106,49 @@ class WorkloadsBase(unittest.IsolatedAsyncioTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.runtime = SimpleNamespace(db=self.db)
-        self.inventory = Inventory(lambda: 0.0)
+        self.inventory = Inventory()
         patcher = patch.object(docker_workloads, "inventory", self.inventory)
         patcher.start()
         self.addCleanup(patcher.stop)
 
 
 class InventoryTest(WorkloadsBase):
+    async def test_burst_coalesces_while_refresh_is_running(self):
+        started, release = asyncio.Event(), asyncio.Event()
+        calls = []
+
+        async def sample(runtime):
+            calls.append(1)
+            if len(calls) == 1:
+                started.set()
+                await release.wait()
+            return True
+
+        with patch.object(self.inventory, "sample", side_effect=sample):
+            self.inventory.kick(self.runtime)
+            await started.wait()
+            for _ in range(1000):
+                self.inventory.kick(self.runtime)
+            release.set()
+            await self.inventory._task
+        self.assertEqual(len(calls), 2)
+        await self.inventory.close()
+
+    async def test_no_grant_clears_deadlines(self):
+        handle = Mock()
+        self.inventory.deadlines.handles["old"] = (1, handle)
+        self.grant = False
+        self.assertFalse(await self.inventory.sample(self.runtime))
+        handle.cancel.assert_called_once()
+        self.assertEqual(self.inventory.deadlines.handles, {})
+
     async def test_deadline_refreshes_daemon_state_before_enforcement(self):
         with patch.object(self.inventory.deadlines, "update") as update:
             await self.inventory.sample(self.runtime)
         callback = update.call_args.args[2]
-        with patch.object(self.inventory, "sample", new_callable=AsyncMock) as sample:
-            await callback()
-        sample.assert_awaited_once_with(self.runtime, force=True)
+        with patch.object(self.inventory, "kick") as kick:
+            callback()
+        kick.assert_called_once_with(self.runtime)
 
     async def test_containers_are_attributed_by_label_and_strays_are_unattributed(self):
         await self.inventory.sample(self.runtime)
@@ -155,15 +184,11 @@ class InventoryTest(WorkloadsBase):
         self.assertIsNone(self.inventory.summary())
         self.assertFalse(self.inventory.view(self.db, None)["enabled"])
 
-    async def test_sampling_is_slow_unless_forced(self):
-        now = [0.0]
-        inventory = Inventory(lambda: now[0])
+    async def test_each_request_reads_current_inventory(self):
+        inventory = Inventory()
         self.assertTrue(await inventory.sample(self.runtime))
-        now[0] = 5.0
-        self.assertFalse(await inventory.sample(self.runtime))
-        now[0] = 16.0
         self.assertTrue(await inventory.sample(self.runtime))
-        self.assertTrue(await inventory.sample(self.runtime, force=True))
+        self.assertTrue(await inventory.sample(self.runtime))
 
     async def test_an_unreachable_daemon_is_reported_not_raised(self):
         async def broken(*args, **kwargs):
@@ -332,7 +357,7 @@ class ReviewFindingsTest(WorkloadsBase):
             self.assertEqual(
                 (row["conversation_id"], row["attribution"], row["uncapped"]), (None, "unattributed", False)
             )
-            await self.inventory.sample(self.runtime, force=True)
+            await self.inventory.sample(self.runtime)
         self.assertIn("answered", self.inventory.view(self.db, None)["error"])
 
     async def test_a_hung_daemon_times_out_instead_of_hanging_the_sampler_or_a_route(self):
@@ -348,35 +373,17 @@ class ReviewFindingsTest(WorkloadsBase):
         self.assertEqual(self.inventory.view(self.db, None)["error"], "TimeoutError")
         self.assertIsNotNone(self.inventory.sampled_at)
 
-    async def test_kick_runs_the_sample_in_its_own_task_once_at_a_time(self):
-        release = asyncio.Event()
-        calls = []
-
-        async def slow(runtime, **kwargs):
-            calls.append(1)
-            await release.wait()
-
-        with patch.object(self.inventory, "sample", slow):
-            self.inventory.kick(self.runtime)
-            self.inventory.kick(self.runtime)
-            await asyncio.sleep(0)
-            self.assertEqual(len(calls), 1)
-            release.set()
-            await self.inventory._task
-            self.inventory.kick(self.runtime)
-            await self.inventory._task
-        self.assertEqual(len(calls), 2)
 
     async def test_sampling_continues_after_the_last_grant_ends_while_labeled_containers_run(self):
         await self.inventory.sample(self.runtime)
         self.assertTrue(self.inventory.watching)
         self.grant = False
-        self.assertTrue(await self.inventory.sample(self.runtime, force=True))  # survivors still matter
+        self.assertTrue(await self.inventory.sample(self.runtime))  # survivors still matter
         for c in self.daemon.containers.values():
             c["State"] = "exited"
-        await self.inventory.sample(self.runtime, force=True)  # one last look sees them stopped
+        await self.inventory.sample(self.runtime)  # one last look sees them stopped
         self.assertFalse(self.inventory.watching)
-        self.assertFalse(await self.inventory.sample(self.runtime, force=True))
+        self.assertFalse(await self.inventory.sample(self.runtime))
         self.assertIsNone(self.inventory.summary())
 
     async def test_survivors_are_named_after_the_grant_is_gone_if_the_inventory_saw_them(self):

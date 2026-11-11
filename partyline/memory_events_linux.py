@@ -56,15 +56,29 @@ class LinuxMemoryEvents:
         self.scopes = {}  # scope root -> attachment ids
         self.scope_fds = {}
         self.watches = {}  # inotify watch descriptor -> (scope root, counters)
-        self.api = ctypes.CDLL(None, use_errno=True)
-        self.api.inotify_init1.argtypes = [ctypes.c_int]
-        self.api.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
-        self.api.inotify_rm_watch.argtypes = [ctypes.c_int, ctypes.c_int]
-        self.inotify = self.api.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
-        loop.add_reader(self.poller.fileno(), self._pressure_ready)
-        if self.inotify >= 0:
-            loop.add_reader(self.inotify, self._events_ready)
-        self._add_pressure("/proc/pressure/memory", None)
+        self.inotify = -1
+        poll_registered = inotify_registered = False
+        try:
+            self.api = ctypes.CDLL(None, use_errno=True)
+            self.api.inotify_init1.argtypes = [ctypes.c_int]
+            self.api.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+            self.api.inotify_rm_watch.argtypes = [ctypes.c_int, ctypes.c_int]
+            self.inotify = self.api.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+            loop.add_reader(self.poller.fileno(), self._pressure_ready)
+            poll_registered = True
+            if self.inotify >= 0:
+                loop.add_reader(self.inotify, self._events_ready)
+                inotify_registered = True
+            self._add_pressure("/proc/pressure/memory", None)
+        except BaseException:
+            if inotify_registered:
+                loop.remove_reader(self.inotify)
+            if poll_registered:
+                loop.remove_reader(self.poller.fileno())
+            if self.inotify >= 0:
+                os.close(self.inotify)
+            self.poller.close()
+            raise
 
     def _add_pressure(self, path, scope):
         try:

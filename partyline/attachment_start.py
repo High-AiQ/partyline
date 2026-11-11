@@ -109,6 +109,8 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
             adapter, conv_id, ident, adapter_completion(att["adapter"]),
             *runtime.held_wake_hooks(conv_id, ident, att["name"]),
         )
+        from .memory_events import lifecycle_changed
+        lifecycle_changed(runtime)
         await announce_attachment(runtime, att, fresh=fresh)
         await deliver_since_attach(runtime, ident)
         return attach_memory_usage(

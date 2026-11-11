@@ -542,7 +542,7 @@ class LifetimeTest(ProxyBase):
 
         self.daemon.containers["running"]["State"]["StartedAt"] = "2026-10-13T10:00:00Z"
         self.daemon.containers["running"]["Labels"]["partyline.max-seconds"] = "1"
-        inventory = docker_workloads.Inventory(lambda: 0.0)
+        inventory = docker_workloads.Inventory()
         docker_lifetime._told.clear()
         with patch.object(docker_workloads.docker_relay, "any_grant", lambda db: True):
             await inventory.sample(self.runtime)

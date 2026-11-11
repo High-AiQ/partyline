@@ -138,7 +138,7 @@ export const SETTINGS: readonly SettingInfo[] = [
       ["memory-reserve", "Memory reserve", "RAM kept back for the host and everything else"],
       ["process-memory", "Default process memory budget", "Per-process soft budget that warnings track"],
       ["memory-reservation", "Memory reservation", "Admission estimate per process; it limits nothing"],
-      ["memory-warning", "Early memory warning", "Percent of the budget at which people are warned"],
+      ["memory-warning", "Early memory warning", "Budget percentage for pressure-event warnings"],
       ["captain-ceiling", "Captain approval ceiling", "Memory requests above this need a person"],
     ] as const
   ).map(([id, label, description]): SettingInfo => ({

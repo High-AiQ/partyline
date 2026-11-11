@@ -289,11 +289,11 @@ async def _resume_adapter_locked(
         adapter, att["conv_id"], att_id, adapter_completion(att["adapter"]),
         *runtime.held_wake_hooks(att["conv_id"], att_id, att["name"]),
     )
-
+    from .memory_events import lifecycle_changed
+    lifecycle_changed(runtime)
     await runtime.post_message(
         att["conv_id"],
-        "system",
-        "system",
+        "system", "system",
         f"@{att['name']} {'resumed with full context' if att['resume'] else 'restarted fresh'} · "
         f"session {att.get('cli_session') or att_id}",
     )

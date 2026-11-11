@@ -32,7 +32,7 @@ scripts, excluding tests, generated static files and other worktrees.
 | (a) | `partyline/captain_handover_completion.py:201` | Confirmation timeout, detach and retention recovery; mutation/deadline wakeups |
 | (a) | `partyline/orchestrator_cleanup.py:102` | Task integration and waiting deadlines; SQL mutations, Git metadata notifications and persisted deadlines |
 | (a) | `partyline/heartbeat_scheduler.py:247` | Reminder due dates/eligibility; configuration/delivery changes and next-due deadline |
-| (a), decision pending | `partyline/memory_sampler.py:267`, `docker_workloads.py:116` | Exact resource gauges; see below |
+| (a), resolved | Memory and Docker gauges | On-demand snapshots and native pressure/limit/Docker events; see below |
 | (a), decision pending | `partyline/event_loop_lag.py:27,47`, `loop_watchdog.py:51` | Continuous loop-responsiveness measurements; see below |
 | (a) | `partyline/mcp/server.py:93` | Watcher initialization; blocking Event, set on shutdown too |
 | (a) | `partyline_helper/stopping.py:34,49` | Stop-file creation/helper exit; filesystem notification and native process wait |
@@ -85,12 +85,10 @@ tooling, not a production script. No production shell polling was found.
 
 These remain visible rather than being relabeled as allowed timers:
 
-1. **Exact memory/Docker gauges:** `/proc`, cgroup `memory.current` and the
-   current process-table APIs provide snapshots. Pressure/limit/exit events do
-   not signal every change to the exact working-set, file-cache, host-free or
-   Docker-memory numbers currently displayed and used by the advisory warning
-   policy. Replacing their sampler requires choosing a different telemetry and
-   warning contract, rather than pretending pressure is equivalent to usage.
+1. **Exact memory/Docker gauges (decided):** read on connect and request, and
+   once after native pressure, limit, and Docker events. Those events do not
+   report every change in the numbers. Warnings are event-driven, and hosts
+   without an available event source have on-demand readings only.
 2. **Loop-lag diagnostics:** the existing monitor and watchdog actively measure
    responsiveness against periodic probes. There is no passive event for every
    otherwise-idle loop-lag sample. Replacing/removing this diagnostic requires
@@ -101,7 +99,7 @@ These remain visible rather than being relabeled as allowed timers:
    cadence lives in `partyline_helper/capture_loop.py`; local stop input now
    reacts to queue and consent-ownership events without periodic reads.
 
-The guard pins the exact existing memory, lag and MSS sleep calls; the sibling-owned screen intervals were removed by 969006e8. It rejects additional calls; these audit
+The guard pins the exact existing lag and MSS sleep calls; the sibling-owned screen intervals were removed by 969006e8. It rejects additional calls; these audit
 exceptions are not (b)–(e) approvals. Windows-only native hook code is isolated
 from ordinary tests; hook consumers are exercised with explicit fake events.
 

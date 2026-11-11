@@ -1,5 +1,18 @@
 # Lessons: the false-assumptions ledger
 
+## Pressure events are not continuous memory gauges
+
+The false assumption was that a pressure notification reports every crossing of
+an exact usage threshold. It does not: read gauges on connection or request and
+once per native event, and describe warnings as event-driven. Fake PSI, cgroup
+counter and Docker streams exercise pushes and warnings without a timer; a live
+PSI registration test skips when the host refuses the trigger. Docker lifetime
+enforcement needs its own one-shot deadlines when inventory polling goes away.
+The false assumption that notifications arrive slowly also permits an unbounded
+queue during sustained pressure or container restart storms. Merge pending memory
+targets and coalesce daemon refreshes while one is running; a clean Docker stream
+EOF gets one immediate re-arm, rather than either permanent silence or a retry loop.
+
 ## Resume backlogs must share delivery accounting
 
 The false assumption was that staging a startup prompt advanced delivery immediately.

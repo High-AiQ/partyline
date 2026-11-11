@@ -42,6 +42,7 @@ def _read(db, live):
             "usage_bytes": usage, "cap_bytes": cap, "raw_bytes": raw,
             "anon_bytes": (cgroup or {}).get("anon"), "file_bytes": (cgroup or {}).get("file"),
             "kernel_bytes": (cgroup or {}).get("kernel_total"),
+            "cgroup": cgroup,
             "percent": min(100, usage * 100 // max(cap, 1)), "source": source, "sampled_at": time.time(),
         }
     return readings
@@ -49,12 +50,23 @@ def _read(db, live):
 
 async def refresh(runtime):
     """Refresh gauges once off-loop; publish only for the same activation."""
-    live = dict(getattr(runtime, "live", {}))
-    readings = await asyncio.to_thread(_read, runtime.db, live)
-    for ident, reading in readings.items():
-        if getattr(runtime, "live", {}).get(ident) is not live.get(ident):
-            continue
-        if reading is None:
-            runtime.memory_usage.pop(ident, None)
-        else:
-            runtime.memory_usage[ident] = reading
+    loop = asyncio.get_running_loop()
+    lock = getattr(runtime, "memory_snapshot_lock", None)
+    if lock is None or getattr(runtime, "memory_snapshot_loop", None) is not loop:
+        lock = runtime.memory_snapshot_lock = asyncio.Lock()
+        runtime.memory_snapshot_loop = loop
+    async with lock:
+        live = dict(getattr(runtime, "live", {}))
+        readings = await asyncio.to_thread(_read, runtime.db, live)
+        refreshed = set()
+        for ident, reading in readings.items():
+            if getattr(runtime, "live", {}).get(ident) is not live.get(ident):
+                continue
+            if reading is None:
+                runtime.memory_usage.pop(ident, None)
+            else:
+                if ident in getattr(runtime, "memory_pressure_delivering", set()):
+                    reading["pressure_notice"] = True
+                runtime.memory_usage[ident] = reading
+                refreshed.add(ident)
+        return refreshed

@@ -4,7 +4,7 @@ Containers belong to the daemon, not to any attachment's cgroup, so no CLI
 memory budget bounds them. A line that holds the docker grant is told to label
 what it starts (``partyline.conversation`` / ``partyline.attachment``, handed to
 its processes as ``PARTYLINE_DOCKER_LABELS``); this module lists the daemon's
-containers on a slow cadence, attributes them by label, flags running ones with
+containers on request and Docker events, attributes them by label, flags running ones with
 no RAM cap, names the survivors of a closed line, and stops one by id for its
 owner. It never removes a container: outputs and shared services stay.
 """
@@ -33,7 +33,6 @@ LABEL_ATTACHMENT = "partyline.attachment"
 LABEL_MANAGED = "partyline.managed"
 LABEL_MAX_SECONDS = "partyline.max-seconds"
 LABEL_GPU_MB = "partyline.gpu-mem-mb"
-INTERVAL = 15.0
 SAMPLE_TIMEOUT = 60.0
 NOTICE_WINDOW = 600.0
 LIVE = ("starting", "running")
@@ -105,21 +104,55 @@ async def _describe(item: dict, gate: asyncio.Semaphore) -> dict:
 
 
 class Inventory:
-    def __init__(self, clock=time.monotonic):
-        self._clock = clock
-        self._at = float("-inf")
+    def __init__(self):
         self.containers: list[dict] = []
         self.sampled_at: float | None = None
         self.error: str | None = None
-        self._task: asyncio.Task | None = None
         self.deadlines = LifetimeDeadlines()
+        self._lock = None
+        self._loop = None
+        self._task = None
+        self._dirty = False
 
-    async def sample(self, runtime, *, force: bool = False) -> bool:
-        """Refresh at most every ``INTERVAL`` s, and only while a docker grant exists."""
-        if not force and self._clock() - self._at < INTERVAL:
-            return False
-        self._at = self._clock()
+    def kick(self, runtime) -> None:
+        """Coalesce concurrent refresh requests in one tracked background task."""
+        if self._task is not None and not self._task.done():
+            self._dirty = True
+            return
+        self._task = asyncio.create_task(self._refresh(runtime))
+
+    async def _refresh(self, runtime) -> None:
+        from .browser_snapshots import push_resources
+        while True:
+            self._dirty = False
+            try:
+                await self.sample(runtime)
+                if any(getattr(runtime, "sockets", {}).values()):
+                    await push_resources(runtime)
+            except Exception:
+                logger.exception("docker workloads: background refresh failed")
+            if not self._dirty:
+                return
+
+    async def close(self) -> None:
+        self.deadlines.close()
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+            await asyncio.gather(self._task, return_exceptions=True)
+        self._task = None
+        self._dirty = False
+
+    async def sample(self, runtime) -> bool:
+        """Read the current inventory when asked, while a docker grant exists."""
+        loop = asyncio.get_running_loop()
+        if self._lock is None or self._loop is not loop:
+            self._lock, self._loop = asyncio.Lock(), loop
+        async with self._lock:
+            return await self._sample(runtime)
+
+    async def _sample(self, runtime) -> bool:
         if not self.watching and not await asyncio.to_thread(docker_relay.any_grant, runtime.db):
+            self.deadlines.close()
             self.containers, self.sampled_at, self.error = [], None, None
             return False
         try:
@@ -133,7 +166,7 @@ class Inventory:
                 self.error = None
                 await enforce_lifetimes(runtime, self.containers)
                 self.deadlines.update(self.containers, max_seconds_cap(runtime.db),
-                                      lambda: asyncio.create_task(self.sample(runtime, force=True)))
+                                      lambda: self.kick(runtime))
         except Exception as exc:  # a hung or malformed daemon must not take the sampler or a route down
             self.error = str(exc) or type(exc).__name__
             logger.warning("docker workloads: cannot list containers: %s", self.error)
@@ -144,11 +177,6 @@ class Inventory:
     def watching(self) -> bool:
         """Labeled containers were running at the last look: keep looking after the grant is gone."""
         return any(c["conversation_id"] and c["state"] == "running" for c in self.containers)
-
-    def kick(self, runtime) -> None:
-        """Sample in its own task, so a hung daemon cannot delay the memory sampler's tick."""
-        if self._task is None or self._task.done():
-            self._task = asyncio.get_running_loop().create_task(self.sample(runtime))
 
     def summary(self) -> dict | None:
         if self.sampled_at is None:
@@ -232,5 +260,5 @@ async def stop_owned(runtime, principal, ident: str) -> dict:
         await post_system_notice(
             runtime, owner,
             f"⏹ container {name} ({info['Id'][:12]}) stopped by {principal.name} (stopped, not removed)")
-    await inventory.sample(runtime, force=True)
+    await inventory.sample(runtime)
     return {"ok": True, "id": info["Id"], "name": name, "was_running": status == 204}

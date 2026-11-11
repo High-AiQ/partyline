@@ -21,7 +21,7 @@ def register_docker_workload_routes(app, runtime) -> None:
     @app.get("/api/docker-workloads")
     async def workloads(request: Request):
         principal = request_principal(request)
-        await inventory.sample(runtime, force=True)
+        await inventory.sample(runtime)
         visible = None if is_human(principal) else visible_conversation_ids(runtime.db, principal)
         return inventory.view(runtime.db, visible)
 

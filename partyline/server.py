@@ -22,7 +22,7 @@ from .attachment_start import start_attachment
 from .attachment_lifecycle_routes import register_attachment_lifecycle_routes
 from .memory_routes import register_memory_routes
 from .memory_requests import register_memory_request_routes
-from .memory_sampler import run as run_memory_sampler
+from .memory_events import run as run_memory_events
 from .attachment_view import attach_memory_usage, attachment_response
 from .auth_guard import (
     WS_FORBIDDEN,
@@ -188,7 +188,7 @@ async def lifespan(app):
              automatic_task, asyncio.create_task(expire_offers(runtime)),
              asyncio.create_task(maintenance(runtime)),
              asyncio.create_task(monitor_event_loop_lag()),
-             asyncio.create_task(run_memory_sampler(runtime)),
+             asyncio.create_task(run_memory_events(runtime)),
              asyncio.create_task(run_task_maintenance(runtime)),
              asyncio.create_task(run_resource_leases(runtime))]
     if features.enabled("heartbeat"):
@@ -200,7 +200,7 @@ async def lifespan(app):
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
-        docker_events.close()
+        await docker_events.close()
         await runtime.shutdown()
 app = FastAPI(lifespan=lifespan)
 app.state.bind = BindConfig()

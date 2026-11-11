@@ -1,5 +1,6 @@
 """PSI and cgroup notifications, without waiting on the real kernel."""
 
+import asyncio
 import errno
 import os
 import select
@@ -14,6 +15,23 @@ from partyline import memory_events_linux as events
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "Linux event source only")
 class LinuxMemoryEventsTest(unittest.TestCase):
+    def test_failed_registration_closes_allocated_descriptors(self):
+        inotify_fd, writer = os.pipe()
+        self.addCleanup(os.close, writer)
+        poller = Mock()
+        poller.fileno.return_value = 100
+        api = Mock()
+        api.inotify_init1.return_value = inotify_fd
+        loop = Mock()
+        loop.add_reader.side_effect = OSError("no selector")
+        with patch.object(events.ctypes, "CDLL", return_value=api), \
+                patch.object(events.select, "epoll", return_value=poller):
+            with self.assertRaises(OSError):
+                events.LinuxMemoryEvents(loop, Mock())
+        with self.assertRaises(OSError):
+            os.fstat(inotify_fd)
+        poller.close.assert_called_once()
+
     def test_registers_and_removes_scope_fds_and_watches(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "memory.events"
@@ -93,3 +111,10 @@ class LinuxMemoryEventsTest(unittest.TestCase):
             poller.unregister(fd)
         finally:
             os.close(fd)
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux event source only")
+class LinuxSelectorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_real_selector_registration_and_close(self):
+        watcher = events.LinuxMemoryEvents(asyncio.get_running_loop(), Mock())
+        watcher.close()

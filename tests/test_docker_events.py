@@ -9,6 +9,49 @@ from partyline.docker_events import consume, run
 
 
 class DockerEventsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_clean_eof_rearms_once_then_waits_for_a_new_event(self):
+        class Signal:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def wait(self):
+                await asyncio.Event().wait()
+
+        signal = Signal()
+        runtime = SimpleNamespace(db=SimpleNamespace(events=SimpleNamespace(subscribe=lambda *args: signal)))
+        inventory = SimpleNamespace(watching=True)
+        second = asyncio.Event()
+        calls = []
+
+        async def stream(*args):
+            calls.append(1)
+            if len(calls) == 2:
+                second.set()
+            return False
+
+        with patch("partyline.docker_events.FileEvents", return_value=signal), \
+                patch("partyline.docker_events.consume", side_effect=stream):
+            task = asyncio.create_task(run(runtime, inventory))
+            await second.wait()
+            loop = asyncio.get_running_loop()
+            for _ in range(10):
+                tick = loop.create_future()
+                loop.call_soon(tick.set_result, None)
+                await tick
+            self.assertEqual(len(calls), 2)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
     async def test_chunked_events_refresh_and_push(self):
         reader = asyncio.StreamReader()
         parts = [b'{"Type":"container","Action":"st', b'art"}\n',
@@ -21,12 +64,10 @@ class DockerEventsTest(unittest.IsolatedAsyncioTestCase):
         writer = Mock()
         writer.drain = AsyncMock()
         runtime = SimpleNamespace(sockets={"line": [object()]})
-        inventory = SimpleNamespace(sample=AsyncMock())
-        with patch("partyline.docker_events.open_upstream", new=AsyncMock(return_value=(reader, writer))), \
-                patch("partyline.browser_snapshots.push_resources", new_callable=AsyncMock) as push:
+        inventory = SimpleNamespace(kick=Mock(), watching=True)
+        with patch("partyline.docker_events.open_upstream", new=AsyncMock(return_value=(reader, writer))):
             await consume(runtime, inventory)
-        self.assertEqual(inventory.sample.await_count, 3)  # startup plus two relevant events
-        self.assertEqual(push.await_count, 2)
+        self.assertEqual(inventory.kick.call_count, 3)  # startup plus two relevant events
         writer.close.assert_called_once()
 
     async def test_rejected_stream_is_closed(self):

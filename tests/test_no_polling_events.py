@@ -197,6 +197,6 @@ class GuardTests(unittest.TestCase):
         for comment in ('// no-poll (a): check for changes', '// no-poll (b):'):
             self.assertTrue(violations('frontend/src/example.ts', comment + '\nsetTimeout(fetch, 100);'))
 
-    def test_existing_exception_does_not_allow_an_additional_poll(self):
+    def test_memory_sampler_poll_is_rejected(self):
         self.assertTrue(violations('partyline/memory_sampler.py',
-            'while True:\n await asyncio.sleep(INTERVAL)\n await asyncio.sleep(INTERVAL)\n'))
+            'while True:\n await asyncio.sleep(INTERVAL)\n'))

@@ -46,15 +46,15 @@ RAM; `PARTYLINE_MAX_PROCESS_MEMORY_LIMIT` can change the 16 GiB limit. Existing 
 available through the per-attachment memory endpoint. An unset cap is resolved
 from the global default and saved on the attachment at admission, so later
 edits to the cap do not change a live process. People can change the saved cap
-while it is stopped. The advisory early-warning sampler privately tells a live
-process when it approaches its cap — save work, find what is growing, or request
+while it is stopped. A memory pressure or limit notification privately tells a live
+process at or above the warning percentage to save work, find what is growing, or request
 more with a reason — and sends a private copy to the nearest live captain on its
 line or an ancestor line. People read both copies on those lines. Going over
 the cap is told once more, even inside the ten-minute cooldown. The warning
 does not stop the process or change its cap.
 
-On Linux the cap is a soft budget, not a cliff: the sampler warns at the warning
-percentage and again once usage passes the cap, but nothing slows or stops the
+On Linux the cap is a soft budget, not a cliff: a pressure or limit event can warn
+and an observed crossing of the cap can warn again, but nothing slows or stops the
 process there. The scope's only kernel limit is `MemoryMax` at an emergency
 backstop above the cap — 1.5× the cap or the cap plus 1 GiB, whichever is
 larger, within 3/4 of host RAM — that exists so one runaway cannot take the host
@@ -131,23 +131,16 @@ and turns the indicator red. The root captain briefing includes a capacity
 line. The authenticated `/api/resources` endpoint is readable by machines as
 well as people, and serves the first load.
 
-Open tabs do not poll. On each memory-sampler tick the server computes the
-snapshot once and pushes it as a `resources` socket event — but only when
-something moved (host, partyline or temp use by 64 MB or 0.5% of RAM, or the
-live-process count, the process limit or the reserve changed), plus one
-heartbeat every 60 s while quiet. With no tab open nothing is computed. A tab
-loads once on mount and refreshes (debounced) on attachment and line-live
-events; the pushed frame carries the same body as `GET /api/resources`.
-
-The UI refreshes its resource snapshot on attachment, removal, and line-live
-wire events. `LineLiveEvent` is broadcast to every open socket, so a browser on
-one line also sees changes on another; refreshes are debounced by 300 ms, and
-the snapshot is polled every five seconds while the tab is visible, because
-real usage moves without any event. `/api/resources` carries the same numbers:
+Open tabs receive a fresh snapshot on connection and pushes after memory,
+Docker, attachment, and settings events. Exact numbers can change silently
+between notifications; an explicit `GET /api/resources` reads memory on demand.
+Docker figures initially use the last inventory while a background refresh runs;
+its result is pushed, so a slow daemon does not hold a connection open.
+There is no periodic refresh or resource heartbeat. The endpoint carries:
 `host_used_bytes`, `host_available_bytes` (Linux `MemAvailable`, Windows
 `GlobalMemoryStatusEx`, null elsewhere), `partyline_server_bytes` (the server's
 cgroup `memory.current`, else its RSS), `partyline_processes_bytes` (the
-sampler's latest reading per live process), `partyline_used_bytes`,
+current reading per live process), `partyline_used_bytes`,
 `other_used_bytes`, `top_lines` and `sampled_at`.
 
 ## Enforcement and limits
@@ -159,17 +152,30 @@ sampler's latest reading per live process), `partyline_used_bytes`,
 | Real available memory minus reserve against the new process's reservation | Enforced by Partyline admission where the host reports available memory (Linux, Windows); the refusal names the real numbers |
 | Per-process memory cap | Linux cgroup scope and Windows Job Object are kernel enforced; macOS `RLIMIT_AS` is best-effort address-space limiting and does not guarantee resident-memory use |
 | Process overview RSS | Advisory visibility only; best effort across supported platforms |
-| Early memory warning | Advisory; one server sampler checks live process trees every five seconds and warns at the people-configured threshold (default 80%), re-arming below 65% and rate-limiting each process to one notice per ten minutes; the notice names the five largest command groups under the process (for example `12× chrome`, with its summed RSS and the largest member's pid), so browser children are visible as one line |
+| Early memory warning | Advisory; pressure or high/max events trigger a reading and warn processes at or above the configured percentage, re-arming below 65% and rate-limiting each process to one notice per ten minutes, with one extra notice when an event observes a cap crossing. The notice names the five largest command groups under the process |
 | Resource snapshots and captain briefing | Advisory visibility; they describe current reservations and do not reserve a slot |
 
-Linux warning samples prefer the process scope's cgroup-v2 `memory.current`,
+On Linux, PSI triggers on host and available scope `memory.pressure` files and
+inotify changes to scope `memory.events` drive updates. Increased `high` or
+`max` counters and pressure events trigger warnings for processes at or above
+the configured percentage; `oom` and `oom_kill`
+changes also trigger a push. Registering PSI may require kernel permissions;
+unavailable sources do not fall back to timed reads. On Windows low and high
+memory resource notifications drive updates, with a warning on low memory.
+macOS currently has on-demand gauges only: no clean native pressure source is
+integrated. Where an event source is unavailable, warnings cannot fire from
+that source and gauges remain available on request. Exact usage crossing a
+percentage alone is not an event and may not produce a warning. Partyline does
+not configure `memory.high`, so crossing the soft budget alone does not produce
+a kernel notification.
+
+Linux event readings prefer the process scope's cgroup-v2 `memory.current`,
 `memory.peak`, and `memory.stat`. When `anon` and `file` are available, the
-warning threshold, re-arming, cap comparison, and displayed percentage use the
+re-arming, cap comparison, and displayed percentage use the
 at-risk working set: `max(anon, memory.current - (file - shmem))`. Since `file`
 includes both active and inactive cache and includes `shmem`, this subtracts all
 file-backed pages the kernel can drop while retaining anonymous, kernel, slab,
-and shared memory. Recently read weights on `active_file` therefore do not cause
-a warning merely by passing through page cache. Older kernels whose `memory.stat`
+and shared memory. Older kernels whose `memory.stat`
 lacks `anon` or `file` retain the previous fallback, `memory.current -
 inactive_file`.
 
@@ -248,8 +254,9 @@ read that cache, so a huge tree costs a partial answer, never a stalled
 server. Before a warning fires, and only when the process's own temp directory is on
 tmpfs (on disk they cost no memory), old `pytest-of-*/pytest-N` runs inside it
 are reaped (older than 30 minutes, never
-`pytest-current`), the sample is re-read, and only a still-over working set
-is reported. Tests pin `PARTYLINE_TMP_BASE` to their sandbox and never
+`pytest-current`). The warning reports the one reading that caused the work;
+there is no follow-up read until another event or request. Tests pin
+`PARTYLINE_TMP_BASE` to their sandbox and never
 touch the real temp directories.
 
 ## Requesting a larger cap
@@ -277,7 +284,8 @@ in its scope may approve that request itself, still within the ceiling. Only one
 memory request can be pending on a line at a
 time; further requests receive HTTP 409 until it is approved or declined. The
 warning threshold and captain ceiling are people-only settings in the resource
-budget dialog.
+budget dialog. The warning threshold also controls when an event can trigger
+temp housekeeping or cache reclaim.
 
 ## Task history retention
 
