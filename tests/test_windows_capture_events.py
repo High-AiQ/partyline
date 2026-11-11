@@ -3,7 +3,7 @@
 import asyncio
 import ctypes
 import sys
-import time
+from threading import Event, Thread
 from types import SimpleNamespace
 import unittest
 from ctypes import wintypes
@@ -261,29 +261,40 @@ class NativeWindowsCaptureTests(unittest.TestCase):
         rectangle = {"x": root.winfo_rootx(), "y": root.winfo_rooty(),
                      "width": root.winfo_width(), "height": root.winfo_height()}
         request = {"region": rectangle, "max_fps": 10}
-        source = _WindowsCapture(request)
-        arrived, closed = __import__("threading").Event(), __import__("threading").Event()
+        source = None
+        arrived, closed = Event(), Event()
         frames, errors = [], []
 
         def frame_arrived(image, _bounds):
             try:
                 frames.append(image)
+                root.after(0, root.quit)
             except Exception as exc:
                 errors.append(exc)
             finally:
                 arrived.set()
 
         try:
+            source = _WindowsCapture(request)
             source.start(frame_arrived, closed.set)
-            deadline = time.monotonic() + 3.0
-            while not arrived.is_set() and time.monotonic() < deadline:
-                root.update()
-                arrived.wait(0.025)
-            root.update()
-            self.assertTrue(arrived.is_set(), "Windows Graphics Capture delivered no frame within 3 seconds")
+            deadline_expired = []
+
+            def timeout():
+                deadline_expired.append(True)
+                root.quit()
+
+            root.after(750, timeout)
+            root.mainloop()
+            self.assertTrue(arrived.is_set(), "Windows Graphics Capture delivered no frame within 750 ms")
+            self.assertEqual(deadline_expired, [], "Windows Graphics Capture exceeded its frame deadline")
             self.assertEqual(errors, [])
             self.assertGreater(frames[0].width, 0)
             self.assertGreater(frames[0].height, 0)
         finally:
-            source.stop()
+            if source is not None:
+                stopping = Thread(target=source.stop, daemon=True)
+                stopping.start()
+                stopping.join(0.2)
+                self.assertFalse(stopping.is_alive(),
+                                 "Windows Graphics Capture did not stop within 200 ms")
             root.destroy()
