@@ -1,9 +1,12 @@
 <script lang="ts">
   /** A person opens and closes the line's bridge here; processes cannot. */
+  import { untrack } from "svelte";
   import { ApiError, api } from "../../lib/api";
   import { bridgeApi, type Bridge, type BridgeLogEntry } from "../../lib/bridge-api";
   import type { Attachment, Conversation } from "../../lib/contracts";
   import { isLive } from "../../lib/attachments";
+  import { hierarchyApi } from "../../lib/hierarchy-api";
+  import { lineLiveState } from "../../state/line-live-state.svelte.js";
   import { treeRootId } from "../../lib/line-hierarchy";
   import { room } from "../../state/room.svelte";
 
@@ -22,6 +25,7 @@
   let theirId = $state("");
   let theirProcesses = $state<Attachment[]>([]);
   let log = $state<BridgeLogEntry[] | null>(null);
+  let loadedLineId = "";
 
   const mine = $derived(room.attachments.filter((a) => a.conv_id === conversation.id && isLive(a)));
   /** Lines of other trees only: lines in one tree already reach each other. */
@@ -29,6 +33,8 @@
     room.conversations.filter(
       (line) =>
         !line.archived_at &&
+        line.live_count > 0 &&
+        line.id !== conversation.id &&
         treeRootId(line.id, room.conversations) !== treeRootId(conversation.id, room.conversations),
     ),
   );
@@ -57,16 +63,54 @@
     };
   });
 
-  async function pickLine(): Promise<void> {
-    theirId = "";
-    theirProcesses = [];
-    if (!otherLineId) return;
-    try {
-      theirProcesses = (await api.conversation(otherLineId)).attachments.filter(isLive);
-    } catch (error) {
-      fail(error, "could not load that line's processes");
+  $effect(() => {
+    const lineId = otherLineId;
+    // Track only this line's state revision. Other lines broadcast line_live
+    // too, but they must not cancel or reload this line's ambassador list.
+    const revision = lineId ? (lineLiveState.revisions[lineId] ?? 0) : 0;
+    void revision;
+    const { line, conversations } = untrack(() => ({
+      line: room.conversations.find((candidate) => candidate.id === lineId),
+      conversations: room.conversations,
+    }));
+    const eligible = Boolean(
+      line &&
+      !line.archived_at &&
+      line.live_count > 0 &&
+      line.id !== conversation.id &&
+      treeRootId(line.id, conversations) !== treeRootId(conversation.id, conversations),
+    );
+
+    if (loadedLineId !== lineId) {
+      loadedLineId = lineId;
+      theirId = "";
+      theirProcesses = [];
     }
-  }
+    if (!lineId || !eligible) {
+      theirId = "";
+      theirProcesses = [];
+      if (lineId) otherLineId = "";
+      return;
+    }
+
+    let cancelled = false;
+    void Promise.all([api.conversation(lineId), hierarchyApi.lead(lineId)])
+      .then(([detail, captain]) => {
+        if (!cancelled) {
+          const processes = detail.attachments
+            .filter(isLive)
+            .sort((a, b) => (a.id === captain.attachment_id ? -1 : b.id === captain.attachment_id ? 1 : 0));
+          theirProcesses = processes;
+          if (!processes.some((process) => process.id === theirId)) theirId = "";
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) fail(error, "could not load that line's processes");
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
 
   async function open(): Promise<void> {
     busy = true;
@@ -151,12 +195,16 @@
         {/each}
       </select>
       <label for="bridgeLine">other line</label>
-      <select id="bridgeLine" bind:value={otherLineId} disabled={busy} onchange={pickLine}>
-        <option value="">choose a line from another tree</option>
-        {#each otherLines as line (line.id)}
-          <option value={line.id}>{line.name}</option>
-        {/each}
-      </select>
+      {#if otherLines.length === 0}
+        <p class="text-cream-faint">no other line has a running process</p>
+      {:else}
+        <select id="bridgeLine" bind:value={otherLineId} disabled={busy}>
+          <option value="">choose a line from another tree</option>
+          {#each otherLines as line (line.id)}
+            <option value={line.id}>{line.name}</option>
+          {/each}
+        </select>
+      {/if}
       <label for="bridgeTheirs">its ambassador</label>
       <select id="bridgeTheirs" bind:value={theirId} disabled={busy || !otherLineId}>
         <option value="">choose a live process</option>

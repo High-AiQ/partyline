@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { request } from "./http";
-import type { Transcript } from "./voice-api";
+import { TranscriptSchema, type Transcript } from "./voice-api";
+import { walkthroughWav } from "./walkthrough-audio";
 
 const ok = z.object({ ok: z.literal(true) });
 const finished = z.object({ message: z.looseObject({ id: z.number() }) });
@@ -14,11 +15,45 @@ export interface WalkthroughResult {
   duration_ms: number;
 }
 
+/** What the server is told when a take is sent: the transcript if there is one, else the failure. */
+export function walkthroughResult(
+  transcript: Transcript | undefined,
+  failed: boolean,
+  take: { notes: string; mark: boolean; noInput: boolean; elapsed: number },
+): WalkthroughResult {
+  return {
+    notes: take.notes,
+    segments: transcript?.segments ?? [],
+    transcript_text: transcript?.segments.length ? "" : (transcript?.text ?? ""),
+    transcription_error: failed,
+    mark_pointer: take.mark,
+    no_input: take.noInput,
+    duration_ms: Math.min(take.elapsed, 600_000),
+  };
+}
+
 function path(line: string, share: string): string {
   return `/api/conversations/${encodeURIComponent(line)}/walkthroughs/${encodeURIComponent(share)}`;
 }
 
 export const walkthroughApi = {
+  transcribe: async (
+    line: string,
+    audio: Blob,
+    preset: string | null,
+    signal?: AbortSignal,
+  ): Promise<Transcript> => {
+    const wav = await walkthroughWav(audio, signal);
+    const query = new URLSearchParams({ walkthrough: "true" });
+    if (preset) query.set("preset", preset);
+    return request(`/api/conversations/${encodeURIComponent(line)}/transcribe?${query.toString()}`, {
+      schema: TranscriptSchema,
+      method: "POST",
+      form: wav,
+      fallback: "could not transcribe that walkthrough",
+      ...(signal ? { signal } : {}),
+    });
+  },
   arm: (line: string, share: string) => request(path(line, share) + "/arm", { schema: ok, method: "POST" }),
   stop: (line: string, share: string) => request(path(line, share) + "/stop", { schema: ok, method: "POST" }),
   cancel: (line: string, share: string) => request(path(line, share), { schema: ok, method: "DELETE" }),

@@ -156,6 +156,36 @@ describe("hands-free composer", () => {
     await unmount(s.component);
   });
 
+  it("lets a failed voice send be dismissed, and clears it when the next one goes through", async () => {
+    const say = vi
+      .spyOn(room, "say")
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    vi.spyOn(voiceApi, "transcribe").mockResolvedValue({
+      text: "hello",
+      language: "en",
+      duration: 1,
+      segments: [],
+    });
+    const s = await setup();
+    button()?.click();
+    await settle();
+    await speak(s.vads[0]);
+    expect(document.body.textContent).toContain("Voice message was not sent: hello");
+    document.querySelector<HTMLButtonElement>('button[aria-label="dismiss"]')?.click();
+    await settle();
+    expect(document.body.textContent).not.toContain("Voice message was not sent");
+
+    await speak(s.vads[0]);
+    expect(document.body.textContent).toContain("Voice message was not sent: hello");
+    await speak(s.vads[0]);
+    expect(say).toHaveBeenCalledTimes(3);
+    expect(document.body.textContent).not.toContain("Voice message was not sent");
+    expect(document.body.textContent).toContain("Voice sent: hello");
+    await unmount(s.component);
+  });
+
   it("explains in its label why it is unavailable", async () => {
     voicePresets.listing = { default: "", presets: [] };
     voicePresets.choose(null);

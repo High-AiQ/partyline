@@ -38,8 +38,8 @@ export function browserListenerSources(): ListenerSources {
 }
 
 /** PCM16 mono WAV: supported by every existing recognizer, with no codec delay. */
-export function speechWav(samples: Float32Array): Blob {
-  const count = Math.min(samples.length, 16 * HANDS_FREE_CAP_MS);
+export function speechWav(samples: Float32Array, maxMs = HANDS_FREE_CAP_MS): Blob {
+  const count = Math.min(samples.length, 16 * maxMs);
   const bytes = new ArrayBuffer(44 + count * 2);
   const view = new DataView(bytes);
   const write = (offset: number, value: string): void => {

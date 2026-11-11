@@ -18,6 +18,7 @@ from .walkthrough_sheet import contact_sheet
 
 
 class Segment(BaseModel):
+    utterance: bool = False
     start: float = Field(ge=0, le=3600, allow_inf_nan=False)
     end: float = Field(ge=0, le=3600, allow_inf_nan=False)
     text: str = Field(max_length=10000)

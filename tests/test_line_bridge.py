@@ -128,6 +128,13 @@ class LineBridgeTest(unittest.TestCase):
         self.db._exec("UPDATE conversations SET archived_at=1 WHERE id='y'")
         self.assertIn("archived", self.open().json()["detail"])
 
+    def test_refuses_a_line_with_no_live_process(self):
+        self.db._exec("UPDATE attachments SET status='detached' WHERE conv_id='y'")
+        response = self.open()
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("line «tool» has no running process", response.json()["detail"])
+        self.assertIn("attach or resume one", response.json()["detail"])
+
     def test_a_line_has_at_most_one_bridge(self):
         self.opened()
         again = self.open(a=("x", "x-other"), b=("y", "y-other"))

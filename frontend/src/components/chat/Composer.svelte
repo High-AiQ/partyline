@@ -24,6 +24,7 @@
   import { draft } from "../../state/draft.svelte.js";
   import { layout } from "../../state/layout.svelte.js";
   import { session } from "../../state/session.svelte.js";
+  import { sendFailures } from "../../state/send-failures.svelte.js";
   import { composerPlaceholder, insertNewline } from "../../lib/composer";
   import { api } from "../../lib/api";
   import type { FileIntake, PendingFiles } from "../../lib/files";
@@ -145,6 +146,7 @@
       pickerGeneration++;
       draft.clear();
       closeToken();
+      sendFailures.sent(conversation.id);
       await room.resync();
       requestAnimationFrame(resize);
     } catch (error) {

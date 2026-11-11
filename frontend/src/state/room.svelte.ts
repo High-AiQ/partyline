@@ -9,12 +9,14 @@ import type {
   Attachment,
   ChatMessage,
   Conversation,
+  LineLiveEvent,
   ReattachAction,
   ReattachOfferEvent,
   WireEvent,
 } from "../lib/contracts";
 import { session } from "./session.svelte.js";
 import { sayOnLine } from "../lib/room-say";
+import { sendFailures } from "./send-failures.svelte.js";
 import { sendOffLine } from "../lib/offline-wire";
 import type { WireIdentity } from "../lib/wire-commands";
 import { restart } from "./restart.svelte.js";
@@ -28,6 +30,7 @@ import type { WireContext } from "./wire.svelte.js";
 import { clearConversationRoute, routedConversationId, setConversationRoute } from "../lib/routing";
 import { isLive, withoutForgotten } from "../lib/attachments";
 import { MessageHistory } from "./message-history.svelte";
+import { lineLiveState } from "./line-live-state.svelte.js";
 import { presenceSync } from "./presence-coordinator.svelte.js";
 import { draft } from "./draft.svelte.js";
 import { LinePins } from "./line-pins.svelte.js";
@@ -87,7 +90,9 @@ class Room {
 
   // ── the list ───────────────────────────────────────────────────────────
   async loadConversations(): Promise<void> {
-    this.conversations = await api.conversations();
+    const updated = await api.conversations();
+    lineLiveState.reconcile(this.conversations, updated);
+    this.conversations = updated;
     void restart.load().catch(ignoreBackgroundFailure);
     // Arriving on a deep link: the route named a line before the list existed.
     const routedId = routedConversationId();
@@ -116,6 +121,8 @@ class Room {
     const presenceFetch = presenceSync.open();
     if (!fromRoute) setConversationRoute(conversation.id);
 
+    if (this.conversation && this.conversation.id !== conversation.id)
+      sendFailures.dismiss(this.conversation.id);
     this.conversation = conversation;
     writeSet.activate(conversation.id);
     memoryRequest.activate(conversation.id);
@@ -224,6 +231,7 @@ class Room {
     this.#epoch++;
     presenceSync.reset();
     wire.disconnect();
+    if (this.conversation) sendFailures.dismiss(this.conversation.id);
     this.conversation = null;
     draft.leaveLine();
     this.history.reset();
@@ -258,6 +266,7 @@ class Room {
       if (result.error) this.showNotice(result.error, "error");
       return false;
     }
+    sendFailures.sent(conversation.id);
     if (result.message && this.conversation?.id === conversation.id) this.#absorb(result.message);
     return true;
   }
@@ -282,12 +291,7 @@ class Room {
     return offer ? wire.chooseReattach(offer.token, action) : false;
   }
 
-  /**
-   * Record an attachment from the socket or from our own POST's answer. Keyed
-   * by id, so idempotent: if the socket is reconnecting when the attach lands,
-   * the REST response is the only news, and a running process with no jack is
-   * worse than a jack that arrives twice.
-   */
+  /** Record an attachment from the socket or our POST's answer; keyed by id, so arriving twice is harmless. */
   upsertAttachment(attachment: Attachment): void {
     if (this.#removed.has(attachment.id)) return; // a late echo of a forgotten jack
     const index = this.attachments.findIndex((candidate) => candidate.id === attachment.id);
@@ -295,6 +299,7 @@ class Room {
     else this.attachments.push(attachment);
     // A process that has exited is no longer waiting on you.
     if (!isLive(attachment)) this.attention.delete(attachment.id);
+    else if (this.conversation) sendFailures.attached(this.conversation.id);
   }
 
   /** Forget a jack; idempotent for the same reason `upsertAttachment` is. */
@@ -308,6 +313,10 @@ class Room {
     this.captainRevision += 1;
     this.captains[conversationId] = attachmentId;
   }
+  setLineLive(event: LineLiveEvent): void {
+    this.conversations = lineLiveState.apply(this.conversations, event);
+  }
+
   #absorb(message: ChatMessage): void {
     this.history.merge([message]);
   }

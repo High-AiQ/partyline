@@ -17,7 +17,7 @@ afterEach(() => {
 it("opens the menu, navigates with arrows, and returns focus on Escape or outside click", async () => {
   const component = mount(ScreenMenuButton, {
     target: document.body,
-    props: { error: "", online: true, onbegin: vi.fn() },
+    props: { online: true, onbegin: vi.fn() },
   });
   const trigger = required(document.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]'));
   await tick();
@@ -48,7 +48,7 @@ it("opens sharing or starts a walkthrough, and blocks recording during a share",
   const begin = vi.fn();
   const component = mount(ScreenMenuButton, {
     target: document.body,
-    props: { error: "", online: true, onbegin: begin },
+    props: { online: true, onbegin: begin },
   });
   const trigger = required(document.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]'));
   const previous = screenStatus.openPicker;
@@ -90,7 +90,7 @@ it("opens sharing or starts a walkthrough, and blocks recording during a share",
 it("closes on Tab without stealing focus on a later Escape", async () => {
   const component = mount(ScreenMenuButton, {
     target: document.body,
-    props: { error: "", online: true, onbegin: vi.fn() },
+    props: { online: true, onbegin: vi.fn() },
   });
   const other = document.createElement("button");
   document.body.append(other);

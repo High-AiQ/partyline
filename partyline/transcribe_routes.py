@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from .auth_guard import request_principal
 from .machine_scope import deny_unless
+from .walkthrough_transcribe import transcribe_walkthrough
 from .transcript import TakeFailed, TranscriberUnavailable, WhisperRetired, segments_to_vtt
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class PresetListing(BaseModel):
 
 
 class TranscribeSegment(BaseModel):
+    utterance: bool = False
     start: float
     end: float
     text: str
@@ -81,8 +83,10 @@ def transcribe_router(runtime, get_registry) -> APIRouter:
     def presets() -> dict:
         return get_registry().listing()
 
-    @router.post("/api/conversations/{conv_id}/transcribe", response_model=TranscribeResponse)
-    async def transcribe(conv_id: str, request: Request, preset: str | None = None, format: str = "json"):
+    @router.post("/api/conversations/{conv_id}/transcribe", response_model=TranscribeResponse,
+                 response_model_exclude_unset=True)
+    async def transcribe(conv_id: str, request: Request, preset: str | None = None,
+                         format: str = "json", walkthrough: bool = False):
         # Audio is read into memory and handed on as bytes: a multipart upload
         # would spool to a temp file, and a take must never touch the disk.
         principal = request_principal(request)
@@ -102,7 +106,10 @@ def transcribe_router(runtime, get_registry) -> APIRouter:
         name = preset or registry.default
         started = time.monotonic()
         try:
-            result = await asyncio.to_thread(backend.transcribe, data, mime)
+            if walkthrough:
+                result = await asyncio.to_thread(transcribe_walkthrough, backend, data, mime)
+            else:
+                result = await asyncio.to_thread(backend.transcribe, data, mime)
         except TakeFailed as exc:  # this take only: the mic must stay usable
             detail = str(exc) if isinstance(exc, WhisperRetired) else f"take-failed status={exc.status}"
             _log_take(conv_id, name, len(data), started, error=detail)

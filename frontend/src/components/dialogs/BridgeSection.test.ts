@@ -4,6 +4,7 @@ import BridgeSection from "./BridgeSection.svelte";
 import { api } from "../../lib/api";
 import { ApiError } from "../../lib/http";
 import { bridgeApi, type Bridge } from "../../lib/bridge-api";
+import { hierarchyApi } from "../../lib/hierarchy-api";
 import { ConversationDetailSchema } from "../../lib/contracts";
 import type { Attachment } from "../../lib/contracts";
 import { room } from "../../state/room.svelte";
@@ -29,6 +30,10 @@ const process = (id: string, conv: string, name: string): Attachment => ({
   created_at: 1,
   cli_session: null,
   cwd_git: null,
+});
+const attachment = (id: string, conv: string, name: string, status: Attachment["status"]): Attachment => ({
+  ...process(id, conv, name),
+  status,
 });
 const opened: Bridge = {
   id: "b1",
@@ -64,16 +69,29 @@ afterEach(() => {
 
 describe("bridge section", () => {
   it("offers only other trees and opens a bridge between the two chosen ambassadors", async () => {
-    room.conversations = [line("x", "3d game"), line("kid", "kid of x", "x"), line("y", "tool")];
+    room.conversations = [
+      line("x", "3d game"),
+      line("kid", "kid of x", "x"),
+      { ...line("y", "tool"), live_count: 2 },
+      { ...line("detached", "detached"), live_count: 0 },
+      { ...line("exited", "exited"), live_count: 0 },
+      { ...line("archived", "archived"), live_count: 1, archived_at: 9 },
+    ];
     room.attachments = [process("x-amb", "x", "sonnet")];
     vi.spyOn(bridgeApi, "forLine").mockResolvedValue(null);
     vi.spyOn(api, "conversation").mockResolvedValue(
       ConversationDetailSchema.parse({
         conversation: line("y", "tool"),
         messages: [],
-        attachments: [process("y-amb", "y", "fable")],
+        attachments: [
+          attachment("y-old", "y", "old", "detached"),
+          process("y-other", "y", "gem"),
+          process("y-amb", "y", "fable"),
+          attachment("y-exited", "y", "past", "exited"),
+        ],
       }),
     );
+    vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: "y-amb" });
     const open = vi.spyOn(bridgeApi, "open").mockResolvedValue(opened);
     const section = mountSection();
     try {
@@ -81,13 +99,18 @@ describe("bridge section", () => {
         expect(document.getElementById("bridgeLine")).not.toBeNull();
       });
       const offered = [...byId("bridgeLine").options].map((o) => o.value);
-      expect(offered).toEqual(["", "y"]); // not itself, not its child
+      expect(offered).toEqual(["", "y"]); // no current, same-tree, inactive, or archived lines
       expect(button("open bridge")?.disabled).toBe(true);
       choose("bridgeMine", "x-amb");
       choose("bridgeLine", "y");
       await vi.waitFor(() => {
-        expect(byId("bridgeTheirs").options.length).toBe(2);
+        expect(byId("bridgeTheirs").options.length).toBe(3);
       });
+      expect([...byId("bridgeTheirs").options].map((option) => option.value)).toEqual([
+        "",
+        "y-amb",
+        "y-other",
+      ]);
       choose("bridgeTheirs", "y-amb");
       await vi.waitFor(() => {
         expect(button("open bridge")?.disabled).toBe(false);
@@ -108,6 +131,96 @@ describe("bridge section", () => {
     }
   });
 
+  it("shows the empty state and updates line choices when live counts change", async () => {
+    const ownLine = { ...line("x", "3d game"), live_count: 1 };
+    const otherLine = { ...line("y", "tool"), live_count: 0 };
+    room.conversations = [ownLine, otherLine];
+    room.attachments = [process("x-amb", "x", "sonnet")];
+    vi.spyOn(bridgeApi, "forLine").mockResolvedValue(null);
+    const section = mountSection();
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("no other line has a running process");
+      });
+      expect(document.body.textContent).toContain("no other line has a running process");
+      expect(document.getElementById("bridgeLine")).toBeNull();
+
+      room.conversations = [ownLine, { ...otherLine, live_count: 1 }];
+      await vi.waitFor(() => {
+        expect([...byId("bridgeLine").options].map((option) => option.value)).toEqual(["", "y"]);
+      });
+      room.conversations = [ownLine, otherLine];
+      await vi.waitFor(() => {
+        expect(document.getElementById("bridgeLine")).toBeNull();
+      });
+    } finally {
+      await unmount(section);
+    }
+  });
+
+  it("preserves the ambassador on unrelated events and clears it only after it departs", async () => {
+    room.conversations = [
+      { ...line("x", "3d game"), live_count: 1 },
+      { ...line("y", "tool"), live_count: 3 },
+      { ...line("z", "unrelated"), live_count: 1 },
+    ];
+    room.attachments = [process("x-amb", "x", "sonnet")];
+    const captain = process("y-cap", "y", "captain");
+    const peer = process("y-peer", "y", "fable");
+    const extra = process("y-extra", "y", "gem");
+    const detail = (attachments: Attachment[]) =>
+      ConversationDetailSchema.parse({
+        conversation: line("y", "tool"),
+        messages: [],
+        attachments,
+      });
+    const list = vi.spyOn(api, "conversation").mockResolvedValueOnce(detail([captain, peer, extra]));
+    vi.spyOn(hierarchyApi, "lead")
+      .mockResolvedValueOnce({ attachment_id: captain.id })
+      .mockResolvedValueOnce({ attachment_id: captain.id })
+      .mockResolvedValueOnce({ attachment_id: peer.id });
+    vi.spyOn(bridgeApi, "forLine").mockResolvedValue(null);
+    const section = mountSection();
+    try {
+      await vi.waitFor(() => {
+        expect(document.getElementById("bridgeLine")).not.toBeNull();
+      });
+      choose("bridgeMine", "x-amb");
+      choose("bridgeLine", "y");
+      await vi.waitFor(() => {
+        expect(byId("bridgeTheirs").options.length).toBe(4);
+      });
+      choose("bridgeTheirs", captain.id);
+      await vi.waitFor(() => {
+        expect(button("open bridge")?.disabled).toBe(false);
+      });
+
+      room.setLineLive({ type: "line_live", conversation_id: "z", live_count: 2 });
+      room.setLineLive({ type: "line_live", conversation_id: "y", live_count: 3 });
+      expect(byId("bridgeTheirs").value).toBe(captain.id);
+      expect(button("open bridge")?.disabled).toBe(false);
+      expect(list).toHaveBeenCalledTimes(1);
+
+      list.mockResolvedValueOnce(detail([captain, peer]));
+      room.setLineLive({ type: "line_live", conversation_id: "y", live_count: 2 });
+      await vi.waitFor(() => {
+        expect(byId("bridgeTheirs").options.length).toBe(3);
+      });
+      expect(byId("bridgeTheirs").value).toBe(captain.id);
+      expect(button("open bridge")?.disabled).toBe(false);
+
+      list.mockResolvedValueOnce(detail([peer]));
+      room.setLineLive({ type: "line_live", conversation_id: "y", live_count: 1 });
+      await vi.waitFor(() => {
+        expect(byId("bridgeTheirs").options.length).toBe(2);
+      });
+      expect(byId("bridgeTheirs").value).toBe("");
+      expect(button("open bridge")?.disabled).toBe(true);
+    } finally {
+      await unmount(section);
+    }
+  });
+
   it("shows a 409 reason in the status line", async () => {
     room.conversations = [line("x", "3d game"), line("y", "tool")];
     room.attachments = [process("x-amb", "x", "sonnet")];
@@ -119,6 +232,7 @@ describe("bridge section", () => {
         attachments: [process("y-amb", "y", "fable")],
       }),
     );
+    vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: "y-amb" });
     vi.spyOn(bridgeApi, "open").mockRejectedValue(
       new ApiError("line «tool» already has an open bridge", 409),
     );
@@ -176,9 +290,10 @@ describe("bridge section", () => {
         expect(close).toHaveBeenCalledWith("b1");
       });
       await vi.waitFor(() => {
-        expect(document.getElementById("bridgeLine")).not.toBeNull();
+        expect(document.body.textContent).toContain("bridge closed");
       });
-      expect(document.body.textContent).toContain("bridge closed");
+      expect(document.getElementById("bridgeLine")).toBeNull();
+      expect(document.body.textContent).toContain("no other line has a running process");
     } finally {
       await unmount(section);
     }

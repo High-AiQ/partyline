@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from partyline import auth_store, auth_tokens
+from partyline.asr_backends import OpenAICompatible
 from partyline.asr_presets import AsrRegistry
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
@@ -26,6 +27,7 @@ from partyline.transcribe_routes import transcribe_router
 from partyline.transcript import TakeFailed, Transcript
 from tests.screen_helper_fakes import FakeDesktop
 from tests.test_screen_share import png
+from tests.walkthrough_audio_fakes import PASSAGES, recognizer, wav
 
 
 class WalkthroughFlowTest(unittest.TestCase):
@@ -45,8 +47,8 @@ class WalkthroughFlowTest(unittest.TestCase):
             kind="fake", status=lambda: {"available": True, "reason": None, "model": None},
             transcribe=lambda *_: Transcript("click gear", "en", 3, (
                 {"start": 0, "end": 1, "text": "click gear"},)))
-        registry = AsrRegistry([("fake", self.backend)], max_bytes=1000)
-        app.include_router(transcribe_router(self.runtime, lambda: registry))
+        self.registry = AsrRegistry([("fake", self.backend)], max_bytes=1000)
+        app.include_router(transcribe_router(self.runtime, lambda: self.registry))
         app.include_router(media_router(self.runtime, self.store))
         self.client = TestClient(app)
         self.client.__enter__()
@@ -136,6 +138,33 @@ class WalkthroughFlowTest(unittest.TestCase):
             self.assertEqual(self.client.post(path + "/finish", json=payload).json()["message"]["id"],
                              message["id"])
             self.assertEqual(len(self.db.message_page("line")[0]), 1)
+
+    def test_json_recognizer_walkthrough_interleaves_passages_but_composer_stays_one_request(self):
+        with recognizer(5) as (base, seen), self.socket() as ws:
+            backend = OpenAICompatible(base, "generic-json", response_format="json")
+            self.registry = AsrRegistry([("json", backend)], max_bytes=1_000_000)
+            path, _ = self.start(ws)
+            audio = wav(PASSAGES)
+            composer = self.client.post("/api/conversations/line/transcribe", content=audio)
+            self.assertEqual(composer.status_code, 200, composer.text)
+            self.assertEqual(len(seen), 1)
+            self.assertEqual(composer.json()["segments"], [])
+            response = self.client.post("/api/conversations/line/transcribe?walkthrough=true",
+                                        content=audio, headers={"Content-Type": "audio/wav"})
+            self.assertEqual(response.status_code, 200, response.text)
+            parts = response.json()["segments"]
+            self.assertEqual(len(parts), 3)
+            message = self.client.post(path + "/finish", json={"segments": parts, "duration_ms": 9000})
+            self.assertEqual(message.status_code, 200, message.text)
+            body = message.json()["message"]["body"]
+            self.assertIn('[0:00] "Open the asset panel"', body)
+            self.assertIn('[0:03] "Select the mesh"', body)
+            self.assertIn('[0:06] "Preview the result"', body)
+            self.assertLess(body.index('"Open the asset panel"'), body.index("[0:02] → frame"))
+            self.assertLess(body.index("[0:02] → frame"), body.index('"Select the mesh"'))
+            self.assertLess(body.index('"Select the mesh"'), body.index("[0:05] → frame"))
+            self.assertLess(body.index("[0:05] → frame"), body.index('"Preview the result"'))
+            self.assertEqual(len(seen), 5)
 
     def test_disconnect_and_recognizer_failure_still_send_frames(self):
         with self.socket() as ws:

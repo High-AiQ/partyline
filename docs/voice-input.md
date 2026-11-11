@@ -241,6 +241,30 @@ Word timings stay in your script's own output; Partyline passes the segments thr
   `text/vtt` with `format=vtt`); `404` for an unknown preset; `422`/`502` when this take could not be transcribed (the mic stays usable);
   `503` only when the backend itself is unavailable (extra or model missing, key variable unset, command not found), `413` over the size cap.
 
+## Walkthrough narration
+
+Walkthroughs use the selected voice preset. The browser decodes its recording
+in memory to mono 16 kHz WAV (up to ten minutes); no local voice extra is needed.
+The first transcription keeps native segment timestamps when the preset returns
+them, including local faster-whisper and verbose JSON services. If the reply has
+no segments, the server detects utterances using 20 ms RMS windows, 500 ms pauses
+and 120 ms padding. It transcribes those chunks with at most three concurrent
+requests. Chunks last at most 30 seconds; longer speech splits at the quietest
+point in the final five seconds. Offsets include leading silence and pauses.
+These are passage timings, not word alignment. Silence artifacts are filtered
+per chunk, and each detected utterance keeps its timestamp in the final message.
+Text-only presets therefore receive an initial full-take request plus the speech
+chunks. Composer voice input continues to send one original recording.
+
+The browser selects this path with `?walkthrough=true` on the transcription
+endpoint, sending PCM WAV. Returned segments can carry `utterance: true`, which
+prevents message assembly from joining separate detected passages.
+
+GPT-Transcribe does not currently supply the native timestamps this needs. See
+its [model documentation](https://developers.openai.com/api/docs/models/gpt-transcribe),
+the [transcription reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create),
+and the [migration compatibility guide](https://developers.openai.com/cookbook/examples/migrating_from_whisper_to_gpt_transcribe).
+
 ## Privacy
 
 What happens to a take depends on the recognizer you pick. Whatever the preset, the audio is
