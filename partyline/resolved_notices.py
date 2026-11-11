@@ -2,8 +2,8 @@
 
 A restart hands a process its unread, addressed messages. Some of those are
 alerts about a moment that has passed: a memory warning for a cap that was
-since raised, a report wake for a report already acknowledged, a question the
-process already answered. Replaying them reads as new work. The state is
+since raised or a report wake for a report already acknowledged. Replaying
+them reads as new work. The state is
 checked here, at delivery time, never at queue time.
 """
 
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import re
 
-from .mentions import mentioned_names
 from .memory_sampler_state import warning_still_crosses
 
 REPORT_WAKE_RE = re.compile(r"(?:@\S+ )?needs attention: report (\d+)")
@@ -44,17 +43,6 @@ def _report_ids(messages: list[dict]) -> dict[int, int]:
     return found
 
 
-def _answered(runtime, att: dict, message: dict) -> bool:
-    """A process's own later post that names the asker closes their question."""
-    if message.get("sender_type") != "agent":
-        return False
-    asker = str(message["sender"]).lower()
-    later = runtime.db._exec(
-        "SELECT body FROM messages WHERE conv_id=? AND sender=? AND sender_type='agent'"
-        " AND id>?", (att["conv_id"], att["name"], message["id"])).fetchall()
-    return any(asker in mentioned_names(row["body"]) for row in later)
-
-
 def drop_resolved(runtime, att: dict, messages: list[dict], *, keep=frozenset()) -> list[dict]:
     """Return ``messages`` without notices that no longer describe a live problem."""
     reports = _report_ids(messages)
@@ -71,7 +59,7 @@ def drop_resolved(runtime, att: dict, messages: list[dict], *, keep=frozenset())
                 "SELECT acknowledged_at FROM line_reports WHERE id=?", (reports[mid],)).fetchone()
             if row is not None and row["acknowledged_at"] is None and newest[reports[mid]] == mid:
                 kept.append(message)
-        elif not _memory_live(runtime, mid) or _answered(runtime, att, message):
+        elif not _memory_live(runtime, mid):
             continue
         else:
             kept.append(message)

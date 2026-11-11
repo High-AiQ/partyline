@@ -4,6 +4,14 @@
 
 The false assumption was that Node would find usable dependencies in a fresh review checkout. Its upward search can instead reach the host checkout, where Vite writes are outside the reviewer’s fence. Give each locked package a real local dependency directory, verify installed lock data before linking, and surface installation failures before review. Package writes through those links are refused by the fence. Run fallback installers in a restricted sandbox with lifecycle scripts disabled: package-manager configuration can execute code.
 
+## A reply does not prove an unread message was answered
+
+The false assumption was that a later mention of a sender answered their message.
+The recipient may have written it before the wake was proved delivered. Resume
+keeps unread addressed mail regardless of later speech; the delivery cursor
+already excludes credited mail. A regression covers an unproved paste followed
+by a question, and another checks that credited, answered mail stays excluded.
+
 ## Text transcription is not timed narration
 
 The false assumption was that switching the default recognizer to GPT-Transcribe

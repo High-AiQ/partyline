@@ -11,6 +11,7 @@ from partyline.resume_continuation import drain, resume_with_backlog
 from partyline.runtime import ChatRuntime
 from partyline.line_process_routes import detach_attachment
 from partyline.presence import Presence
+from partyline.mention_relay import post_private
 
 
 class StagingAdapter:
@@ -80,6 +81,52 @@ class ResumeContinuationTest(unittest.IsolatedAsyncioTestCase):
         await drain()
         self.assertEqual([m["body"] for m in adapter.deliveries[0]], ["@luna finish the adapter"])
         self.assertEqual(self.db.get_attachment("one")["last_seen"], seen["pending"][-1]["id"])
+
+    async def test_private_message_during_resume_reaches_the_new_process_once(self):
+        adapter = StagingAdapter("owner-1")
+        staged = []
+
+        async def resume(att_id, pending):
+            staged.extend(pending)
+            self.db.set_attachment_status(att_id, "running", "owner-1")
+            self.runtime.live[att_id] = adapter
+            await post_private(self.runtime, "line", "captain", "agent", "option 1",
+                               audience=att_id)
+            return ResumedAttachment(adapter, True)
+
+        await resume_with_backlog(self.runtime, "one", resume)
+        await drain()
+        bodies = [m["body"] for batch in [staged, *adapter.deliveries] for m in batch]
+        self.assertEqual(bodies.count("option 1"), 1)
+        # The separate startup race can resend an older staged digest.
+        self.assertEqual(bodies.count("@luna finish the adapter"), 2)
+
+    async def test_queued_older_mail_flushes_after_newer_resume_briefing(self):
+        self.db._exec("DELETE FROM messages")
+        old = await post_private(self.runtime, "line", "captain", "agent", "older",
+                                 audience="one", route=False)
+        self.db.set_last_seen("one", old["id"], "owner-1")
+        await self.db.queue_delivery_ids("one", [old["id"]], "owner-1")
+        await post_private(self.runtime, "line", "captain", "agent", "newer",
+                           audience="one", route=False)
+        adapter = StagingAdapter("owner-1")
+        presence = Presence(self.runtime)
+        staged = []
+
+        async def resume(att_id, pending):
+            staged.extend(pending)
+            self.db.set_attachment_status(att_id, "running", "owner-1")
+            self.runtime.live[att_id] = presence.watch(
+                adapter, "line", att_id, "receipt",
+                *self.runtime.held_wake_hooks("line", att_id, "luna"))
+            return ResumedAttachment(adapter, True)
+
+        await resume_with_backlog(self.runtime, "one", resume)
+        await drain()
+        await presence.queue.flush("one")
+        bodies = [m["body"] for batch in [staged, *adapter.deliveries] for m in batch]
+        # Known separate ordering gap: the persisted older wake flushes after the briefing.
+        self.assertEqual(bodies, ["newer", "older"])
 
     async def test_a_process_that_finished_its_turn_gets_no_notice(self):
         adapter = StagingAdapter("owner-1")
