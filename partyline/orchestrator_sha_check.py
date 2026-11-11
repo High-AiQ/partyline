@@ -29,6 +29,10 @@ from .task_workspaces import workspaces
 # either: suspected() skips it. The cost is a missed warning for an all-digit
 # short SHA, which is rare; a real full SHA is still checked.
 TOKEN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])")
+# A full UUID (8-4-4-4-12 hex, either case) is an id — a media item, a line —
+# never a commit; a hyphen is not alphanumeric, so TOKEN would otherwise match
+# each of its hex groups on its own.
+UUID = re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}(?![0-9A-Za-z])")
 # Words that name another kind of hash or version when they come just before a
 # token: a model revision, a weights checksum, a file digest — and the ids
 # partyline mints for its own requests and hand-overs, which are bare hex too,
@@ -58,12 +62,16 @@ def suspected(text: str) -> list[str]:
 
     A token is skipped when another kind of hash is named just before it —
     including a request or hand-over id — when it sits inside a URL or path,
-    or when it is made only of decimal digits (see TOKEN).
+    when it is made only of decimal digits (see TOKEN), or when it lies inside
+    a full UUID. A hyphenated hex word that is not UUID-shaped is still checked.
     """
     text = text or ""
+    uuids = [match.span() for match in UUID.finditer(text)]
     found = []
     for match in TOKEN.finditer(text):
         token = match.group()
+        if any(start <= match.start() and match.end() <= end for start, end in uuids):
+            continue
         if token.isdecimal() or token in found or _named_other(text, match.start()):
             continue
         if _in_url_or_path(text, match.start(), match.end()):
