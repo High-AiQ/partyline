@@ -55,6 +55,7 @@
     // between the send and the reply — the buttons would otherwise stay
     // disabled forever, leaving a dead dialog with no way out of it.
     if (ackTimer) clearTimeout(ackTimer);
+    // no-poll (b): one-shot UI deadline; no state request
     ackTimer = setTimeout(() => {
       ackTimer = null;
       choosing = false;

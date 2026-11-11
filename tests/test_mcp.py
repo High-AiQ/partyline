@@ -814,7 +814,7 @@ class RenderAndServerTests(unittest.TestCase):
 
             def is_set(self):
                 self.checks += 1
-                return self.checks >= 3
+                return self.checks >= 5
 
             def wait(self, _delay):
                 return False

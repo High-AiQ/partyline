@@ -19,6 +19,7 @@ from partyline.interrupts import (
     interrupt_for,
     supports_interrupt,
 )
+from partyline.adapters.events import AdapterEvents
 from partyline.mentions import interrupt_names, mentioned_names
 
 
@@ -278,10 +279,11 @@ def notice(offset: float = 0.0, step: int = 1) -> dict:
             "content": "Error: The stream was interrupted. Please continue the task."}
 
 
-class NoTurnState:
+class NoTurnState(AdapterEvents):
     """An adapter that never tracks turns, so its state is simply unknown."""
 
     def __init__(self):
+        self._events_init()
         self.written = []
         self.interrupt_confirmed = asyncio.Event()
         self.interrupt_since = None
@@ -294,16 +296,26 @@ class NoTurnState:
         self.written.append(data)
 
 
-class FakePty:
+class FakePty(AdapterEvents):
     """The adapter surface `interrupt()` touches, with a transcript tail."""
 
     def __init__(self, alive=True, turn_open=True):
         self.alive_flag = alive
+        self._events_init()
         self.written = []
         self.interrupt_confirmed = asyncio.Event()
         self.interrupt_since = None
         self.interrupt_records_used = set()
         self._turn_open = turn_open
+
+    @property
+    def _turn_open(self):
+        return self.turn_open
+
+    @_turn_open.setter
+    def _turn_open(self, value):
+        self.turn_open = value
+        self.changed()
 
     def alive(self):
         return self.alive_flag

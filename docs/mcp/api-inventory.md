@@ -267,12 +267,12 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 127 | GET | `/api/conversations/{conv_id}/staffing` | M with `assign` | **op**: captain op `staffing` | who works the line |
 | 128 | WS | `/ws/attachments/{att_id}/terminal` | M with `read` on the attachment's line (input needs `attach`) | **excluded** | raw PTY stream, not structured speech; the watch-any-attachment gap is fixed on this branch by bf8573a (per-line `read` and `attach` checks, rechecked while open); MCP still excludes it |
 | 129 | POST | `/api/conversations/{conv_id}/tmp/reap` | H, or root captain | **excluded** | destructive temp reap; root captain or person |
-| 130 | GET | `/api/conversations/{conv_id}/write-set/request` | M with `read` | **op**: captain op `write_set_requests` (read-only) | lists pending requests (this row) and current grants (row 135) on a line the caller may read, so `decide_write_set` callers can find a request id |
-| 131 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/approve` | H, or ancestor captain | **op**: captain op `decide_write_set` (approve) | ancestor captain only inside its own grants or writable checkout; the route enforces that rule |
+| 130 | GET | `/api/conversations/{conv_id}/write-set/request` | M with `read` | **op**: captain op `write_set_requests` (read-only) | lists pending requests, including `paths`, `human_only`, and eligible `decider`, plus current grants (row 135) |
+| 131 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/approve` | H, or ancestor captain | **op**: captain op `decide_write_set` (approve) | approves every path together and returns `granted: [{path, granted_at}]`; ancestor captain only when every path is in its writable scope |
 | 133 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/deny` | H, or ancestor captain | **op**: captain op `decide_write_set` (deny; reason required) | ancestor captain only inside its own grants or writable checkout; the route enforces that rule |
 | 134 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/withdraw` | requesting attachment | **op**: captain op `decide_write_set` (withdraw) | withdraw is the requester's act; captain ops need a live lead, so a worker withdraws on the route |
 | 135 | GET | `/api/conversations/{conv_id}/write-set` | M with `read` | **op**: captain op `write_set_requests` (read-only) | lists current grants on a line the caller may read; pending requests are row 130 |
-| 136 | POST | `/api/conversations/{conv_id}/write-set` | H grants; M files a request | **op**: captain op `request_write_set` (lead) | a person or ancestor captain decides; worker requests keep the fence message's direct POST; Docker mode is person-only (403) |
+| 136 | POST | `/api/conversations/{conv_id}/write-set` | H grants; M files a request | **op**: captain op `request_write_set` (lead) | accepts `path` or `paths` (1–32); a person grants the list, machines file one merged request; already-granted paths are reported without a banner; Docker mode is person-only (403) |
 
 ## Implemented names and the routes they reach
 
@@ -322,7 +322,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 9. **Chat socket (row 124).** Machines have no push feed in this slice. Agents poll `read_messages` (row 74).
 10. **Memory (rows 67-72).** Excluded in this slice. The approved memory-lease design routes adjustment requests through the root captain, so no captain tool is added here.
 11. **Root heartbeat (rows 37-41).** Excluded. It is the root manager's surface, not captain or worker scope.
-12. **Write-set requests (row 136).** A lead requests through captain op `request_write_set`. Worker requests keep the fence message's direct POST, which is outside MCP in this slice.
+12. **Write-set requests (row 136).** A lead requests through captain op `request_write_set(paths=[...])`; it also accepts legacy `path`. Worker requests use the direct API POST with `paths`, as described in `docs/write-fence.md`. Later filings merge into the pending list; person-only requests do not ring an ineligible captain. Approve returns all resulting grants.
 13. **Docs (rows 16-18).** Read through `guide`. Captain op `docs_read` is the lead-only form of row 18.
 14. **Shared-branch and parallel-worker refusals (row 29).** Enforced by the server on the route; MCP passes the refusal text back unchanged.
 

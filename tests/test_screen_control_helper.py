@@ -30,6 +30,7 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
         self.out = io.StringIO()
         self.session = Session(self.socket, self.desktop, self.terminal, "desktop", clock=self.clock,
                                sleep=self.clock.sleep, inputs=self.inputs, **kwargs)
+        self.session.capture_sleep = lambda _: asyncio.Event().wait()
 
     async def asyncSetUp(self):
         self.make()
@@ -46,6 +47,8 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
             await self.session.dispatch(request())
             await self.socket.next("frame")
             await self.terminal.waiting.get()
+            async with self.session.frame_lock:
+                pass
 
     async def grant(self, armed=True):
         """Grant control. Takeback detection arms on the agent's first action, so most tests arm it here
@@ -119,6 +122,21 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
             await self.socket.next("control_granted")
         self.assertTrue(self.terminal.asks.empty())
         self.assertIn("WARNING: --allow-control-without-prompt", self.out.getvalue())
+
+    async def test_consent_cancels_the_stop_reader_before_owning_terminal_input(self):
+        await self.share()
+        reader = self.session.stop_read
+        self.terminal.control_answer = asyncio.get_running_loop().create_future()
+        with contextlib.redirect_stdout(self.out):
+            await self.session.dispatch(ASK)
+            await self.terminal.asks.get()
+            self.assertTrue(reader.cancelled())
+            self.assertTrue(self.session.control.prompting)
+            self.terminal.control_answer.set_result(False)
+            await self.socket.next("control_revoked")
+            await self.terminal.lines.put("s")
+            await self.socket.next("share_stopped")
+        self.assertIsNone(self.session.share)
 
     async def test_requests_without_share_or_pending_prompt(self):
         with contextlib.redirect_stdout(self.out):
@@ -230,11 +248,11 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
         await self.share()
         await self.grant()
         self.desktop.position = (-20 + control.DRIFT, 30)  # within tolerance
-        self.clock.advance(control.WATCH)
+        self.session.control.pointer_event()
         await checkpoint()
         self.assertTrue(self.session.control.granted)
         self.desktop.position = (60, 60)
-        self.clock.advance(control.WATCH)
+        self.session.control.pointer_event()
         revoked = await self.socket.next("control_revoked")
         self.assertIn("pointer was moved", revoked["reason"])
         self.assertIn("revoked", (await self.result(act("move", x=1, y=1)))["error"])
@@ -250,7 +268,7 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
         control_ = self.session.control
         self.assertFalse(control_.armed)
         self.desktop.position = (400, 400)  # far from the Yes button
-        self.clock.advance(control.WATCH)
+        self.session.control.pointer_event()
         self.inputs.on_key("q", False, True)  # the person types too
         self.inputs.on_key("q", False, False)
         await checkpoint()
@@ -266,7 +284,7 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(control_.armed and control_.granted)
         self.assertEqual(control_.target, (10, 10))
         self.desktop.position = (10, 10)  # the fake pointer follows the agent's injected move
-        self.clock.advance(control.WATCH)
+        self.session.control.pointer_event()
         await checkpoint()
         self.assertTrue(control_.granted)
 
@@ -275,7 +293,7 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
         await self.grant(armed=False)
         await self.result(act("move", x=10, y=10))
         self.desktop.position = (200, 200)
-        self.clock.advance(control.WATCH)
+        self.session.control.pointer_event()
         revoked = await self.socket.next("control_revoked")
         self.assertIn("pointer was moved", revoked["reason"])
         await self.remake()
@@ -335,7 +353,6 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
         await self.share()
         await self.grant()
         self.session.control.flags_injected = flags_injected
-        self.session.control.watcher.cancel()  # keys only: its AutoTime polling would race the clock
         self.assertTrue((await self.result(act("click", x=0, y=0)))["ok"])
 
     async def typed_hello(self, flags_injected):

@@ -80,6 +80,28 @@ class ShaCheckTest(TaskFixture):
                          [])
         self.assertEqual(suspected(f'open tests/fixtures/{FAKE}.txt'), [])
 
+    def test_a_uuid_is_not_suspected_alone_or_in_a_sentence(self):
+        media, line = '65000881-a136-49bc-9095-b514e2c89ca3', '606c3370-f0fe-4999-a730-a201af53299b'
+        self.assertEqual(suspected(media), [])
+        self.assertEqual(suspected(f'see {media}.'), [])
+        self.assertEqual(suspected(f'line media {media} and {line}'), [])
+        self.assertEqual(suspected(f'line {line}, media ({media})'), [])
+
+    def test_an_uppercase_uuid_is_not_suspected(self):
+        self.assertEqual(suspected('media 65000881-A136-49BC-9095-B514E2C89CA3'), [])
+        self.assertEqual(suspected('media 65000881-A136-49bc-9095-b514e2c89ca3'), [])
+
+    def test_a_real_sha_beside_a_uuid_is_still_suspected(self):
+        media = '65000881-a136-49bc-9095-b514e2c89ca3'
+        self.assertEqual(suspected(f'media {media} shipped in {FAKE}'), [FAKE])
+        self.assertEqual(suspected(f'{FAKE} and media {media}'), [FAKE])
+        self.assertEqual(suspected(f'{media} {FAKE} {media}'), [FAKE])
+
+    def test_a_hyphenated_hex_word_that_is_not_a_uuid_is_still_suspected(self):
+        self.assertEqual(suspected('2543c0ec-based fix'), ['2543c0ec'])
+        self.assertEqual(suspected('a136-49bc-9095-b514e2c89ca3'), ['b514e2c89ca3'])
+        self.assertEqual(suspected('606c3370-f0fe-4999-a730'), ['606c3370'])
+
     def test_a_fabricated_commit_next_to_commit_or_sha_is_still_suspected(self):
         self.assertEqual(suspected(f'commit {FAKE}'), [FAKE])
         self.assertEqual(suspected(f'SHA {FAKE} is the fix'), [FAKE])

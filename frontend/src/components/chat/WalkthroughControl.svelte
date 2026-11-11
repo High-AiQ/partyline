@@ -3,7 +3,7 @@
   import { screenApi } from "../../lib/screen-api";
   import { useScreenDevices } from "../../state/screen-devices.svelte.js";
   import { walkthroughApi, walkthroughResult } from "../../lib/walkthrough-api";
-  import { type Transcript } from "../../lib/voice-api";
+  import { newTake, cancelTake, transcribeTake, type Take } from "../../lib/walkthrough-take";
   import { VoiceRecorder, browserSources, type RecorderSources } from "../../lib/voice-recorder";
   import type { WalkthroughStage } from "../../lib/walkthrough-status";
   import { WalkthroughMic } from "../../state/walkthrough-mic.svelte.js";
@@ -27,10 +27,10 @@
   };
   let elapsed = $state(0);
   let originalNotes = "";
+  /** Guards begin() and arm() against a cancel; a finished take has its own `cancelled` flag. */
   let generation = 0;
   let sawShare = false;
-  let abort: AbortController | null = null;
-  let finishData = $state<{ audio: Blob; line: string; share: string; id: number } | null>(null);
+  let finishData: Take | null = null;
   let awaitingSelection = $state(false);
   const online = $derived(devices.list.some((device) => device.online));
   const recorder = new VoiceRecorder(
@@ -50,7 +50,7 @@
           void walkthroughApi.stop(line, share).catch(() => {
             /* finish also stops the share */
           });
-          finishData = { audio, line, share, id: generation };
+          finishData = newTake(audio, line, share);
           void finish();
         }
       },
@@ -186,7 +186,7 @@
   async function finishWithoutAudio(): Promise<void> {
     const { line, shareId: share } = walkthrough;
     if (line && share) {
-      finishData = { audio: new Blob(), line, share, id: generation };
+      finishData = newTake(new Blob(), line, share);
       await finish();
     } else await cancel();
   }
@@ -196,21 +196,17 @@
     stage = "finishing";
     // Read now: the person may move to another line while this is in flight.
     const sent = { notes: draft.text, mark, noInput: mic.noInput, elapsed };
-    let transcript: Transcript | undefined;
-    let failed = false;
-    abort = new AbortController();
-    try {
-      transcript = await walkthroughApi.transcribe(take.line, take.audio, voicePresets.active, abort.signal);
-    } catch {
-      failed = true;
-    }
-    if (take.id !== generation) return;
+    const { transcript, failed } = await transcribeTake(take, voicePresets.active);
+    // A function, not a property read: the flag changes across awaits, which narrowing cannot see.
+    const dropped = (): boolean => take.cancelled;
+    if (dropped()) return;
     try {
       await walkthroughApi.finish(take.line, take.share, walkthroughResult(transcript, failed, sent));
-      if (take.id !== generation) return;
+      if (dropped()) return;
       if (room.conversation?.id === take.line) draft.text = "";
       sendFailures.discard(take.line);
     } catch (error) {
+      if (dropped()) return;
       const { audio, share } = take;
       sendFailures.fail(take.line, error instanceof Error ? error : "Could not send walkthrough", {
         audio,
@@ -221,7 +217,8 @@
       // Refused after the person left: only the take waits for them, not a stale message.
       if (room.conversation?.id !== take.line) sendFailures.dismiss(take.line);
     }
-    if (walkthrough.line === take.line) {
+    // Only the take still in front of the person resets; one finishing after they left changes nothing.
+    if (finishData === take) {
       finishData = null;
       reset();
     }
@@ -236,7 +233,7 @@
     walkthrough.active = true;
     walkthrough.line = line;
     walkthrough.shareId = held.share;
-    finishData = { audio: held.audio, line, share: held.share, id: generation };
+    finishData = newTake(held.audio, line, held.share);
     void finish();
   }
   /** The person gave up on this line's failed take: forget it and release its share. */
@@ -259,7 +256,7 @@
   async function cancel(): Promise<void> {
     const { line, shareId: share } = walkthrough;
     generation++;
-    abort?.abort();
+    cancelTake(finishData);
     recorder.cancel();
     finishData = null;
     if (stage !== "idle" && room.conversation?.id === line) draft.text = originalNotes;

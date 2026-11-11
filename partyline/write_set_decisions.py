@@ -8,6 +8,7 @@ line already holds.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Literal
 
@@ -26,11 +27,11 @@ from .write_set_requests import (
     WriteSetGrantRequest,
     non_resumable_live_attachments,
     pending_model,
-    resume_granted_scope,
     resume_line_attachments,
 )
 from .contracts import WriteSetGrantRequestEvent
 from .write_set_routes import add_write_grant
+from .write_set_resume import resume_granted_scopes
 
 
 class ApproveIn(BaseModel):
@@ -121,9 +122,11 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
         principal = request_principal(request)
         current = _pending_request(conv_id, request_id)
         if not is_human(principal):
-            error = _machine_decision_error(runtime.db, principal, conv_id, current)
-            if error:
-                raise HTTPException(403, error)
+            for path in current.paths:
+                candidate = current.model_copy(update={"path": path})
+                error = _machine_decision_error(runtime.db, principal, conv_id, candidate)
+                if error:
+                    raise HTTPException(403, error)
         return current, principal
 
     def _take_person_only(request: Request, conv_id: str, request_id: str):
@@ -132,12 +135,12 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
             raise HTTPException(403, "only a person may decide a write-set request")
         return _pending_request(conv_id, request_id)
 
-    @app.post("/api/conversations/{conv_id}/write-set/request/{request_id}/approve",
-              response_model=PendingWriteSetGrant)
+    @app.post("/api/conversations/{conv_id}/write-set/request/{request_id}/approve")
     async def approve(request: Request, conv_id: str, request_id: str, body: ApproveIn | None = None):
         current, principal = _take_for_decision(request, conv_id, request_id)
         mode = body.docker_mode if body else "managed"
-        blocked = non_resumable_live_attachments(runtime, conv_id, current.path)
+        blocked = list({att["id"]: att for path in current.paths
+                        for att in non_resumable_live_attachments(runtime, conv_id, path)}.values())
         if blocked:
             names = ", ".join(f"@{att['name']} ({att['adapter']})" for att in blocked)
             raise HTTPException(
@@ -146,17 +149,21 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                 "detach them first",
             )
         who = principal.name
-        add_write_grant(runtime.db, conv_id, current.path, who, mode)
+        grants = [add_write_grant(
+            runtime.db, conv_id, path, who,
+            mode if docker_relay.is_docker_socket(path) else None) for path in current.paths]
         with runtime.db.lock:
             runtime.db.conn.execute(
                 "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
                 (conv_id, request_id))
             runtime.db.conn.commit()
-        _resumed, failed = await resume_granted_scope(
-            runtime, conv_id, current.path, resume, resume_line_attachments)
-        text = (f"☏ write-set grant for `{current.path}` approved by @{who} — "
+        _resumed, failed = await resume_granted_scopes(
+            runtime, conv_id, current.paths, resume, resume_line_attachments)
+        await _clear_wait_reason(runtime.db, conv_id)
+        listed_paths = ", ".join(f"`{path}`" for path in current.paths)
+        text = (f"☏ write-set grant for {listed_paths} approved by @{who} — "
                 "live processes on this line are resumed with the widened bind")
-        if docker_relay.is_docker_socket(current.path):
+        if any(docker_relay.is_docker_socket(path) for path in current.paths):
             text = (f"☏ {docker_workloads.mode_text(mode)} granted by @{who} — every live process "
                     "is resumed so other lines cannot reach the relay")
         if failed:
@@ -164,7 +171,8 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                      "re-attach them by hand")
         await announce(conv_id, text)
         await ring_requester(current, text, actor=principal)
-        return PendingWriteSetGrant(request=None)
+        return {"granted": [{"path": row["path"], "granted_at": row["granted_at"]}
+                            for row in grants]}
 
     @app.delete("/api/conversations/{conv_id}/write-set/request/{request_id}",
                  response_model=PendingWriteSetGrant)
@@ -176,8 +184,10 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                 "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
                 (conv_id, request_id))
             runtime.db.conn.commit()
-        text = f"☏ write-set request for `{current.path}` declined by @{principal.name}"
+        listed_paths = ", ".join(f"`{path}`" for path in current.paths)
+        text = f"☏ write-set request for {listed_paths} declined by @{principal.name}"
         await announce(conv_id, text)
+        await _clear_wait_reason(runtime.db, conv_id)
         await ring_requester(current, text, actor=principal)
         return PendingWriteSetGrant(request=None)
 
@@ -190,9 +200,11 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                 "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
                 (conv_id, request_id))
             runtime.db.conn.commit()
-        text = (f"☏ write-set request for `{current.path}` declined by "
+        listed_paths = ", ".join(f"`{path}`" for path in current.paths)
+        text = (f"☏ write-set request for {listed_paths} declined by "
                 f"@{principal.name}: {body.reason}")
         await announce(conv_id, text)
+        await _clear_wait_reason(runtime.db, conv_id)
         await ring_requester(current, text, actor=principal)
         return {"ok": True}
 
@@ -212,7 +224,18 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                 "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
                 (conv_id, request_id))
             runtime.db.conn.commit()
-        await announce(conv_id, f"☏ write-set request for `{current.path}` "
+        listed_paths = ", ".join(f"`{path}`" for path in current.paths)
+        await announce(conv_id, f"☏ write-set request for {listed_paths} "
                                 f"withdrawn by @{principal.name}")
+        await _clear_wait_reason(runtime.db, conv_id)
         return PendingWriteSetGrant(request=None)
+
+
+async def _clear_wait_reason(db, conv_id: str) -> None:
+    """A decided write-set blocker is stale; the next task read must not retain it."""
+    await asyncio.to_thread(
+        db._exec,
+        "UPDATE task_reviews SET wait_reason='',wait_until=NULL WHERE conv_id=?",
+        (conv_id,),
+    )
 

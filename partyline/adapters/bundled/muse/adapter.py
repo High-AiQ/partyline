@@ -21,6 +21,8 @@ import os
 import threading
 from pathlib import Path
 
+from partyline.adapters.events import watch_files
+
 from partyline.adapters import Adapter
 from partyline.adapters.compaction import is_compaction_record
 
@@ -211,51 +213,31 @@ class PartylineAdapter(Adapter):
         return None
 
     async def _tail(self, path: Path, offset: int | None) -> None:
-        with path.open(encoding="utf-8", errors="replace") as file:
-            # A resume normally snapshots the byte cursor before spawning. If
-            # that stat failed, start at end-of-log now: replaying from zero can
-            # race deliver(), clear resume silence, and flood old messages.
-            if offset is None:
-                file.seek(0, os.SEEK_END)
-            else:
-                file.seek(offset)
-            self.mark_ready()
-            while True:
-                position = file.tell()
-                line = await asyncio.to_thread(file.readline)
-                if not line:
-                    if not self.alive():
-                        return
-                    await asyncio.sleep(self.POLL_SECONDS)
-                    continue
-                if not line.endswith("\n"):
-                    if not self.alive():
-                        return
-                    file.seek(position)
-                    await asyncio.sleep(0.3)
-                    continue
-                self.observe_claim(line)
-                record = await asyncio.to_thread(self._decode, line)
-                message = self._assistant_message(record or {})
-                if message is None:
-                    continue
-                message_id, body = message
-                if message_id and message_id in self._seen_messages:
-                    continue
-                if message_id:
-                    self._seen_messages.add(message_id)
-                await self.post(self.att["name"], "agent", body)
-                boundary = self.att.get("credit_delivery_boundary")
-                if boundary is not None:
-                    await boundary()
+        async def handle(record):
+            message = self._assistant_message(record)
+            if message is None:
+                return
+            message_id, body = message
+            if message_id and message_id in self._seen_messages:
+                return
+            if message_id:
+                self._seen_messages.add(message_id)
+            await self.post(self.att["name"], "agent", body)
+            boundary = self.att.get("credit_delivery_boundary")
+            if boundary is not None:
+                await boundary()
 
+        await self._tail_jsonl(str(path), handle, offset)
+
+    @watch_files(lambda self: [self._session_root() / "*" / "*" / "*" / "*" / "session.jsonl"])
     async def _run(self):
         try:
+            deadline = self.event_time() + self.DISCOVERY_TIMEOUT
             waited = 0.0
             path = await asyncio.to_thread(self._find_and_claim)
             while path is None and self.alive() and waited < self.DISCOVERY_TIMEOUT:
-                await asyncio.sleep(self.POLL_SECONDS)
-                waited += self.POLL_SECONDS
+                await self.wait_for_change(max(0, deadline - self.event_time()))
+                waited = self.DISCOVERY_TIMEOUT - max(0, deadline - self.event_time())
                 path = await asyncio.to_thread(self._find_and_claim)
             if path is None:
                 if self.alive():

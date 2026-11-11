@@ -27,7 +27,13 @@ WORKER = (
     "directory or ask a person to create it first. "
     "A read-only or EROFS error on a path inside the fence is the write set saying no — POST "
     "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/write-set with "
-    '{{"path":"/abs/normalized/path"}} and wait for a person to approve it in the banner; '
+    '{{"paths":["/abs/normalized/path","/another/abs/normalized/path"]}}. Several paths '
+    "can be filed together; a later filing merges into the pending request. The response lists "
+    "paths already granted separately from its pending paths. It says "
+    "whether it is waiting on a person or a captain. An already-granted response means no new "
+    "request was filed; re-attach or restart to pick up a widened bind. If filing fails, read "
+    "the explicit refusal and correct every named path before continuing. Never assume a path "
+    "was requested unless the API confirms it. "
     "never work around the fence (pointing npm at a temp cache is the kind of shortcut that "
     "belongs in a write-set request instead).\n"
     "### Keep your notes current\n"

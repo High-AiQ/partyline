@@ -99,6 +99,21 @@ class ImplementerRestartTest(TaskFixture):
         self.runtime.returns.handed_to.assert_called_once_with('captain', ident)
         self.assertTrue(any('resumed by captain; continue the task:' in body for body in notices), notices)
 
+    async def test_restart_implementer_stages_queued_mail_before_newer_mail(self):
+        await self.create()
+        ident = self.detach()
+        self.db._exec("UPDATE attachments SET cli_session='session' WHERE id=?", (ident,))
+        att = self.db.get_attachment(ident)
+        old = self.db.add_message(self.conv_id, 'captain', 'human', f"@{att['name']} older")
+        self.db.set_last_seen(ident, old['id'], att['runtime_owner'])
+        await self.db.queue_delivery_ids(ident, [old['id']], att['runtime_owner'])
+        new = self.db.add_message(self.conv_id, 'captain', 'human', f"@{att['name']} newer")
+        self.actor = self.captain
+        response = self.client.post(self.url())
+        self.assertEqual(response.status_code, 200, response.text)
+        ids = [message['id'] for message in self.runtime.live[ident].startup_messages]
+        self.assertLess(ids.index(old['id']), ids.index(new['id']))
+
     async def test_a_blocked_task_and_a_person_are_allowed(self):
         await self.create()
         self.db._exec("UPDATE task_reviews SET status='blocked' WHERE conv_id=?", (self.conv_id,))

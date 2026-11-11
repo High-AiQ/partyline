@@ -35,6 +35,11 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
     case "message":
       room.absorb(event.message);
       break;
+    case "screen_snapshot":
+      screenStatus.indicators = event.indicators;
+      screenStatus.devices = event.devices;
+      room.screenShare = event.share;
+      break;
     case "screen_share":
       screenStatus.revision++;
       room.screenShare = event.share;
@@ -49,14 +54,12 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
       if (event.conversation_id === convId) room.pins.replace(event.pins);
       break;
     case "attachment":
-      resources.scheduleRefresh();
       room.upsertAttachment(event.attachment);
       break;
     case "captain_changed":
       room.setCaptain(event.conversation_id, event.attachment_id);
       break;
     case "attachment_removed":
-      resources.scheduleRefresh();
       room.removeAttachment(event.attachment_id);
       break;
     case "memory_usage": {
@@ -79,7 +82,6 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
       resources.snapshot = event.snapshot;
       break;
     case "line_live":
-      resources.scheduleRefresh();
       room.setLineLive(event);
       break;
     case "attention":
@@ -119,7 +121,7 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
       applyPendingWireEvent(event);
       break;
     case "asr_presets_changed":
-      voicePresets.refresh();
+      voicePresets.receive(event.settings);
       break;
     case "error":
       if (event.conversation_id === convId) handleWireError(room, event, context);

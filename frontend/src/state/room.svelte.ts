@@ -52,7 +52,6 @@ interface LeaveOptions {
 function ignoreBackgroundFailure(): void {
   // Best-effort refreshes already have a primary UI state to preserve.
 }
-
 class Room {
   conversations = $state<Conversation[]>([]);
   archived = $state<Conversation[]>([]);
@@ -277,6 +276,7 @@ class Room {
   showNotice(message: string, kind: RoomNotice["kind"] = ""): void {
     this.notice = { message, kind };
     if (this.#noticeTimer !== null) clearTimeout(this.#noticeTimer);
+    // no-poll (b): one-shot UI deadline; no state request
     this.#noticeTimer = setTimeout(() => {
       this.notice = null;
     }, 4200);

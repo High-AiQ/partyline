@@ -103,7 +103,7 @@ class PresetRolesTest(unittest.TestCase):
             ('server.py', 'resume_with_backlog'), ('server.py', '_resume_adapter'),
             ('server.py', 'resume_adapter'), ('memory_requests.py', 'resume_with_backlog'),
             ('write_set_requests.py', 'resume_with_backlog'),
-            ('orchestrator_staff.py', '_start_attachment'), ('orchestrator_staff.py', '_resume_adapter'),
+            ('orchestrator_staff.py', '_start_attachment'), ('orchestrator_staff.py', 'resume_with_backlog'),
             ('orchestrator_staff.py', 'spawn'), ('orchestrator_service.py', 'spawn'),
             ('hierarchy_routes.py', 'set_lead'), ('conversation_routes.py', 'start_staffed'),
             ('preset_roles.py', 'seat_captain'), ('adapters/windows_runtime.py', 'spawn'),
@@ -115,7 +115,8 @@ class PresetRolesTest(unittest.TestCase):
             ('server.py', '_resume_adapter'), ('server.py', 'resume_adapter'),
             ('server.py', 'resume_with_backlog'), ('conversation_routes.py', '_start_attachment'),
             ('orchestrator_staff.py', '_start_attachment'), ('orchestrator_staff.py', '_resume_adapter'),
-            ('memory_requests.py', 'resume_with_backlog'), ('write_set_requests.py', 'resume_with_backlog'),
+            ('orchestrator_staff.py', 'resume_with_backlog'), ('memory_requests.py', 'resume_with_backlog'),
+            ('write_set_requests.py', 'resume_with_backlog'),
         })
         # Memory and write-set approvals resume live processes; server restart
         # recovery also continues live processes, rather than staffing new ones.

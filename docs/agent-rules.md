@@ -10,6 +10,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 
 | DO | DO NOT |
 | --- | --- |
+| Partyline never polls; it reacts to events. Deadlines are one-shot timers, keepalives are protocol pings; the browser learns state from websocket/stream pushes (snapshot on connect), never by polling or retry-fetching | Re-check state on a timer, or schedule browser fetches to learn state |
 | Keep every process a real interactive process in a pty | Substitute a headless invocation or an SDK call |
 | Post assistant speech from structured transcripts | Turn terminal screen contents into chat messages |
 | Post media and service links as host-relative paths (`/api/media/<id>/slim`) or the LAN host | Post `0.0.0.0`, `127.0.0.1`, or `localhost` URLs; people reach this over LAN or HTTPS |
@@ -32,6 +33,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 ## Gates — all must pass before every commit
 
 ```bash
+./scripts/check-no-polling          # classified event/deadline waits
 uv run --locked ruff check .        # lint (no autoformatter: match surrounding style by hand)
 ./scripts/capped-test               # parallel full suite under a 4 GB memory cap
 uv run --locked coverage report     # ≥90% combined (statements + branches, fail_under in pyproject), nothing omitted
@@ -157,6 +159,13 @@ detail: `docs/write-fence.md`.
 | Review the child’s reported SHA in a Partyline-managed review worktree; mirrored refs are private per line and shared by its processes | Judge a child’s progress from its worktree as seen by the captain: accepted refs can make newer committed work appear uncommitted |
 | Replace a CLI sandbox that cannot nest (codex's bwrap) with `fence_args`, only while fenced | Run two sandboxes at once, or leave a CLI's sandbox as the only one on an unfenced host |
 
+Write-set requests accept `{"path":"/absolute/path"}` or `{"paths":["/absolute/path", ...]}`.
+Several paths are one decision, and a later request merges into the pending request. Read the
+API response: `already_granted` means no banner was opened; re-attach or restart the worker to
+pick up a widened bind. A refusal names the paths that were not filed and the corrective action.
+If no root captain in the chain can grant every path, the request is person-decided from filing
+time and the banner must not mention the captain with unusable decision links.
+
 ## Process and releases
 
 | DO | DO NOT |
@@ -170,4 +179,5 @@ detail: `docs/write-fence.md`.
 | Let CI create tags — tags are the release record | Hand-create a GitHub Release (`docs/releases.md`) |
 | Before clearing a goal, detaching the final workers, or retiring a line, persist every deliverable, asset, and piece of unfinished work in its intended durable repository or application storage, or an accessible handoff location; verify the read-back and record the locations in the handoff | Rely on a git commit for generated non-git assets, leave a temp directory, worktree, or child-only upload as the sole copy, or run destructive cleanup over unfinished work instead of preserving it and reporting the blocker |
 | Once every task is merged and released, or the captain is completely blocked waiting on a person, detach every process on its tree — implementers, reviewers, sub-captains and helper processes (`POST /api/conversations/<id>/attachments/close`) — and detach the captain itself last; no process stays attached "standing by". Retire finished child lines (`DELETE /api/conversations/<child-id>?stop_processes=true`); before detaching an unresponsive process, peek at `GET /api/attachments/<att-id>/screen?lines=40` or its transcript tail and detach only when sure it is stuck | Leave idle processes and finished child lines running after the goal is cleared, or detach a process you never confirmed stuck |
+| Restart a raw helper (idle-check, rotate-captain) with `DELETE /api/attachments/<id>`, `PATCH` its command, `POST /api/attachments/<id>/resume`; helpers hold no staffed role, so no preset trait is needed | Expect a helper restart to need Fast implementer, or staff a task worker or captain from a preset without its role trait |
 | The root captain inspects `retirement-preview` and decides explicit `force_discard` with its token for obsolete strict descendants; preserve deliverables first and retain the returned recovery refs/audit ID (`docs/hierarchy.md`) | Request human UI cleanup when the root can make the authorized retirement decision itself; give non-root captains the override |

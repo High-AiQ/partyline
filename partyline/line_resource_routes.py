@@ -41,7 +41,7 @@ async def maintain(runtime):
         with db.lock, db.conn:
             claimed = db.conn.execute(
                 'UPDATE line_resource_claims SET notified=? WHERE id=? '
-                'AND (notified=0 OR (notified>1 AND notified<?))',
+                'AND (notified=0 OR (notified>1 AND notified<=?))',
                 (now, row['id'], now - 30)).rowcount
         if not claimed:
             continue
@@ -60,13 +60,29 @@ async def maintain(runtime):
 
 
 async def run(runtime):
-    while True:
-        try:
-            with timed_tick('resource lease sweep'):
-                await maintain(runtime)
-        except Exception:
-            logging.getLogger(__name__).exception('resource lease sweep failed')
-        await asyncio.sleep(5)
+    with runtime.db.events.subscribe('line_resources', 'line_resource_claims',
+                                     'attachments', 'conversations') as events:
+        while True:
+            with events.processing():
+                failed = False
+                try:
+                    with timed_tick('resource lease sweep'):
+                        await maintain(runtime)
+                except Exception:
+                    failed = True
+                    logging.getLogger(__name__).exception('resource lease sweep failed')
+                row = runtime.db._exec('SELECT MIN(notified) FROM line_resource_claims '
+                                       'WHERE notified>1').fetchone()
+                delay = None if row[0] is None else max(0, row[0] + 30 - time.time())
+                failed_probe = runtime.db._exec(
+                    'SELECT 1 FROM line_resource_claims q WHERE granted_at IS NULL '
+                    'AND NOT EXISTS (SELECT 1 FROM line_resource_claims h WHERE '
+                    'h.conv_id=q.conv_id AND h.name=q.name AND h.granted_at IS NOT NULL) LIMIT 1'
+                ).fetchone()
+                if failed or failed_probe:
+                    # no-poll (e): retry failed delivery/probes; success clears the deadline.
+                    delay = 5 if delay is None else min(5, delay)
+            await events.wait(delay)
 
 
 def register_line_resource_routes(app, runtime):

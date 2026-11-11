@@ -213,6 +213,7 @@ class ControlFlowTest(unittest.IsolatedAsyncioTestCase):
             "Agent control audit — person: click left (-90,20) · move (-50,50) ×3 · "
             "type `hi 'there'` (10 chars)"))
         self.desktop.position = (90, 90)  # the person grabs the mouse
+        self.inputs.on_move()
         await until(lambda: self.grant().status == "revoked")
         self.assertTrue(any(body.startswith("@person Agent control revoked (the pointer was moved")
                             for body in self.bodies()))

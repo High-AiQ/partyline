@@ -876,6 +876,18 @@ class FenceIntegrationTest(unittest.TestCase):
                            os.path.join(common, "worktrees"), True), pairs)
             self.assertNotIn((sibling_gitdir, sibling_gitdir, False), pairs)
 
+            modules = os.path.join(own["path"], "node_modules")
+            host_modules = os.path.join(self.fix["repo"], "node_modules")
+            os.makedirs(modules)
+            os.makedirs(host_modules)
+            marker = os.path.join(modules, ".vite-temp")
+            result = self.run_fenced("mkdir", marker)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(os.path.isdir(marker))
+            self.assertFalse(os.path.exists(os.path.join(host_modules, ".vite-temp")))
+            result = self.run_fenced("mkdir", os.path.join(host_modules, ".vite-temp"))
+            self.assertNotEqual(result.returncode, 0)
+
             own_marker = os.path.join(own["path"], "review-write.txt")
             self.assertEqual(self.run_fenced("touch", own_marker).returncode, 0)
             result = self.run_fenced("git", "-C", own["path"], "add", "review-write.txt")
@@ -1026,7 +1038,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["path"], target)
 
-    def test_a_second_write_set_request_while_pending_is_409(self):
+    def test_a_second_write_set_request_merges_into_the_pending_request(self):
         self.db.add_attachment("kid-worker", self.kid["id"], "worker", "fake",
                                ["fake"], self.directory.name)
         headers = self.machine("kid-worker")
@@ -1034,12 +1046,15 @@ class WriteSetGrantApiTest(unittest.TestCase):
         second = os.path.join(self.repo, "second")
         os.makedirs(first)
         os.makedirs(second)
-        self.assertEqual(self.client.post(
+        first_request = self.client.post(
             f"/api/conversations/{self.kid['id']}/write-set",
-            json={"path": first}, headers=headers).status_code, 200)
-        self.assertEqual(self.client.post(
+            json={"path": first}, headers=headers)
+        self.assertEqual(first_request.status_code, 200)
+        second_request = self.client.post(
             f"/api/conversations/{self.kid['id']}/write-set",
-            json={"path": second}, headers=headers).status_code, 409)
+            json={"path": second}, headers=headers)
+        self.assertEqual(second_request.status_code, 200, second_request.text)
+        self.assertEqual(second_request.json()["id"], first_request.json()["id"])
 
     def test_an_unrelated_machine_cannot_file_a_request(self):
         self.db.create_conversation("stranger", "Stranger", captain_mode="manager_tree")

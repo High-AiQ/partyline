@@ -188,6 +188,7 @@ class Acting:
                     raise ValueError(f"agent control was revoked after {index} of {len(text)} characters")
                 self.expect(xtest_echoes([CONTROL_CODES.get(char, char)]))
                 inputs.type(char)
+                # no-poll (b): yield between input actions; no state check
                 await asyncio.sleep(0)
 
     async def drag(self, share_id, start, end):
@@ -196,6 +197,7 @@ class Acting:
             inputs.press("left")
             try:
                 for step in range(1, DRAG_STEPS + 1):
+                    # no-poll (b): paced drag action; finite sequence of input deadlines
                     await self.session.sleep(DRAG_STEP)
                     if self.live(share_id) and self.drifted():
                         self.kill("the pointer was moved on the computer")

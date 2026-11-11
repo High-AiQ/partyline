@@ -177,6 +177,8 @@ async def _try_detach(runtime, row):
         await finish_detach(runtime, row)
     except Exception:
         logger.exception('handover detach failed for %s; it will be retried', row['id'])
+        return True
+    return False
 
 
 async def maintenance_once(runtime):
@@ -188,18 +190,30 @@ async def maintenance_once(runtime):
                                     MessageEvent(message=MessageResponse.model_validate(message)))
         except Exception:
             logger.exception('could not broadcast handover timeout notice %s', message['id'])
+    failed = False
     for row in pending_detaches(runtime.db):
-        await _try_detach(runtime, row)
+        failed = await _try_detach(runtime, row) or failed
+    return failed
 
 
 async def maintenance(runtime):
-    while True:
-        try:
-            await maintenance_once(runtime)
-        except Exception:
-            logger.exception('handover maintenance failed; it will be retried')
-        await asyncio.sleep(MAINTENANCE_INTERVAL_SECONDS)
-
+    with runtime.db.events.subscribe('captain_handovers', 'attachments') as events:
+        from .retention_events import retention_notifications
+        async with retention_notifications(events.changes):
+            while True:
+                with events.processing():
+                    try:
+                        failed = await maintenance_once(runtime)
+                    except Exception:
+                        failed = True
+                        logger.exception('handover maintenance failed; retrying after failure')
+                    row = runtime.db._exec("SELECT MIN(accepted_at) FROM captain_handovers "
+                        "WHERE state='accepted' AND timeout_notified_at IS NULL").fetchone()
+                    delay = None if row[0] is None else row[0] + CONFIRM_TIMEOUT_SECONDS - time.time()
+                    if failed is True:
+                        # no-poll (e): retry failed detach/reap operations; success clears the deadline.
+                        delay = 5 if delay is None else min(5, delay)
+                await events.wait(delay)
 
 async def complete_route(runtime, request: Request, conv: str, body):
     from .captain_handover import _locks, _principal

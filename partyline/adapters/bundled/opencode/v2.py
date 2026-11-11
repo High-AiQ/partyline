@@ -242,8 +242,16 @@ class PartylineAdapter(WakeSettlement, Adapter):
 
     async def _tail_session(self):
         self._store = await asyncio.to_thread(self._resolve_store)
+        paths = [self._store]
+        if self._provider_log is not None:
+            paths.append(self._provider_log.path)
+        async with self.file_events(*paths, changes=self._changes):
+            await self._follow_session()
+
+    async def _follow_session(self):
+        deadline = self.event_time() + 45.0
         submitted = False
-        for attempt in range(90):
+        while self.event_time() < deadline:
             if not self.alive():
                 return
             try:
@@ -259,10 +267,10 @@ class PartylineAdapter(WakeSettlement, Adapter):
             # 2.0.18 can leave --prompt in the composer without submitting it.
             # Only press Enter once it is visibly loaded; readiness and speech
             # still require the nonce in a structured user row, never the screen.
-            if not submitted and attempt >= 6 and self._claim_token in self.screen_text():
+            if not submitted and self._claim_token in self.screen_text():
                 await self._write_all(b"\r")
                 submitted = True
-            await asyncio.sleep(0.5)
+            await self.wait_for_change(max(0, deadline - self.event_time()))
         else:
             raise RuntimeError("no claimed OpenCode v2 session appeared after 45s; "
                                "check the terminal for startup errors")
@@ -272,7 +280,10 @@ class PartylineAdapter(WakeSettlement, Adapter):
             except sqlite3.Error as exc:
                 logger.debug("OpenCode v2 poll skipped: %s", exc)
             await self._poll_provider()
-            await asyncio.sleep(0.5)
+            delay = None
+            if self.resume and not self._ready.is_set() and self._resume_claimed_at is not None:
+                delay = max(0, self._resume_claimed_at + RESUME_READY_TIMEOUT_SECONDS - time.monotonic())
+            await self.wait_for_change(delay)
 
     def _release_claim(self):
         key = (str(self._store), self._session_id)

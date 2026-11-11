@@ -70,10 +70,13 @@ class ResolvedNoticesTest(unittest.TestCase):
         self.assertEqual(self.backlog_ids(), [new])
         self.assertNotIn(old, self.backlog_ids())
 
-    def test_answered_question_dropped_and_open_one_kept(self):
-        answered = self.db.add_message("root", "boris", "agent", "@lead which branch?")["id"]
+    def test_delivered_then_answered_question_is_dropped(self):
+        answered = self.db.add_message("root", "boris", "agent", "@lead which branch?")
+        self.db.set_last_seen("cap", answered["id"], "o1")
         self.db.add_message("root", "lead", "agent", "@boris use main")
-        opened = self.db.add_message("root", "ines", "agent", "@lead may I merge?")["id"]
-        ids = self.backlog_ids()
-        self.assertNotIn(answered, ids)
-        self.assertIn(opened, ids)
+        self.assertNotIn(answered["id"], self.backlog_ids())
+
+    def test_reply_does_not_answer_unproved_mail(self):
+        message = self.db.add_message("root", "boris", "agent", "@lead which branch?")
+        self.db.add_message("root", "lead", "agent", "@boris which option?")
+        self.assertIn(message["id"], self.backlog_ids())

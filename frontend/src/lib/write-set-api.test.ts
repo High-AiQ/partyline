@@ -14,9 +14,9 @@ describe("write-set requests", () => {
   });
 
   it("approves and declines by request id on a line", async () => {
-    const fetch = vi.fn().mockResolvedValue(response({ request: null }));
+    const fetch = vi.fn().mockResolvedValue(response({ granted: [] }));
     vi.stubGlobal("fetch", fetch);
-    await expect(writeSetApi.approve("line", "abc")).resolves.toEqual({ request: null });
+    await expect(writeSetApi.approve("line", "abc")).resolves.toEqual({ granted: [] });
     expect(fetch).toHaveBeenCalledWith("/api/conversations/line/write-set/request/abc/approve", {
       method: "POST",
     });
@@ -28,7 +28,7 @@ describe("write-set requests", () => {
   });
 
   it("sends a docker access mode only when one is chosen", async () => {
-    const fetch = vi.fn().mockResolvedValue(response({ request: null }));
+    const fetch = vi.fn().mockResolvedValue(response({ granted: [] }));
     vi.stubGlobal("fetch", fetch);
     await writeSetApi.approve("line", "abc", "unrestricted");
     const init = fetch.mock.calls[0]?.[1] as RequestInit;

@@ -19,7 +19,11 @@
   let { close }: Props = $props();
 
   let busy = $state<"approve" | "unrestricted" | "decline" | null>(null);
-  const isDocker = $derived(Boolean(writeSet.request?.path.endsWith("docker.sock")));
+  const isDocker = $derived(
+    (writeSet.request?.paths.length ? writeSet.request.paths : [writeSet.request?.path]).some((path) =>
+      path?.endsWith("docker.sock"),
+    ),
+  );
   let error = $state("");
 
   $effect(() => {
@@ -56,7 +60,7 @@
   {#if writeSet.request}
     <p class="dialog-text">
       <strong>@{writeSet.request.requester}</strong> asks to widen this line's write set to:
-      <code>{writeSet.request.path}</code>
+      <code>{writeSet.request.paths.length ? writeSet.request.paths.join(", ") : writeSet.request.path}</code>
     </p>
     <p class="dialog-text">
       Every live process on this line is detached and resumed with the new bind. Only grant paths you intend

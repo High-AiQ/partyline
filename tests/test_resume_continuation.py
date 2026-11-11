@@ -11,6 +11,7 @@ from partyline.resume_continuation import drain, resume_with_backlog
 from partyline.runtime import ChatRuntime
 from partyline.line_process_routes import detach_attachment
 from partyline.presence import Presence
+from partyline.mention_relay import post_private
 
 
 class StagingAdapter:
@@ -80,6 +81,132 @@ class ResumeContinuationTest(unittest.IsolatedAsyncioTestCase):
         await drain()
         self.assertEqual([m["body"] for m in adapter.deliveries[0]], ["@luna finish the adapter"])
         self.assertEqual(self.db.get_attachment("one")["last_seen"], seen["pending"][-1]["id"])
+
+    async def test_private_message_during_resume_reaches_the_new_process_once(self):
+        adapter = StagingAdapter("owner-1")
+        staged = []
+
+        async def resume(att_id, pending):
+            staged.extend(pending)
+            self.runtime._record_unproved(self.db.get_attachment(att_id), adapter, pending)
+            self.db.set_attachment_status(att_id, "running", "owner-1")
+            self.runtime.live[att_id] = adapter
+            await post_private(self.runtime, "line", "captain", "agent", "option 1",
+                               audience=att_id)
+            return ResumedAttachment(adapter, True)
+
+        await resume_with_backlog(self.runtime, "one", resume)
+        await drain()
+        bodies = [m["body"] for batch in [staged, *adapter.deliveries] for m in batch]
+        self.assertEqual(bodies.count("option 1"), 1)
+        self.assertEqual(bodies.count("@luna finish the adapter"), 1)
+
+    async def test_queued_older_mail_precedes_newer_resume_briefing(self):
+        self.db._exec("DELETE FROM messages")
+        old = await post_private(self.runtime, "line", "captain", "agent", "older",
+                                 audience="one", route=False)
+        self.db.set_last_seen("one", old["id"], "owner-1")
+        await self.db.queue_delivery_ids("one", [old["id"]], "owner-1")
+        await post_private(self.runtime, "line", "captain", "agent", "newer",
+                           audience="one", route=False)
+        adapter = StagingAdapter("owner-1")
+        presence = Presence(self.runtime)
+        staged = []
+
+        async def resume(att_id, pending):
+            staged.extend(pending)
+            self.runtime._record_unproved(self.db.get_attachment(att_id), adapter, pending)
+            self.db.set_attachment_status(att_id, "running", "owner-1")
+            self.runtime.live[att_id] = presence.watch(
+                adapter, "line", att_id, "receipt",
+                *self.runtime.held_wake_hooks("line", att_id, "luna"))
+            return ResumedAttachment(adapter, True)
+
+        await resume_with_backlog(self.runtime, "one", resume)
+        await drain()
+        await presence.queue.flush("one")
+        bodies = [m["body"] for batch in [staged, *adapter.deliveries] for m in batch]
+        self.assertEqual(bodies, ["older", "newer"])
+
+    async def test_newer_proof_does_not_release_queued_older_unproved_mail(self):
+        old = self.db.add_message("line", "captain", "agent", "older")
+        self.db.set_last_seen("one", old["id"], "owner-1")
+        new = self.db.add_message("line", "captain", "agent", "newer")
+        adapter = StagingAdapter("owner-1")
+        self.runtime.live["one"] = adapter
+        self.runtime._record_unproved(self.db.get_attachment("one"), adapter, [old, new])
+        await self.runtime.confirm_delivery_ids("one", [new["id"]], "owner-1")
+        self.assertEqual(self.runtime.uncredited["one"]["ids"], {old["id"], new["id"]})
+        await self.runtime.confirm_delivery_ids("one", [old["id"]], "owner-1")
+        self.assertNotIn("one", self.runtime.uncredited)
+        self.assertEqual(self.db.get_attachment("one")["last_seen"], new["id"])
+
+    async def test_newer_queued_flush_cannot_advance_past_unproved_staged_mail(self):
+        adapter = StagingAdapter("owner-1")
+        self.runtime.live["one"] = adapter
+        old = self.db.messages_by_ids("line", [1])[0]
+        self.runtime._record_unproved(self.db.get_attachment("one"), adapter, [old])
+        new = self.db.add_message("line", "greg", "human", "@luna newer")
+        await self.db.queue_delivery_ids("one", [new["id"]], "owner-1")
+        flush, *_ = self.runtime.held_wake_hooks("line", "one", "luna")
+        self.assertTrue(await flush([new["id"]]))
+        self.assertEqual(self.db.get_attachment("one")["last_seen"], 0)
+        self.assertEqual(self.runtime.uncredited["one"]["ids"], {old["id"], new["id"]})
+        await self.runtime.confirm_delivery_ids("one", [old["id"]], "owner-1")
+        self.assertEqual(self.db.get_attachment("one")["last_seen"], new["id"])
+        self.assertNotIn("one", self.runtime.uncredited)
+
+    async def test_late_startup_receipt_releases_newer_confirmed_mail(self):
+        adapter = StagingAdapter("owner-1")
+        receipt = asyncio.Event()
+        adapter.wait_startup_delivery_received = receipt.wait
+        async def resume(att_id, pending):
+            self.runtime._record_unproved(self.db.get_attachment(att_id), adapter, pending)
+            self.db.set_attachment_status(att_id, "running", "owner-1")
+            self.runtime.live[att_id] = adapter
+            return ResumedAttachment(adapter, True)
+        await resume_with_backlog(self.runtime, "one", resume, timeout=0)
+        await asyncio.sleep(0)  # let the receipt waiter start without advancing a clock
+        for text in ("newer one", "newer two"):
+            self.db.add_message("line", "greg", "human", f"@luna {text}")
+            await self.runtime.deliver_pending("line", self.db.get_attachment("one"), adapter)
+        self.assertEqual(self.db.get_attachment("one")["last_seen"], 0)
+        self.assertEqual(len(self.runtime.uncredited["one"]["ids"]), 3)
+        receipt.set()
+        await asyncio.wait_for(drain(), .5)
+        self.assertEqual(self.db.get_attachment("one")["last_seen"], 3)
+        self.assertNotIn("one", self.runtime.uncredited)
+
+    async def test_late_receipt_cannot_credit_a_replacement_activation(self):
+        adapter = StagingAdapter("owner-1")
+        receipt = asyncio.Event()
+        adapter.wait_startup_delivery_received = receipt.wait
+        async def resume(att_id, pending):
+            self.runtime._record_unproved(self.db.get_attachment(att_id), adapter, pending)
+            return ResumedAttachment(adapter, True)
+        await resume_with_backlog(self.runtime, "one", resume, timeout=0)
+        self.db._exec("UPDATE attachments SET runtime_owner='owner-2' WHERE id='one'")
+        receipt.set()
+        await asyncio.wait_for(drain(), .5)
+        self.assertEqual(self.db.get_attachment("one")["last_seen"], 0)
+        self.assertIsNone(self.runtime._live_uncredited("one", "owner-2"))
+
+    async def test_unstaged_resume_waits_past_timeout_for_readiness(self):
+        adapter = PastingAdapter("owner-1")
+        ready = asyncio.Event()
+        adapter.wait_ready = ready.wait
+        async def resume(att_id, pending):
+            self.runtime._record_unproved(self.db.get_attachment(att_id), adapter, pending)
+            self.db.set_attachment_status(att_id, "running", "owner-1")
+            self.runtime.live[att_id] = adapter
+            return ResumedAttachment(adapter, False)
+        await resume_with_backlog(self.runtime, "one", resume, timeout=0)
+        await asyncio.sleep(0)
+        self.assertEqual(adapter.deliveries, [])
+        ready.set()
+        await asyncio.wait_for(drain(), .5)
+        self.assertEqual([m["body"] for m in adapter.deliveries[0]], ["@luna finish the adapter"])
+        self.assertEqual(self.db.get_attachment("one")["last_seen"], 1)
 
     async def test_a_process_that_finished_its_turn_gets_no_notice(self):
         adapter = StagingAdapter("owner-1")

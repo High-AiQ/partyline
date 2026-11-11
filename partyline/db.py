@@ -17,10 +17,9 @@ from .conversation_queries import ACTIVE_CONVERSATIONS, ARCHIVED_CONVERSATIONS, 
 from .message_queries import MESSAGE_SELECT, as_message, select_message_by_id, select_message_page
 from .message_visibility import BRIDGE_DIGEST_CLAUSE
 from . import runtime_lock
-
+from .db_events import DatabaseEvents
 
 RestartPlanMode = Literal["offer", "automatic"]
-
 
 class MessageRow(TypedDict):
     id: int
@@ -86,6 +85,7 @@ class Db:
                     pass  # already applied, or an index the data cannot yet satisfy
             self.conn.commit()
         ensure_db_sidecars(self)
+        self.events = DatabaseEvents(self.conn)
 
     def close(self):
         """Close the connection; the server holds it for its whole life."""

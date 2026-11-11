@@ -165,7 +165,10 @@ class WriteSetRequestTest(unittest.TestCase):
         self.assertEqual(filed.status_code, 200, filed.text)
         notice = self.db.list_messages("line")[-1]
         self.assertIn("asks to grant write-set scope", notice["body"])
-        self.assertEqual(self.file(self.worker).status_code, 409)
+        first_id = self.file(self.worker).json()["id"]
+        merged = self.file(self.worker)
+        self.assertEqual(merged.status_code, 200, merged.text)
+        self.assertEqual(merged.json()["id"], first_id)
 
     def test_only_a_person_decides_and_approval_grants_and_resumes_the_line(self):
         request_id = self.file(self.worker).json()["id"]
@@ -183,6 +186,7 @@ class WriteSetRequestTest(unittest.TestCase):
         self.assertEqual(sorted(self.resumed), ["cap", "wrk"])
         grants = list_write_grants(self.db, "line")
         self.assertEqual([row["path"] for row in grants], [self.target])
+        self.assertEqual(approved.json()["granted"][0]["path"], self.target)
         self.assertEqual(self.client.get(
             "/api/conversations/line/write-set/request", headers=self.human).json(),
                          {"request": None})
@@ -196,6 +200,42 @@ class WriteSetRequestTest(unittest.TestCase):
         self.assertEqual(failed, [])
         self.assertTrue(cap.stopped)
         self.assertTrue(wrk.stopped)
+
+    def test_write_set_resume_preserves_queued_order_during_a_wake(self):
+        from partyline.mention_relay import post_private
+        from partyline.resume_continuation import drain
+        self.go_live("cap")
+        self.go_live("wrk")
+        old = self.db.add_message("line", "person", "human", "@worker older")
+        owner = self.db.get_attachment("wrk")["runtime_owner"]
+        self.db.set_last_seen("wrk", old["id"], owner)
+        staged, adapters = {}, {}
+
+        async def run():
+            await self.db.queue_delivery_ids("wrk", [old["id"]], owner)
+            self.db.add_message("line", "person", "human", "@worker newer")
+            async def resume(ident, pending):
+                att = self.db.get_attachment(ident)
+                adapter = FakeAdapter(att=att)
+                adapters[ident] = adapter
+                staged[ident] = pending
+                self.runtime._record_unproved(att, adapter, pending)
+                self.db.set_attachment_status(ident, "running", att["runtime_owner"])
+                self.runtime.live[ident] = adapter
+                if ident == "wrk":
+                    await post_private(self.runtime, "line", "captain", "agent", "wake",
+                                       audience=ident)
+                return ResumedAttachment(adapter, True)
+            await resume_line_attachments(self.runtime, "line", resume)
+            await drain()
+
+        asyncio.run(run())
+        bodies = [m["body"] for batch in [staged["wrk"], *adapters["wrk"].deliveries]
+                  for m in batch]
+        self.assertEqual(bodies.count("@worker older"), 1)
+        self.assertLess(bodies.index("@worker older"), bodies.index("@worker newer"))
+        self.assertEqual(bodies.count("wake"), 1)
+        self.assertEqual(self.db.queued_delivery_ids("wrk"), [])
 
     def test_approval_surfaces_a_resume_failure_and_still_resumes_the_rest(self):
         request_id = self.file(self.worker).json()["id"]
@@ -259,7 +299,11 @@ class WriteSetRequestTest(unittest.TestCase):
         self.db.add_attachment("next-worker", "line", "next", "fake", ["fake"], self.repo)
         next_worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(
             self.db, "next-worker")}
-        request_id = self.file(next_worker).json()["id"]
+        next_path = os.path.join(self.repo, "next")
+        os.makedirs(next_path)
+        filed = self.file(next_worker, next_path)
+        self.assertEqual(filed.status_code, 200, filed.text)
+        request_id = filed.json()["id"]
         self.assertEqual(self.client.delete(
             f"/api/conversations/line/write-set/request/{request_id}",
             headers=self.human).status_code, 200)
@@ -363,6 +407,164 @@ class WriteSetRequestTest(unittest.TestCase):
         pending = self.client.get("/api/conversations/line/write-set/request",
                                   headers=self.captain).json()["request"]
         self.assertEqual(pending["path"], os.path.join(repo, ".review", sha))
+
+    def test_multi_path_request_merges_and_approval_returns_each_grant(self):
+        second = os.path.join(self.target, "second")
+        os.makedirs(second)
+        filed = self.client.post("/api/conversations/line/write-set",
+                                 json={"paths": [self.target]}, headers=self.worker)
+        self.assertEqual(filed.status_code, 200, filed.text)
+        first_id = filed.json()["id"]
+        merged = self.client.post("/api/conversations/line/write-set",
+                                  json={"paths": [second]}, headers=self.worker)
+        self.assertEqual(merged.status_code, 200, merged.text)
+        self.assertEqual(merged.json()["id"], first_id)
+        request = self.client.get("/api/conversations/line/write-set/request",
+                                  headers=self.human).json()["request"]
+        self.assertEqual(request["paths"], [self.target, second])
+        with patch("partyline.write_set_decisions.resume_line_attachments", self._resume_line):
+            approved = self.client.post(
+                f"/api/conversations/line/write-set/request/{first_id}/approve",
+                headers=self.human)
+        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual([row["path"] for row in approved.json()["granted"]],
+                         [self.target, second])
+        self.assertEqual(self.resumed, ["cap", "wrk"])
+
+    def test_merged_request_uses_the_retained_requester_for_decider_eligibility(self):
+        self.db.create_conversation("child", "Child", captain_mode="manager_tree")
+        self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='child'")
+        self.db.add_attachment("child-wrk", "child", "childworker", "fake", ["fake"], self.repo)
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='child-wrk'")
+        child_worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "child-wrk")}
+        second = os.path.join(self.target, "second")
+        os.makedirs(second)
+
+        # A captain's request stays person-decided when a worker merges into it.
+        captain_first = self.client.post(
+            "/api/conversations/child/write-set", json={"path": self.target},
+            headers=self.captain)
+        self.assertEqual(captain_first.status_code, 200, captain_first.text)
+        request_id = captain_first.json()["id"]
+        merged = self.client.post(
+            "/api/conversations/child/write-set", json={"path": second},
+            headers=child_worker)
+        self.assertEqual(merged.status_code, 200, merged.text)
+        self.assertTrue(merged.json()["human_only"])
+        self.assertEqual(self.client.post(
+            f"/api/conversations/child/write-set/request/{request_id}/approve",
+            headers=self.captain).status_code, 403)
+        self.client.post(f"/api/conversations/child/write-set/request/{request_id}/withdraw",
+                         headers=self.captain)
+
+        # A worker's request stays captain-decided when the captain merges.
+        worker_first = self.client.post(
+            "/api/conversations/child/write-set", json={"path": self.target},
+            headers=child_worker)
+        self.assertEqual(worker_first.status_code, 200, worker_first.text)
+        request_id = worker_first.json()["id"]
+        merged = self.client.post(
+            "/api/conversations/child/write-set", json={"path": second},
+            headers=self.captain)
+        self.assertEqual(merged.status_code, 200, merged.text)
+        self.assertFalse(merged.json()["human_only"])
+        self.assertEqual(merged.json()["decider_name"], "astra")
+        with patch("partyline.write_set_decisions.resume_line_attachments", self._resume_line):
+            approved = self.client.post(
+                f"/api/conversations/child/write-set/request/{request_id}/approve",
+                headers=self.captain)
+        self.assertEqual(approved.status_code, 200, approved.text)
+
+    def test_request_for_a_granted_parent_is_reported_without_opening_banner(self):
+        self.grant_on("line", self.target)
+        child = os.path.join(self.target, "child")
+        os.makedirs(child)
+        response = self.file(self.worker, child)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["already_granted"], [child])
+        self.assertIn("re-attach or restart", response.json()["message"])
+        self.assertIsNone(self.client.get("/api/conversations/line/write-set/request",
+                                         headers=self.human).json()["request"])
+
+    def test_mixed_path_request_names_paths_already_granted(self):
+        self.grant_on("line", self.target)
+        new_path = os.path.join(self.repo, "new")
+        os.makedirs(new_path)
+        response = self.client.post("/api/conversations/line/write-set",
+                                    json={"paths": [self.target, new_path]}, headers=self.worker)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["already_granted"], [self.target])
+        self.assertEqual(response.json()["paths"], [new_path])
+
+    def test_request_outside_root_captains_grants_is_person_only_from_filing(self):
+        self._seed_subtree()
+        other_repo, _sha = self._subtree_repo_with_commit()
+        path = os.path.join(other_repo, ".review")
+        filed = self.file_on_kid(path)
+        self.assertEqual(filed.status_code, 200, filed.text)
+        self.assertTrue(filed.json()["human_only"])
+        root_notice = self.db.list_messages("line")[-1]["body"]
+        self.assertIn("a person decides", root_notice)
+        self.assertNotIn("@astra", root_notice)
+        self.assertNotIn("approve:", root_notice)
+        self.assertIsNone(self.db._exec(
+            "SELECT wait_reason FROM task_reviews WHERE conv_id='kid'").fetchone())
+
+    def test_nearest_eligible_ancestor_captain_is_named_for_the_decision(self):
+        self._seed_subtree()
+        self.db.create_conversation("mid", "Mid", captain_mode="manager_tree")
+        self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='mid'")
+        self.db._exec("UPDATE conversations SET parent_id='mid' WHERE id='kid'")
+        self.db.add_attachment("mid-cap", "mid", "midcaptain", "fake", ["fake"], self.repo)
+        self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='mid-cap'")
+        mid_recorder = self.go_live("mid-cap")
+        mid_captain = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "mid-cap")}
+        other_repo, _sha = self._subtree_repo_with_commit()
+        self.grant_on("mid", other_repo)
+        path = os.path.join(other_repo, ".review")
+        filed = self.file_on_kid(path)
+        self.assertEqual(filed.status_code, 200, filed.text)
+        self.assertFalse(filed.json()["human_only"])
+        self.assertEqual(filed.json()["decider_name"], "midcaptain")
+        root_notice = self.db.list_messages("line")[-1]["body"]
+        self.assertIn("@midcaptain", root_notice)
+        self.assertNotIn("@astra", root_notice)
+        mid_notices = [m for m in self.db.list_messages("mid")
+                       if "write-set decision needed" in m["body"]]
+        self.assertEqual(len(mid_notices), 1)
+        self.assertIn("@midcaptain", mid_notices[0]["body"])
+        self.assertEqual(len([m for m in mid_recorder.delivered if "write-set decision needed"
+                              in m["body"]]), 1)
+        approved = self.client.post(
+            f"/api/conversations/kid/write-set/request/{filed.json()['id']}/approve",
+            headers=mid_captain)
+        self.assertEqual(approved.status_code, 200, approved.text)
+
+    def test_invalid_path_list_refuses_every_named_path_with_a_fix(self):
+        invalid = os.path.join(self.target, "missing")
+        response = self.client.post("/api/conversations/line/write-set",
+                                    json={"paths": [self.target, invalid]}, headers=self.worker)
+        self.assertEqual(response.status_code, 400)
+        detail = response.json()["detail"]
+        self.assertIn("none of these paths were filed", detail)
+        self.assertIn(invalid, detail)
+        self.assertIn("request the nearest existing ancestor", detail)
+
+    def test_deciding_write_request_clears_task_wait_reason(self):
+        self._seed_subtree()
+        self.db._exec(
+            "INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,policy,"
+            "created_at,wait_reason,wait_until) VALUES('kid','line','kid-worker','fake','captain',"
+            "0,'Waiting for write scope',9999999999)")
+        filed = self.file_on_kid()
+        self.assertEqual(filed.status_code, 200, filed.text)
+        request_id = filed.json()["id"]
+        approved = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/approve", headers=self.human)
+        self.assertEqual(approved.status_code, 200, approved.text)
+        row = self.db._exec("SELECT wait_reason,wait_until FROM task_reviews WHERE conv_id='kid'")
+        self.assertEqual(dict(row.fetchone()), {"wait_reason": "", "wait_until": None})
 
     def test_a_person_can_grant_a_review_checkout_by_repository_and_sha(self):
         # the person approving should not type the path either: the pair

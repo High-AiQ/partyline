@@ -16,7 +16,7 @@ from websockets.asyncio.server import serve as websocket_server
 
 from partyline_helper import cli, foreground, install_windows, launch, links, runtime, stopping, tray, version
 from partyline_helper.status import Status
-from tests.screen_helper_fakes import FakeDesktop, FakeTerminal, ManualTime, request, serve
+from tests.screen_helper_fakes import FakeDesktop, FakeTerminal, request, serve
 
 
 class FakeUser32:
@@ -150,11 +150,13 @@ class StopTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / "run.stop"
         self.naps, self.kills = [], []
+        self.wait = patch.object(stopping, "wait_pid", return_value=True).start()
+        self.addCleanup(patch.stopall)
 
     def stop(self, holders):
         FakeLock.holders = holders
         return stopping.stop_helper(FakeLock, lambda pid, sig: self.kills.append((pid, sig)),
-                                    self.naps.append, self.path)
+                                    self.path)
 
     def test_nothing_running_is_fine_and_clears_a_stale_request(self):
         self.path.write_text("stop")
@@ -167,39 +169,59 @@ class StopTests(unittest.TestCase):
         self.assertIn("4242", text)
         self.assertEqual(self.kills, [])
         self.assertEqual(self.path.read_text(), "stop")  # the helper deletes it as it exits
-        self.assertEqual(self.naps, [stopping.POLL])
+        self.assertEqual(self.naps, [])
+        self.wait.assert_called_once_with(4242, timeout=5)
 
     def test_an_old_helper_that_ignores_the_file_is_ended_by_pid(self):
-        stopped, text = self.stop([4242] * (stopping.WAITS + 2) + [None])
+        self.wait.side_effect = [False, True]
+        stopped, text = self.stop([4242])
         self.assertTrue(stopped)
         self.assertIn("ending the process", text)
         self.assertEqual(self.kills, [(4242, signal.SIGTERM)])
         self.assertFalse(self.path.exists())  # nobody will read it now
 
     def test_a_helper_that_survives_everything_is_reported(self):
+        self.wait.return_value = False
         stopped, text = self.stop([4242])
         self.assertFalse(stopped)
         self.assertIn("Task Manager", text)
 
     def test_a_kill_that_is_denied_is_not_fatal(self):
+        self.wait.return_value = False
         FakeLock.holders = [4242]
 
         def deny(pid, sig):
             raise PermissionError
-        self.assertFalse(stopping.stop_helper(FakeLock, deny, self.naps.append, self.path)[0])
+        self.assertFalse(stopping.stop_helper(FakeLock, deny, self.path)[0])
 
 
 class WatchStopTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_stop_file_cancels_the_helper_and_is_consumed(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path, clock, cancelled = Path(tmp) / "run.stop", ManualTime(), []
-            watching = asyncio.create_task(
-                stopping.watch_stop(lambda: cancelled.append(1), path, clock.sleep))
-            self.assertEqual(await clock.sleep_calls.get(), 0.5)
-            self.assertEqual(cancelled, [])
-            path.write_text("stop")
-            clock.advance(0.5)
-            await watching
+            path, cancelled = Path(tmp) / "run.stop", []
+            entered, created = asyncio.Event(), asyncio.Event()
+
+            class Events:
+                def __init__(self, *args):
+                    pass
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    pass
+
+                async def wait(self):
+                    entered.set()
+                    await created.wait()
+
+            with patch.object(stopping, 'FileEvents', Events):
+                watching = asyncio.create_task(stopping.watch_stop(lambda: cancelled.append(1), path))
+                await entered.wait()
+                self.assertEqual(cancelled, [])
+                path.write_text("stop")
+                created.set()
+                await watching
             self.assertEqual(cancelled, [1])
             self.assertFalse(path.exists())
 

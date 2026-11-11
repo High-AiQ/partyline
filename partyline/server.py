@@ -71,6 +71,7 @@ from .contracts import (
     ShutdownResponse,
 )
 from .handshake import VersionResponse
+from .screen_account_wire import serve_wire
 from . import deployment
 from .db import Db
 from .frontend_build import current_frontend_build
@@ -181,7 +182,9 @@ async def lifespan(app):
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
     app.state.automatic_reattach_task = automatic_task
     from .captain_handover import expire_offers
-    tasks = [automatic_task, asyncio.create_task(expire_offers(runtime)),
+    from .browser_snapshots import resource_updates
+    tasks = [asyncio.create_task(resource_updates(runtime)), automatic_task,
+             asyncio.create_task(expire_offers(runtime)),
              asyncio.create_task(maintenance(runtime)),
              asyncio.create_task(monitor_event_loop_lag()),
              asyncio.create_task(run_memory_sampler(runtime)),
@@ -197,7 +200,6 @@ async def lifespan(app):
             with suppress(asyncio.CancelledError):
                 await task
         await runtime.shutdown()
-
 app = FastAPI(lifespan=lifespan)
 app.state.bind = BindConfig()
 user_sockets = UserSocketRegistry()
@@ -249,12 +251,10 @@ app.include_router(orchestrator_router(runtime))
 app.include_router(restart_report_router(runtime, lambda r: require_loopback(r)))
 app.include_router(signal_router(runtime))
 app.include_router(forward_router(runtime))
-
 # -- REST ------------------------------------------------------------------
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
-
 
 # The frontend is built by Vite into `static/`, which emits content-hashed
 # bundles under `assets/`. Hashed names are why these can be cached hard: a new
@@ -277,7 +277,6 @@ async def version():
             "instance_name": getattr(app.state, "instance_name", None),
             "checkout_path": deployment.startup_path(),
             "git_head": deployment.startup_head()}
-
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 # Set by main(). None when partyline runs under someone else's ASGI server, in
@@ -583,10 +582,9 @@ async def ws_endpoint(ws: WebSocket, conv_id: str):
     finally:
         user_sockets.discard(principal.user_id, ws)
 
-
 async def _serve_socket(ws: WebSocket, conv_id: str, handle: str):
-    await runtime.websocket(
-        ws,
+    await serve_wire(
+        runtime, ws,
         conv_id,
         handle=handle,
         frontend_build=current_frontend_build(), server_version=__version__,

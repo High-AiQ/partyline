@@ -459,6 +459,78 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             self.db.get_attachment("one")["last_seen"], staged[0][-1]["id"]
         )
 
+    async def test_reattach_stages_queued_mail_before_newer_briefing(self):
+        old = self.db.add_message("line", "greg", "human", "@sol older")
+        self.db.set_last_seen("one", old["id"], None)
+        await self.db.queue_delivery_ids("one", [old["id"]], None)
+        new = self.db.add_message("line", "greg", "human", "@sol newer")
+        staged = []
+
+        async def resume(attachment_id, pending):
+            staged.extend(pending)
+            adapter = ReadyAdapter(self.order, "sol")
+            self.runtime._record_unproved(self.db.get_attachment(attachment_id), adapter, pending)
+            self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, True)
+
+        result = await ReattachCoordinator(self.runtime, resume).run(
+            {**self.plan, "attachment_ids": ["one"]}, "greg"
+        )
+        self.assertEqual(result.ready, ("sol",))
+        self.assertLess([m["id"] for m in staged].index(old["id"]),
+                        [m["id"] for m in staged].index(new["id"]))
+        self.assertEqual(self.db.queued_delivery_ids("one"), [])
+
+    async def test_late_reattach_receipt_credits_staged_and_newer_mail(self):
+        from partyline.continuation_delivery import _CONTINUATIONS
+        old = self.db.add_message("line", "greg", "human", "@sol older")
+        receipt = asyncio.Event()
+        started = set(_CONTINUATIONS)
+        async def resume(ident, pending):
+            adapter = ReadyAdapter(self.order, "sol")
+            adapter.wait_startup_delivery_received = receipt.wait
+            self.runtime._record_unproved(self.db.get_attachment(ident), adapter, pending)
+            self.db.set_attachment_status(ident, "running", None)
+            self.runtime.live[ident] = adapter
+            return ResumedAttachment(adapter, True)
+        result = await ReattachCoordinator(self.runtime, resume, ready_timeout=0).run(
+            {**self.plan, "attachment_ids": ["one"]}, "greg"
+        )
+        self.assertEqual(result.unconfirmed, ("sol",))
+        waiters = set(_CONTINUATIONS) - started
+        self.assertEqual(len(waiters), 1)
+        new = self.db.add_message("line", "greg", "human", "@sol newer")
+        await self.runtime.deliver_pending("line", self.db.get_attachment("one"), self.runtime.live["one"])
+        self.assertLess(self.db.get_attachment("one")["last_seen"], old["id"])
+        receipt.set()
+        await asyncio.wait_for(asyncio.gather(*waiters), .5)
+        self.assertEqual(self.db.get_attachment("one")["last_seen"], new["id"])
+        self.assertNotIn("one", self.runtime.uncredited)
+
+    async def test_reattach_continues_unstaged_delivery_after_ready_timeout(self):
+        from partyline.continuation_delivery import _CONTINUATIONS
+        message = self.db.add_message("line", "greg", "human", "@sol older")
+        ready = asyncio.Event()
+        started = set(_CONTINUATIONS)
+        adapter = ReadyAdapter(self.order, "sol")
+        adapter.wait_ready = ready.wait
+        async def resume(ident, pending):
+            self.runtime._record_unproved(self.db.get_attachment(ident), adapter, pending)
+            self.db.set_attachment_status(ident, "running", None)
+            self.runtime.live[ident] = adapter
+            return ResumedAttachment(adapter, False)
+        result = await ReattachCoordinator(self.runtime, resume, ready_timeout=0).run(
+            {**self.plan, "attachment_ids": ["one"]}, "greg"
+        )
+        self.assertEqual(result.unconfirmed, ("sol",))
+        waiters = set(_CONTINUATIONS) - started
+        self.assertEqual(len(waiters), 1)
+        self.assertEqual(adapter.deliveries, [])
+        ready.set()
+        await asyncio.wait_for(asyncio.gather(*waiters), .5)
+        self.assertIn(message["id"], [m["id"] for m in adapter.deliveries[0]])
+        self.assertGreaterEqual(self.db.get_attachment("one")["last_seen"], message["id"])
+
     async def test_staged_process_exiting_before_receipt_keeps_cursor(self):
         plan = {**self.plan, "attachment_ids": ["one"]}
 

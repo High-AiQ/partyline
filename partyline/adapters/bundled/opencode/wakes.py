@@ -96,10 +96,7 @@ class WakeSettlement:
             if not self.alive():  # type: ignore[attr-defined]
                 return False
             self._delivery_confirmed.clear()
-            try:
-                await asyncio.wait_for(self._delivery_confirmed.wait(), timeout=1.0)
-            except TimeoutError:
-                continue
+            await self._delivery_confirmed.wait()
         return True
 
     def _schedule_unproved_repool(self) -> None:

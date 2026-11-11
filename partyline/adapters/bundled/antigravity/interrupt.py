@@ -155,5 +155,5 @@ async def turn_closed(adapter, timeout: float) -> bool:
     while not turn_is_closed(adapter):
         if time.monotonic() >= deadline or not adapter.alive():
             return False
-        await asyncio.sleep(0.05)
+        await adapter.wait_for_change(max(0, deadline - time.monotonic()))
     return True

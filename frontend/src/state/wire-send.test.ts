@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { voicePresets } from "./voice-presets.svelte.js";
 import { wire, WAKE_VERIFY_MS } from "./wire.svelte.js";
 
 class FakeSocket {
@@ -24,6 +25,7 @@ class FakeSocket {
 }
 
 afterEach(() => {
+  voicePresets.reset();
   wire.disconnect();
   FakeSocket.instances = [];
   vi.unstubAllGlobals();
@@ -54,6 +56,26 @@ describe("wire send recovery", () => {
     const before = FakeSocket.instances.length;
     expect(wire.send({ body: "hello" })).toBe(false);
     expect(FakeSocket.instances.length).toBeGreaterThan(before);
+  });
+
+  it("applies a recognizer snapshot on every account hello without a timer fetch", () => {
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.stubGlobal("location", { protocol: "https:", host: "partyline.example" });
+    wire.connect("~account", { clientId: "tab" }, () => undefined);
+    const socket = FakeSocket.instances[0];
+    if (!socket?.onopen || !socket.onmessage) throw new Error("missing socket handlers");
+    socket.onopen();
+    socket.onmessage({
+      data: JSON.stringify({
+        type: "hello",
+        conversation_id: "~account",
+        handle: "greg",
+        version: "2.112.3",
+        speech_settings: { default: "pushed", presets: [] },
+      }),
+    });
+    expect(voicePresets.settings?.default).toBe("pushed");
+    expect(FakeSocket.instances).toHaveLength(1);
   });
 
   it("replaces a stale socket after the tab was hidden long enough", () => {

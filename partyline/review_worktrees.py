@@ -11,6 +11,7 @@ review checkout can never lose the work that was reviewed.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -123,6 +124,8 @@ def create_review_worktree(db, conv_id: str, sha: str, repository: str = "") -> 
             raise ReviewError(
                 409, f"cannot create the review worktree: {detail[-1] if detail else 'git failed'}"
             )
+    from .review_dependencies import provision, sources_for
+    provision(path, sources_for(db, conv_id, root))
     created_at = time.time()
     db._exec(
         "INSERT INTO review_worktrees(conv_id,sha,path,created_at) VALUES(?,?,?,?) "
@@ -242,7 +245,7 @@ def register_review_routes(app, runtime) -> None:
         deny_unless(db, request_principal(request), conv_id, "write")
         principal = request_principal(request)
         try:
-            done = create_review_worktree(db, conv_id, body.sha, body.repository)
+            done = await asyncio.to_thread(create_review_worktree, db, conv_id, body.sha, body.repository)
         except ReviewError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         await post_system_notice(

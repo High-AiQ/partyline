@@ -63,7 +63,7 @@ beforeEach(() => {
   room.conversation = conversation;
   draft.openLine(conversation.id);
   draft.text = "";
-  vi.spyOn(voiceApi, "presets").mockResolvedValue(ONE);
+  voicePresets.listing = ONE;
 });
 
 afterEach(() => {

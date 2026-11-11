@@ -7,6 +7,8 @@ from types import SimpleNamespace
 from websockets.exceptions import ConnectionClosed
 
 from .uia_access import WindowAccess, select_window
+from .window_events import WindowEvents
+from partyline.file_events import Changes
 from .uia_task import WindowTask, read_options
 from .uia_window_identity import unmark
 from .window_target_picker import select_target
@@ -26,6 +28,7 @@ class WindowSession:
 
 class WindowShares:
     def __init__(self, session, window_picker=select_window, target_picker=select_target):
+        self._changes = Changes()
         self.session, self.window_picker, self.target_picker = session, window_picker, target_picker
         self.grants, self.waiters, self.tasks = {}, {}, set()
         self.picking, self.generation = False, 0
@@ -59,6 +62,7 @@ class WindowShares:
             await self.session.send("window_revoked", grant_id=ident, reason=reason)
 
     def changed(self):
+        self._changes.notify()
         labels = {ident: f"{entry['title']} → @{entry['target']['name']} «{entry['target']['line_name']}»"
                   for ident, entry in self.grants.items()}
         self.session.status.window_grants = labels
@@ -142,24 +146,23 @@ class WindowShares:
             await entry["worker"].submit_action(message)
 
     async def watch(self):
-        async def sleep(delay):
-            await self.session.sleep(delay)
-        while True:
-            await sleep(1)
-            for entry in list(self.grants.values()):
-                access = entry["access"]
-                grant = access.grant
-                if not grant:
-                    continue
-                reason = await access.check(grant)
-                if access.grant is not grant:
-                    continue
-                if reason == "window closed":
-                    access.revoke(reason)
-                elif reason == "secure desktop active":
-                    access.gate.invalidate()
-                elif access.grant and access.gate.revoked.is_set():
-                    access.gate.grant()
+        async with WindowEvents(self._changes) as events:
+            while True:
+                for entry in list(self.grants.values()):
+                    access = entry["access"]
+                    grant = access.grant
+                    if not grant:
+                        continue
+                    reason = await access.check(grant)
+                    if access.grant is not grant:
+                        continue
+                    if reason == "window closed":
+                        access.revoke(reason)
+                    elif reason == "secure desktop active":
+                        access.gate.invalidate()
+                    elif access.grant and access.gate.revoked.is_set():
+                        access.gate.grant()
+                await events.wait()
 
     async def close(self):
         self.revoke_all(notify=False)

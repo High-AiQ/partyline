@@ -22,6 +22,7 @@ async def wait_until_quiet(runtime, presence, att_id, ended_at, clock, sleep) ->
         delay = quiet_deadline(runtime, att_id, ended_at) - clock()
         if delay <= 0:
             return True
+        # no-poll (b): deadline derived from the last activity, not a periodic state check
         await sleep(delay)
     return False
 
@@ -151,6 +152,7 @@ class GoalStallGuard:
                 ]
                 delay = max(deadlines, default=now) - now
                 if delay > 0:
+                    # no-poll (b): deadline derived from the last activity, not a periodic state check
                     await returns.sleep(delay)
                     continue
                 target = self._target(conv_id)

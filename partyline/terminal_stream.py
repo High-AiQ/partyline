@@ -1,6 +1,9 @@
 """WebSocket streaming for the live terminal view."""
 
 import asyncio
+import time
+
+import jwt
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -47,13 +50,21 @@ class TerminalAuthority:
 
 async def _send_terminal(ws: WebSocket, viewer: TerminalViewer, authority: TerminalAuthority) -> None:
     while await authority.require("read"):
-        try:
-            data = await asyncio.wait_for(viewer.queue.get(), AUTH_CHECK_INTERVAL)
-        except TimeoutError:
-            continue
+        data = await viewer.queue.get()
         if data is None or not await authority.require("read"):
             return
         await ws.send_bytes(data)
+
+
+async def _watch_authority(authority):
+    with authority.runtime.db.events.subscribe('users', 'auth_tokens', 'attachments',
+            'conversations', 'conversation_write_grants', 'task_reviews') as events:
+        while await authority.require('read'):
+            try:
+                expiry = jwt.decode(authority.token, options={"verify_signature": False}).get('exp')
+            except jwt.DecodeError:
+                expiry = None  # opaque machine token: rotation arrives as a mutation
+            await events.wait(None if expiry is None else max(0, expiry - time.time()))
 
 
 async def _receive_terminal(ws: WebSocket, adapter: Adapter, authority: TerminalAuthority) -> None:
@@ -98,7 +109,8 @@ def terminal_endpoint(runtime: "ChatRuntime"):
             else:
                 await ws.send_text(viewer.snapshot)
             tasks = [asyncio.create_task(_send_terminal(ws, viewer, authority)),
-                     asyncio.create_task(_receive_terminal(ws, adapter, authority))]
+                     asyncio.create_task(_receive_terminal(ws, adapter, authority)),
+                     asyncio.create_task(_watch_authority(authority))]
             await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         except WebSocketDisconnect:
             pass

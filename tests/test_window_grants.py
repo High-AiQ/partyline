@@ -1,14 +1,130 @@
 """Cross-line window authorization and lifecycle, with event-driven helper responses."""
 import unittest
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
+
+from fastapi import WebSocketDisconnect
 
 from partyline.auth_guard import Principal
 from partyline.screen_grants import device_grants, resolve_window, window_share_indicators
+from partyline.screen_frames import ShareBuffer
+from partyline.screen_account_wire import serve_wire
+from partyline.screen_snapshot import owner_state
 from partyline.screen_window_grants import share_targets
 from tests.window_grant_fixtures import WindowGrantFixture
 
 
 class WindowGrantTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_owner_snapshot_queries_are_shared_across_tabs(self):
+        first = SimpleNamespace(screen_owner_id=self.owner["id"], send_json=AsyncMock())
+        second = SimpleNamespace(screen_owner_id=self.owner["id"], send_json=AsyncMock())
+        self.runtime.sockets = {"alpha": [first], "beta": [second]}
+        with patch("partyline.screen_snapshot.owner_state", wraps=owner_state) as build:
+            await self.hub._device_event(self.device, True)
+        build.assert_called_once_with(self.hub, self.owner["id"])
+        self.assertEqual("screen_snapshot", first.send_json.await_args.args[0]["type"])
+        self.assertEqual("screen_snapshot", second.send_json.await_args.args[0]["type"])
+
+    async def test_account_wire_pushes_snapshot_and_unregisters_on_disconnect(self):
+        await self.grant("a")
+        socket = Mock()
+        socket.screen_owner_id = self.owner["id"]
+        socket.accept = AsyncMock()
+        socket.send_json = AsyncMock()
+        socket.receive_json = AsyncMock(side_effect=[{"type": "hello", "client_id": "tab"},
+                                                    WebSocketDisconnect()])
+        await serve_wire(self.runtime, socket, "~account", "owner", "build", "1")
+        messages = [call.args[0] for call in socket.send_json.await_args_list]
+        self.assertEqual(["hello", "screen_snapshot"], [item["type"] for item in messages])
+        self.assertEqual("alpha", messages[1]["indicators"][0]["conv_id"])
+        self.assertEqual(set(), self.runtime.sockets["~account"])
+        self.runtime.sockets["~account"].add(socket)
+        await self.hub.window_grants.revoke("g1")
+        self.assertEqual([], socket.send_json.await_args.args[0]["indicators"])
+
+    async def test_socket_hello_and_reconnect_push_current_screen_snapshot(self):
+        await self.grant("a")
+        for _ in range(2):
+            socket = Mock()
+            socket.screen_owner_id = self.owner["id"]
+            socket.accept = AsyncMock()
+            socket.send_json = AsyncMock()
+            socket.receive_json = AsyncMock(side_effect=[{"type": "hello", "client_id": "tab"},
+                                                        WebSocketDisconnect()])
+            await self.runtime.websocket(socket, "alpha", "owner", "build", "1")
+            messages = [call.args[0] for call in socket.send_json.await_args_list]
+            self.assertEqual(["hello", "screen_snapshot"], [item["type"] for item in messages])
+            self.assertEqual("g1", messages[1]["devices"][0]["window_grants"][0]["id"])
+            self.assertEqual("alpha", messages[1]["indicators"][0]["conv_id"])
+
+    async def test_share_and_control_changes_push_owner_snapshots(self):
+        own = SimpleNamespace(screen_owner_id=self.owner["id"], send_json=AsyncMock())
+        self.runtime.sockets = {"beta": [own]}
+        region = {"x": 0, "y": 0, "width": 10, "height": 10}
+        self.device["monitors"] = [region]
+        share = await self.hub.start_share("alpha", self.owner["id"], "owner",
+                                           self.device["id"], region, "Alpha")
+        def snapshots():
+            return [call.args[0] for call in own.send_json.await_args_list
+                    if call.args[0]["type"] == "screen_snapshot"]
+        self.assertEqual([], snapshots()[-1]["indicators"])
+        share.status = "active"
+        await self.hub._line_event("alpha", self.hub._share_view(share, self.device))
+        self.assertEqual("screen", snapshots()[-1]["indicators"][0]["kind"])
+        self.hub.control.expect(share, "owner")
+        with patch("partyline.screen_control.notice", new_callable=AsyncMock):
+            await self.hub.control.from_helper(
+                self.device, {"type": "control_granted", "share_id": share.share_id})
+            await self.hub.control.revoke(share, "released")
+        self.assertGreaterEqual(len(snapshots()), 4)
+        with patch("partyline.screen_share_stop.share_stopped", new_callable=AsyncMock):
+            await self.hub.stop_share(share.share_id)
+        self.assertEqual([], snapshots()[-1]["indicators"])
+
+    async def test_pair_and_offline_removal_push_device_list(self):
+        own = SimpleNamespace(screen_owner_id=self.owner["id"], send_json=AsyncMock())
+        self.runtime.sockets = {"alpha": [own]}
+        code = self.hub.issue_pair_code(self.owner["id"])
+        response = await self.client.post("/api/screen/pair/claim", json={
+            "code": code, "device_name": "Laptop", "os": "test"})
+        self.assertEqual(200, response.status_code)
+        ident = response.json()["device_id"]
+        self.assertIn(ident, [device["id"] for device in own.send_json.await_args.args[0]["devices"]])
+        response = await self.client.delete("/api/screen/devices/" + ident, headers=self.human(self.owner))
+        self.assertEqual(200, response.status_code)
+        self.assertNotIn(ident, [device["id"] for device in own.send_json.await_args.args[0]["devices"]])
+
+    async def test_walkthrough_deadline_pushes_share_expiry(self):
+        own = SimpleNamespace(screen_owner_id=self.owner["id"], send_json=AsyncMock())
+        self.runtime.sockets = {"beta": [own]}
+        share = ShareBuffer("take", "alpha", self.device["id"], self.owner["id"], "owner", {})
+        self.hub.shares["alpha"] = share
+        loop = Mock()
+        with patch("partyline.walkthrough_takes.asyncio.get_running_loop", return_value=loop):
+            self.hub.walkthroughs.create(share)
+        callback = loop.call_later.call_args.args[1]
+        await callback()
+        self.assertNotIn("alpha", self.hub.shares)
+        snapshots = [call.args[0] for call in own.send_json.await_args_list
+                     if call.args[0]["type"] == "screen_snapshot"]
+        self.assertTrue(snapshots)
+        self.assertEqual([], snapshots[-1]["indicators"])
+
+    async def test_grant_lifecycle_notifies_only_owner(self):
+        own = SimpleNamespace(screen_owner_id=self.owner["id"], send_json=AsyncMock())
+        other = SimpleNamespace(screen_owner_id=self.other_user["id"], send_json=AsyncMock())
+        self.runtime.sockets = {"alpha": [own], "beta": [other]}
+        await self.grant("a")
+        def snapshots():
+            return [call.args[0] for call in own.send_json.await_args_list
+                    if call.args[0]["type"] == "screen_snapshot"]
+        self.assertEqual(1, len(snapshots()))
+        self.assertEqual("g1", snapshots()[-1]["devices"][0]["window_grants"][0]["id"])
+        await self.hub.window_grants.revoke("g1")
+        self.assertEqual(2, len(snapshots()))
+        self.assertEqual([], snapshots()[-1]["devices"][0]["window_grants"])
+        other.send_json.assert_not_awaited()
+
     async def test_two_windows_one_process_ambiguity_and_snapshot_isolation(self):
         self.assertTrue((await self.grant("a"))["ok"])
         self.assertTrue((await self.grant("a", "Browser", "g2", 20))["ok"])

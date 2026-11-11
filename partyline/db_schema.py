@@ -18,14 +18,14 @@ from .screen_audit_schema import MIGRATIONS as SCREEN_AUDIT
 from .screen_schema import MIGRATIONS as SCREEN
 from .screen_account_schema import MIGRATIONS as SCREEN_ACCOUNT
 from .screen_grant_schema import MIGRATIONS as SCREEN_GRANTS
+from .write_set_schema import MIGRATIONS as WRITE_SET
 from .orchestrator_schema import MIGRATIONS as ORCHESTRATOR
 from .asr_schema import MIGRATIONS as ASR
+
 MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
-    # archived_at: NULL while live. Archiving hides a line and stops processes.
     "ALTER TABLE conversations ADD COLUMN archived_at REAL",
-    # A singleton restart intent: saved before shutdown, consumed on reattachment.
     """CREATE TABLE IF NOT EXISTS restart_plan(
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
         conversation_id TEXT NOT NULL,
@@ -297,4 +297,4 @@ MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + S
                   + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR + HANDOVER)
 MIGRATIONS.extend(["ALTER TABLE attachments ADD COLUMN is_successor INTEGER NOT NULL DEFAULT 0"] + SCREEN
                   + ASR + SCREEN_AUDIT + LOCAL_TOOLS_AUDIT + SCREEN_ACCOUNT)
-MIGRATIONS.extend(SCREEN_GRANTS)
+MIGRATIONS.extend(SCREEN_GRANTS + WRITE_SET)

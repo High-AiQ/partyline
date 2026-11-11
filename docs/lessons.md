@@ -1,5 +1,49 @@
 # Lessons: the false-assumptions ledger
 
+## Resume backlogs must share delivery accounting
+
+The false assumption was that staging a startup prompt advanced delivery immediately.
+A wake could paste it again before transcript proof, while older persisted queue IDs
+were left behind the new briefing. Register startup IDs as unproved before routing,
+merge queued IDs into the ordered briefing, and credit only confirmed IDs. A
+coordinator timeout must not cancel the receipt waiter: late transcript proof
+releases the cursor and any newer confirmed mail. A write that can be credited
+immediately must update that frontier while the same ownership reservation is
+held; otherwise a waiting replacement can claim the process between paste and
+credit.
+
+## Review checkouts need their own JavaScript dependencies
+
+The false assumption was that Node would find usable dependencies in a fresh review checkout. Its upward search can instead reach the host checkout, where Vite writes are outside the reviewer’s fence. Give each locked package a real local dependency directory, verify installed lock data before linking, and surface installation failures before review. Package writes through those links are refused by the fence. Run fallback installers in a restricted sandbox with lifecycle scripts disabled: package-manager configuration can execute code.
+
+## A reply does not prove an unread message was answered
+
+The false assumption was that a later mention of a sender answered their message.
+The recipient may have written it before the wake was proved delivered. Resume
+keeps unread addressed mail regardless of later speech; the delivery cursor
+already excludes credited mail. A regression covers an unproved paste followed
+by a question, and another checks that credited, answered mail stays excluded.
+
+## A native watcher wrapper can still poll and watch too much
+
+Disabling watchfiles' filesystem polling did not disable its timed Rust wait
+loop. A recursive nearest-ancestor fallback also expanded a single database
+watch into the whole home directory. Use descriptor readiness or native I/O
+completion with cancellation, shallow watches, and explicit bounded transcript
+layouts. Register each missing path component before scanning it. Tests count
+kernel registrations, advance an idle virtual hour without work, and exercise
+parent creation and shutdown; a wrapper's option name is not that evidence.
+
+## Event waits keep the consumer's identity
+
+A timeout wrapper can create a new asyncio Task on each wait. Using that Task
+as the notification cursor makes an old generation look new every time, turning
+an event-driven deadline into a spin. Keep the calling consumer's cursor across
+`wait_for`, register filesystem notifications before scanning, and watch the
+parent directory so unlink/recreate reopens the transcript. The event regressions
+cover a quiet second wait, native watcher failures, and an unlinked inode followed
+by a partial replacement. Speech still comes only from structured records.
+
 ## Text transcription is not timed narration
 
 The false assumption was that switching the default recognizer to GPT-Transcribe

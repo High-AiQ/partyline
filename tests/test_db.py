@@ -227,27 +227,25 @@ class DbTest(unittest.TestCase):
         contender = Db(self.db_path)
 
         async def contend_then_cancel():
+            from partyline import runtime_lock
+            native_lock = runtime_lock.lock
+            loop = asyncio.get_running_loop()
             lock_waiting = asyncio.Event()
-            never = asyncio.Event()
 
-            async def contended(_seconds):
-                lock_waiting.set()
-                await never.wait()
+            def contended(descriptor):
+                loop.call_soon_threadsafe(lock_waiting.set)
+                native_lock(descriptor)
 
-            with patch("partyline.runtime_lock.asyncio.sleep", new=contended):
-                async with self.db.reserve_attachment_delivery(
-                    "att", "old-generation"
-                ) as reserved:
-                    self.assertTrue(reserved)
+            async with self.db.reserve_attachment_delivery("att", "old-generation") as reserved:
+                self.assertTrue(reserved)
 
-                    async def wait_for_same_lock():
-                        async with contender.reserve_attachment_delivery(
-                            "att", "old-generation"
-                        ):
-                            self.fail("a second reservation crossed the held lock")
+                async def wait_for_same_lock():
+                    async with contender.reserve_attachment_delivery("att", "old-generation"):
+                        self.fail("a second reservation crossed the held lock")
 
+                with patch.object(runtime_lock, 'lock', contended):
                     waiting = asyncio.create_task(wait_for_same_lock())
-                    await asyncio.wait_for(lock_waiting.wait(), 1)
+                    await lock_waiting.wait()
                     waiting.cancel()
                     with self.assertRaises(asyncio.CancelledError):
                         await waiting
@@ -280,16 +278,20 @@ class DbTest(unittest.TestCase):
             transition_finished.set()
 
         async def reserve_while_detach_starts():
-            with patch("partyline.runtime_lock.time.sleep", side_effect=lambda _: lock_blocked.set()):
-                async with self.db.reserve_attachment_delivery(
-                    "att", "old-generation"
-                ) as reserved:
-                    self.assertTrue(reserved)
+            from partyline import runtime_lock
+            native_lock = runtime_lock.lock
+
+            def contended(descriptor):
+                lock_blocked.set()
+                native_lock(descriptor)
+
+            async with self.db.reserve_attachment_delivery("att", "old-generation") as reserved:
+                self.assertTrue(reserved)
+                with patch.object(runtime_lock, 'lock', contended):
                     transition = asyncio.create_task(asyncio.to_thread(detach_then_claim))
                     await asyncio.to_thread(lock_blocked.wait)
-                    # The contender really failed the OS lock, not merely started.
                     self.assertFalse(transition_finished.is_set())
-                await transition
+            await transition
 
         try:
             asyncio.run(reserve_while_detach_starts())

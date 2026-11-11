@@ -1,10 +1,7 @@
 """Resume one attachment, including its server-owned delivery history.
 
-The server used to hold this orchestration inline while ``server.py`` sat on
-its grandfathered line cap.  Keeping it here both removes that debt and makes
-the replay boundary explicit: a resumable adapter receives the ordered bodies
-this exact attachment actually delivered, not an inferred position in a file
-owned by its CLI.
+A resumable adapter receives the ordered bodies this attachment actually
+delivered, not an inferred position in a file owned by its CLI.
 """
 
 from __future__ import annotations
@@ -276,6 +273,9 @@ async def _resume_adapter_locked(
         runtime.db, att_id, runtime_owner, lease, grandfathered=grandfathered
     ):
         raise HTTPException(409, claim_refusal_detail(runtime, att))
+    if startup_messages:
+        runtime._live_uncredited(att_id, runtime_owner)
+        runtime._record_unproved(att, adapter, startup_messages)
     try:
         await adapter.start()
     except FenceUnavailable as exc:

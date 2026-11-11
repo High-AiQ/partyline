@@ -13,7 +13,7 @@ import time
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from . import docker_relay, docker_workloads
 from .auth_guard import request_principal
@@ -22,6 +22,7 @@ from .machine_scope import deny_unless, is_human
 
 class WriteSetIn(BaseModel):
     path: str = ""
+    paths: list[str] = Field(default_factory=list)
     # Or name a review worktree instead of typing its path: the pair resolves
     # to ``<repository>/.review/<full sha>``, the repository under the same
     # subtree rule a review worktree obeys. The pair and a typed path are
@@ -30,12 +31,50 @@ class WriteSetIn(BaseModel):
     sha: str = Field(default="", max_length=64)
     docker_mode: Literal["", "managed", "unrestricted"] = ""  # docker access only; a person's choice
 
+    @model_validator(mode="after")
+    def one_path_source(self):
+        if self.path and self.paths:
+            raise ValueError("pass path or paths, not both")
+        if len(set(self.paths)) != len(self.paths):
+            raise ValueError("paths must be unique")
+        if self.repository or self.sha:
+            if self.paths:
+                raise ValueError("a review worktree grant names one path source")
+        return self
+
 
 class WriteSetGrant(BaseModel):
     path: str
     granted_by: str
     granted_at: float
     docker_mode: str = "managed"
+
+
+def requested_paths(db, conv_id: str, body: WriteSetIn) -> list[str]:
+    from .write_set_requests import resolve_write_set_path, validate_grantable
+
+    raw = body.paths or ([body.path] if body.path else [])
+    if body.repository or body.sha:
+        raw = [resolve_write_set_path(db, conv_id, body)]
+    if not raw:
+        raise HTTPException(422, "name the path or paths to request")
+    if len(raw) > 32:
+        named = ", ".join(f"`{path}`" for path in raw)
+        raise HTTPException(
+            422, f"none of these paths were filed: {named}; submit at most 32 paths per call")
+    validated = []
+    failures = []
+    for path in raw:
+        try:
+            validated.append(validate_grantable(db, path))
+        except HTTPException as exc:
+            failures.append((path, exc.detail))
+    if failures:
+        if body.paths:
+            items = "; ".join(f"{path}: {detail}" for path, detail in failures)
+            raise HTTPException(400, f"none of these paths were filed: {items}; correct them and retry")
+        raise HTTPException(400, failures[0][1])
+    return list(dict.fromkeys(validated))
 
 
 def list_write_grants(db, conv_id: str) -> list[dict]:
@@ -77,8 +116,8 @@ def add_write_grant(db, conv_id: str, path: str, granted_by: str, docker_mode: s
 
 def write_set_router(runtime, resume=None) -> APIRouter:
     from .write_set_decisions import make_announcer
-    from .write_set_requests import (
-        file_write_set_request, resolve_write_set_path, resume_granted_scope)
+    from .write_set_requests import file_write_set_request
+    from .write_set_resume import resume_granted_scopes
 
     router = APIRouter()
 
@@ -96,27 +135,42 @@ def write_set_router(runtime, resume=None) -> APIRouter:
         principal = request_principal(request)
         if db.get_conversation(conv_id) is None:
             raise HTTPException(404)
+        if not is_human(principal):
+            from .write_set_requests import machine_may_file
+            if not machine_may_file(db, principal, conv_id):
+                raw_paths = body.paths or ([body.path] if body.path else [])
+                named = ", ".join(f"`{path}`" for path in raw_paths) or "(no path named)"
+                raise HTTPException(
+                    403, f"none of these paths were filed: {named}; only a person or a captain "
+                         "above this line may request write scope")
         if is_human(principal):
             # Same rule as a process filing: the path must be grantable, so a
             # person cannot record a grant the fence would drop at spawn (2.18).
-            from .write_set_requests import validate_grantable
-            path = validate_grantable(db, resolve_write_set_path(db, conv_id, body))
-            add_write_grant(db, conv_id, path, principal.name, body.docker_mode or None)
-            text = f"☏ write-set grant for `{path}` by @{principal.name}"
-            if resume is not None and docker_relay.is_docker_socket(path):
+            paths = requested_paths(db, conv_id, body)
+            grants = [add_write_grant(
+                db, conv_id, path, principal.name,
+                body.docker_mode if docker_relay.is_docker_socket(path) else None)
+                      for path in paths]
+            text = f"☏ write-set grant for {', '.join(f'`{p}`' for p in paths)} by @{principal.name}"
+            docker_paths = [path for path in paths if docker_relay.is_docker_socket(path)]
+            if resume is not None and docker_paths:
                 # Every live process must pick up the mount that hides the relays.
-                _done, failed = await resume_granted_scope(runtime, conv_id, path, resume)
+                _done, failed = await resume_granted_scopes(runtime, conv_id, paths, resume)
                 text = (f"☏ {docker_workloads.mode_text(body.docker_mode or 'managed')} granted by "
                         f"@{principal.name} — every live process is resumed so other lines "
                         "cannot reach the relay")
                 if failed:
                     text += f" — could not resume @{', @'.join(failed)}; re-attach them by hand"
             await post_system_notice(runtime, conv_id, text, actor=principal)
-            return list_write_grants(db, conv_id)
+            return grants
         if body.docker_mode:
             raise HTTPException(403, "only a person chooses a docker access mode")
-        return await file_write_set_request(
-            runtime, conv_id, resolve_write_set_path(db, conv_id, body), principal,
+        filed = await file_write_set_request(
+            runtime, conv_id, requested_paths(db, conv_id, body), principal,
             announce_fn=make_announcer(runtime))
+        if not filed.id:
+            return {"already_granted": filed.paths,
+                    "message": "already granted; re-attach or restart the worker to pick up the widened bind"}
+        return filed
 
     return router

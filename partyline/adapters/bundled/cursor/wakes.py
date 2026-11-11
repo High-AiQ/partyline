@@ -129,10 +129,7 @@ class WakeSettlement:
             if not self.alive():  # type: ignore[attr-defined]
                 return False
             self._confirm_event.clear()
-            try:
-                await asyncio.wait_for(self._confirm_event.wait(), timeout=1.0)
-            except TimeoutError:
-                continue
+            await self._confirm_event.wait()
         return True
 
     async def interrupt(self) -> InterruptStatus:

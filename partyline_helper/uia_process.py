@@ -3,7 +3,7 @@ import json
 import subprocess
 import sys
 import tempfile
-import time
+import threading
 from pathlib import Path
 
 from .uia_snapshot import BUDGET
@@ -19,7 +19,7 @@ def command(payload):
 
 
 def read(hwnd, frame=None, state=None, deep=True, popen=subprocess.Popen, platform=sys.platform,
-         clock=time.monotonic, sleep=time.sleep):
+         ready_wait=None):
     if platform != "win32":
         return {"elements_unavailable": "Windows UI Automation is not available on this platform"}
     with tempfile.TemporaryDirectory(prefix="partyline-uia-") as directory:
@@ -30,17 +30,32 @@ def read(hwnd, frame=None, state=None, deep=True, popen=subprocess.Popen, platfo
         payload = json.dumps([hwnd, frame, str(path), str(ready), str(saved) if state else None, deep])
         process = None
         try:
-            process = popen(command(payload), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            process = popen(command(payload), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                             creationflags=0x08000000)
-            deadline, started = clock() + START_LIMIT, False
-            while process.poll() is None:
-                if not started and ready.exists():
-                    started, deadline = True, clock() + BUDGET + KILL_SLACK
-                if clock() >= deadline:
-                    process.kill()
-                    process.wait()
-                    return {"elements_unavailable": "timeout", "truncated": True}
-                sleep(.01)
+            ready_event = threading.Event()
+            announcement = []
+
+            def initialized():
+                try:
+                    announcement.append(process.stdout.readline())
+                except OSError:
+                    pass  # A failed child closes its pipe; readiness remains unproved.
+                finally:
+                    ready_event.set()
+
+            threading.Thread(target=initialized, name='uia-ready', daemon=True).start()
+            wait_ready = ready_wait or ready_event.wait
+            # Windows text-mode stdout writes CRLF, so compare the stripped line.
+            if not wait_ready(START_LIMIT) or [line.strip() for line in announcement] != [b"READY"]:
+                process.kill()
+                process.wait()
+                return {"elements_unavailable": "timeout", "truncated": True}
+            try:
+                process.wait(timeout=BUDGET + KILL_SLACK)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+                return {"elements_unavailable": "timeout", "truncated": True}
             if process.returncode:
                 return {"elements_unavailable": "Windows UI Automation failed"}
             return json.loads(path.read_text(encoding="utf-8"))
@@ -50,6 +65,8 @@ def read(hwnd, frame=None, state=None, deep=True, popen=subprocess.Popen, platfo
             if process is not None and process.poll() is None:
                 process.kill()
                 process.wait()
+            if process is not None and getattr(process, 'stdout', None) is not None:
+                process.stdout.close()
 
 
 def initialize():  # pragma: no cover - native Windows UIA type library
@@ -65,7 +82,7 @@ def main(request=None):  # pragma: no cover - isolated Windows child process
     hwnd, frame, path, ready, saved, deep = json.loads(request or sys.argv[1])
     provider = WindowsProvider(hwnd, cached=True, deep=deep and not saved)
     provider.root()  # the whole-tree prefetch runs under the start limit, not the walk's budget
-    Path(ready).touch()
+    print("READY", flush=True)
     state = json.loads(Path(saved).read_text(encoding="utf-8")) if saved else None
     result = snapshot(provider, frame, state=state)
     Path(path).write_text(json.dumps(result), encoding="utf-8")

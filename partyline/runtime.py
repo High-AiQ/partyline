@@ -13,9 +13,10 @@ from .bridge_delivery import stamp_outbound
 from .bridge_service import close_for_attachment
 from .contracts import ErrorEvent, Event, MessageEvent, MessageResponse
 from .capability_versions import CapabilityVersions
-from .handshake import hello_payload
+from .browser_snapshots import hello_payload
 from .db import Db
 from .delivery_hooks import delivery_hooks
+from .delivery_credit_accounting import confirm_reserved
 from .delivery_reservation import reserve_delivery
 from .message_routing import post_human_message, route_message
 from .reattach import ReattachCoordinator
@@ -26,6 +27,7 @@ from .attachment_stop_audit import status_update
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 RESERVED_NAMES = {"all", "system"}  # @all rings everyone; system is the notice sender
 logger = logging.getLogger(__name__)
+
 
 def handle_error(handle: str) -> str | None:
     """Return a user-facing validation error, or ``None`` for a valid handle."""
@@ -48,8 +50,7 @@ class ChatRuntime(DeliveryCreditMixin):
         # Manual and restart-plan resumes must never start the same attachment
         # concurrently. Locks are process-local and keyed by durable id.
         self.resume_locks: dict[str, asyncio.Lock] = {}
-        # A planned process is queued behind its durable cursor, not unreachable.
-        self.reattaching: set[str] = set()
+        self.reattaching: set[str] = set()  # queued behind the durable cursor
         # Ids of the restart plan being worked, in order; see reattach_queue.
         self.restart_plan_order: list[str] = []
         # Pasted-but-unproved message ids, keyed per activation. Transcript
@@ -67,11 +68,7 @@ class ChatRuntime(DeliveryCreditMixin):
         return adapter.att.get("runtime_owner") == attachment.get("runtime_owner")
 
     def running_processes(self) -> list[dict]:
-        """Every live attachment, across every line, newest line first.
-
-        Stopping the server stops all of these, so whoever asks for that has to
-        be shown the whole list — not just the line they happen to be looking at.
-        """
+        """List all live attachments newest first, including every line a stop affects."""
         found = []
         for conv in self.db.list_conversations():
             for att in self.db.list_attachments(conv["id"]):
@@ -175,9 +172,13 @@ class ChatRuntime(DeliveryCreditMixin):
             if claims_transcript(adapter.att) and not transcript_claimed(adapter):
                 await self._hold_credit(conv_id, att, adapter, pending)
                 return True
-            if not self.db.set_last_seen(att["id"], pending[-1]["id"], runtime_owner):
+            if ours:
+                self._record_unproved(att, adapter, pending)
+                confirm_reserved(self, att["id"], [m["id"] for m in pending], runtime_owner)
+            elif not self.db.set_last_seen(att["id"], pending[-1]["id"], runtime_owner):
                 raise RuntimeError("attachment ownership changed during mention delivery")
-            self.db.clear_queued_delivery_ids(att["id"], [m["id"] for m in pending])
+            else:
+                self.db.clear_queued_delivery_ids(att["id"], [m["id"] for m in pending])
         return True
 
     def held_wake_hooks(self, conv_id: str, att_id: str, name: str):
@@ -281,9 +282,11 @@ class ChatRuntime(DeliveryCreditMixin):
                                     pass  # a half-open socket cannot be closed cleanly
                     claims[ws] = (handle, client_id)
                     claimed_handle, claimed_client = handle, client_id
-                    await ws.send_json(hello_payload(
-                        conv_id, handle, frontend_build, server_version, instance_name
+                    await ws.send_json(await hello_payload(
+                        self, conv_id, handle, frontend_build, server_version, instance_name
                     ))
+                    from .screen_snapshot import send_snapshot
+                    await send_snapshot(self, ws, conv_id)
                     if reattacher is not None and (offer := reattacher.offer(conv_id)):
                         await ws.send_json(offer.model_dump())
                     continue

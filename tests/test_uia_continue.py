@@ -1,4 +1,5 @@
 """Helper-side cursor handling: parts of one walk share IDs, a new snapshot ends them."""
+import io
 import json
 import unittest
 from pathlib import Path
@@ -98,7 +99,8 @@ class RequestTests(unittest.TestCase):
             seen["payload"] = payload
             seen["state"] = json.loads(Path(payload[4]).read_text(encoding="utf-8"))
             Path(payload[2]).write_text('{"elements": []}', encoding="utf-8")
-            return SimpleNamespace(poll=lambda: 0, returncode=0)
+            return SimpleNamespace(stdout=io.BytesIO(b"READY\n"), wait=lambda **kw: 0,
+                                   poll=lambda: 0, returncode=0)
 
         state = {"stack": [[[n], None] for n in range(20_000)]}
         self.assertEqual({"elements": []}, read(1, None, state, False, popen=popen, platform="win32"))

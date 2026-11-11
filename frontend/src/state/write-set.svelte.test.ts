@@ -24,6 +24,9 @@ describe("write-set banner state", () => {
       conversation_id: "B",
       requester: "worker",
       path: "/tmp/B",
+      paths: ["/tmp/B"],
+      human_only: false,
+      already_granted: [],
       created_at: 1,
     };
     state.apply(event);

@@ -1,3 +1,5 @@
+import { voicePresets } from "./voice-presets.svelte.js";
+import { resources } from "./resources.svelte.js";
 /**
  * The wire: one WebSocket to one line, and an honest account of its health.
  *
@@ -185,6 +187,8 @@ class Wire {
           location.reload();
           return;
         }
+        if (payload.speech_settings) voicePresets.receive(payload.speech_settings);
+        if (payload.resource_snapshot) resources.snapshot = payload.resource_snapshot;
         onHandshake(payload);
         authenticationPhase = "initial";
         this.stopped = false;
@@ -237,6 +241,7 @@ class Wire {
           .catch(() => {
             if (!current()) return;
             if (!this.stopped) this.#armOutage();
+            // no-poll (e): socket reconnect after failure; success ends retries
             this.#retryTimer = setTimeout(() => {
               if (current()) {
                 this.connect(convId, identity, onEvent, onResync, onHandshake, authenticationPhase);
@@ -246,6 +251,7 @@ class Wire {
         return;
       }
       if (!this.stopped) this.#armOutage();
+      // no-poll (e): socket reconnect after failure; success ends retries
       this.#retryTimer = setTimeout(() => {
         if (current() && !this.#claimRejected) {
           this.connect(convId, identity, onEvent, onResync, onHandshake);
@@ -342,6 +348,7 @@ class Wire {
 
   #armOutage(): void {
     if (this.#graceTimer || this.outage) return;
+    // no-poll (b): one-shot UI deadline; no state request
     this.#graceTimer = setTimeout(() => {
       this.#graceTimer = null;
       this.outage = { message: "the wire is down — reconnecting…", stopped: false };

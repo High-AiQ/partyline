@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, Mock
 
+from tests.adapter_event_clock import install as event_clock
+
 from partyline.adapters.bundled.opencode.v2 import PartylineAdapter
 from partyline.adapters.receipts import BEGAN, ENDED
 
@@ -37,9 +39,10 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
                    command=[], adapter_metadata={"capabilities": {"transcript": True}})
         att.update(extra)
         adapter = PartylineAdapter(att, self.post, AsyncMock())
+        event_clock(adapter)
         adapter._store = self.store
         adapter.spawned_at = 1
-        return adapter
+        return event_clock(adapter)
 
     def row(self, ident, kind, data, seq=1, session="ours", created=1000):
         self.db.execute("INSERT INTO session_message VALUES(?,?,?,?,?,?)",

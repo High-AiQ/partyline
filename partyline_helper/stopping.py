@@ -1,19 +1,16 @@
 """`partyline-helper stop`: ask the running helper to exit, and end it if it does not listen.
 
-The helper polls for a stop file and shuts down through its normal path (the share is ended, the border
-removed, the tray icon taken away). An older helper that predates this does not poll, so after a short wait
+The helper watches native filesystem notifications for a stop file and shuts down normally
+(the share is ended, the border removed, the tray icon taken away). An older helper may not watch;
+after a short wait
 the stop falls back to terminating the pid it recorded under the run lock.
 """
-import asyncio
 import os
 import signal
-import time
 
 from .instance import InstanceLock, lock_dir
-
-POLL = 0.2
-WAITS = 25  # polls of POLL seconds per phase: about five seconds politely, then five more after a kill
-
+from partyline.file_events import FileEvents
+from partyline.process_events import wait_pid
 
 def stop_path():
     return lock_dir() / "run.stop"
@@ -23,18 +20,18 @@ def clear_stop(path=None):
     (path or stop_path()).unlink(missing_ok=True)
 
 
-async def watch_stop(cancel, path=None, sleep=asyncio.sleep, interval=0.5):
+async def watch_stop(cancel, path=None):
     """Call `cancel` once a stop file appears (and remove it)."""
     path = path or stop_path()
-    while True:
-        if path.exists():
-            clear_stop(path)
-            cancel()
-            return
-        await sleep(interval)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    async with FileEvents(path) as events:
+        while not path.exists():
+            await events.wait()
+        clear_stop(path)
+        cancel()
 
 
-def stop_helper(lock=InstanceLock, kill=os.kill, sleep=time.sleep, path=None):
+def stop_helper(lock=InstanceLock, kill=os.kill, path=None):
     """Returns (stopped, message). Safe to call when nothing runs."""
     path = path or stop_path()
     holder = lock("run").holder()
@@ -43,11 +40,7 @@ def stop_helper(lock=InstanceLock, kill=os.kill, sleep=time.sleep, path=None):
         return True, "The helper is not running."
 
     def gone():
-        for _ in range(WAITS):
-            if lock("run").holder() is None:
-                return True
-            sleep(POLL)
-        return lock("run").holder() is None
+        return wait_pid(holder, timeout=5)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("stop")

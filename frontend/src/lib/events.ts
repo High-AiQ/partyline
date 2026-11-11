@@ -1,3 +1,4 @@
+import { AsrSettingsSchema } from "./asr-contracts";
 /** Runtime-validated WebSocket events and commands. */
 
 import { z } from "zod";
@@ -14,13 +15,16 @@ import { MemoryRequestSchema } from "./memory-request-contracts";
 import { WriteSetGrantRequestSchema } from "./write-set-contracts";
 import { ReactionResponseSchema } from "./reaction-contracts";
 import { PinsChangedEventSchema } from "./pin-contracts";
-import { ResourceSnapshotSchema } from "./resource-api";
+import { ResourceSnapshotSchema } from "./resource-contracts";
 import { ScreenShareSchema } from "./screen-contracts";
+import { IndicatorSchema, ScreenDeviceSchema } from "./screen-device-contracts";
 
 export const HelloEventSchema = z.object({
   type: z.literal("hello"),
   conversation_id: z.string(),
   handle: z.string(),
+  speech_settings: AsrSettingsSchema.optional(),
+  resource_snapshot: ResourceSnapshotSchema.optional(),
   build: z.string().optional(),
   // Required: an old tab must not retain a stale release badge after reconnect.
   version: z.string(),
@@ -198,6 +202,12 @@ export const ScreenShareEventSchema = z.object({
   type: z.literal("screen_share"),
   share: ScreenShareSchema.nullable().default(null),
 });
+export const ScreenSnapshotEventSchema = z.object({
+  type: z.literal("screen_snapshot"),
+  indicators: z.array(IndicatorSchema),
+  devices: z.array(ScreenDeviceSchema),
+  share: ScreenShareSchema.nullable().default(null),
+});
 export const ScreenDevicesChangedEventSchema = z.object({
   type: z.literal("screen_devices_changed"),
   device_id: z.string(),
@@ -207,7 +217,10 @@ export type MemoryRequestEvent = z.infer<typeof MemoryRequestEventSchema>;
 export type ConversationsChangedEvent = z.infer<typeof ConversationsChangedEventSchema>;
 
 /** Someone changed the speech presets in settings: refetch the preset list. */
-export const AsrPresetsChangedEventSchema = z.object({ type: z.literal("asr_presets_changed") });
+export const AsrPresetsChangedEventSchema = z.object({
+  type: z.literal("asr_presets_changed"),
+  settings: AsrSettingsSchema,
+});
 
 const CurrentWireEventSchema = z.discriminatedUnion("type", [
   HelloEventSchema,
@@ -235,6 +248,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ResourcesEventSchema,
   ScreenShareEventSchema,
   ScreenDevicesChangedEventSchema,
+  ScreenSnapshotEventSchema,
   PinsChangedEventSchema,
   AsrPresetsChangedEventSchema,
 ]);

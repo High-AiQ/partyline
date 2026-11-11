@@ -5,6 +5,8 @@ import os
 import signal
 import subprocess
 
+from .process_wait import wait_for_process
+
 STOP_TERM_GRACE = 0.5
 STOP_KILL_GRACE = 1.0
 
@@ -12,12 +14,6 @@ STOP_KILL_GRACE = 1.0
 async def stop_process_group(proc: subprocess.Popen) -> None:
     """Stop the full session, reaping its leader while checking its children."""
     pgid = proc.pid
-
-    def group_alive() -> bool:
-        # poll() reaps an exited group leader, so killpg(..., 0) does not
-        # mistake its zombie for a surviving CLI child.
-        proc.poll()
-        return process_group_alive(pgid)
 
     _signal_group(pgid, signal.SIGTERM, "cannot signal attachment process group")
     if await _wait_for_group_exit(proc, pgid, STOP_TERM_GRACE):
@@ -28,14 +24,17 @@ async def stop_process_group(proc: subprocess.Popen) -> None:
 
 
 async def _wait_for_group_exit(proc: subprocess.Popen, pgid: int, timeout: float) -> bool:
+    if not process_group_alive(pgid):
+        return True
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
-    while loop.time() < deadline:
-        proc.poll()
-        if not process_group_alive(pgid):
-            return True
-        await asyncio.sleep(0.05)
-    proc.poll()
+    try:
+        await asyncio.wait_for(wait_for_process(proc), timeout)
+    except TimeoutError:
+        return not process_group_alive(pgid)
+    if process_group_alive(pgid):
+        # no-poll (b): one grace deadline for surviving children, not a liveness loop.
+        await asyncio.sleep(max(0, deadline - loop.time()))
     return not process_group_alive(pgid)
 
 

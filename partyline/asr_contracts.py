@@ -74,3 +74,4 @@ class AsrTestResult(TranscribeResponse):
 
 class AsrPresetsChangedEvent(BaseModel):
     type: Literal["asr_presets_changed"] = "asr_presets_changed"
+    settings: AsrSettings

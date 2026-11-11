@@ -52,10 +52,10 @@ beforeEach(() => {
   vi.stubGlobal("MediaRecorder", { isTypeSupported: () => true });
   Object.defineProperty(navigator, "mediaDevices", { value: {}, configurable: true });
   room.conversation = conversation;
-  vi.spyOn(voiceApi, "presets").mockResolvedValue({
+  voicePresets.listing = {
     default: "a",
     presets: [{ name: "a", kind: "command", available: true }],
-  });
+  };
   vi.spyOn(voiceApi, "transcribe").mockResolvedValue({ text: "", language: "en", duration: 1, segments: [] });
 });
 

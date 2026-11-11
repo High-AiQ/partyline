@@ -115,6 +115,8 @@ class CaptureReviewTests(unittest.IsolatedAsyncioTestCase):
         await self.session.dispatch(req)
         await self.socket.next("frame")
         await self.term.waiting.get()
+        async with self.session.frame_lock:
+            pass
         first_grabs = len(self.desktop.grabs)
         first_time = self.session.last_frame_at
         await self.session.dispatch(dict(type="snap", share_id="share", request_id="too-soon"))
@@ -194,7 +196,7 @@ class ConsentReviewTests(unittest.IsolatedAsyncioTestCase):
                 await checkpoint()
                 self.assertFalse(pending.done())
                 self.clock.advance(.5)
-                self.assertEqual(await self.clock.sleep_calls.get(), .05)
+                self.assertEqual(await self.clock.sleep_calls.get(), 59)
                 self.assertTrue(self.terminal.lines.empty())
                 self.assertFalse(pending.done())
                 self.terminal.lines.put("n")

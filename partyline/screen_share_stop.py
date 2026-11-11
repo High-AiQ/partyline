@@ -37,6 +37,8 @@ async def stop_share(hub, share, reason):
                 await device["socket"].send_json({"type": "stop_share", "share_id": share.share_id})
             except Exception:
                 pass
+        await hub._device_event({"id": share.device_id, "owner_id": share.owner_id},
+                                device is not None)
         if status == "waiting" and device:
             view = hub._share_view(share, device)
             view["share"]["status"] = "declined"

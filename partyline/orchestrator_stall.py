@@ -161,7 +161,7 @@ def resume(db, conv_id):
     commit spends a worker's time, not the watchdog's budget.
     """
     db._exec("UPDATE task_reviews SET status='implementing',stall_stage=0,stall_notice_id=NULL,"
-             "wait_until=NULL,"
+             "wait_reason='',wait_until=NULL,"
              "report_id=CASE WHEN status='blocked' OR stall_stage=3 THEN NULL ELSE report_id END "
              'WHERE conv_id=?', (conv_id,))
 
@@ -171,7 +171,7 @@ async def blocked(runtime, actor, conv_id, body):
     if row['status'] not in ('implementing', 'idle', 'blocked'):
         raise HTTPException(409, 'only an implementing task can be blocked')
     runtime.db._exec("UPDATE task_reviews SET status='blocked',findings=?,stall_stage=0,blocked_at=?,"
-                     "wait_until=NULL,overridden_by=NULL,"
+                     "wait_reason='',wait_until=NULL,overridden_by=NULL,"
                      "report_id=CASE WHEN stall_stage=3 THEN NULL ELSE report_id END WHERE conv_id=?",
                      (body.reason, time.time(), conv_id))
     row = task(runtime.db, conv_id)

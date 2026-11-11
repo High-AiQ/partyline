@@ -10,18 +10,20 @@ widened bind applies without a service restart.
 from __future__ import annotations
 
 import logging
+import json
 import os
 import time
 import uuid
 
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .adapters import ADAPTER_METADATA
 from .approval_bubble import bubble_approval
 from . import docker_relay, docker_workloads
-from .fence_protect import protected_repo_roots
 from .hierarchy import ancestors
+from .fence_protect import protected_repo_roots
+from .write_set_routing import _covers, eligible_captain
 from .line_process_routes import detach_attachment, live_attachments
 from .line_worktree import REVIEW_DIR, rev
 from .resume_continuation import resume_with_backlog
@@ -35,6 +37,10 @@ class WriteSetGrantRequest(BaseModel):
     id: str
     conversation_id: str
     path: str
+    paths: list[str] = Field(default_factory=list)
+    human_only: bool = False
+    decider_name: str = ""
+    already_granted: list[str] = Field(default_factory=list)
     requester: str
     requester_attachment_id: str | None = None
     created_at: float
@@ -53,10 +59,14 @@ def get_pending_request(db, conv_id: str) -> dict | None:
 
 
 def _row_to_request(row: dict) -> WriteSetGrantRequest:
+    paths = json.loads(row.get("paths") or "[]") or [row["path"]]
     return WriteSetGrantRequest(
         id=row["id"],
         conversation_id=row["conv_id"],
         path=row["path"],
+        paths=paths,
+        human_only=bool(row.get("human_only", 0)),
+        decider_name=row.get("decider_name", ""),
         requester=row["requester"],
         requester_attachment_id=row["requester_attachment_id"],
         created_at=row["created_at"],
@@ -198,56 +208,83 @@ def non_resumable_live_attachments(runtime, conv_id: str, path: str | None = Non
     ]
 
 
-async def resume_granted_scope(runtime, conv_id: str, path: str, resume,
-                               resumer=None) -> tuple[list[str], list[str]]:
-    resumed: list[str] = []
-    failed: list[str] = []
-    for line in grant_scope(runtime, conv_id, path):
-        done, broke = await (resumer or resume_line_attachments)(runtime, line, resume)
-        resumed += done
-        failed += broke
-    return resumed, failed
-
-
 async def file_write_set_request(
-    runtime, conv_id: str, path: str, principal, *, announce_fn,
+    runtime, conv_id: str, paths: list[str], principal, *, announce_fn,
 ) -> WriteSetGrantRequest:
     db = runtime.db
-    if get_pending_request(db, conv_id) is not None:
-        raise HTTPException(409, "a write-set request is already waiting for a decision")
+    paths = list(dict.fromkeys(validate_grantable(db, path) for path in paths))
     if not machine_may_file(db, principal, conv_id):
+        named = ", ".join(f"`{path}`" for path in paths)
         raise HTTPException(
-            403, "only a person or a captain above this line may grant write scope")
-    path = validate_grantable(db, path)
+            403, f"none of these paths were filed: {named}; only a person or a captain above "
+                 "this line may request write scope")
+    grants = db._exec("SELECT path FROM conversation_write_grants WHERE conv_id=?", (conv_id,)).fetchall()
+    already = [path for path in paths if any(_covers(row["path"], path) for row in grants)]
+    paths = [path for path in paths if path not in already]
+    if not paths:
+        return WriteSetGrantRequest(
+            id="", conversation_id=conv_id, path=already[0] if already else "",
+            paths=already, requester=principal.name,
+            requester_attachment_id=principal.attachment_id, created_at=time.time(),
+        )
+    pending = get_pending_request(db, conv_id)
+    effective_requester_id = (
+        pending["requester_attachment_id"] if pending else principal.attachment_id
+    )
+    if pending:
+        old_paths = json.loads(pending.get("paths") or "[]") or [pending["path"]]
+        paths = list(dict.fromkeys([*old_paths, *paths]))
+    decider = eligible_captain(db, conv_id, paths, effective_requester_id)
+    human_only = decider is None
+    all_paths = paths
     request = WriteSetGrantRequest(
         id=uuid.uuid4().hex[:12],
         conversation_id=conv_id,
-        path=path,
+        path=paths[0],
+        paths=paths,
+        human_only=human_only,
+        decider_name=decider["name"] if decider else "",
+        already_granted=already,
         requester=principal.name,
         requester_attachment_id=principal.attachment_id,
         created_at=time.time(),
     )
     with db.lock:
-        db.conn.execute(
-            "INSERT INTO conversation_write_grant_requests"
-            "(conv_id,id,path,requester,requester_attachment_id,created_at) "
-            "VALUES(?,?,?,?,?,?)",
-            (conv_id, request.id, path, request.requester,
-             request.requester_attachment_id, request.created_at))
+        if pending:
+            request.id = pending["id"]
+            request.requester = pending["requester"]
+            request.requester_attachment_id = pending["requester_attachment_id"]
+            request.created_at = pending["created_at"]
+            db.conn.execute(
+                "UPDATE conversation_write_grant_requests SET path=?,paths=?,human_only=?,decider_name=? "
+                "WHERE conv_id=?",
+                (paths[0], json.dumps(paths), int(human_only), request.decider_name, conv_id))
+        else:
+            db.conn.execute(
+                "INSERT INTO conversation_write_grant_requests"
+                "(conv_id,id,path,requester,requester_attachment_id,created_at,paths,"
+                "human_only,decider_name) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (conv_id, request.id, paths[0], request.requester,
+                 request.requester_attachment_id, request.created_at, json.dumps(paths),
+                 int(human_only), request.decider_name))
         db.conn.commit()
-    warning = f" — {docker_workloads.BUDGET_WARNING}" if docker_relay.is_docker_socket(path) else ""
+    has_docker = any(docker_relay.is_docker_socket(path) for path in paths)
+    warning = f" — {docker_workloads.BUDGET_WARNING}" if has_docker else ""
+    listed = ", ".join(f"`{path}`" for path in all_paths)
+    decider_text = "a person decides" if human_only else f"@{request.decider_name} may decide"
+    waiting = "waiting on a person" if human_only else "waiting for a write-set decision"
     await announce_fn(
         conv_id,
-        f"☏ @{principal.name} asks to grant write-set scope for `{path}`{warning} — "
-        "a person, or a captain above this line when the path is inside its own grants "
-        "or writable checkout, may approve or decline",
+        f"☏ @{principal.name} asks to grant write-set scope for {listed}{warning} — "
+        f"{decider_text}; {waiting}",
         actor=principal,
     )
-    await bubble_approval(
-        runtime, conv_id, kind="write-set", requester=principal.name,
-        detail=f"grant write scope for `{path}`{warning}",
+    await bubble_approval(runtime, conv_id, kind="write-set", requester=principal.name,
+        detail=f"grant write scope for {listed}{warning}",
         approve=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/approve",
         decline=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/deny",
-        actor=principal,
-    )
+        actor=principal, human_only=human_only,
+        decider_name=request.decider_name,
+        decider_conv_id=decider["conv_id"] if decider else "")
     return request

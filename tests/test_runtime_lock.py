@@ -96,13 +96,12 @@ class RuntimeLockTest(unittest.TestCase):
                 runtime_lock.try_lock(descriptor)
             self.assertEqual(raised.exception.errno, errno.EBADF)
 
-    def test_sync_wait_retries_contention_but_propagates_other_errors(self):
-        with patch.object(runtime_lock, "try_lock", side_effect=[BlockingIOError(), None]), \
-                patch.object(runtime_lock, "unlock"), patch.object(runtime_lock.time, "sleep") as sleep:
+    def test_sync_wait_uses_native_blocking_lock_and_propagates_errors(self):
+        with patch.object(runtime_lock, "lock") as lock, patch.object(runtime_lock, "unlock") as unlock:
             with runtime_lock.exclusive(self.path):
-                pass
-        sleep.assert_called_once_with(0.01)
-        with patch.object(runtime_lock, "try_lock", side_effect=OSError("denied")), \
+                lock.assert_called_once()
+            unlock.assert_called_once()
+        with patch.object(runtime_lock, "lock", side_effect=OSError("denied")), \
                 patch.object(runtime_lock, "unlock") as unlock:
             with self.assertRaisesRegex(OSError, "denied"), runtime_lock.exclusive(self.path):
                 self.fail("acquired after an unexpected error")

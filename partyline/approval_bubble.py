@@ -4,14 +4,16 @@ A write-set, memory or restart request filed on a child line used to post
 only on that line, and the person — who talks to the root captain and never
 reads sublines — found it by luck. `bubble_approval` runs at each filing
 path when the line has ancestors: one notice on the root names the line,
-the requester and the approve call, and @mentions the root's captain so
-that process actually wakes and can explain the request in context. A
+the requester and the decision call. Write-set requests address an eligible
+captain on its own line; other request types address the root captain. A
 request filed on the root itself is already where the person looks, so
 nothing bubbles. `pending_approvals` is the same picture as a count: what
 is still waiting anywhere in a line's subtree, for the staffing line.
 """
 
 from __future__ import annotations
+
+import json
 
 from fastapi import HTTPException, Request
 
@@ -41,15 +43,13 @@ def _clip(text: str, limit: int = DETAIL_LIMIT) -> str:
 
 async def bubble_approval(runtime, conv_id: str, *, kind: str, requester: str,
                           detail: str, approve: str, decline: str = "",
-                          actor=None) -> None:
-    """Post the pending-approval notice on the tree's root and ring its captain.
+                          actor=None, human_only: bool = False,
+                          decider_name: str = "", decider_conv_id: str = "") -> None:
+    """Post the root approval notice and address any captain on its home line.
 
-    The forced mention route is what wakes: system notices are otherwise
-    never delivered. The routed body names the requester too, but relays skip
-    system notices, so only a process on the root — the captain — is rung,
-    and the captain that filed the request itself is never rung about its own
-    filing (the same-speaker rule). ``decline`` names the deny endpoint when
-    one exists, so the root captain can decline from the notice as well.
+    System notices are not routed by default. The root notice is for people;
+    an eligible intermediate captain gets a second notice on its own line.
+    ``decline`` names the deny endpoint when one exists.
     """
     db = runtime.db
     chain = ancestors(db, conv_id)
@@ -61,14 +61,27 @@ async def bubble_approval(runtime, conv_id: str, *, kind: str, requester: str,
         return
     line = db.get_conversation(conv_id)
     captain = lead_attachment(db, root_id)
-    ring = f" @{captain['name']}" if captain else ""
+    captain_name = decider_name or (captain["name"] if captain else "")
+    ring = f" @{captain_name}" if captain_name and not human_only else ""
     decline_part = f"; decline: {decline}" if decline else ""
+    action = ("a person decides" if human_only else
+              f"(approve: {approve}{decline_part})")
     body = (f"⚑ approval pending on «{line['name'] if line else conv_id}»: {kind} "
             f"from @{requester} — {_clip(detail)} "
-            f"(approve: {approve}{decline_part}){ring}")
+            f"{action}{ring}")
     msg = await post_system_notice(runtime, root_id, body, actor=actor)
-    if captain:
+    if captain_name and not human_only and (not decider_conv_id or decider_conv_id == root_id):
         await runtime.route_mentions(root_id, msg, force=True)
+    elif captain_name and not human_only:
+        # The root digest is for people. System notices do not relay across
+        # lines, so wake an intermediate decider with a notice on its own line.
+        notice = await post_system_notice(
+            runtime, decider_conv_id,
+            f"⚑ write-set decision needed for «{line['name'] if line else conv_id}»: "
+            f"{_clip(detail)} (approve: {approve}{decline_part}) @{captain_name}",
+            actor=actor,
+        )
+        await runtime.route_mentions(decider_conv_id, notice, force=True)
 
 
 def pending_approval_rows(db, conv_id: str, runtime=None) -> list[dict]:
@@ -81,13 +94,16 @@ def pending_approval_rows(db, conv_id: str, runtime=None) -> list[dict]:
     """
     items: list[dict] = []
     for row in db._exec(
-            "SELECT conv_id, id, requester, path, created_at "
+            "SELECT conv_id, id, requester, path, paths, human_only, decider_name, created_at "
             "FROM conversation_write_grant_requests").fetchall():
+        paths = json.loads(row["paths"] or "[]") or [row["path"]]
         items.append({
             "kind": "write-set", "conv_id": row["conv_id"], "request_id": row["id"],
             "requester": row["requester"],
-            "detail": f"write-set scope for `{row['path']}`",
+            "detail": f"write-set scope for `{', '.join(paths)}`",
             "created_at": row["created_at"],
+            "human_only": bool(row["human_only"]),
+            "decider": row["decider_name"] or None,
             "approve": f"/api/conversations/{row['conv_id']}"
                        f"/write-set/request/{row['id']}/approve",
             "decline": f"/api/conversations/{row['conv_id']}"

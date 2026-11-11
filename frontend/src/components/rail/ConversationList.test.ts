@@ -1,7 +1,6 @@
 import { mount, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ConversationList from "./ConversationList.svelte";
-import { screenApi } from "../../lib/screen-api";
 import { screenStatus } from "../../state/screen-status.svelte";
 import { tick } from "svelte";
 import { room } from "../../state/room.svelte.js";
@@ -171,17 +170,16 @@ describe("conversation rail task mode marker", () => {
 
 describe("active share indicators", () => {
   it("shows a single labelled icon only on lines with an active share", async () => {
+    const interval = vi.spyOn(globalThis, "setInterval");
     const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
     room.conversations = [
       { ...base, id: "a", name: "A" },
       { ...base, id: "b", name: "B" },
     ];
-    const fetch = vi.spyOn(screenApi, "indicators").mockResolvedValue({
-      indicators: [
-        { conv_id: "a", device_name: "Desk", kind: "screen", label: "Desk screen share" },
-        { conv_id: "a", device_name: "Desk", kind: "window", label: "reading Editor for @bot" },
-      ],
-    });
+    screenStatus.indicators = [
+      { conv_id: "a", device_name: "Desk", kind: "screen", label: "Desk screen share" },
+      { conv_id: "a", device_name: "Desk", kind: "window", label: "reading Editor for @bot" },
+    ];
     const list = mount(ConversationList, {
       target: document.body,
       props: { onmanagement: vi.fn(), onrename: vi.fn(), oncloseprocesses: vi.fn(), ondelete: vi.fn() },
@@ -191,10 +189,10 @@ describe("active share indicators", () => {
       await Promise.resolve();
       await tick();
       const icons = document.querySelectorAll(".share-icon");
+      expect(interval).not.toHaveBeenCalled();
       expect(icons).toHaveLength(1);
       expect(icons[0]?.getAttribute("aria-label")).toBe("Desk screen share; reading Editor for @bot");
-      fetch.mockResolvedValue({ indicators: [] });
-      screenStatus.revision++;
+      screenStatus.indicators = [];
       await tick();
       await Promise.resolve();
       await tick();

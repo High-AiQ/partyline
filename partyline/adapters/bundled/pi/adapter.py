@@ -12,6 +12,8 @@ import asyncio
 import glob
 import os
 
+from partyline.adapters.events import watch_files
+
 from partyline.adapters import Adapter
 from partyline.adapters.compaction import is_compaction_record
 
@@ -36,6 +38,7 @@ class PartylineAdapter(Adapter):
             cmd += ["--session-id", self.att["id"]]
         return cmd
 
+    @watch_files(lambda self: [self.session_dir()])
     async def _run(self):
         os.makedirs(self.session_dir(), exist_ok=True)
         await asyncio.sleep(4.0)
@@ -44,10 +47,9 @@ class PartylineAdapter(Adapter):
         if not self.resume:
             await self.send_keys(self.briefing())
 
+        started = self.event_time()
         path, waited = None, 0.0
         while path is None:
-            await asyncio.sleep(1.0)
-            waited += 1.0
             # pi writes the transcript at startup, before the first turn.
             hits = sorted(glob.glob(os.path.join(self.session_dir(), "*.jsonl")),
                           key=os.path.getmtime, reverse=True)
@@ -55,13 +57,7 @@ class PartylineAdapter(Adapter):
                 path = hits[0]
             elif not self.alive():
                 return
-            elif waited in (12.0, 24.0):
-                # Probably held at a first-run or trust prompt: accept the
-                # default and re-send the briefing.
-                self.write_terminal(b"\r")
-                await asyncio.sleep(1.0)
-                await self.send_keys(self.briefing())
-            elif waited > 45.0:
+            elif waited >= 45.0:
                 await self.post(
                     "system", "system",
                     f"{self.att['name']}: no transcript after 45s — the CLI is probably "
@@ -69,6 +65,9 @@ class PartylineAdapter(Adapter):
                     f"{self.att['cwd']}, then re-attach.",
                 )
                 return
+            if path is None:
+                await self.wait_for_change(max(0, 45.0 - waited))
+                waited = self.event_time() - started
 
         seen: set[str] = set()
 

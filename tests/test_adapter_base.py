@@ -218,7 +218,7 @@ class AdapterLifecycleTest(unittest.IsolatedAsyncioTestCase):
             "partyline.adapters.process_shutdown.STOP_TERM_GRACE", 0
         ), patch("partyline.adapters.process_shutdown.STOP_KILL_GRACE", 0), patch(
             "partyline.adapters.process_shutdown.process_group_alive",
-            side_effect=[True, False],
+            side_effect=[True, True, False],
         ):
             await stop_process_group(proc)
 
@@ -1025,6 +1025,7 @@ class ClaimGateTest(unittest.IsolatedAsyncioTestCase):
         await until(lambda: any(p[1] == "agent" and p[2] == "after the marker"
                                 for p in adapter.posts), what="speech after the marker")
         adapter.proc = types.SimpleNamespace(poll=lambda: 0)
+        adapter.changed()
         await asyncio.wait_for(tail, 10)
         self.assertEqual([p[2] for p in adapter.posts if p[1] == "agent"],
                          ["after the marker"])

@@ -8,6 +8,7 @@ import time
 
 from .adapter_capabilities import transcript_claimed
 from .adapters import Adapter
+from .delivery_credit_accounting import confirm_reserved
 
 logger = logging.getLogger(__name__)
 CLAIM_RETRY_DIAGNOSTIC_SECONDS = 5.0
@@ -120,9 +121,11 @@ class DeliveryCreditMixin:
         ):
             return None
         entry["claim_pending"] = False
+        message_ids = sorted(entry.get("claim_ids", entry["ids"]))
+        if not message_ids:
+            return None
         entry["claim_retry_pending"] = True
         entry["claim_retry_at"] = time.monotonic()
-        message_ids = sorted(entry["ids"])
         return message_ids
 
     def transcript_claimed(self, att_id: str, runtime_owner: str | None) -> None:
@@ -186,6 +189,7 @@ class DeliveryCreditMixin:
                 # An idle repool may already have pasted without proof. Those
                 # ids belong to runtime suppression again, not an empty queue.
                 entry["ids"].difference_update(handed_off)
+                entry.setdefault("claim_ids", set()).difference_update(message_ids)
                 entry.setdefault("confirmed", set()).difference_update(handed_off)
                 entry.pop("claim_retry_pending", None)
                 if not entry["ids"]:
@@ -195,6 +199,7 @@ class DeliveryCreditMixin:
             entry = self.uncredited.get(att_id)
             if entry is not None and entry["owner"] == runtime_owner:
                 entry["claim_pending"] = True
+                entry.setdefault("claim_ids", set()).update(message_ids)
                 entry.pop("claim_retry_pending", None)
 
     async def confirm_delivery_ids(
@@ -211,35 +216,7 @@ class DeliveryCreditMixin:
         async with self.db.reserve_attachment_delivery(att_id, runtime_owner) as reserved:
             if not reserved:
                 return False
-            entry = self.uncredited.get(att_id)
-            if entry is not None and entry["owner"] != runtime_owner:
-                del self.uncredited[att_id]
-                entry = None
-            if entry is None:
-                entry = {"owner": runtime_owner, "ids": set(), "confirmed": set()}
-                self.uncredited[att_id] = entry
-            entry.setdefault("confirmed", set())
-            ids = set(message_ids)
-            entry["ids"].update(ids)
-            entry["confirmed"].update(ids)
-            attachment = self.db.get_attachment(att_id)
-            if attachment is None or attachment.get("runtime_owner") != runtime_owner:
-                return False
-            unresolved = entry["ids"] - entry["confirmed"]
-            frontier = min(unresolved) - 1 if unresolved else max(entry["ids"])
-            eligible = entry["confirmed"] & {mid for mid in entry["ids"] if mid <= frontier}
-            if eligible and not self.db.set_last_seen(att_id, max(eligible), runtime_owner):
-                return False
-            attachment = self.db.get_attachment(att_id)
-            high_water = attachment["last_seen"] if attachment is not None else 0
-            credited = {mid for mid in entry["ids"] if mid <= high_water}
-            entry["ids"].difference_update(credited)
-            entry["confirmed"].difference_update(credited)
-            self.db.clear_queued_delivery_ids(att_id, list(credited))
-            if not entry["ids"]:
-                self.uncredited.pop(att_id, None)
-                self.unclaimed_noticed.discard(att_id)
-            return max(message_ids) <= high_water
+            return confirm_reserved(self, att_id, message_ids, runtime_owner, boundary=_boundary)
 
     async def _hold_credit(self, conv_id: str, att: dict, adapter: Adapter, pending: list[dict]):
         """Remember pre-claim pastes and say so once."""
@@ -253,6 +230,7 @@ class DeliveryCreditMixin:
         entry.setdefault("warned_ids", set())
         ids = {m["id"] for m in pending}
         entry["ids"].update(ids)
+        entry.setdefault("claim_ids", set()).update(ids)
         try:
             asyncio.get_running_loop().create_task(
                 self._diagnose_uncredited_delivery(

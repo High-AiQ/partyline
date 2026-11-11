@@ -28,6 +28,8 @@ import glob
 import json
 import os
 
+from partyline.adapters.events import watch_files
+
 from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.session_seed import seed, seed_private_file
 from partyline.adapters.bundled.codex.thread_history import tail_thread_history
@@ -187,14 +189,17 @@ class PartylineAdapter(BaseAdapter):
             return path
         return None
 
+    @watch_files(lambda self: [
+        os.path.join(getattr(self, "_home", "") or HOME_ROOT + "/" + self.att.get("id", ""),
+                     "sessions", "*", "*", "*", "rollout-*.jsonl"),
+        os.path.join(getattr(self, "_home", "") or HOME_ROOT + "/" + self.att.get("id", ""),
+                     "thread_history_1.sqlite")])
     async def _run(self):
         await asyncio.sleep(6.0)
         if not self.alive():
             return
 
-        # A resumed turn is projected into CODEX_HOME's thread-history db
-        # rather than a fresh rollout. Prefer that store; the rollout tail
-        # below stays the fresh-attach path and the resume fallback.
+        # Prefer thread history on resume; rollouts remain the fallback.
         if self.resume and (thread_id := self.att.get("cli_session")):
             home = getattr(self, "_home", "") or (
                 self.codex_home() if self.att.get("id") else ""
@@ -205,6 +210,7 @@ class PartylineAdapter(BaseAdapter):
         # No cross-adapter lock: the claim token means no two adapters can
         # ever match the same rollout, and serializing discovery only ever
         # gagged later attachments behind one CLI stuck on a trust screen.
+        started = self.event_time()
         waited = 0.0
         if not self.resume:
             await self.send_keys(self.briefing())
@@ -213,15 +219,11 @@ class PartylineAdapter(BaseAdapter):
             path = self._find_rollout()
             if path or not self.alive():
                 break
-            await asyncio.sleep(1.0)
-            waited += 1.0
+            await self.wait_for_change(None if self.resume else max(0, 90.0 - waited))
+            waited = self.event_time() - started
             if self.resume:
                 continue
-            if waited in (20.0, 40.0):
-                self.write_terminal(b"\r")
-                await asyncio.sleep(1.0)
-                await self.send_keys(self.briefing())
-            elif waited > 90.0:
+            if waited >= 90.0:
                 await self.post(
                     "system", "system",
                     f"{self.att['name']}: no rollout file after 90s — the CLI is probably "

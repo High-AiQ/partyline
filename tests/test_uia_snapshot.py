@@ -94,44 +94,44 @@ class SnapshotTests(unittest.TestCase):
         self.assertNotIn("state", snapshot(tree, clock=lambda: 0))
 
     def test_unavailable_timeout_and_failure(self):
+        import io
         self.assertIn("elements_unavailable", read(1, platform="linux"))
+
         def failed(*args, **kwargs):
             raise OSError()
+
         self.assertIn("elements_unavailable", read(1, popen=failed, platform="win32"))
+
         def succeeded(args, **kwargs):
             path = json.loads(args[-1])[2]
             Path(path).write_text('{"elements": []}', encoding="utf-8")
-            return SimpleNamespace(poll=lambda: 0, returncode=0)
+            return SimpleNamespace(stdout=io.BytesIO(b'READY\n'), poll=lambda: 0,
+                                   wait=lambda **kw: 0, returncode=0)
+
         self.assertEqual({"elements": []}, read(1, popen=succeeded, platform="win32"))
 
-    def test_deadline_starts_after_initialization_and_kills_hung_worker(self):
-        now = [0.0]
-        killed = []
-        def sleep(delay):
-            now[0] += delay
-        def popen(args, **kwargs):
-            ready = json.loads(args[-1])[3]
-            def poll():
-                if killed:
-                    return -1
-                if now[0] >= 3:
-                    Path(ready).touch()
-                return None
-            return SimpleNamespace(poll=poll, kill=lambda: killed.append(now[0]), wait=lambda: None)
-        answer = read(1, popen=popen, platform="win32", clock=lambda: now[0], sleep=sleep)
-        self.assertEqual("timeout", answer["elements_unavailable"])
-        self.assertTrue(answer["truncated"])
-        self.assertEqual(1, len(killed))
-        self.assertGreaterEqual(killed[0], 3 + BUDGET + KILL_SLACK)
-        self.assertLess(killed[0], 3.1 + BUDGET + KILL_SLACK)
+        def crlf(args, **kwargs):  # a Windows child's text-mode print ends lines with CRLF
+            process = succeeded(args, **kwargs)
+            process.stdout = io.BytesIO(b'READY\r\n')
+            return process
 
-    def test_initialization_timeout_kills_worker(self):
-        ticks = iter([0, 31])
+        self.assertEqual({"elements": []}, read(1, popen=crlf, platform="win32"))
+
+    def test_deadline_starts_at_readiness_and_kills_hung_worker(self):
+        import io
+        import subprocess
+        process = Mock(stdout=io.BytesIO(b'READY\n'), returncode=None)
+        process.wait.side_effect = [subprocess.TimeoutExpired('uia', BUDGET + KILL_SLACK), None]
+        result = read(1, popen=lambda *a, **k: process, platform="win32")
+        self.assertEqual('timeout', result['elements_unavailable'])
+        process.wait.assert_any_call(timeout=BUDGET + KILL_SLACK)
+        process.kill.assert_called_once()
+
+    def test_initialization_timeout_kills_worker_without_a_poll(self):
         process = Mock()
-        process.poll.side_effect = [None, -1]
-        result = read(1, popen=lambda *a, **k: process, platform="win32", clock=lambda: next(ticks),
-                      sleep=lambda _: None)
-        self.assertEqual("timeout", result["elements_unavailable"])
+        process.stdout.readline.return_value = b''
+        result = read(1, popen=lambda *a, **k: process, platform="win32", ready_wait=lambda _: False)
+        self.assertEqual('timeout', result['elements_unavailable'])
         process.kill.assert_called_once()
 
 

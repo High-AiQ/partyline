@@ -8,6 +8,8 @@ import shlex
 import sys
 import weakref
 
+from partyline.adapters.events import watch_files
+
 from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.bundled.claude.session import ClaudeSession
 from partyline.adapters.compaction import compaction_hooks_declared, is_compaction_record
@@ -207,7 +209,7 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
         return None
 
     async def _await_transcript(self) -> str | None:
-        """Poll until this process's transcript appears, or the CLI dies.
+        """Wait for this process's transcript creation, or for CLI exit.
 
         Giving up here used to end the adapter while the CLI kept running:
         the attachment stayed live and mentionable, its cursor kept
@@ -216,10 +218,10 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
         so the 45s mark warns once and the search goes on for as long as the
         process is alive. Silence is never a verdict.
         """
+        started = self.event_time()
         waited, warned = 0.0, False
         while self.alive():
-            await asyncio.sleep(1.0)
-            waited += 1.0
+            waited = self.event_time() - started
             if path := self._find_transcript():
                 self._report_cli_session(path)
                 if warned:
@@ -229,12 +231,7 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
                         f"{int(waited)}s — the line is reachable again.",
                     )
                 return path
-            if self.resume:
-                continue
-            if waited in (12.0, 24.0):
-                if not await self.send_startup_briefing():
-                    return None
-            elif waited > 45.0 and not warned:
+            if waited >= 45.0 and not warned:
                 warned = True
                 await self.post(
                     "system", "system",
@@ -243,8 +240,11 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
                     f"If this persists, run the CLI manually once in "
                     f"{self.att['cwd']}, then re-attach.",
                 )
+            await self.wait_for_change(None if warned else max(0, 45.0 - waited))
         return None
 
+    @watch_files(lambda self: [self.transcript_glob(),
+                               os.path.expanduser("~/.claude/projects/*/*.jsonl")])
     async def _run(self):
         await asyncio.sleep(5.0)
         if not self.alive():

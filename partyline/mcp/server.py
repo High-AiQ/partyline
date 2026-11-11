@@ -90,8 +90,9 @@ class MCPServer:
     def _poll_capabilities(self):
         delay = 0.5
         while not self._poll_stop.is_set():
-            if not self._watch_ready.wait(0.2):
-                continue
+            self._watch_ready.wait()
+            if self._poll_stop.is_set():
+                return
             version, recovered = self._watch_step(self._capability_version)
             if recovered:
                 self._capability_version = version
@@ -244,6 +245,7 @@ class MCPServer:
                 self.handle(message)
         finally:
             self._poll_stop.set()
+            self._watch_ready.set()
             interrupt = getattr(self.client, "interrupt", None)
             if interrupt:
                 try:

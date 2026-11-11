@@ -330,8 +330,10 @@ cleanup; this feature never garbage-collects its recovery copies.
 
 Requests that need a person bubble to the root. A write-set, memory-cap or restart request
 filed on a child line posts its ordinary notice there plus one `⚑ approval pending` line on the
-tree's root, naming the line, the requester and the approve and decline calls, and @mentions the root's
-captain so that process wakes and can explain the request in context — the person talks to the
+tree's root, naming the line, the requester and (when a captain can decide) the approve and
+decline calls, and @mentions an eligible ancestor captain only when that captain may decide
+every path. If no ancestor captain can grant the full request, the notice says a person decides
+and has no captain mention or unusable links. The person talks to the
 root captain and never reads sublines. The one-click banner on the filing line and every
 ancestor updates live when a request is filed or decided. A request filed on the root itself does not bubble, and
 the staffing wake line counts what is still waiting anywhere below:
@@ -341,9 +343,13 @@ notices: `GET /api/conversations/<root id>/approvals` (people only) lists
 every pending request in the subtree — kind, line, requester, detail, and
 the approve/decline endpoints — and the root line's one-click approvals
 banner renders exactly that list with **Approve** and **Decline** buttons
-per row. A write-set row also carries `deny`, the machine-callable
+per row. A multi-path write-set request is one decision; later filings merge into it, and
+already-granted paths are omitted with an explicit `already_granted` response. A write-set row
+that needs a person has no captain decision links in its notice. Approve returns the grants and their
+`granted_at` timestamps. Task `wait_reason` clears on request decision, `blocked(reason)`, or
+`resume_work(note)`; a new `waiting(reason, seconds)` replaces it. A write-set row also carries `deny`, the machine-callable
 `POST …/deny {"reason"}`: a captain decides a child's write-set request itself
-when the path lies inside a grant its own line already holds or inside its
+when every path lies inside a grant its own line already holds or inside its
 own writable checkout (including `.git` carve-outs, `.review/` and `.scratch/`), and declines with
 a reason as easily as it approves (see `docs/write-fence.md`, Scope expansion).
 
@@ -519,15 +525,28 @@ partyline owns the directory but nothing else in a repository's `.review`.
 Review checkouts are disposable by contract: pruning is forced, and the SHAs
 themselves stay in the repository, so no reviewed work is ever lost.
 
+Locked JavaScript packages get a local `node_modules` in the review checkout:
+verified matching npm installations are linked for reading, with writable caches
+kept local. This avoids copying dependency trees or sharing writable hard links.
+When the installed state cannot be verified, the package manager installs from
+the lockfile inside a restricted sandbox with lifecycle scripts disabled. If a
+package needs those scripts, the install or later build may fail; report that to
+the captain. Reviewers run the package's tests and build in the checkout. A
+package that writes inside its linked installation can be refused by the fence;
+report that failure. The checkout stays under the repository because its own
+local `node_modules` stops Node's upward search, and its location preserves the
+existing review fence and lifecycle. Install failures and timeouts are reported
+to the task and captain before review.
+
 ## Scratch worktrees
 
-A review checkout is for adversarial reads; verifying an integration needs a
-build, and a build writes. `POST /api/conversations/<id>/scratch-worktrees`
+Review checkouts are for adversarial review; verifying an integration of
+multiple changes needs a separate build checkout. `POST /api/conversations/<id>/scratch-worktrees`
 with `{"sha":"...", "repository":"<abs path>"?}` checks the SHA out detached
 and **writable** at `<repo>/.scratch/<full sha>` — same subtree rule, same
 creation permission, recorded on the calling line. The fence binds a line's
 recorded scratch checkouts writable, so the line's own process builds there
-without a write-set request; review checkouts stay exactly as they are.
+without a write-set request; review checkouts remain separate.
 `GET …/scratch-worktrees` lists them, `DELETE
 …/scratch-worktrees/<sha>` drops one early, and a scratch checkout is pruned
 when the line retires or is purged and swept at startup when its record or
@@ -1130,7 +1149,10 @@ express) is chosen separately at creation (see Task modes below).
 Preset role traits govern agent staffing: implementers need **Fast implementer**; captains,
 sub-captains and reviewers need **Can manage a line**. Choose a free Fast implementer
 for implementation. A person may attach, resume, replace or appoint a process directly
-without those role traits; agents cannot staff presets with neither role trait. When attaching a sub-captain, select the captain role; the server appoints it on a
+without those role traits; agents cannot staff presets with neither role trait. Helper processes (raw
+adapters outside the worker count, such as the idle-check and rotate-captain helpers) hold no staffed role:
+they need no role trait, and a captain can restart one with delete, edit command and resume. An agent
+resuming any other process that is not a task worker, captain or helper still needs Fast implementer. When attaching a sub-captain, select the captain role; the server appoints it on a
 vacant line. **Reads images** is advisory; prefer it for image and screenshot work. Existing
 processes are not stopped when traits change, but subsequent staffing checks the current
 preset. A named default review policy must satisfy the reviewer requirement; `captain`

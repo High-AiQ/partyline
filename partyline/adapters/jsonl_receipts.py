@@ -138,10 +138,7 @@ class JsonlPasteReceipts:
             if not self.alive():
                 return False
             self._jsonl_receipt_event.clear()
-            try:
-                await asyncio.wait_for(self._jsonl_receipt_event.wait(), timeout=1)
-            except TimeoutError:
-                continue
+            await self._jsonl_receipt_event.wait()
         return True
 
 
@@ -151,7 +148,7 @@ def _read_batch(file, pending, path, anchor):
     try:
         target = os.stat(path)
     except FileNotFoundError:
-        target = current
+        return [], False, "unlinked"
     if (current.st_dev, current.st_ino) != (target.st_dev, target.st_ino):
         return [], False, "replaced"
     offset = file.tell()
@@ -201,17 +198,35 @@ async def _refuse_until_claimed(adapter, path: str) -> bool:
         "it carries another attachment's claim marker",
     )
     while adapter.alive():
-        await asyncio.sleep(1.0)
+        await adapter.wait_for_change()
         if await asyncio.to_thread(adapter.recorded_claim, path):
             adapter._mark_claim_proven()
             return True
     return False
 
 
-async def tail_jsonl(adapter, path: str, handle_line) -> None:
+async def tail_jsonl(adapter, path: str, handle_line, offset=0) -> None:
+    async with adapter.file_events(path, changes=adapter._changes):
+        await _tail_jsonl(adapter, path, handle_line, offset)
+
+
+async def _open_transcript(adapter, path):
+    while True:
+        try:
+            return await asyncio.to_thread(open, path, "rb", buffering=0)
+        except FileNotFoundError:
+            if not adapter.alive():
+                return None
+            await adapter.wait_for_change()
+
+
+async def _tail_jsonl(adapter, path: str, handle_line, offset=0) -> None:
     """Follow a JSONL transcript, scanning existing receipts before ready."""
     adapter._jsonl_tail_path = path
-    file = await asyncio.to_thread(open, path, "rb", buffering=0)
+    file = await _open_transcript(adapter, path)
+    if file is None:
+        return
+    file.seek(0, os.SEEK_END) if offset is None else file.seek(offset)
     try:
         if await asyncio.to_thread(adapter.recorded_claim, path):
             adapter._mark_claim_proven()
@@ -228,7 +243,9 @@ async def tail_jsonl(adapter, path: str, handle_line) -> None:
         while True:
             lines, read, change = await asyncio.to_thread(_read_batch, file, pending, path, anchor)
             if change:
-                replacement = await asyncio.to_thread(open, path, "rb", buffering=0)
+                replacement = await _open_transcript(adapter, path)
+                if replacement is None:
+                    return
                 await asyncio.to_thread(file.close)
                 file = replacement
                 pending.clear()
@@ -246,7 +263,7 @@ async def tail_jsonl(adapter, path: str, handle_line) -> None:
                     ready = True
                 if not adapter.alive():
                     return
-                await asyncio.sleep(0.3 if partial else 0.5)
+                await adapter.wait_for_change()
                 continue
             for line, record in lines:
                 if adapter._claim_in_line(line):
@@ -254,5 +271,6 @@ async def tail_jsonl(adapter, path: str, handle_line) -> None:
                 if isinstance(record, dict):
                     await adapter._observe_jsonl_paste(record)
                     await handle_line(record)
+                    adapter.changed()
     finally:
         await asyncio.to_thread(file.close)

@@ -11,6 +11,7 @@ import type { RecorderSources } from "../../lib/voice-recorder";
 import { draft } from "../../state/draft.svelte.js";
 import { layout } from "../../state/layout.svelte.js";
 import { room } from "../../state/room.svelte.js";
+import { screenStatus } from "../../state/screen-status.svelte.js";
 import { sendFailures } from "../../state/send-failures.svelte.js";
 import { session } from "../../state/session.svelte.js";
 import { voicePresets } from "../../state/voice-presets.svelte.js";
@@ -79,18 +80,16 @@ async function refusedTake(inFlight?: { refuse?: (error: Error) => void }) {
   draft.openLine(line.id);
   draft.clear();
   walkthrough.last = { line: "l", device: "d", region };
-  vi.spyOn(screenApi, "devices").mockResolvedValue({
-    devices: [{ id: "d", name: "Desk", os: "test", online: true, monitors: [] }],
-  });
+  screenStatus.devices = [{ id: "d", name: "Desk", os: "test", online: true, monitors: [] }];
   vi.spyOn(screenApi, "start").mockResolvedValue({ share_id: "s", status: "waiting" });
   vi.spyOn(screenApi, "current").mockResolvedValue({ share });
   vi.spyOn(walkthroughApi, "arm").mockResolvedValue({ ok: true });
   vi.spyOn(walkthroughApi, "stop").mockResolvedValue({ ok: true });
   const cancel = vi.spyOn(walkthroughApi, "cancel").mockResolvedValue({ ok: true });
-  vi.spyOn(voiceApi, "presets").mockResolvedValue({
+  voicePresets.listing = {
     default: "fake",
     presets: [{ name: "fake", kind: "fake", available: true }],
-  });
+  };
   vi.spyOn(voiceApi, "transcribe").mockResolvedValue({ text: "", duration: 1, language: "en", segments: [] });
   const finish = vi.spyOn(walkthroughApi, "finish");
   if (inFlight) finish.mockReturnValue(new Promise((_, reject) => (inFlight.refuse = reject)));

@@ -8,9 +8,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from partyline.adapters import jsonl_receipts
+from partyline.adapters.events import AdapterEvents
 
 
-class Adapter:
+class Adapter(AdapterEvents):
+    def __init__(self):
+        self._events_init()
     att = {"name": "test"}
     live = True
     def recorded_claim(self, path): return False
@@ -82,5 +85,6 @@ class TailIOTest(unittest.IsolatedAsyncioTestCase):
                 os.replace(replacement, path)
                 await asyncio.wait_for(second_record.wait(), 2)
                 adapter.live = False
+                adapter.changed()
                 await asyncio.wait_for(task, 2)
                 self.assertEqual(observed, [{"n": 1}, {"n": 2}])

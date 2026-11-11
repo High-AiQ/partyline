@@ -3,7 +3,7 @@ import asyncio
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from partyline_helper.client import Session
 from partyline_helper.uia_access import WindowAccess
@@ -146,23 +146,33 @@ class WindowWatchTests(unittest.IsolatedAsyncioTestCase):
         access = WindowAccess(session, platform="win32")
         access.grant = session.window.grant
         access.gate.grant()
-        ticks, entered = asyncio.Queue(), asyncio.Queue()
-        async def sleep(_):
-            entered.put_nowait(True)
-            await ticks.get()
+        entered = asyncio.Queue()
+        pending = asyncio.Queue()
+
+        class Events:
+            def __init__(self, *args):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def wait(self):
+                entered.put_nowait(True)
+                await pending.get()
+
         access.check = AsyncMock(side_effect=["secure desktop active", None, "window closed"])
         session.status = SimpleNamespace(window_title="Target", changed=Mock())
-        watch = asyncio.create_task(access.watch(sleep=sleep))
-        await entered.get()
-        ticks.put_nowait(True)
-        await entered.get()
-        self.assertTrue(access.gate.revoked.is_set())
-        ticks.put_nowait(True)
-        await entered.get()
-        self.assertFalse(access.gate.revoked.is_set())
-        ticks.put_nowait(True)
-        await entered.get()
-        self.assertIsNone(access.grant)
-        watch.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await watch
+        with patch('partyline_helper.uia_access.WindowEvents', Events):
+            watch = asyncio.create_task(access.watch())
+            for revoked in (True, False, True):
+                await entered.get()
+                self.assertEqual(revoked, access.gate.revoked.is_set())
+                if access.grant:
+                    pending.put_nowait(True)
+            self.assertIsNone(access.grant)
+            watch.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await watch

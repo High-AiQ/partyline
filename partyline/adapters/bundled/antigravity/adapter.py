@@ -28,6 +28,8 @@ import re
 import time
 from pathlib import Path
 
+from partyline.adapters.events import watch_files
+
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.antigravity import interrupt as interrupts
 from partyline.interrupts import InterruptStatus
@@ -140,7 +142,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
     async def _tail_log(self):
         """Follow the pinned `--log-file`, judging wakes by its submissions."""
         while not os.path.exists(self.log_path()) and self.alive():
-            await asyncio.sleep(0.5)
+            await self.wait_for_change()
         try:
             file = await asyncio.to_thread(open, self.log_path(), encoding="utf-8", errors="replace")
         except OSError:
@@ -150,7 +152,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
             while self.alive():
                 line = await asyncio.to_thread(file.readline)
                 if not line:
-                    await asyncio.sleep(0.5)
+                    await self.wait_for_change()
                     continue
                 await self._note_log_line(line)
 
@@ -191,6 +193,8 @@ class PartylineAdapter(WakeSettlement, Adapter):
     def _conversation_from_log(self, after: int = 0) -> str | None:
         return conversation_from_log(Path(self.log_path()), after=after)
 
+    @watch_files(lambda self: [self.log_path(),
+        BRAIN_ROOT / "*" / ".system_generated" / "logs" / "transcript.jsonl"])
     async def _run(self):
         os.makedirs(LOG_ROOT, exist_ok=True)
         await asyncio.to_thread(self._remember_log_mark)
@@ -201,21 +205,16 @@ class PartylineAdapter(WakeSettlement, Adapter):
             await self.send_keys(self.briefing())
 
         conversation = ""
+        started = self.event_time()
         waited = 0.0
         while not conversation and self.alive():
             after = await asyncio.to_thread(suffix_offset, Path(self.log_path()), self._log_mark)
             conversation = await asyncio.to_thread(self._conversation_from_log, after=after) or ""
             if conversation:
                 break
-            await asyncio.sleep(1.0)
-            waited += 1.0
-            if waited in (12.0, 24.0):
-                # Probably held at a first-run or trust prompt: accept the
-                # default and re-send the briefing.
-                self.write_terminal(b"\r")
-                await asyncio.sleep(1.0)
-                await self.send_keys(self.briefing())
-            elif waited > 45.0:
+            await self.wait_for_change(max(0, 45.0 - waited))
+            waited = self.event_time() - started
+            if waited >= 45.0:
                 await self.post(
                     "system", "system",
                     f"{self.att['name']}: no Created or Resuming conversation line in this "
@@ -230,7 +229,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
 
         transcript = BRAIN_ROOT / conversation / ".system_generated" / "logs" / "transcript.jsonl"
         while not transcript.exists() and self.alive():
-            await asyncio.sleep(0.5)
+            await self.wait_for_change()
         if not self.alive():
             return
 

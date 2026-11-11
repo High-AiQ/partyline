@@ -10,7 +10,6 @@
   import type { ResourceDraft } from "../../../lib/resource-form";
   import { SaveTracker } from "../../../lib/save-state";
   import type { SaveSnapshot } from "../../../lib/save-state";
-  import { resources } from "../../../state/resources.svelte.js";
 
   let stored = $state<ResourceSettings | null>(null);
   let draft = $state<ResourceDraft | null>(null);
@@ -50,7 +49,6 @@
     const next = await tracker.run(() => setResourceSettings(body), "could not save resource settings");
     if (next) {
       accept(next);
-      await resources.load();
     }
   }
 
@@ -58,7 +56,6 @@
     const next = await tracker.run(() => resetResourceSettings(), "could not reset resource settings");
     if (next) {
       accept(next);
-      await resources.load();
     }
   }
 

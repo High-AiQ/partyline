@@ -221,7 +221,7 @@ def _body(op, args):
         return {key: args[key] for key in ("ref_or_sha", "name", "repository", "replace")
                 if key in args}
     if op == "request_write_set":
-        return {"path": args["path"]}
+        return {"paths": args.get("paths") or [args["path"]]}
     if op == "request_restart":
         return {key: args[key] for key in ("reason", "confirm_no_deploy") if key in args}
     if op == "ack_report":

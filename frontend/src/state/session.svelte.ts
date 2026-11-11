@@ -1,3 +1,4 @@
+import { screenStatus } from "./screen-status.svelte.js";
 /**
  * The authenticated operator, and the things that belong to the server rather
  * than to a line: the adapter registry, saved presets, and version badge.
@@ -77,6 +78,8 @@ class Session {
 
   clearSession(): void {
     clearStoredTokens();
+    screenStatus.devices = [];
+    screenStatus.indicators = [];
     this.user = null;
     this.authReady = true;
   }
@@ -111,7 +114,7 @@ class Session {
     if (this.user && this.user.handle !== handle) this.user = { ...this.user, handle };
     void this.loadAdapters();
     // A restart may have added recognizers: the mic follows the server too.
-    voicePresets.refresh();
+    voicePresets.ensure();
   }
 
   async loadAdapters(): Promise<void> {

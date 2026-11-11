@@ -18,6 +18,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from tests.adapter_event_clock import install as event_clock
+
 from partyline.adapters.bundled.hermes.adapter import PartylineAdapter as HermesAdapter
 from partyline.adapters.bundled.opencode import adapter as opencode_module
 from partyline.adapters.bundled.opencode.adapter import PartylineAdapter as OpenCodeAdapter
@@ -93,7 +95,7 @@ class RecordingAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.statuses.append(value)
 
     def make(self, cls, **att_extra):
-        return cls(attachment(**att_extra), self.post, self.status)
+        return event_clock(cls(attachment(**att_extra), self.post, self.status))
 
 
 class HermesAdapterTest(RecordingAdapterTest):
@@ -1327,8 +1329,8 @@ class PiAdapterTest(RecordingAdapterTest):
             ):
                 await adapter._run()
             self.assertEqual(self.messages, [("agent", "agent", "ready")])
-            write.assert_called_once_with(7, b"\r")
-            self.assertGreaterEqual(adapter.send_keys.await_count, 2)
+            write.assert_not_called()
+            self.assertEqual(adapter.send_keys.await_count, 1)
 
     async def test_run_reports_missing_transcript_after_timeout(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1373,7 +1375,7 @@ class RawAdapterTest(RecordingAdapterTest):
             adapter.proc.stop()
 
         adapter.post = post
-        with patch("partyline.adapters.bundled.raw.adapter.asyncio.sleep", new=AsyncMock()):
+        with patch.object(adapter, "wait_for_change", new=AsyncMock()):
             await adapter._run()
         self.assertEqual(self.messages, [("agent", "agent", "hello\nworld\n\ufffd")])
 

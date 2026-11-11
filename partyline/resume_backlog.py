@@ -42,7 +42,8 @@ def addressed_backlog(runtime, att: dict, *, include_message_ids=()) -> list[dic
             and not known_mention_names(runtime.db, att["conv_id"], names)
         )
 
-    selected = [message for message in pending if addressed(message)]
+    queued = runtime.db.messages_by_ids(att["conv_id"], runtime.db.queued_delivery_ids(att["id"]))
+    selected = [message for message in pending if addressed(message)] + queued
     latest_non_system = runtime.db._exec(
         MESSAGE_SELECT +
         " WHERE m.conv_id=? AND m.sender_type!='system' ORDER BY m.id DESC LIMIT 1",
@@ -56,7 +57,7 @@ def addressed_backlog(runtime, att: dict, *, include_message_ids=()) -> list[dic
             and addressed_human_message(runtime, att, latest)
         ):
             selected.append(latest)
-    kept = drop_resolved(runtime, att, list(selected), keep=included)
+    kept = drop_resolved(runtime, att, list(selected), keep=included | {m["id"] for m in queued})
     return sorted({message["id"]: message for message in kept}.values(), key=lambda m: m["id"])
 
 

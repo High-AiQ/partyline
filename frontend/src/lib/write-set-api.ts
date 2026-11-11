@@ -1,18 +1,14 @@
 /** A line's request for extra write-set scope, and a person's decision on it. */
-import { PendingWriteSetGrantSchema } from "./write-set-contracts";
-import type { PendingWriteSetGrant } from "./write-set-contracts";
+import { PendingWriteSetGrantSchema, WriteSetApprovalSchema } from "./write-set-contracts";
+import type { PendingWriteSetGrant, WriteSetApproval } from "./write-set-contracts";
 import { request } from "./http";
 
 export const writeSetApi = {
   pending: (convId: string): Promise<PendingWriteSetGrant> =>
     request(`/api/conversations/${convId}/write-set/request`, { schema: PendingWriteSetGrantSchema }),
-  approve: (
-    convId: string,
-    id: string,
-    dockerMode?: "managed" | "unrestricted",
-  ): Promise<PendingWriteSetGrant> =>
+  approve: (convId: string, id: string, dockerMode?: "managed" | "unrestricted"): Promise<WriteSetApproval> =>
     request(`/api/conversations/${convId}/write-set/request/${id}/approve`, {
-      schema: PendingWriteSetGrantSchema,
+      schema: WriteSetApprovalSchema,
       method: "POST",
       ...(dockerMode ? { body: { docker_mode: dockerMode } } : {}),
       fallback: "could not approve the write-set request",
