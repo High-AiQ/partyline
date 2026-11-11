@@ -3,9 +3,8 @@
   import { screenStatus } from "../../state/screen-status.svelte.js";
   import { tooltip } from "../../lib/tooltip";
   import { PopupMenu } from "../../lib/popup-menu.svelte";
-  import ComposerBubble from "./ComposerBubble.svelte";
 
-  let { error, online, onbegin }: { error: string; online: boolean; onbegin: () => void } = $props();
+  let { online, onbegin }: { online: boolean; onbegin: () => void } = $props();
   const popup = new PopupMenu();
   const blocked = $derived(Boolean(room.screenShare && room.screenShare.status !== "declined"));
   const reason = $derived(
@@ -79,5 +78,4 @@
       </button>
     </div>
   {/if}
-  {#if error}<ComposerBubble><span role="alert" class="text-red">{error}</span></ComposerBubble>{/if}
 </div>

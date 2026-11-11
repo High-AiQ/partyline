@@ -89,6 +89,7 @@
         send: (text) => (room.conversation?.id === line && !reason ? room.say(text) : Promise.resolve(false)),
         onsent: (text) => {
           lastSent = text;
+          failure = "";
         },
         onerror: (message) => {
           failure = message;
@@ -110,6 +111,7 @@
     void room.conversation?.id;
     untrack(() => {
       lastSent = "";
+      failure = "";
     });
   });
 
@@ -200,7 +202,19 @@
   {/if}
   {#if failure || lastSent}
     <ComposerBubble>
-      {#if failure}<span role="alert" class="block text-red">{failure}</span>{/if}
+      {#if failure}
+        <span class="flex items-center gap-2 text-red">
+          <span role="alert">{failure}</span>
+          <button
+            type="button"
+            class="border-0 bg-transparent px-1 py-0 text-cream-faint hover:text-cream"
+            aria-label="dismiss"
+            onclick={() => {
+              failure = "";
+            }}>✕</button
+          >
+        </span>
+      {/if}
       {#if lastSent}
         <span class="block text-cream-dim" aria-live="polite"
           >Voice sent: <span class="text-cream">{lastSent}</span></span

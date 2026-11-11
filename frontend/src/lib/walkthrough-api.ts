@@ -15,6 +15,23 @@ export interface WalkthroughResult {
   duration_ms: number;
 }
 
+/** What the server is told when a take is sent: the transcript if there is one, else the failure. */
+export function walkthroughResult(
+  transcript: Transcript | undefined,
+  failed: boolean,
+  take: { notes: string; mark: boolean; noInput: boolean; elapsed: number },
+): WalkthroughResult {
+  return {
+    notes: take.notes,
+    segments: transcript?.segments ?? [],
+    transcript_text: transcript?.segments.length ? "" : (transcript?.text ?? ""),
+    transcription_error: failed,
+    mark_pointer: take.mark,
+    no_input: take.noInput,
+    duration_ms: Math.min(take.elapsed, 600_000),
+  };
+}
+
 function path(line: string, share: string): string {
   return `/api/conversations/${encodeURIComponent(line)}/walkthroughs/${encodeURIComponent(share)}`;
 }

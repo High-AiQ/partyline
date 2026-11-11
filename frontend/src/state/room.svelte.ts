@@ -15,6 +15,7 @@ import type {
 } from "../lib/contracts";
 import { session } from "./session.svelte.js";
 import { sayOnLine } from "../lib/room-say";
+import { sendFailures } from "./send-failures.svelte.js";
 import { sendOffLine } from "../lib/offline-wire";
 import type { WireIdentity } from "../lib/wire-commands";
 import { restart } from "./restart.svelte.js";
@@ -116,6 +117,8 @@ class Room {
     const presenceFetch = presenceSync.open();
     if (!fromRoute) setConversationRoute(conversation.id);
 
+    if (this.conversation && this.conversation.id !== conversation.id)
+      sendFailures.dismiss(this.conversation.id);
     this.conversation = conversation;
     writeSet.activate(conversation.id);
     memoryRequest.activate(conversation.id);
@@ -224,6 +227,7 @@ class Room {
     this.#epoch++;
     presenceSync.reset();
     wire.disconnect();
+    if (this.conversation) sendFailures.dismiss(this.conversation.id);
     this.conversation = null;
     draft.leaveLine();
     this.history.reset();
@@ -258,6 +262,7 @@ class Room {
       if (result.error) this.showNotice(result.error, "error");
       return false;
     }
+    sendFailures.sent(conversation.id);
     if (result.message && this.conversation?.id === conversation.id) this.#absorb(result.message);
     return true;
   }
@@ -271,6 +276,9 @@ class Room {
     this.#noticeTimer = setTimeout(() => {
       this.notice = null;
     }, 4200);
+  }
+  dismissNotice(): void {
+    this.notice = null; // a pending timer only ever nulls it again; showNotice resets it
   }
   // ── server events ──────────────────────────────────────────────────────
   #onWireEvent(event: WireEvent, context: WireContext): void {
@@ -295,6 +303,7 @@ class Room {
     else this.attachments.push(attachment);
     // A process that has exited is no longer waiting on you.
     if (!isLive(attachment)) this.attention.delete(attachment.id);
+    else if (this.conversation) sendFailures.attached(this.conversation.id);
   }
 
   /** Forget a jack; idempotent for the same reason `upsertAttachment` is. */
