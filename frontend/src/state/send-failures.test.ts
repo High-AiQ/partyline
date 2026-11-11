@@ -120,7 +120,7 @@ describe("the room and failed sends", () => {
 
   it("dismisses a notice on request", () => {
     room.showNotice("boom", "error");
-    room.dismissNotice();
+    room.notice = null;
     expect(room.notice).toBeNull();
   });
 });

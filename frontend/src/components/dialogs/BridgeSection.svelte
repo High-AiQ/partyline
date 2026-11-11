@@ -1,10 +1,12 @@
 <script lang="ts">
   /** A person opens and closes the line's bridge here; processes cannot. */
+  import { untrack } from "svelte";
   import { ApiError, api } from "../../lib/api";
   import { bridgeApi, type Bridge, type BridgeLogEntry } from "../../lib/bridge-api";
   import type { Attachment, Conversation } from "../../lib/contracts";
   import { isLive } from "../../lib/attachments";
   import { hierarchyApi } from "../../lib/hierarchy-api";
+  import { lineLiveState } from "../../state/line-live-state.svelte.js";
   import { treeRootId } from "../../lib/line-hierarchy";
   import { room } from "../../state/room.svelte";
 
@@ -23,6 +25,7 @@
   let theirId = $state("");
   let theirProcesses = $state<Attachment[]>([]);
   let log = $state<BridgeLogEntry[] | null>(null);
+  let loadedLineId = "";
 
   const mine = $derived(room.attachments.filter((a) => a.conv_id === conversation.id && isLive(a)));
   /** Lines of other trees only: lines in one tree already reach each other. */
@@ -62,21 +65,43 @@
 
   $effect(() => {
     const lineId = otherLineId;
-    const line = room.conversations.find((candidate) => candidate.id === lineId);
-    // A line_live event changes live_count, so refresh this one selection from
-    // the shared live state without polling while the dialog stays open.
-    const liveCount = line?.live_count;
-    theirId = "";
-    theirProcesses = [];
-    if (!lineId || !liveCount) return;
+    // Track only this line's state revision. Other lines broadcast line_live
+    // too, but they must not cancel or reload this line's ambassador list.
+    const revision = lineId ? (lineLiveState.revisions[lineId] ?? 0) : 0;
+    void revision;
+    const { line, conversations } = untrack(() => ({
+      line: room.conversations.find((candidate) => candidate.id === lineId),
+      conversations: room.conversations,
+    }));
+    const eligible = Boolean(
+      line &&
+      !line.archived_at &&
+      line.live_count > 0 &&
+      line.id !== conversation.id &&
+      treeRootId(line.id, conversations) !== treeRootId(conversation.id, conversations),
+    );
+
+    if (loadedLineId !== lineId) {
+      loadedLineId = lineId;
+      theirId = "";
+      theirProcesses = [];
+    }
+    if (!lineId || !eligible) {
+      theirId = "";
+      theirProcesses = [];
+      if (lineId) otherLineId = "";
+      return;
+    }
 
     let cancelled = false;
     void Promise.all([api.conversation(lineId), hierarchyApi.lead(lineId)])
       .then(([detail, captain]) => {
         if (!cancelled) {
-          theirProcesses = detail.attachments
+          const processes = detail.attachments
             .filter(isLive)
             .sort((a, b) => (a.id === captain.attachment_id ? -1 : b.id === captain.attachment_id ? 1 : 0));
+          theirProcesses = processes;
+          if (!processes.some((process) => process.id === theirId)) theirId = "";
         }
       })
       .catch((error: unknown) => {

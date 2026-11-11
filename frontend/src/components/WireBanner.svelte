@@ -136,7 +136,7 @@
       class="ml-2 border-0 bg-transparent px-1 py-0 opacity-70 hover:opacity-100"
       aria-label="dismiss"
       onclick={() => {
-        room.dismissNotice();
+        room.notice = null; // a pending timer only nulls it again
       }}>✕</button
     >
   </div>

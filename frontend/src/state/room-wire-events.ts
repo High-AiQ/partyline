@@ -1,6 +1,5 @@
 /** Wire events that mutate the open line — kept out of room.svelte.ts for the line cap. */
-import type { Attachment, ChatMessage, Conversation, WireEvent } from "../lib/contracts";
-import { applyLineLive } from "../lib/line-live";
+import type { Attachment, ChatMessage, Conversation, LineLiveEvent, WireEvent } from "../lib/contracts";
 import { handleWireError, type RefusalTarget } from "./room-wire-error";
 import type { WireContext } from "./wire.svelte.js";
 import { presenceSync } from "./presence-coordinator.svelte.js";
@@ -22,6 +21,7 @@ export interface RoomWireSink extends RefusalTarget {
   upsertAttachment(attachment: Attachment): void;
   removeAttachment(attachmentId: string): void;
   setCaptain(conversationId: string, attachmentId: string | null): void;
+  setLineLive(event: LineLiveEvent): void;
   leave(): void;
   loadConversations(): Promise<void>;
   refreshArchiveIfOpen(): void;
@@ -80,7 +80,7 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
       break;
     case "line_live":
       resources.scheduleRefresh();
-      room.conversations = applyLineLive(room.conversations, event);
+      room.setLineLive(event);
       break;
     case "attention":
       room.attention.add(event.attachment_id);

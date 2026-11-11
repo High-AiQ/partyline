@@ -158,6 +158,69 @@ describe("bridge section", () => {
     }
   });
 
+  it("preserves the ambassador on unrelated events and clears it only after it departs", async () => {
+    room.conversations = [
+      { ...line("x", "3d game"), live_count: 1 },
+      { ...line("y", "tool"), live_count: 3 },
+      { ...line("z", "unrelated"), live_count: 1 },
+    ];
+    room.attachments = [process("x-amb", "x", "sonnet")];
+    const captain = process("y-cap", "y", "captain");
+    const peer = process("y-peer", "y", "fable");
+    const extra = process("y-extra", "y", "gem");
+    const detail = (attachments: Attachment[]) =>
+      ConversationDetailSchema.parse({
+        conversation: line("y", "tool"),
+        messages: [],
+        attachments,
+      });
+    const list = vi.spyOn(api, "conversation").mockResolvedValueOnce(detail([captain, peer, extra]));
+    vi.spyOn(hierarchyApi, "lead")
+      .mockResolvedValueOnce({ attachment_id: captain.id })
+      .mockResolvedValueOnce({ attachment_id: captain.id })
+      .mockResolvedValueOnce({ attachment_id: peer.id });
+    vi.spyOn(bridgeApi, "forLine").mockResolvedValue(null);
+    const section = mountSection();
+    try {
+      await vi.waitFor(() => {
+        expect(document.getElementById("bridgeLine")).not.toBeNull();
+      });
+      choose("bridgeMine", "x-amb");
+      choose("bridgeLine", "y");
+      await vi.waitFor(() => {
+        expect(byId("bridgeTheirs").options.length).toBe(4);
+      });
+      choose("bridgeTheirs", captain.id);
+      await vi.waitFor(() => {
+        expect(button("open bridge")?.disabled).toBe(false);
+      });
+
+      room.setLineLive({ type: "line_live", conversation_id: "z", live_count: 2 });
+      room.setLineLive({ type: "line_live", conversation_id: "y", live_count: 3 });
+      expect(byId("bridgeTheirs").value).toBe(captain.id);
+      expect(button("open bridge")?.disabled).toBe(false);
+      expect(list).toHaveBeenCalledTimes(1);
+
+      list.mockResolvedValueOnce(detail([captain, peer]));
+      room.setLineLive({ type: "line_live", conversation_id: "y", live_count: 2 });
+      await vi.waitFor(() => {
+        expect(byId("bridgeTheirs").options.length).toBe(3);
+      });
+      expect(byId("bridgeTheirs").value).toBe(captain.id);
+      expect(button("open bridge")?.disabled).toBe(false);
+
+      list.mockResolvedValueOnce(detail([peer]));
+      room.setLineLive({ type: "line_live", conversation_id: "y", live_count: 1 });
+      await vi.waitFor(() => {
+        expect(byId("bridgeTheirs").options.length).toBe(2);
+      });
+      expect(byId("bridgeTheirs").value).toBe("");
+      expect(button("open bridge")?.disabled).toBe(true);
+    } finally {
+      await unmount(section);
+    }
+  });
+
   it("shows a 409 reason in the status line", async () => {
     room.conversations = [line("x", "3d game"), line("y", "tool")];
     room.attachments = [process("x-amb", "x", "sonnet")];
