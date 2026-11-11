@@ -141,21 +141,33 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
         access = entry["access"]
         access.check = AsyncMock(side_effect=["secure desktop active", None, "window closed"])
         entered, ticks = asyncio.Queue(), asyncio.Queue()
-        async def sleep(_):
-            entered.put_nowait(True)
-            await ticks.get()
-        self.session.sleep = sleep
-        watch = asyncio.create_task(self.manager.watch())
-        await entered.get()
-        for revoked in (True, False, True):
-            ticks.put_nowait(True)
-            await entered.get()
-            self.assertEqual(revoked, access.gate.revoked.is_set())
-        self.assertNotIn(ident, self.manager.grants)
-        self.assertEqual("window closed", (await self.socket.next("window_revoked"))["reason"])
-        watch.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await watch
+
+        class Events:
+            def __init__(self, *args):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def wait(self):
+                entered.put_nowait(True)
+                await ticks.get()
+
+        with patch('partyline_helper.window_shares.WindowEvents', Events):
+            watch = asyncio.create_task(self.manager.watch())
+            for revoked in (True, False, True):
+                await entered.get()
+                self.assertEqual(revoked, access.gate.revoked.is_set())
+                if access.grant:
+                    ticks.put_nowait(True)
+            self.assertNotIn(ident, self.manager.grants)
+            self.assertEqual("window closed", (await self.socket.next("window_revoked"))["reason"])
+            watch.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await watch
 
     async def test_stop_during_server_registration_withdraws_late_grant(self):
         async def request(kind, **fields):

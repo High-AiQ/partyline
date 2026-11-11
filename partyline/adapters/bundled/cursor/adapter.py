@@ -9,6 +9,8 @@ import logging
 import os
 from pathlib import Path
 
+from partyline.adapters.events import watch_files
+
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.cursor.parse import (
     chat_dir,
@@ -180,18 +182,17 @@ class PartylineAdapter(WakeSettlement, Adapter):
                             seen_fps, resync_failures = await self._handle_resync(
                                 path, seen_fps, resync_failures
                             )
-                            await asyncio.sleep(self.POLL_SECONDS)
                             break
                         pos = fh.tell()
                         line = await asyncio.to_thread(fh.readline)
                         if not line:
-                            await asyncio.sleep(self.POLL_SECONDS)
+                            await self.wait_for_change()
                             continue
                         if not line.endswith("\n"):
                             if not self.alive():
                                 return
                             fh.seek(pos)
-                            await asyncio.sleep(0.3)
+                            await self.wait_for_change()
                             continue
                         fp = await asyncio.to_thread(fingerprint, line)
                         self.observe_claim(line)
@@ -210,7 +211,6 @@ class PartylineAdapter(WakeSettlement, Adapter):
                             seen_fps, resync_failures = await self._handle_resync(
                                 path, seen_fps, resync_failures
                             )
-                            await asyncio.sleep(self.POLL_SECONDS)
                             break
                         seen_fps.append(fp)
                         matched += 1
@@ -234,8 +234,10 @@ class PartylineAdapter(WakeSettlement, Adapter):
             except OSError:
                 if not self.alive():
                     return
-                await asyncio.sleep(self.POLL_SECONDS)
+                await self.wait_for_change()
 
+    @watch_files(lambda self: [chat_dir(self.att["cwd"]) / "*" / "*",
+        transcript_path(self.att["cwd"], "*")])
     async def _run(self):
         await asyncio.sleep(self.INITIAL_DELAY)
         if not self.alive():
@@ -246,6 +248,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
         async with lock:
             if not self.resume:
                 await self.send_keys(self.briefing())
+            deadline = self.event_time() + self.DISCOVERY_TIMEOUT
             waited = 0.0
             while session_id is None and self.alive():
                 session_id = self._find_chat()
@@ -253,11 +256,9 @@ class PartylineAdapter(WakeSettlement, Adapter):
                     self._CLAIMED.add(session_id)
                     self._session_id = session_id
                     break
-                await asyncio.sleep(self.POLL_SECONDS)
-                waited += self.POLL_SECONDS
-                if (11.9 <= waited <= 12.1 or 23.9 <= waited <= 24.1) and not self.resume:
-                    await self.send_keys(self.briefing())
-                elif waited > self.DISCOVERY_TIMEOUT:
+                await self.wait_for_change(max(0, deadline - self.event_time()))
+                waited = self.DISCOVERY_TIMEOUT - max(0, deadline - self.event_time())
+                if waited >= self.DISCOVERY_TIMEOUT:
                     diagnostic = startup_diagnostics(
                         getattr(self, "spawn_argv", self.build_command()),
                         self.att["cwd"], self._startup_output.decode(errors="replace"),
@@ -281,10 +282,12 @@ class PartylineAdapter(WakeSettlement, Adapter):
             self.on_cli_session(session_id)
 
         path = transcript_path(self.att["cwd"], session_id)
-        waited = 0.0
-        while not path.is_file() and self.alive() and waited < self.DISCOVERY_TIMEOUT:
-            await asyncio.sleep(self.POLL_SECONDS)
-            waited += self.POLL_SECONDS
+        deadline = self.event_time() + self.DISCOVERY_TIMEOUT
+        while not path.is_file() and self.alive():
+            remaining = deadline - self.event_time()
+            if remaining <= 0:
+                break
+            await self.wait_for_change(remaining)
         if not path.is_file() or not self.alive():
             return
 

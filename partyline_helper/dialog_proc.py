@@ -10,7 +10,6 @@ import json
 import os
 import sys
 import threading
-import time
 
 from . import foreground
 
@@ -71,23 +70,10 @@ def ask(title, message, timeout, kind="ask", box=None, ticked=None):
     return tk_ask(title, message, timeout, kind, box, ticked)
 
 
-def process_gone(pid, sleep=time.sleep):
+def process_gone(pid):
     """Block until process `pid` has exited."""
-    if os.name == "nt":  # pragma: no cover - Windows only
-        import ctypes
-        handle = ctypes.windll.kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
-        if not handle:
-            raise OSError("cannot watch the helper process")  # the caller then keeps the dialog open
-        ctypes.windll.kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)
-        return
-    while True:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return
-        except OSError:
-            pass
-        sleep(1)
+    from partyline.process_events import wait_pid
+    wait_pid(pid)
 
 
 def watch_parent(pid, exit_fn=os._exit, wait=process_gone):

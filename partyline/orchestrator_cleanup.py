@@ -93,10 +93,14 @@ async def tick(runtime):
 
 
 async def run(runtime):
-    while True:
+    from .maintenance_events import tasks
+
+    async def maintain(runtime):
         try:
             with timed_tick('task maintenance'):
                 await tick(runtime)
         except Exception:
-            logger.exception('task maintenance failed; retrying next tick')
-        await asyncio.sleep(30)
+            logger.exception('task maintenance failed; retrying after failure')
+            return True
+
+    await tasks(runtime, maintain)

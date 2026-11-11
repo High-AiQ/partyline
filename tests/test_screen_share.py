@@ -864,6 +864,7 @@ class HelperProtocolCompatibilityTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(HelperFrame.model_validate(socket.sent[2]).request_id, "snap")
         self.assertIsInstance(socket.sent[3], bytes)
         helper.accepted = False
+        helper.pending_id = message["share_id"]
         gate = asyncio.Event()
         helper.worker = asyncio.create_task(gate.wait())
         await helper.dispatch(message)

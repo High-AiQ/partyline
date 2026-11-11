@@ -43,6 +43,7 @@
     }
     copied = true;
     clearTimeout(revertTimer);
+    // no-poll (b): one-shot UI deadline; no state request
     revertTimer = setTimeout(() => (copied = false), 1500);
   }
 

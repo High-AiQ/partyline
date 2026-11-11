@@ -2,13 +2,13 @@
 import asyncio
 import socket
 import sys
-import time
 
 from . import consent_dialog
 from .config import config_path, load_config, pair
 from .instance import InstanceLock, spawn_detached
 from .launch import recorded_launch
 from .stopping import clear_stop, stop_helper
+from partyline.process_events import wait_pid
 from .urls import LinkError, parse_link
 
 
@@ -70,18 +70,18 @@ def open_link(url, ask=consent_dialog.confirm, tell=consent_dialog.notify, pairi
 _held = []
 
 
-def claim_run(log=None, wait=False, lock=InstanceLock, sleep=time.sleep, attempts=100):
+def claim_run(log=None, wait=False, lock=InstanceLock):
     """Take the one-helper lock for this process (kept until exit) and send output to the log file.
 
     False when another helper holds it. `wait` covers a restart: the old helper is still exiting.
     """
     guard = lock("run")
-    for _ in range(attempts if wait else 1):
-        if guard.acquire():
-            break
-        sleep(0.1)
-    else:
-        return False
+    if not guard.acquire():
+        if not wait:
+            return False
+        holder = guard.holder()
+        if holder is None or not wait_pid(holder, timeout=10) or not guard.acquire():
+            return False
     _held.append(guard)
     clear_stop()  # a stop requested of the previous helper must not end this one
     if log:

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TypeVar
 
 from .db import Db, RestartPlan
+from .file_events import FileEvents
 
 T = TypeVar("T")
 LeaseGuard = Callable[[], None]
@@ -30,18 +32,25 @@ class RestartPlanLeaseLost(RuntimeError):
 
 
 async def _claim(db: Db, owner: str, timing: LeaseTiming) -> RestartPlan | None:
-    while True:
-        pending = db.get_restart_plan()
-        if pending is None or pending["mode"] != "automatic":
-            return None
-        claimed = db.claim_restart_plan("automatic", owner, timing.lease_seconds)
-        if claimed is not None:
-            return claimed
-        await asyncio.sleep(timing.retry_interval)
+    async with FileEvents(db.path) as events:
+        while True:
+            pending = db.get_restart_plan()
+            if pending is None or pending["mode"] != "automatic":
+                return None
+            claimed = db.claim_restart_plan("automatic", owner, timing.lease_seconds)
+            if claimed is not None:
+                return claimed
+            # no-poll (b): the current owner's persisted lease expiry is a deadline.
+            remaining = max(0, (pending.get('claim_until') or 0) - time.time())
+            try:
+                await asyncio.wait_for(events.wait(asyncio.current_task()), remaining)
+            except TimeoutError:
+                pass
 
 
 async def _renew(db: Db, plan: RestartPlan, owner: str, timing: LeaseTiming) -> None:
     while True:
+        # no-poll (c): ownership protocol lease renewal; no state discovery
         await asyncio.sleep(timing.renew_interval)
         if not db.renew_restart_plan_claim(plan["token"], owner, timing.lease_seconds):
             raise RestartPlanLeaseLost(

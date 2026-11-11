@@ -10,6 +10,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 
 | DO | DO NOT |
 | --- | --- |
+| Partyline never polls; it reacts to events. Deadlines are one-shot timers, keepalives are protocol pings; the browser learns state from websocket/stream pushes (snapshot on connect), never by polling or retry-fetching | Re-check state on a timer, or schedule browser fetches to learn state |
 | Keep every process a real interactive process in a pty | Substitute a headless invocation or an SDK call |
 | Post assistant speech from structured transcripts | Turn terminal screen contents into chat messages |
 | Post media and service links as host-relative paths (`/api/media/<id>/slim`) or the LAN host | Post `0.0.0.0`, `127.0.0.1`, or `localhost` URLs; people reach this over LAN or HTTPS |
@@ -32,6 +33,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 ## Gates — all must pass before every commit
 
 ```bash
+./scripts/check-no-polling          # classified event/deadline waits
 uv run --locked ruff check .        # lint (no autoformatter: match surrounding style by hand)
 ./scripts/capped-test               # parallel full suite under a 4 GB memory cap
 uv run --locked coverage report     # ≥90% combined (statements + branches, fail_under in pyproject), nothing omitted

@@ -12,6 +12,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from tests.adapter_event_clock import install as event_clock
+
 from partyline.adapters.bundled.codex.adapter import PartylineAdapter
 from partyline.terminal_viewers import TerminalViewerRegistry
 
@@ -36,7 +38,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
         adapter = PartylineAdapter.__new__(PartylineAdapter)
         adapter.att = {"command": command, "cli_session": session_id}
         adapter.resume = resume
-        return adapter
+        return event_clock(adapter)
 
     def make_resumed_adapter(self) -> PartylineAdapter:
         async def post(sender: str, sender_type: str, body: str) -> None:
@@ -45,7 +47,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
         async def on_status(status: str) -> None:
             return None
 
-        return PartylineAdapter(
+        return event_clock(PartylineAdapter(
             {
                 "command": ["codex"],
                 "cli_session": "session-1",
@@ -54,7 +56,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
             },
             post,
             on_status,
-        )
+        ))
 
     def test_fresh_command_is_unchanged(self):
         command = ["codex", "--model", "gpt-5.6-terra"]
@@ -123,7 +125,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
                 patch("builtins.open", side_effect=OSError),
             ):
                 await adapter._run()
-            return adapter
+            return event_clock(adapter)
 
         prompt = self.make_resumed_adapter().format_digest(messages)
         received = await run_with(
@@ -164,6 +166,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
             post,
             on_status,
         )
+        event_clock(adapter)
         adapter.alive = lambda: True
         adapter.master = 1
         adapter._find_rollout = lambda: None
@@ -191,6 +194,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
                "resume": True}
         att.update(extra_att or {})
         adapter = PartylineAdapter(att, post, on_status)
+        event_clock(adapter)
         self.assertTrue(
             adapter.stage_startup_delivery(
                 [{"sender": "system", "body": "Continuation debrief: nonce-123"}]
@@ -209,7 +213,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
             patch("builtins.open", side_effect=OSError),
         ):
             await adapter._run()
-        return adapter, posted
+        return event_clock(adapter), posted
 
     # Newer Codex builds record speech as completed items rather than the
     # user_message/agent_message events the old vocabulary used. Two agents sat
@@ -332,6 +336,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
             post,
             on_status,
         )
+        event_clock(adapter)
         adapter.alive = lambda: True
         adapter._fresh = lambda timestamp: True
         adapter._find_rollout = lambda: "rollout.jsonl"
@@ -383,6 +388,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
             post,
             on_status,
         )
+        event_clock(adapter)
         adapter._fresh = lambda timestamp: False
         adapter.alive = lambda: True
         adapter._find_rollout = lambda: "rollout.jsonl"
@@ -431,6 +437,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
             post2,
             on_status2,
         )
+        event_clock(adapter2)
         adapter2._fresh = lambda ts: False
         adapter2.alive = lambda: True
         adapter2._find_rollout = lambda: "rollout.jsonl"
@@ -498,7 +505,7 @@ class CodexDiscoveryTest(unittest.IsolatedAsyncioTestCase):
         adapter.proc = None
         adapter.master = None
         adapter._tasks = []
-        return adapter
+        return event_clock(adapter)
 
     @staticmethod
     def write_rollout(path: str, meta: dict, lines=()) -> str:
@@ -678,8 +685,9 @@ class CodexHomeTest(unittest.IsolatedAsyncioTestCase):
             post,
             on_status,
         )
+        event_clock(adapter)
         adapter.spawned_at = time.time()
-        return adapter
+        return event_clock(adapter)
 
     @staticmethod
     def write_rollout(path: str, *, cwd: str, session: str, records=()) -> str:
@@ -919,7 +927,7 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
         adapter.mark_ready = lambda: setattr(self, "ready", True)
         adapter._alive = True
         adapter.alive = lambda: adapter._alive
-        self.adapter = adapter
+        self.adapter = event_clock(adapter)
 
         async def fake_receipt(att, event):
             self.receipts.append((att, event))
@@ -968,7 +976,7 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
         async def stop_after_poll(*_a, **_k):
             self.adapter._alive = False
 
-        with patch.object(self.th.asyncio, "sleep", new=stop_after_poll):
+        with patch.object(self.adapter, "wait_for_change", new=stop_after_poll):
             return await self.th.tail_thread_history(
                 self.adapter, self.home, "thread-1", timeout=timeout
             )
@@ -1220,7 +1228,7 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
             else:
                 self.adapter._alive = False
 
-        with patch.object(self.th.asyncio, "sleep", new=two_polls):
+        with patch.object(self.adapter, "wait_for_change", new=two_polls):
             await self.th.tail_thread_history(self.adapter, self.home, "thread-1")
 
         self.assertEqual(self.receipts, [(self.adapter.att, BEGAN), (self.adapter.att, ENDED)])
@@ -1294,7 +1302,7 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
             else:
                 self.adapter._alive = False
 
-        with patch.object(self.th.asyncio, "sleep", new=appear_then_stop):
+        with patch.object(self.adapter, "wait_for_change", new=appear_then_stop):
             opened = await self.th.tail_thread_history(
                 self.adapter, self.home, "thread-1", timeout=5.0
             )
@@ -1321,7 +1329,7 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
             elif polls["n"] > 2:
                 self.adapter._alive = False
 
-        with patch.object(self.th.asyncio, "sleep", new=three_polls):
+        with patch.object(self.adapter, "wait_for_change", new=three_polls):
             await self.th.tail_thread_history(self.adapter, self.home, "thread-1")
 
         self.assertEqual(self.receipts, [(self.adapter.att, BEGAN), (self.adapter.att, ENDED)])
@@ -1360,7 +1368,7 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
             self.adapter._alive = True
 
         self.adapter.post = post_keep_alive
-        with patch.object(self.th.asyncio, "sleep", new=two_polls):
+        with patch.object(self.adapter, "wait_for_change", new=two_polls):
             await self.th.tail_thread_history(self.adapter, self.home, "thread-1")
 
         self.assertEqual(self.messages, [("terra", "agent", "once")])
@@ -1412,7 +1420,7 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
                 if calls["n"] >= 2:
                     self.adapter._alive = False
 
-            with patch.object(self.th.asyncio, "sleep", new=one_sleep):
+            with patch.object(self.adapter, "wait_for_change", new=one_sleep):
                 await self.th.tail_thread_history(self.adapter, self.home, "thread-1")
 
         self.assertEqual(self.messages, [("terra", "agent", "survived")])

@@ -48,6 +48,8 @@ def setUpModule():
         )
 
 
+from tests.adapter_event_clock import install as event_clock
+
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.grok.adapter import PartylineAdapter
 from partyline.adapters.bundled.grok import turn_hooks
@@ -113,6 +115,14 @@ def make_adapter(
         await asyncio.sleep(0)
 
     adapter._poll = fast_poll
+    event_clock(adapter)
+    original_wait = adapter.wait_for_change
+
+    async def changed(timeout=None):
+        adapter._test_polled.set()
+        return await original_wait(timeout)
+
+    adapter.wait_for_change = changed
     return adapter
 
 
@@ -1868,7 +1878,7 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         tail = AsyncMock()
         with (
             patch.object(adapter, "_transcript", side_effect=[None, None, None, path]),
-            patch("partyline.adapters.bundled.grok.adapter.asyncio.sleep", new=AsyncMock()),
+            patch("asyncio.sleep", new=AsyncMock()),
             patch.object(adapter, "_tail_grok_transcript", new=tail),
         ):
             await adapter._run()
@@ -1899,7 +1909,7 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         tail = AsyncMock()
         with (
             patch.object(adapter, "_transcript", side_effect=[None, path]),
-            patch("partyline.adapters.bundled.grok.adapter.asyncio.sleep", new=AsyncMock()),
+            patch("asyncio.sleep", new=AsyncMock()),
             patch.object(adapter, "_tail_grok_transcript", new=tail),
         ):
             await adapter._run()

@@ -262,7 +262,9 @@
           refreshToken();
         }}
         onclick={refreshToken}
-        onblur={() => setTimeout(closeToken, 150)}></textarea>
+        onblur={() => {
+          setTimeout(closeToken, 150); // no-poll (b): one-shot blur deadline; no state request
+        }}></textarea>
       <button
         id="send"
         class="primary min-h-11 self-end disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"

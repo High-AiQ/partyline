@@ -72,10 +72,10 @@ describe("VoiceInput", () => {
   it("disables with the server's reason when the extra is missing", async () => {
     secure(true);
     room.conversation = conversation;
-    vi.spyOn(voiceApi, "presets").mockResolvedValue({
+    voicePresets.listing = {
       default: "a",
       presets: [{ name: "a", kind: "command", available: false, reason: "needs the extra" }],
-    });
+    };
     const target = document.body.appendChild(document.createElement("div"));
     const comp = mount(VoiceInput, { target, props: { box: null, oninserted: () => undefined } });
     await settle();
@@ -86,10 +86,10 @@ describe("VoiceInput", () => {
   it("records, transcribes and inserts at the caret without sending", async () => {
     secure(true);
     room.conversation = conversation;
-    vi.spyOn(voiceApi, "presets").mockResolvedValue({
+    voicePresets.listing = {
       default: "a",
       presets: [{ name: "a", kind: "command", available: true }],
-    });
+    };
     const spy = vi.spyOn(voiceApi, "transcribe").mockResolvedValue({
       text: "hello",
       language: "en",
@@ -125,10 +125,10 @@ describe("VoiceInput", () => {
   async function failedTake(status: number) {
     secure(true);
     room.conversation = conversation;
-    vi.spyOn(voiceApi, "presets").mockResolvedValue({
+    voicePresets.listing = {
       default: "a",
       presets: [{ name: "a", kind: "command", available: true }],
-    });
+    };
     vi.spyOn(voiceApi, "transcribe").mockRejectedValue(new ApiError("take failed", status));
     const target = document.body.appendChild(document.createElement("div"));
     const comp = mount(VoiceInput, {
@@ -162,10 +162,10 @@ describe("VoiceInput", () => {
   it("drops a take when the line changes: speech never lands in another line", async () => {
     secure(true);
     room.conversation = conversation;
-    vi.spyOn(voiceApi, "presets").mockResolvedValue({
+    voicePresets.listing = {
       default: "a",
       presets: [{ name: "a", kind: "command", available: true }],
-    });
+    };
     let finish: (t: { text: string; language: string; duration: number; segments: [] }) => void = () =>
       undefined;
     vi.spyOn(voiceApi, "transcribe").mockImplementation(
@@ -204,13 +204,13 @@ describe("VoiceInput", () => {
   it("tracks unavailability per preset: a 503 on one leaves another usable", async () => {
     secure(true);
     room.conversation = conversation;
-    vi.spyOn(voiceApi, "presets").mockResolvedValue({
+    voicePresets.listing = {
       default: "a",
       presets: [
         { name: "a", kind: "command", available: true },
         { name: "b", kind: "command", available: true },
       ],
-    });
+    };
     vi.spyOn(voiceApi, "transcribe").mockRejectedValue(new ApiError("a is down", 503));
     const target = document.body.appendChild(document.createElement("div"));
     const comp = mount(VoiceInput, {
@@ -226,7 +226,7 @@ describe("VoiceInput", () => {
     button?.click();
     await settle();
     // "a" is marked down; with no pick of its own the mic falls through to "b" and stays usable.
-    expect(voicePresets.listing?.presets.find((entry) => entry.name === "a")?.available).toBe(false);
+    expect(voicePresets.listing.presets.find((entry) => entry.name === "a")?.available).toBe(false);
     expect(voicePresets.active).toBe("b");
     expect(button?.disabled).toBe(false);
     // A remembered pick that is down falls through the same way.
@@ -239,13 +239,6 @@ describe("VoiceInput", () => {
   it("never traps a live mic: presets that arrive unavailable mid-take leave stop enabled", async () => {
     secure(true);
     room.conversation = conversation;
-    let resolvePresets: (v: Awaited<ReturnType<typeof voiceApi.presets>>) => void = () => undefined;
-    vi.spyOn(voiceApi, "presets").mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolvePresets = resolve;
-        }),
-    );
     const transcribe = vi
       .spyOn(voiceApi, "transcribe")
       .mockResolvedValue({ text: "hi", language: "en", duration: 1, segments: [] });
@@ -259,10 +252,10 @@ describe("VoiceInput", () => {
     button?.click();
     await settle();
     expect(button?.getAttribute("aria-pressed")).toBe("true");
-    resolvePresets({
+    voicePresets.listing = {
       default: "a",
       presets: [{ name: "a", kind: "command", available: false, reason: "not installed" }],
-    });
+    };
     await tick();
     await settle();
     expect(button?.disabled).toBe(false);
@@ -278,10 +271,10 @@ describe("VoiceInput", () => {
   it("lets the person cancel while the permission prompt is open", async () => {
     secure(true);
     room.conversation = conversation;
-    vi.spyOn(voiceApi, "presets").mockResolvedValue({
+    voicePresets.listing = {
       default: "a",
       presets: [{ name: "a", kind: "command", available: true }],
-    });
+    };
     const track = { stop: vi.fn() };
     const stream = { getTracks: () => [track] } as unknown as MediaStream;
     let grant: (s: MediaStream) => void = () => undefined;
@@ -313,10 +306,10 @@ describe("VoiceInput", () => {
   it("collapsed on a phone it stays out of the row until a take is live, and dictate() starts the same take", async () => {
     secure(true);
     room.conversation = conversation;
-    vi.spyOn(voiceApi, "presets").mockResolvedValue({
+    voicePresets.listing = {
       default: "a",
       presets: [{ name: "a", kind: "command", available: true }],
-    });
+    };
     vi.spyOn(voiceApi, "transcribe").mockResolvedValue({
       text: "hi",
       language: "en",
@@ -380,10 +373,10 @@ describe("VoiceInput teardown", () => {
   it("reports an idle mic when unmounted mid-take, so the phone menu is never left hidden", async () => {
     secure(true);
     room.conversation = conversation;
-    vi.spyOn(voiceApi, "presets").mockResolvedValue({
+    voicePresets.listing = {
       default: "a",
       presets: [{ name: "a", kind: "command", available: true }],
-    });
+    };
     const onstatus = vi.fn();
     const target = document.body.appendChild(document.createElement("div"));
     const comp = mount(VoiceInput, {

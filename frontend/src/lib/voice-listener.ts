@@ -115,6 +115,7 @@ export class VoiceListener {
             if (!current()) return;
             this.hooks.onphase("speaking");
             this.clearCap();
+            // no-poll (b): one-shot UI deadline; no state request
             this.cap = setTimeout(() => {
               void this.capTake(generation);
             }, HANDS_FREE_CAP_MS - PRE_ROLL_MS);

@@ -154,11 +154,11 @@ class BridgeProcessTest(unittest.IsolatedAsyncioTestCase):
                 listening.set()
                 return result
 
-            async def pause(_seconds):
+            async def pause(_pid):
                 await stop_polling.wait()
 
             with patch.object(docker_bridge.asyncio, "start_unix_server", started), \
-                    patch.object(docker_bridge.asyncio, "sleep", pause), \
+                    patch.object(docker_bridge, "process_exited", pause), \
                     patch.object(docker_bridge, "owner_alive", lambda *_: alive[0]):
                 task = asyncio.get_running_loop().create_task(docker_bridge.serve(host, path))
                 await asyncio.wait_for(listening.wait(), 1)

@@ -82,6 +82,7 @@
       if (opened.fellBack) mic.notice = FALLBACK_NOTICE;
       mic.label = streamMicLabel(opened.stream);
       meter = startMeter(opened.stream, browserAudioContext, mic.hooks);
+      // no-poll (b): one-shot UI deadline; no state request
       limit = setTimeout(stopTest, TEST_LIMIT_MS);
       // Permission was just granted, so the names are readable now.
       void refresh();

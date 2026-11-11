@@ -99,6 +99,8 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         await self.session.dispatch(request())
         await self.socket.next("frame")
         await self.terminal.waiting.get()
+        async with self.session.frame_lock:
+            pass  # initial frame completion, independent of the stop-input reader
 
     async def test_capture_waits_for_consent_and_remote_stop(self):
         pending = asyncio.get_running_loop().create_future()

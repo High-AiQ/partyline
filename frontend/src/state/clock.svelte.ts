@@ -11,6 +11,7 @@ class Clock {
   /** Re-read the time every minute; the returned function stops the ticking. */
   run(): () => void {
     this.now = new Date();
+    // no-poll (d): local display ticker; no request
     const timer = setInterval(() => {
       this.now = new Date();
     }, CLOCK_TICK_MS);

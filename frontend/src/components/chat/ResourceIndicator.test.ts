@@ -50,7 +50,8 @@ describe("ResourceIndicator", () => {
   it("updates from a pushed resources event and never polls", async () => {
     vi.useFakeTimers();
     try {
-      const load = vi.spyOn(resourceApi, "getResources").mockResolvedValue(snapshot);
+      const load = vi.spyOn(resourceApi, "getResources");
+      resources.snapshot = snapshot;
       const component = mount(ResourceIndicator, { target: document.body });
       try {
         await vi.waitFor(() => {
@@ -64,9 +65,9 @@ describe("ResourceIndicator", () => {
         await vi.waitFor(() => {
           expect(document.querySelector(".resource-trigger")?.textContent).toContain("7");
         });
-        expect(resources.snapshot?.live_processes).toBe(7);
+        expect(resources.snapshot.live_processes).toBe(7);
         await vi.advanceTimersByTimeAsync(30_000);
-        expect(load).toHaveBeenCalledTimes(1);
+        expect(load).not.toHaveBeenCalled();
       } finally {
         void unmount(component);
       }
@@ -83,7 +84,7 @@ describe("ResourceIndicator", () => {
       unattributed: 1,
       sampled_at: 1760000000,
     };
-    vi.spyOn(resourceApi, "getResources").mockResolvedValue({ ...snapshot, docker });
+    resources.snapshot = { ...snapshot, docker };
     const component = mount(ResourceIndicator, { target: document.body });
     try {
       resources.popoverOpen = true;
@@ -101,7 +102,7 @@ describe("ResourceIndicator", () => {
   });
 
   it("hides the Docker row when no docker grant exists", async () => {
-    vi.spyOn(resourceApi, "getResources").mockResolvedValue({ ...snapshot, docker: null });
+    resources.snapshot = { ...snapshot, docker: null };
     const component = mount(ResourceIndicator, { target: document.body });
     try {
       resources.popoverOpen = true;
@@ -115,7 +116,7 @@ describe("ResourceIndicator", () => {
   });
 
   it("uses shared topbar interaction styling without state colours on hover", async () => {
-    vi.spyOn(resourceApi, "getResources").mockResolvedValue(snapshot);
+    resources.snapshot = snapshot;
     const component = mount(ResourceIndicator, { target: document.body });
     try {
       const trigger = document.querySelector(".resource-trigger");
@@ -149,7 +150,7 @@ describe("ResourceIndicator", () => {
   });
 
   it("shows fleet details in a tap popover when hover tooltips are disabled", async () => {
-    vi.spyOn(resourceApi, "getResources").mockResolvedValue(snapshot);
+    resources.snapshot = snapshot;
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: (query: string) => ({ matches: query === "(hover: none)" }),
@@ -178,7 +179,7 @@ describe("ResourceIndicator", () => {
   });
 
   it("opens the resource settings section on desktop click", async () => {
-    vi.spyOn(resourceApi, "getResources").mockResolvedValue(snapshot);
+    resources.snapshot = snapshot;
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: () => ({ matches: false }),
@@ -199,14 +200,13 @@ describe("ResourceIndicator", () => {
   });
 
   it("ramps from amber near capacity to red at the limit", async () => {
-    const load = vi.spyOn(resourceApi, "getResources").mockResolvedValue(snapshot);
+    resources.snapshot = snapshot;
     const component = mount(ResourceIndicator, { target: document.body });
     try {
       await vi.waitFor(() => {
         expect(document.querySelector(".resource-trigger")?.classList.contains("warning")).toBe(true);
       });
-      load.mockResolvedValue({ ...snapshot, live_processes: 24 });
-      await resources.load();
+      resources.snapshot = { ...snapshot, live_processes: 24 };
       await vi.waitFor(() => {
         expect(document.querySelector(".resource-trigger")?.classList.contains("full")).toBe(true);
       });
@@ -216,14 +216,14 @@ describe("ResourceIndicator", () => {
   });
 
   it("shows real over-limit counts and explains that new attaches are blocked", async () => {
-    const load = vi.spyOn(resourceApi, "getResources").mockResolvedValue({
+    resources.snapshot = {
       ...snapshot,
       max_live_processes: 8,
       live_processes: 14,
       memory_budget_bytes: 1024 ** 3,
       memory_reserved_bytes: 14 * 1024 ** 3,
       memory_cap_bytes: 56 * 1024 ** 3,
-    });
+    };
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: (query: string) => ({ matches: query === "(hover: none)" }),
@@ -243,14 +243,13 @@ describe("ResourceIndicator", () => {
         );
       });
       expect(document.querySelector(".resource-popover")?.textContent).toContain("14 GB / 1.0 GB");
-      load.mockResolvedValue({
+      resources.snapshot = {
         ...snapshot,
         live_processes: 7,
         memory_budget_bytes: 1024 ** 3,
         memory_reserved_bytes: 7 * 1024 ** 3,
         memory_cap_bytes: 28 * 1024 ** 3,
-      });
-      await resources.load();
+      };
       await vi.waitFor(() => {
         expect(trigger?.textContent).toContain("7/24");
         expect(trigger?.classList.contains("over-limit")).toBe(true);
@@ -261,7 +260,7 @@ describe("ResourceIndicator", () => {
   });
 
   it("renders host used over total with the partyline split", async () => {
-    vi.spyOn(resourceApi, "getResources").mockResolvedValue(snapshot);
+    resources.snapshot = snapshot;
     const component = mount(ResourceIndicator, { target: document.body });
     try {
       const trigger = document.querySelector(".resource-trigger");
@@ -286,7 +285,7 @@ describe("ResourceIndicator", () => {
   });
 
   it("shows em dashes where the platform reports no host numbers", async () => {
-    vi.spyOn(resourceApi, "getResources").mockResolvedValue({
+    resources.snapshot = {
       ...snapshot,
       host_used_bytes: null,
       host_available_bytes: null,
@@ -295,7 +294,7 @@ describe("ResourceIndicator", () => {
       partyline_used_bytes: null,
       other_used_bytes: null,
       top_lines: [],
-    });
+    };
     const component = mount(ResourceIndicator, { target: document.body });
     try {
       await vi.waitFor(() => {
@@ -315,7 +314,7 @@ describe("ResourceIndicator", () => {
   });
 
   it("sizes the host bar against total memory, leaving the free remainder as track", async () => {
-    vi.spyOn(resourceApi, "getResources").mockResolvedValue({
+    resources.snapshot = {
       ...snapshot,
       host_used_bytes: 40 * 1024 ** 3,
       host_available_bytes: 24 * 1024 ** 3,
@@ -323,7 +322,7 @@ describe("ResourceIndicator", () => {
       partyline_server_bytes: 2 * 1024 ** 3,
       partyline_processes_bytes: 8 * 1024 ** 3,
       other_used_bytes: 30 * 1024 ** 3,
-    });
+    };
     const component = mount(ResourceIndicator, { target: document.body });
     try {
       await vi.waitFor(() => {

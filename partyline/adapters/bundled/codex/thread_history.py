@@ -26,7 +26,6 @@ proof lands.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 import sqlite3
@@ -119,6 +118,7 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
     seen_items: set[str] = set()
     seen_turns: dict[str, str] = {}
     open_turn: str | None = None
+    deadline = adapter.event_time() + timeout
     waited = 0.0
     opened = False
     while adapter.alive():
@@ -126,15 +126,15 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
         if not path.exists():
             if waited >= timeout:
                 return False
-            await asyncio.sleep(0.5)
-            waited += 0.5
+            await adapter.wait_for_change(max(0, deadline - adapter.event_time()))
+            waited = timeout - max(0, deadline - adapter.event_time())
             continue
         try:
             with contextlib.closing(connect(home)) as conn:
                 rows = fetch_items(conn, thread_id, after_ms)
                 turns = fetch_turns(conn, thread_id)
         except sqlite3.Error:
-            await asyncio.sleep(0.5)
+            await adapter.wait_for_change()
             continue
         opening = not opened
         if opening:
@@ -173,5 +173,5 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
             adapter.mark_ready()
         for body in speech:
             await adapter.post(adapter.att["name"], "agent", body)
-        await asyncio.sleep(0.5)
+        await adapter.wait_for_change()
     return opened

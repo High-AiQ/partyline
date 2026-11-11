@@ -53,24 +53,20 @@ async def settled_snapshot(
     adapter, path: Path, scan: Callable[[Path], Scan | None]
 ) -> tuple[Scan, tuple[int, int, int]] | None:
     """Read a transcript only after one identity remains stable around the scan."""
-    previous = None
-    stable_for = 0.0
-    waited = 0.0
-    while adapter.alive() and waited < adapter.SETTLE_TIMEOUT:
+    deadline = adapter.event_time() + adapter.SETTLE_TIMEOUT
+    while adapter.alive():
         current = adapter._identity(path)
         if current is None:
             return None
-        if current == previous:
-            stable_for += adapter.POLL_SECONDS
-            if stable_for >= adapter.SETTLE_SECONDS:
-                scanned = await asyncio.to_thread(scan, path)
-                if scanned is not None and adapter._identity(path) == current:
-                    return scanned, current
-                previous, stable_for = None, 0.0
-        else:
-            previous, stable_for = current, 0.0
-        await adapter._poll()
-        waited += adapter.POLL_SECONDS
+        remaining = deadline - adapter.event_time()
+        if remaining <= 0:
+            return None
+        quiet = min(adapter.SETTLE_SECONDS, remaining)
+        elapsed = await adapter.wait_for_change(quiet)
+        if elapsed >= quiet:
+            scanned = await asyncio.to_thread(scan, path)
+            if scanned is not None and adapter._identity(path) == current:
+                return scanned, current
     return None
 
 

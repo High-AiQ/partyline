@@ -308,19 +308,10 @@ class TkDialogProcessTests(unittest.TestCase):
         dialog_proc.watch_parent(77, exits.append, broken).join()
         self.assertEqual(exits, [3])  # a parent we cannot watch must not make the dialog vanish
 
-    def test_waiting_for_a_posix_parent_polls_until_the_pid_disappears(self):
-        calls, naps = [], []
-
-        def kill(pid, signal):
-            calls.append((pid, signal))
-            if len(calls) == 2:
-                raise PermissionError  # alive but not ours: keep waiting
-            if len(calls) == 3:
-                raise ProcessLookupError
-        with patch.object(os, "kill", kill), patch.object(os, "name", "posix"):
-            dialog_proc.process_gone(77, naps.append)
-        self.assertEqual(calls, [(77, 0)] * 3)
-        self.assertEqual(naps, [1, 1])
+    def test_waiting_for_a_parent_uses_a_native_process_exit_event(self):
+        with patch('partyline.process_events.wait_pid') as wait:
+            dialog_proc.process_gone(77)
+        wait.assert_called_once_with(77)
 
     def test_without_tkinter_off_windows_the_answer_is_no(self):
         with patch.dict(sys.modules, {"tkinter": None}):

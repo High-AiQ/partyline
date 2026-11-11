@@ -59,9 +59,15 @@ class Session(SessionTransport):
         worker, self.worker = self.worker, None
         self.pending_id = None
         if worker:
+            cancellations = asyncio.current_task().cancelling()
             worker.cancel()
-            with contextlib.suppress(asyncio.CancelledError, ConnectionClosed):
+            try:
                 await worker
+            except asyncio.CancelledError:
+                if asyncio.current_task().cancelling() > cancellations:
+                    raise
+            except ConnectionClosed:
+                pass
         share, self.share = self.share, None
         self.accepted = False
         self.last_uia_frame = None
@@ -93,20 +99,8 @@ class Session(SessionTransport):
             print("SHARING ACTIVE — type s Enter or press Ctrl+C to stop", flush=True)
             if request.get("control") is True:  # the person asked for agent control with the share
                 await self.control.request(dict(request, type="control_request"))
-            while True:
-                await self.frame()
-                end = self.clock() + 1 / request["max_fps"]
-                while self.clock() < end:
-                    wait = min(.05, end - self.clock())
-                    if self.control.prompting:  # the control prompt owns terminal input
-                        await self.sleep(wait)
-                    elif await self.terminal.read(wait) == "s":
-                        self.share = None
-                        self.accepted = False
-                        self.control.end("sharing stopped locally")
-                        await self.send("share_stopped", share_id=request["share_id"], reason="local")
-                        print("Sharing stopped: local", flush=True)
-                        return
+            from .capture_loop import capture
+            await capture(self, request)
         except (ValueError, TypeError, KeyError, RuntimeError, OSError) as exc:
             accepted = self.share is not None
             self.share = None
@@ -152,7 +146,8 @@ class Session(SessionTransport):
     async def dispatch(self, message):
         kind = message["type"]
         if kind == "start_share":
-            if self.worker and not self.worker.done() and not self.accepted:
+            if (self.worker and not self.worker.done() and not self.accepted
+                    and self.pending_id is not None):
                 await self.send("share_declined", share_id=message["share_id"], reason="prompt pending")
                 return
             await self.stop("replaced")
@@ -196,6 +191,7 @@ class Session(SessionTransport):
 
     async def heartbeat(self):
         while True:
+            # no-poll (c): websocket ping keeps the connection alive through idle proxies
             await self.sleep(min(15, max(0, 45 - (self.clock() - self.last_received))))
             if self.clock() - self.last_received >= 45:
                 await self.socket.close(code=1011, reason="Heartbeat timeout")
@@ -281,5 +277,6 @@ async def serve(config, desktop, terminal, yes=False, sleep=asyncio.sleep,
             if message := certificate_failure(exc, server):
                 raise CertificateError(message) from None
         print(f"Disconnected. Reconnecting in {delay}s; active share ended.", flush=True)
+        # no-poll (e): reconnect after transport failure; success ends retries
         await sleep(delay)
         delay = min(60, delay * 2)

@@ -199,6 +199,8 @@ async def tick(runtime, *, now: float | None = None) -> int | None:
         )
         heartbeat_wake.settle_delivered(runtime.db, now=moment)
         return None
+    if moment < row["next_due_at"]:
+        return None
     if _stay_quiet(runtime, row, moment):
         return None
     snapshot = heartbeat_snapshot.build(
@@ -235,13 +237,22 @@ async def tick(runtime, *, now: float | None = None) -> int | None:
 
 
 async def run(runtime, *, sleep=asyncio.sleep, clock=time.time) -> None:
-    """Tick until cancelled. One failing pass must not end the monitor."""
-    while True:
-        try:
-            with timed_tick('lead heartbeat'):
-                await tick(runtime, now=clock())
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("lead heartbeat tick failed; continuing")
-        await sleep(TICK_SECONDS)
+    """React to configuration/delivery changes and each stored reminder deadline."""
+    with runtime.db.events.subscribe('lead_heartbeat', 'attachments', 'conversations',
+                                     'messages', 'queued_deliveries') as events:
+        while True:
+            with events.processing():
+                try:
+                    with timed_tick('lead heartbeat'):
+                        await tick(runtime, now=clock())
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("lead heartbeat failed; waiting for a state change")
+                row = heartbeat.get(runtime.db)
+                delay = None
+                if row and row['enabled'] and deliverable_owner(runtime, row):
+                    # A held wake waits for an actual delivery/idle event.
+                    if row['pending_message_id'] is None:
+                        delay = row['next_due_at'] - clock()
+            await events.wait(delay)

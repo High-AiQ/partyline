@@ -49,6 +49,7 @@ class StartupPromptGuard:
     def mark_startup_prompt_began(self) -> None:
         """Stop watching the startup screen once the process starts a turn."""
         self._startup_prompt_began = True
+        self.changed()
 
     async def send_startup_briefing(self) -> bool:
         """Wait for a person to dismiss a startup dialog, then paste once."""
@@ -82,7 +83,7 @@ class StartupPromptGuard:
                 if attention:
                     await attention(prompt.replace("_", " "))
                 reported = prompt
-            await asyncio.sleep(1.0)
+            await self.wait_for_change()
         return not self._stopping and self._startup_prompt_result is not False and self.alive()
 
     def _startup_prompt_polling_allowed(self) -> bool:
@@ -92,6 +93,8 @@ class StartupPromptGuard:
         """Unblock startup waiters after exit without claiming any delivery."""
         self._startup_prompt_result = False
         self._startup_prompt_delivery.set()
+        self.wake_delivery_waiters()
+        self.changed()
 
     async def wait_startup_delivery(self) -> bool:
         """Hold wakes queued while the initial briefing is blocked by a dialog."""

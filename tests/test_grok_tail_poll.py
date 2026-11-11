@@ -121,15 +121,15 @@ class StopPollRunsTest(unittest.IsolatedAsyncioTestCase):
             adapter.alive = lambda: False
 
         adapter._poll = stop_poll
-        import partyline.adapters.bundled.grok.adapter as adapter_mod
-        original = adapter_mod.asyncio.sleep
-        adapter_mod.asyncio.sleep = wrong_sleep
+        import asyncio
+        original = asyncio.sleep
+        asyncio.sleep = wrong_sleep
         try:
             with tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / "chat_history.jsonl"
                 path.write_text('{"type":"assistant"', encoding="utf-8")
                 await adapter._tail_grok_transcript(path, AsyncMock())
         finally:
-            adapter_mod.asyncio.sleep = original
+            asyncio.sleep = original
         self.assertEqual(called, ["poll"])
         self.assertNotIn("module", called)

@@ -1,3 +1,4 @@
+import os
 """install / uninstall / open / native consent, all against fakes under temp dirs and a manual clock."""
 import contextlib
 import io
@@ -512,21 +513,25 @@ class ClaimRunTests(TempHome):
         self.assertFalse(links.claim_run(None))
         links._held.pop().release()
 
-    def test_wait_retries_until_the_old_helper_releases(self):
+    def test_wait_uses_old_helpers_exit_notification_before_claiming(self):
         links._held.clear()
         holder = instance.InstanceLock("run")
         holder.acquire()
-        sleeps = []
 
-        def sleep(seconds):
-            sleeps.append(seconds)
+        def exited(pid, timeout):
+            self.assertEqual(pid, os.getpid())
+            self.assertEqual(timeout, 10)
             holder.release()
-        self.assertTrue(links.claim_run(None, wait=True, sleep=sleep))
-        self.assertEqual(sleeps, [0.1])
+            return True
+
+        with patch.object(links, 'wait_pid', side_effect=exited) as wait:
+            self.assertTrue(links.claim_run(None, wait=True))
+        wait.assert_called_once()
         links._held.pop().release()
         holder = instance.InstanceLock("run")
         holder.acquire()
-        self.assertFalse(links.claim_run(None, wait=True, sleep=lambda s: None, attempts=3))
+        with patch.object(links, 'wait_pid', return_value=False):
+            self.assertFalse(links.claim_run(None, wait=True))
         holder.release()
 
 

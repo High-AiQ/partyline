@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import collections
 import re
 import time
@@ -73,7 +72,8 @@ class RawAdapter(Adapter):
             if text:
                 self._buffer.append(text)
             self._pending = True
-            self._last_output = time.monotonic()
+            self._last_output = self.event_time()
+            self.changed()
 
     def _end_echo_window(self) -> None:
         carry, self._carry = self._carry, ""
@@ -83,9 +83,11 @@ class RawAdapter(Adapter):
 
     async def _run(self):
         while self.alive() or self._buffer or self._pending:
-            await asyncio.sleep(0.25)
+            delay = (max(0, self._last_output + self.QUIET_SECONDS - self.event_time())
+                     if self._buffer or self._pending else None)
+            await self.wait_for_change(delay)
             if (self._buffer or self._pending) and (
-                time.monotonic() - self._last_output > self.QUIET_SECONDS
+                self.event_time() - self._last_output >= self.QUIET_SECONDS
             ):
                 self._end_echo_window()
                 body = "".join(self._buffer).strip("\n")

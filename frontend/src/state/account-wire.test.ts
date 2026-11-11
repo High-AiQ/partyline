@@ -3,11 +3,13 @@ import { afterEach, expect, it, vi } from "vitest";
 import ComputersSection from "../components/settings/sections/ComputersSection.svelte";
 import { connectAccountWire } from "./account-wire.svelte.js";
 import { room } from "./room.svelte.js";
+import { voicePresets } from "./voice-presets.svelte.js";
 import { screenStatus } from "./screen-status.svelte.js";
 import { wire } from "./wire.svelte.js";
 import { WireEventSchema } from "../lib/events";
 
 afterEach(() => {
+  voicePresets.reset();
   screenStatus.devices = [];
   screenStatus.indicators = [];
   vi.restoreAllMocks();
@@ -35,4 +37,17 @@ it("populates the home page and computer settings without an open line", async (
   await tick();
   expect(document.body.textContent).toContain("Desk (online)");
   await unmount(component);
+});
+
+it("receives recognizer settings over the account wire without opening a second socket", () => {
+  const connect = vi.spyOn(wire, "connect").mockImplementation(() => undefined);
+  connectAccountWire({ clientId: "tab" }, vi.fn());
+  const onEvent = connect.mock.calls[0]?.[2];
+  if (!onEvent) throw new Error("missing account event handler");
+  onEvent(
+    WireEventSchema.parse({ type: "asr_presets_changed", settings: { default: "pushed", presets: [] } }),
+    { wasReady: true, claimRejected: false, rejectClaim: vi.fn() },
+  );
+  expect(voicePresets.settings?.default).toBe("pushed");
+  expect(connect).toHaveBeenCalledOnce();
 });

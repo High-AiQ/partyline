@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import ResourcesSection from "./ResourcesSection.svelte";
 import * as resourceApi from "../../../lib/resource-api";
 import { GIB } from "../../../lib/resource-form";
-import { resources } from "../../../state/resources.svelte.js";
 
 const budget: resourceApi.ResourceSettings = {
   max_live_processes: 24,
@@ -48,7 +47,6 @@ describe("resources tab", () => {
   it("shows a field's problem inline and sends nothing until it is fixed", async () => {
     vi.spyOn(resourceApi, "getResourceSettings").mockResolvedValue(budget);
     const save = vi.spyOn(resourceApi, "setResourceSettings").mockResolvedValue(budget);
-    vi.spyOn(resources, "load").mockResolvedValue();
     const section = mount(ResourcesSection, { target: document.body });
     await settle();
     expect(submit()?.disabled).toBe(true);
@@ -81,7 +79,6 @@ describe("resources tab", () => {
     const reset = vi
       .spyOn(resourceApi, "resetResourceSettings")
       .mockResolvedValue({ ...budget, memory_reserve_bytes: 2 * GIB });
-    vi.spyOn(resources, "load").mockResolvedValue();
     const section = mount(ResourcesSection, { target: document.body });
     await settle();
     [...document.querySelectorAll("button")].find((b) => b.textContent.includes("reset"))?.click();

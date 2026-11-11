@@ -177,7 +177,7 @@ class LineResourcesTest(TaskFixture):
         self.assertEqual(len([m for m in self.db.list_messages(self.conv_id)
                               if 'you now hold gpu' in m['body']]), 1)
         with patch('partyline.line_resource_routes.maintain', new=AsyncMock(side_effect=RuntimeError)), \
-                patch('partyline.line_resource_routes.asyncio.sleep', new=AsyncMock(
+                patch('partyline.db_events.Subscription.wait', new=AsyncMock(
                     side_effect=asyncio.CancelledError)):
             with self.assertRaises(asyncio.CancelledError):
                 await run(self.runtime)

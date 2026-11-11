@@ -286,6 +286,7 @@ class ClaudeJsonlReceiptTest(unittest.IsolatedAsyncioTestCase):
                 self.fail("unproved Claude paste was not retried after readiness")
             await asyncio.sleep(0)
         adapter.alive = lambda: False
+        adapter.changed()
         await asyncio.wait_for(tail, timeout=1)
 
         self.assertEqual(adapter.send_keys.await_count, 2)

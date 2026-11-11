@@ -5,7 +5,7 @@
    * Config-file presets are read-only here, but "customize" saves a settings
    * copy under the same name, which wins over the file until it is deleted.
    */
-  import { onDestroy, onMount, untrack } from "svelte";
+  import { onDestroy } from "svelte";
   import SettingsSection from "../SettingsSection.svelte";
   import SettingRow from "../SettingRow.svelte";
   import SaveIndicator from "../SaveIndicator.svelte";
@@ -19,11 +19,10 @@
   import type { AsrDraft } from "../../../lib/asr-preset-form";
   import { SaveTracker } from "../../../lib/save-state";
   import type { SaveSnapshot } from "../../../lib/save-state";
-  import { retryDelay, voicePresets } from "../../../state/voice-presets.svelte.js";
+  import { voicePresets } from "../../../state/voice-presets.svelte.js";
   import { sectionShown } from "../section-shown";
 
-  let settings = $state<AsrSettings | null>(null);
-  let loadError = $state("");
+  const settings = $derived(voicePresets.settings);
   /** "new", a preset name being edited or customized, or null. */
   let editing = $state<string | null>(null);
   let busy = $state(false);
@@ -39,49 +38,8 @@
     voicePresets.listing ? voicePresets.active : (voicePresets.chosen ?? settings?.default ?? null),
   );
 
-  /**
-   * Fetch the server's listing on mount and again on every store revision —
-   * a live `asr_presets_changed`, a reconnect, or recovery after a failure —
-   * so another tab's edits show here at once. Rows are keyed by
-   * name, so an open form keeps its draft across a refresh.
-   */
-  let request = 0;
-  let attempt = 0;
-  let retry: ReturnType<typeof setTimeout> | null = null;
   const shown = sectionShown("voice");
-  function reload(): void {
-    if (retry !== null) clearTimeout(retry);
-    retry = null;
-    const mine = ++request;
-    asrApi
-      .list()
-      .then((next) => {
-        if (mine !== request) return;
-        settings = next;
-        loadError = "";
-        attempt = 0;
-      })
-      .catch((failure: unknown) => {
-        if (mine !== request) return;
-        loadError = failure instanceof Error ? failure.message : "could not load";
-        // Its own backoff: the mic list can be fine while this one failed.
-        retry = setTimeout(reload, retryDelay(attempt++));
-      });
-  }
-  $effect(() => {
-    void voicePresets.revision;
-    untrack(reload);
-  });
-  // Coming back to the tab after a failure tries again at once.
-  $effect(() => {
-    if (shown() && untrack(() => loadError)) untrack(reload);
-  });
-  onMount(() => {
-    voicePresets.ensure();
-  });
   onDestroy(() => {
-    request++;
-    if (retry !== null) clearTimeout(retry);
     tracker.dispose();
   });
 
@@ -91,9 +49,7 @@
     actionError = formError = "";
     try {
       const next = await work();
-      request++; // a listing fetched before this change is stale now
-      settings = next;
-      void voicePresets.load();
+      voicePresets.receive(next);
       return true;
     } catch (failure: unknown) {
       const message = failure instanceof Error ? failure.message : "that did not work";
@@ -184,8 +140,8 @@
     description="Changes apply at once, without a restart. Presets from the config file are read-only here; customize one to override it by name."
     stacked
   >
-    <p class="line-status" class:error={Boolean(loadError || actionError)} aria-live="polite">
-      {loadError || actionError || (!settings ? "loading…" : "")}
+    <p class="line-status" class:error={Boolean(actionError)} aria-live="polite">
+      {actionError || (!settings ? "loading…" : "")}
     </p>
     <div class="flex flex-col gap-2.5">
       {#each settings?.presets ?? [] as preset (preset.name)}

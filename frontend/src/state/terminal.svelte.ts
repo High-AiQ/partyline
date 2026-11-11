@@ -91,6 +91,7 @@ export class TerminalStream {
           })
           .catch(() => {
             if (!current()) return;
+            // no-poll (e): socket reconnect after failure; success ends retries
             this.#retryTimer = setTimeout(() => {
               if (current()) this.connect(attId, handlers, authenticationPhase);
             }, TERMINAL_RETRY_MS);
@@ -102,6 +103,7 @@ export class TerminalStream {
         handlers.onUnavailable();
         return;
       }
+      // no-poll (e): socket reconnect after failure; success ends retries
       this.#retryTimer = setTimeout(() => {
         if (current()) this.connect(attId, handlers);
       }, TERMINAL_RETRY_MS);

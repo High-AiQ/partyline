@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 
 from .uia_process import read
+from .window_events import WindowEvents
+from partyline.file_events import Changes
 from .uia_gate import DispatchGate
 from .uia_window_identity import live, unmark
 
@@ -39,6 +41,7 @@ def available_windows(platform=sys.platform):
 class WindowAccess:
     def __init__(self, session, picker=select_window, list_windows=available_windows, reader=read,
                  platform=sys.platform, on_revoke=None):
+        self._changes = Changes()
         self.on_revoke = on_revoke
         self.session, self.picker, self.list_windows, self.reader = session, picker, list_windows, reader
         self.platform, self.grant, self.generation = platform, None, 0
@@ -107,6 +110,7 @@ class WindowAccess:
                 return
             self.generation += 1
             self.grant = selected
+            self._changes.notify()
             if getattr(self.session, "control", None) and self.session.control.granted:
                 self.gate.grant()
             self.unavailable = "not consented"
@@ -182,15 +186,16 @@ class WindowAccess:
             result["next_cursor"] = token
 
     async def watch(self, sleep=asyncio.sleep):
-        while True:
-            await sleep(1)
-            grant = self.grant
-            if grant:
-                reason = await self.check(grant)
-                if reason == "window closed" and self.grant is grant:
-                    self.revoke(reason)
-                elif reason == "secure desktop active":
-                    self.gate.invalidate()
-                elif not reason and self.gate.revoked.is_set() and getattr(self.session, "control", None):
-                    if self.session.control.granted:
-                        self.gate.grant()
+        async with WindowEvents(self._changes) as events:
+            while True:
+                grant = self.grant
+                if grant:
+                    reason = await self.check(grant)
+                    if reason == "window closed" and self.grant is grant:
+                        self.revoke(reason)
+                    elif reason == "secure desktop active":
+                        self.gate.invalidate()
+                    elif not reason and self.gate.revoked.is_set() and getattr(self.session, "control", None):
+                        if self.session.control.granted:
+                            self.gate.grant()
+                await events.wait()

@@ -7,11 +7,11 @@ import platform
 from websockets.exceptions import ConnectionClosed
 
 from .acting import Acting
+from partyline.file_events import Changes
 from .terminal import display_text
 
 CONTROL_VERSION = 1
 DRIFT = 8            # desktop pixels the pointer may move from the agent's position
-WATCH = 0.1          # pointer poll interval for the kill switch
 
 
 def border_mode(session, mode):
@@ -28,6 +28,7 @@ def default_inputs(desktop):
 
 class Control(Acting):
     def __init__(self, session, inputs=None, without_prompt=False):
+        self.input_changes = Changes()
         self.session = session
         self.make_inputs = inputs or default_inputs
         self.without_prompt = without_prompt
@@ -80,8 +81,14 @@ class Control(Acting):
             await self.answer("control_revoked", reason="prompt pending")
         else:
             self.prompt = asyncio.create_task(self.ask(message))
+            self.input_changes.notify()
+            self.prompt.add_done_callback(lambda _: self.input_changes.notify())
 
     async def ask(self, message):
+        reader = getattr(self.session, "stop_read", None)
+        if reader is not None:
+            reader.cancel()
+            await asyncio.gather(reader, return_exceptions=True)
         agent = display_text(message.get("requested_by"))
         print(f"\nAGENT CONTROL REQUEST\nRequested by: {agent}\n"
               f"Line: {display_text(message.get('line_name'))}\n"
@@ -114,12 +121,13 @@ class Control(Acting):
         loop = asyncio.get_running_loop()
         self.inputs = self.make_inputs(self.session.desktop)
         # Fail closed: no listener means no kill switch, so no control.
-        self.inputs.listen(lambda *event: loop.call_soon_threadsafe(self.key_event, *event))
+        self.inputs.listen(lambda *event: loop.call_soon_threadsafe(self.key_event, *event),
+                           lambda: loop.call_soon_threadsafe(self.pointer_event))
         self.granted, self.agent, self.clicked = True, agent, False
         if getattr(self.session, "window", None) and self.session.window.grant:
             self.session.window.gate.grant()
         self.target, self.armed = None, False  # armed by the agent's first action (see Acting.move)
-        self.watcher = asyncio.create_task(self.watch())
+
         print(f"AGENT CONTROL ACTIVE — {agent} can use the mouse and keyboard in the shared region.\n"
               "After mouse or keyboard control starts, move the mouse or press a key to take control back. "
               "Window grants have separate Stop controls in the tray. "
@@ -179,8 +187,6 @@ class Control(Acting):
         x, y = self.session.desktop.pointer()
         return math.hypot(x - self.target[0], y - self.target[1]) > DRIFT
 
-    async def watch(self):
-        while self.granted:
-            await self.session.sleep(WATCH)
-            if self.granted and not self.injecting and self.drifted():
-                self.kill("the pointer was moved on the computer")
+    def pointer_event(self):
+        if self.granted and not self.injecting and self.drifted():
+            self.kill("the pointer was moved on the computer")

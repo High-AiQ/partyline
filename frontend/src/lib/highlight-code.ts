@@ -109,6 +109,7 @@ function codeCopyButton(pre: HTMLElement, code: HTMLElement): void {
       : '<span aria-hidden="true">!</span>';
     clearTimeout(revert);
     if (success) {
+      // no-poll (b): one-shot UI deadline; no state request
       revert = setTimeout(() => {
         status.textContent = "";
         button.setAttribute("aria-label", "copy code block");

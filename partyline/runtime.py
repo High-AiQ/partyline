@@ -13,7 +13,7 @@ from .bridge_delivery import stamp_outbound
 from .bridge_service import close_for_attachment
 from .contracts import ErrorEvent, Event, MessageEvent, MessageResponse
 from .capability_versions import CapabilityVersions
-from .handshake import hello_payload
+from .browser_snapshots import hello_payload
 from .db import Db
 from .delivery_hooks import delivery_hooks
 from .delivery_reservation import reserve_delivery
@@ -281,8 +281,8 @@ class ChatRuntime(DeliveryCreditMixin):
                                     pass  # a half-open socket cannot be closed cleanly
                     claims[ws] = (handle, client_id)
                     claimed_handle, claimed_client = handle, client_id
-                    await ws.send_json(hello_payload(
-                        conv_id, handle, frontend_build, server_version, instance_name
+                    await ws.send_json(await hello_payload(
+                        self, conv_id, handle, frontend_build, server_version, instance_name
                     ))
                     from .screen_snapshot import send_snapshot
                     await send_snapshot(self, ws, conv_id)

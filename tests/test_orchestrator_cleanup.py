@@ -66,7 +66,7 @@ class CleanupTest(TaskFixture):
     async def test_cleaner_continues_after_tick_error_and_cancels(self):
         import asyncio
         with patch('partyline.orchestrator_cleanup.tick', AsyncMock(side_effect=OSError('db'))), \
-             patch('partyline.orchestrator_cleanup.asyncio.sleep',
+             patch('partyline.db_events.Subscription.wait',
                    AsyncMock(side_effect=asyncio.CancelledError)):
             with self.assertLogs('partyline.orchestrator_cleanup', level='ERROR'):
                 with self.assertRaises(asyncio.CancelledError):

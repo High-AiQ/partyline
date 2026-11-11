@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from tests.adapter_event_clock import install as event_clock
 from partyline.adapters import jsonl_receipts
 from partyline.adapters.bundled.claude.adapter import PartylineAdapter
 
@@ -34,7 +35,7 @@ class ClaimMarkerAdoptionTest(unittest.IsolatedAsyncioTestCase):
         )
         adapter._post_to_chat = AsyncMock(side_effect=lambda *a: self.posted.append(a))
         adapter.alive = lambda: True
-        self.adapter = adapter
+        self.adapter = event_clock(adapter)
         self.sleeps = 0
 
     def write(self, *records):

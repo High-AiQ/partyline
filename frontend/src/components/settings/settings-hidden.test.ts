@@ -58,18 +58,15 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-it("recovers a failed settings listing when the separate mic listing succeeds", async () => {
-  const list = vi
-    .spyOn(asrApi, "list")
-    .mockRejectedValueOnce(new Error("temporary settings failure"))
-    .mockResolvedValue(listing);
-  vi.spyOn(voiceApi, "presets").mockResolvedValue(listing);
+it("waits for a pushed settings snapshot without retry-fetching", async () => {
+  const list = vi.spyOn(asrApi, "list");
+  const mic = vi.spyOn(voiceApi, "presets");
   mounted = mount(VoiceSection, { target: document.body });
-  await settle();
-  expect(document.body.textContent).toContain("temporary settings failure");
   await vi.advanceTimersByTimeAsync(60_000);
+  expect(list).not.toHaveBeenCalled();
+  expect(mic).not.toHaveBeenCalled();
+  voicePresets.receive(listing);
   await settle();
-  expect(list.mock.calls.length).toBeGreaterThan(1);
   expect(document.querySelector('[data-asr-preset="cloud"]')).not.toBeNull();
 });
 
@@ -105,8 +102,7 @@ it("stops a test take when Voice is hidden instead of uploading hidden audio at 
     configurable: true,
   });
   vi.spyOn(settingsApi, "getGlobalProse").mockResolvedValue({ value: "saved" });
-  vi.spyOn(asrApi, "list").mockResolvedValue(listing);
-  vi.spyOn(voiceApi, "presets").mockResolvedValue(listing);
+  voicePresets.receive(listing);
   const test = vi.spyOn(asrApi, "test").mockResolvedValue({
     preset: "cloud",
     text: "hidden audio",
@@ -131,19 +127,17 @@ it("stops a test take when Voice is hidden instead of uploading hidden audio at 
   expect(test).not.toHaveBeenCalled();
 });
 
-it("retries a failed Voice listing as soon as the tab is shown again", async () => {
+it("keeps pushed recognizers across tab switches without a fetch", async () => {
   vi.spyOn(settingsApi, "getGlobalProse").mockResolvedValue({ value: "saved" });
-  vi.spyOn(voiceApi, "presets").mockResolvedValue(listing);
-  const list = vi.spyOn(asrApi, "list").mockRejectedValue(new Error("down for now"));
+  const list = vi.spyOn(asrApi, "list");
+  voicePresets.receive(listing);
   settingsNav.show("voice");
   mounted = mount(SettingsDialog, { target: document.body, props: { close: vi.fn() } });
   await settle();
   settingsNav.show("general");
   await settle();
-  const before = list.mock.calls.length;
-  list.mockResolvedValue(listing);
   settingsNav.show("voice");
   await settle();
-  expect(list.mock.calls.length).toBe(before + 1);
+  expect(list).not.toHaveBeenCalled();
   expect(document.querySelector('[data-asr-preset="cloud"]')).not.toBeNull();
 });

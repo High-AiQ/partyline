@@ -89,6 +89,7 @@ class Activation:
     def _mark_claim_proven(self) -> None:
         """This activation's own token has been observed in its transcript."""
         self._claim_proven = True
+        self.changed()
 
     def recorded_claim(self, path: str) -> bool:
         """Whether this transcript file records this activation's token.

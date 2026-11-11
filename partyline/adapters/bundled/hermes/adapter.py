@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
+from partyline.adapters.events import watch_files
+
 from partyline.adapters import Adapter
 
 
@@ -167,19 +169,21 @@ class PartylineAdapter(Adapter):
                     boundary = self.att.get("credit_delivery_boundary")
                     if boundary is not None:
                         await boundary()
-            await asyncio.sleep(self.POLL_SECONDS)
+            await self.wait_for_change()
 
+    @watch_files(lambda self: [self._db_path()])
     async def _run(self):
         try:
             # Hermes renders a fairly large startup screen before its input
             # reader is ready.  Sending the paste earlier can leave the text
             # visible but drop the terminating Enter.
+            deadline = self.event_time() + 30.0
             waited = 0.0
             while self.alive() and waited < 30.0:
                 if "Welcome to Hermes Agent" in self.screen_text():
                     break
-                await asyncio.sleep(0.5)
-                waited += 0.5
+                await self.wait_for_change(max(0, deadline - self.event_time()))
+                waited = 30.0 - max(0, deadline - self.event_time())
             if not self.alive():
                 return
 
@@ -203,13 +207,14 @@ class PartylineAdapter(Adapter):
                 await asyncio.sleep(1.0)
                 if self.alive():
                     self.send_key("enter")
+                deadline = self.event_time() + self.DISCOVERY_TIMEOUT
                 waited = 0.0
                 while self.alive() and waited < self.DISCOVERY_TIMEOUT:
                     self._session_id = self._discover()
                     if self._session_id is not None:
                         break
-                    await asyncio.sleep(1.0)
-                    waited += 1.0
+                    await self.wait_for_change(max(0, deadline - self.event_time()))
+                    waited = self.DISCOVERY_TIMEOUT - max(0, deadline - self.event_time())
                 if self._session_id is None:
                     await self.post(
                         "system", "system",

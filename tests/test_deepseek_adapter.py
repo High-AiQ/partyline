@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
+from tests.adapter_event_clock import install as event_clock
+
 from partyline.adapters.bundled.deepseek.adapter import PartylineAdapter
 
 
@@ -41,7 +43,7 @@ class DeepSeekAdapterTest(unittest.IsolatedAsyncioTestCase):
         pass
 
     def make(self, **extra):
-        return PartylineAdapter(attachment(**extra), self.post, self.status)
+        return event_clock(PartylineAdapter(attachment(**extra), self.post, self.status))
 
     async def test_default_command_and_resume_command_are_argv(self):
         fresh = self.make(command=[])

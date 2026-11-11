@@ -1,6 +1,5 @@
 <script lang="ts">
   /** Compact fleet-wide admission snapshot beside the account controls. */
-  import { onMount } from "svelte";
   import { resources } from "../../state/resources.svelte.js";
   import { tooltipsEnabled, tooltip } from "../../lib/tooltip";
   import { settingsNav } from "../../state/settings-nav.svelte.js";
@@ -40,10 +39,6 @@
   function gbText(bytes: number | null | undefined): string {
     return bytes == null ? "—" : gb(bytes);
   }
-
-  onMount(() => {
-    void resources.load();
-  });
 
   function openSettings(): void {
     resources.popoverOpen = false;

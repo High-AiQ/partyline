@@ -24,6 +24,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from partyline.adapters.events import watch_files
+
 from partyline.adapters import Adapter
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 from partyline.adapters.bundled.opencode.wakes import WakeSettlement
@@ -127,6 +129,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
         )
         return self._with_claim(prompt)
 
+    @watch_files(lambda self: [STORE])
     async def _run(self):
         await asyncio.sleep(3.0)
         if not self.alive():
@@ -137,6 +140,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
         async with lock:
             if not self.resume:
                 await self.send_keys(self.briefing())
+            deadline = self.event_time() + 45.0
             waited = 0.0
             while session_id is None and self.alive():
                 session_id = self._find_session()
@@ -144,9 +148,9 @@ class PartylineAdapter(WakeSettlement, Adapter):
                     self._CLAIMED.add(session_id)
                     self._session_id = session_id
                     break
-                await asyncio.sleep(1.0)
-                waited += 1.0
-                if waited > 45.0:
+                await self.wait_for_change(max(0, deadline - self.event_time()))
+                waited = 45.0 - max(0, deadline - self.event_time())
+                if waited >= 45.0:
                     await self.post(
                         "system", "system",
                         f"{self.att['name']}: no session appeared after 45s — run the CLI "
@@ -211,7 +215,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
                         await self._observe_user_part(raw_part, part_id=part_id)
             except sqlite3.Error as exc:
                 logger.debug("opencode poll skipped: %s", exc)
-                await asyncio.sleep(0.5)
+                await self.wait_for_change()
                 continue
             for part_id, raw_data in rows:
                 if part_id in seen:
@@ -267,4 +271,4 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 # handshake; only its fresh user part opens readiness.
                 await self.send_keys(self._resume_probe())
                 last_resume_probe = time.monotonic()
-            await asyncio.sleep(0.5)
+            await self.wait_for_change()

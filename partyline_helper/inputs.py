@@ -42,6 +42,7 @@ class Inputs:
         self.mouse, self.keyboard = mouse.Controller(), keyboard.Controller()
         self.scale = scale or 1.0
         self.listener = None
+        self.mouse_listener = None
 
     def move(self, x, y):
         # pynput 1.8's darwin getter flips Y with CGDisplayPixelsHigh(0) (retina.pointer_y_offset
@@ -82,7 +83,7 @@ class Inputs:
             for item in reversed(pressed):
                 self.keyboard.release(item)
 
-    def listen(self, on_key):
+    def listen(self, on_key, on_move=None):
         """Start the listener; on_key(name, injected, down) runs on pynput's thread."""
         listener = self.keyboard_module.Listener(
             on_press=lambda key, injected: on_key(key_name(key), bool(injected), True),
@@ -92,8 +93,17 @@ class Inputs:
         listener.wait()
         if not getattr(listener, "IS_TRUSTED", True) or not listener.is_alive():
             raise RuntimeError("The kill-switch key listener could not start. " + PERMISSION)
+        if on_move is not None:
+            self.mouse_listener = self.mouse_module.Listener(on_move=lambda *args: on_move())
+            self.mouse_listener.start()
+            self.mouse_listener.wait()
+            if not self.mouse_listener.is_alive():
+                raise RuntimeError("The kill-switch mouse listener could not start. " + PERMISSION)
 
     def stop(self):
+        if self.mouse_listener:
+            self.mouse_listener.stop()
+            self.mouse_listener = None
         listener, self.listener = self.listener, None
         if listener:
             listener.stop()

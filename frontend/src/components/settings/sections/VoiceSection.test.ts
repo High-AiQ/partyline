@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import VoiceSection from "./VoiceSection.svelte";
 import { asrApi } from "../../../lib/asr-api";
 import type { AsrPreset, AsrSettings } from "../../../lib/asr-api";
-import { voiceApi } from "../../../lib/voice-api";
 import { voicePresets } from "../../../state/voice-presets.svelte.js";
 
 const base = {
@@ -59,11 +58,7 @@ function type(input: HTMLInputElement | HTMLTextAreaElement | null | undefined, 
 }
 
 beforeEach(() => {
-  vi.spyOn(asrApi, "list").mockResolvedValue(LISTING);
-  vi.spyOn(voiceApi, "presets").mockResolvedValue({
-    default: "local",
-    presets: LISTING.presets.map(({ name, kind, available }) => ({ name, kind, available })),
-  });
+  voicePresets.receive(LISTING);
 });
 
 afterEach(() => {

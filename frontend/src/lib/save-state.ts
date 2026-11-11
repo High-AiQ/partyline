@@ -20,6 +20,7 @@ export class SaveTracker {
     try {
       const result = await work();
       this.report({ phase: "saved", message: "" });
+      // no-poll (b): one-shot UI deadline; no state request
       this.#timer = setTimeout(() => {
         this.#timer = null;
         this.report({ phase: "idle", message: "" });

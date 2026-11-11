@@ -12,6 +12,26 @@ keeps unread addressed mail regardless of later speech; the delivery cursor
 already excludes credited mail. A regression covers an unproved paste followed
 by a question, and another checks that credited, answered mail stays excluded.
 
+## A native watcher wrapper can still poll and watch too much
+
+Disabling watchfiles' filesystem polling did not disable its timed Rust wait
+loop. A recursive nearest-ancestor fallback also expanded a single database
+watch into the whole home directory. Use descriptor readiness or native I/O
+completion with cancellation, shallow watches, and explicit bounded transcript
+layouts. Register each missing path component before scanning it. Tests count
+kernel registrations, advance an idle virtual hour without work, and exercise
+parent creation and shutdown; a wrapper's option name is not that evidence.
+
+## Event waits keep the consumer's identity
+
+A timeout wrapper can create a new asyncio Task on each wait. Using that Task
+as the notification cursor makes an old generation look new every time, turning
+an event-driven deadline into a spin. Keep the calling consumer's cursor across
+`wait_for`, register filesystem notifications before scanning, and watch the
+parent directory so unlink/recreate reopens the transcript. The event regressions
+cover a quiet second wait, native watcher failures, and an unlinked inode followed
+by a partial replacement. Speech still comes only from structured records.
+
 ## Text transcription is not timed narration
 
 The false assumption was that switching the default recognizer to GPT-Transcribe

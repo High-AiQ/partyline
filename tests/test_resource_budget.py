@@ -379,7 +379,7 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
             request.state.principal = Principal(kind=kind, name="caller")
             return await call_next(request)
 
-        register_resource_routes(app, SimpleNamespace(db=self.db, memory_usage={}))
+        register_resource_routes(app, SimpleNamespace(db=self.db, memory_usage={}, broadcast_all=AsyncMock()))
         with patch("partyline.resource_budget.host_resources", return_value=self.host):
             client = TestClient(app)
             readable = client.get("/api/resources")

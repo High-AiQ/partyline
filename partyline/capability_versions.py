@@ -20,7 +20,7 @@ class CapabilityVersions:
         self._tables = {"attachments", "conversations", "conversation_write_grants",
                         "task_reviews", "screen_window_grants"}
         if db is not None:
-            db.conn.set_trace_callback(self.changed_by_sql)
+            db.events.callbacks.add(self.changed_by_sql)
 
     def current(self, attachment_id):
         with self._lock:

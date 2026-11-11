@@ -22,10 +22,11 @@ if sys.platform != "win32":
     import termios
 
 from partyline import process_memory, process_exit, docker_shim_env
+from partyline.adapters.events import AdapterEvents
 from partyline.adapters import activation, fence, mcp_hooks, pty_io, startup_prompt
 from partyline.adapters.process_shutdown import stop_process_group
 from partyline.adapters.process_wait import wait_for_process
-from partyline.adapters.jsonl_receipts import JsonlPasteReceipts, tail_jsonl
+from partyline.adapters.jsonl_receipts import JsonlPasteReceipts
 from partyline.adapters.task_logging import log_task_deaths
 from partyline.adapters.briefing import (
     fresh_checkpoint_briefing, connection_briefing,
@@ -38,12 +39,10 @@ from partyline.adapters.briefing import (
 from partyline.adapters.terminal import KEYS, screen_text, terminal_responses
 from partyline.terminal_viewers import TerminalViewer, TerminalViewerRegistry
 
-
 Post = Callable[[str, str, str], Awaitable[None]]
 Status = Callable[[str], Awaitable[None]]
 
-
-class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
+class Adapter(AdapterEvents, JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
               startup_prompt.StartupPromptGuard, mcp_hooks.McpHooks):
     """Base class for a process connected through a pseudo-terminal."""
 
@@ -56,6 +55,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         return bool(att.get("cli_session"))
 
     def __init__(self, att: dict, post: Post, on_status: Status, on_cli_session=None):
+        self._events_init()
         self.att = att
         self.resume = bool(att.get("resume"))
         self._post_to_chat = post
@@ -229,6 +229,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
                         self._term, self._terminal_query_tail, data)
                     if replies:
                         os.write(self.master, replies)  # type: ignore[arg-type]
+                self.changed()
                 await self.on_output(data)
         finally:
             try:
@@ -240,6 +241,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
     async def _watch_exit(self):
         assert self.proc is not None
         rc = await wait_for_process(self.proc)
+        self.changed()
         self.abort_startup_prompt()
         self._mark_not_ready()
         await process_exit.report_exit(self, rc)
@@ -272,6 +274,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
                     ]
                 raise
         self._silent_until_wake = False
+        self.changed()
         if tracked:
             return False
 
@@ -335,7 +338,3 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
 
     def alive(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
-
-    async def _tail_jsonl(self, path: str, handle_line):
-        """Follow a JSONL transcript, ignoring incomplete or invalid records."""
-        await tail_jsonl(self, path, handle_line)

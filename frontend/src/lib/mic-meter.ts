@@ -56,6 +56,7 @@ export function startMeter(
     const samples = new Float32Array(analyser.fftSize);
     let quietMs = 0;
     let silent = false;
+    // no-poll (d): local display ticker; no request
     timer = setInterval(() => {
       analyser.getFloatTimeDomainData(samples);
       let sum = 0;

@@ -75,6 +75,7 @@ export async function downloadFile(file: FileRef): Promise<void> {
   link.href = objectUrl;
   link.download = file.filename ?? `${stem}.${extension}`;
   link.click();
+  // no-poll (b): one-shot UI deadline; no state request
   setTimeout(() => {
     URL.revokeObjectURL(objectUrl);
   }, 60_000);

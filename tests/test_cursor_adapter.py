@@ -16,6 +16,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from tests.adapter_event_clock import install as event_clock
+
 from partyline.adapters.bundled.cursor.adapter import PartylineAdapter
 from partyline.adapters.bundled.cursor.parse import (
     chat_dir,
@@ -118,9 +120,10 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.status,
             on_cli_session=self.on_cli_session,
         )
+        event_clock(adapter)
         adapter.INITIAL_DELAY = 0
         adapter.POLL_SECONDS = 0.01
-        return adapter
+        return event_clock(adapter)
 
     def test_manifest(self):
         import tomllib
@@ -1898,7 +1901,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         ):
             with patch("pathlib.Path.is_file", return_value=True):
                 await adapter._run()
-            self.assertGreaterEqual(adapter.send_keys.await_count, 2)
+            self.assertEqual(adapter.send_keys.await_count, 1)
             self.assertEqual(adapter._session_id, "found-uuid")
 
     async def test_run_transcript_file_timeout(self):
@@ -1935,9 +1938,10 @@ class WakeSettlementTest(unittest.IsolatedAsyncioTestCase):
 
     def make_adapter(self, **att_extra) -> PartylineAdapter:
         adapter = PartylineAdapter(attachment(**att_extra), self.post, self.status)
+        event_clock(adapter)
         adapter.INITIAL_DELAY = 0
         adapter.POLL_SECONDS = 0.01
-        return adapter
+        return event_clock(adapter)
 
     def _wake(self, adapter, ids, body="@cursor-auto do it"):
         adapter.format_digest = lambda messages: "\n".join(m["body"] for m in messages)

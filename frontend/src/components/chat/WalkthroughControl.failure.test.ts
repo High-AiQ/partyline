@@ -86,10 +86,10 @@ async function refusedTake(inFlight?: { refuse?: (error: Error) => void }) {
   vi.spyOn(walkthroughApi, "arm").mockResolvedValue({ ok: true });
   vi.spyOn(walkthroughApi, "stop").mockResolvedValue({ ok: true });
   const cancel = vi.spyOn(walkthroughApi, "cancel").mockResolvedValue({ ok: true });
-  vi.spyOn(voiceApi, "presets").mockResolvedValue({
+  voicePresets.listing = {
     default: "fake",
     presets: [{ name: "fake", kind: "fake", available: true }],
-  });
+  };
   vi.spyOn(voiceApi, "transcribe").mockResolvedValue({ text: "", duration: 1, language: "en", segments: [] });
   const finish = vi.spyOn(walkthroughApi, "finish");
   if (inFlight) finish.mockReturnValue(new Promise((_, reject) => (inFlight.refuse = reject)));

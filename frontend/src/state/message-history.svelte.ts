@@ -149,6 +149,7 @@ export class MessageHistory {
     this.scrollToLive = false;
     this.scrollRequest++;
     clearTimeout(this.#highlightTimer);
+    // no-poll (b): one-shot UI deadline; no state request
     this.#highlightTimer = setTimeout(() => {
       if (this.highlightedId === messageId) this.highlightedId = null;
     }, 2400);

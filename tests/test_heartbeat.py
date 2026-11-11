@@ -1018,24 +1018,39 @@ class ContinuityTest(HeartbeatFixture):
 
 
 class SchedulerLoopTest(HeartbeatFixture):
-    async def test_a_failing_tick_does_not_end_the_monitor(self):
+    async def test_a_failing_tick_waits_for_an_event_then_can_recover(self):
+        from contextlib import nullcontext
         import asyncio
+        from unittest.mock import patch
+        entered, changed = asyncio.Queue(), asyncio.Queue()
 
-        calls = []
+        class Events:
+            def __enter__(self):
+                return self
 
-        async def sleep(_seconds):
-            calls.append(1)
-            if len(calls) >= 3:
-                raise asyncio.CancelledError
+            def __exit__(self, *args):
+                pass
 
-        broken = SimpleNamespace(
-            db=SimpleNamespace(),
-            live={},
-        )
-        with self.assertRaises(asyncio.CancelledError):
-            await heartbeat_scheduler.run(broken, sleep=sleep, clock=lambda: self.now)
+            def processing(self):
+                return nullcontext()
 
-        self.assertEqual(len(calls), 3, "the loop kept ticking after failures")
+            async def wait(self, delay):
+                entered.put_nowait(delay)
+                await changed.get()
+
+        runtime = SimpleNamespace(db=SimpleNamespace(events=SimpleNamespace(subscribe=lambda *a: Events())))
+        tick = AsyncMock(side_effect=[RuntimeError('temporary failure'), None])
+        with patch.object(heartbeat_scheduler, 'tick', tick), \
+                patch.object(heartbeat, 'get', return_value=None):
+            run = asyncio.create_task(heartbeat_scheduler.run(runtime))
+            await entered.get()
+            self.assertEqual(tick.await_count, 1)
+            changed.put_nowait(True)
+            await entered.get()
+            self.assertEqual(tick.await_count, 2)
+            run.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await run
 
 
 if __name__ == "__main__":

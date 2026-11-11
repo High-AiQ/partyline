@@ -37,6 +37,8 @@ jobs:
           APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=120"
           sudo apt-get $APT update
           sudo apt-get $APT install -y --no-install-recommends ffmpeg bubblewrap
+      - name: polling guard
+        run: ./scripts/check-no-polling
       - name: lint
         run: uv run --locked ruff check .
       - name: test with coverage

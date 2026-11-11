@@ -270,8 +270,13 @@ async def accept_route(runtime, request: Request, conv: str, body: HandoverIdIn)
 
 async def expire_offers(runtime):
     """Expire persisted offers after restart and while the server is running."""
-    while True:
-        now = time.time()
-        runtime.db._exec("UPDATE captain_handovers SET state='expired',expired_at=? "
-                         "WHERE state='offered' AND offered_at<=?", (now, now - OFFER_TTL_SECONDS))
-        await asyncio.sleep(30)
+    with runtime.db.events.subscribe('captain_handovers') as events:
+        while True:
+            with events.processing():
+                now = time.time()
+                runtime.db._exec("UPDATE captain_handovers SET state='expired',expired_at=? "
+                                 "WHERE state='offered' AND offered_at<=?", (now, now - OFFER_TTL_SECONDS))
+                row = runtime.db._exec("SELECT MIN(offered_at) FROM captain_handovers "
+                                       "WHERE state='offered'").fetchone()
+                delay = None if row[0] is None else row[0] + OFFER_TTL_SECONDS - time.time()
+            await events.wait(delay)

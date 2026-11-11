@@ -3,8 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import VoiceInput from "./VoiceInput.svelte";
 import { room } from "../../state/room.svelte.js";
 import { draft } from "../../state/draft.svelte.js";
-import { session } from "../../state/session.svelte.js";
-import { RETRY_BASE_MS, voicePresets } from "../../state/voice-presets.svelte.js";
+import { voicePresets } from "../../state/voice-presets.svelte.js";
 import { voiceApi } from "../../lib/voice-api";
 import type { Transcript, VoiceListing } from "../../lib/voice-api";
 import type { RecorderSources } from "../../lib/voice-recorder";
@@ -73,7 +72,7 @@ afterEach(() => {
 
 describe("VoiceInput cancel", () => {
   it("cancels while recording: nothing uploaded, mic released at once", async () => {
-    vi.spyOn(voiceApi, "presets").mockResolvedValue(ONE);
+    voicePresets.listing = ONE;
     const transcribe = vi.spyOn(voiceApi, "transcribe");
     const track = { stop: vi.fn() };
     const ui = composer(take(track));
@@ -93,7 +92,7 @@ describe("VoiceInput cancel", () => {
   });
 
   it("cancels while transcribing: the request is aborted and a late result is ignored", async () => {
-    vi.spyOn(voiceApi, "presets").mockResolvedValue(ONE);
+    voicePresets.listing = ONE;
     let finish: (t: Transcript) => void = () => undefined;
     let signal: AbortSignal | undefined;
     vi.spyOn(voiceApi, "transcribe").mockImplementation((_line, _audio, _preset, abort) => {
@@ -121,7 +120,7 @@ describe("VoiceInput cancel", () => {
   });
 
   it("Escape in the composer cancels the take and goes no further", async () => {
-    vi.spyOn(voiceApi, "presets").mockResolvedValue(ONE);
+    voicePresets.listing = ONE;
     const transcribe = vi.spyOn(voiceApi, "transcribe");
     const outer = vi.fn();
     window.addEventListener("keydown", outer);
@@ -143,40 +142,16 @@ describe("VoiceInput cancel", () => {
 });
 
 describe("VoiceInput presets", () => {
-  it("shows a failed listing instead of going quiet, then recovers on the retry", async () => {
+  it("waits for a server snapshot without scheduling a retry-fetch", async () => {
     vi.useFakeTimers();
-    const presets = vi
-      .spyOn(voiceApi, "presets")
-      .mockRejectedValueOnce(new Error("server restarting"))
-      .mockResolvedValue(ONE);
+    const presets = vi.spyOn(voiceApi, "presets");
     const ui = composer(take());
     await settle();
-    expect(ui.mic()?.disabled).toBe(true);
-    expect(voicePresets.error).toBe("server restarting");
-    expect(ui.row.querySelector(".bg-red")).not.toBeNull();
-    await vi.advanceTimersByTimeAsync(RETRY_BASE_MS);
+    expect(voicePresets.loading).toBe(true);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(presets).not.toHaveBeenCalled();
+    voicePresets.listing = ONE;
     await settle();
-    expect(presets).toHaveBeenCalledTimes(2);
-    expect(ui.mic()?.disabled).toBe(false);
-    expect(ui.row.querySelector(".bg-red")).toBeNull();
-    void unmount(ui.comp);
-  });
-
-  it("refetches on reconnect, so presets added by a restart reach an open tab", async () => {
-    const presets = vi.spyOn(voiceApi, "presets").mockResolvedValue({
-      default: "a",
-      presets: [{ name: "a", kind: "command", available: false, reason: "not installed" }],
-    });
-    const ui = composer(take());
-    await settle();
-    expect(ui.mic()?.disabled).toBe(true);
-    presets.mockResolvedValue({
-      default: "openai",
-      presets: [{ name: "openai", kind: "openai-compatible", available: true }],
-    });
-    session.acceptHandshake(session.version ?? "1.0.0", null, session.handle ?? "me");
-    await settle();
-    expect(presets).toHaveBeenCalledTimes(2);
     expect(ui.mic()?.disabled).toBe(false);
     void unmount(ui.comp);
   });

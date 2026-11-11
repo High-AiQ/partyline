@@ -55,12 +55,12 @@
   const recording = $derived(phase === "recording");
   const listing = $derived(voicePresets.listing);
   const active = $derived(voicePresets.active);
-  // A failed listing is never silent: it disables the mic with the reason while the store retries.
+  // A failed listing remains visible until the next server snapshot.
   const loadFailed = $derived(!listing && voicePresets.error !== null);
   const reason = $derived(
     unsupported ??
       (loadFailed
-        ? `could not check voice input (${voicePresets.error ?? "unknown error"}); retrying`
+        ? `could not check voice input (${voicePresets.error ?? "unknown error"}); waiting for server`
         : listing && active === null
           ? (listing.presets.find((entry) => entry.reason)?.reason ??
             "voice input is not available on this server")

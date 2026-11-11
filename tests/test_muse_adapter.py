@@ -12,6 +12,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from tests.adapter_event_clock import install as event_clock
+
 from partyline.adapters.bundled.muse.adapter import CURSOR_QUERY, PartylineAdapter
 
 CWD = "/tmp/muse-project"
@@ -50,7 +52,7 @@ def make_adapter(*, command=None, resume=False, session_id=None, cwd=CWD, on_cli
         on_status,
         on_cli_session,
     )
-    return adapter, posts, statuses
+    return event_clock(adapter), posts, statuses
 
 
 def record(payload_type, payload):

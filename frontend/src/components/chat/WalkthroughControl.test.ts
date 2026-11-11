@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import WalkthroughControl from "./WalkthroughControl.svelte";
 import ScreenControls from "./ScreenControls.svelte";
 import { screenApi } from "../../lib/screen-api";
-import { voiceApi } from "../../lib/voice-api";
 import { walkthroughApi } from "../../lib/walkthrough-api";
 import type { RecorderSources } from "../../lib/voice-recorder";
 import { FakeAudioContext, fakeAudioContext } from "../../lib/mic-fakes";
@@ -71,10 +70,10 @@ function setup(extra: Partial<RecorderSources> = {}) {
   vi.spyOn(walkthroughApi, "arm").mockResolvedValue({ ok: true });
   vi.spyOn(walkthroughApi, "stop").mockResolvedValue({ ok: true });
   vi.spyOn(walkthroughApi, "cancel").mockResolvedValue({ ok: true });
-  vi.spyOn(voiceApi, "presets").mockResolvedValue({
+  voicePresets.listing = {
     default: "fake",
     presets: [{ name: "fake", kind: "fake", available: true }],
-  });
+  };
   vi.spyOn(walkthroughApi, "transcribe").mockResolvedValue({
     text: "click",
     duration: 1,

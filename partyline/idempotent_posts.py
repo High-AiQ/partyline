@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import dataclasses
 from dataclasses import dataclass
 import threading
 import time
@@ -35,6 +36,7 @@ class _ClaimState:
     claimed: bool = False
     users: int = 0
     waiters: int = 0
+    signals: set = dataclasses.field(default_factory=set)
 
 
 _KEY_CLAIMS: dict[tuple[int, str, str, str], _ClaimState] = {}
@@ -66,6 +68,7 @@ async def claim_key(db, caller_id: str, conv_id: str, client_key: str):
     waiting = False
     try:
         while not acquired:
+            signal = asyncio.get_running_loop().create_future()
             with _KEY_CLAIMS_GUARD:
                 if not state.claimed:
                     state.claimed = True
@@ -76,8 +79,14 @@ async def claim_key(db, caller_id: str, conv_id: str, client_key: str):
                 elif not waiting:
                     state.waiters += 1
                     waiting = True
+                if not acquired:
+                    state.signals.add(signal)
             if not acquired:
-                await asyncio.sleep(0.01)
+                try:
+                    await signal
+                finally:
+                    with _KEY_CLAIMS_GUARD:
+                        state.signals.discard(signal)
         yield
     finally:
         with _KEY_CLAIMS_GUARD:
@@ -85,9 +94,16 @@ async def claim_key(db, caller_id: str, conv_id: str, client_key: str):
                 state.waiters -= 1
             if acquired:
                 state.claimed = False
+                for signal in list(state.signals):
+                    signal.get_loop().call_soon_threadsafe(_wake, signal)
             state.users -= 1
             if state.users == 0:
                 del _KEY_CLAIMS[identity]
+
+
+def _wake(signal):
+    if not signal.done():
+        signal.set_result(None)
 
 
 def _storage_key(conv_id: str, client_key: str) -> str:

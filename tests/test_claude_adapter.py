@@ -13,6 +13,8 @@ import weakref
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from tests.adapter_event_clock import install as event_clock
+
 from partyline.adapters.bundled.claude.adapter import PartylineAdapter
 
 
@@ -37,7 +39,7 @@ class ClaudeCommandTest(unittest.TestCase):
         if hook_url is not None:
             adapter.att["hook_url"] = hook_url
         adapter.resume = resume
-        return adapter
+        return event_clock(adapter)
 
     def test_fresh_command_gets_one_session_id(self):
         adapter = self.make_adapter(command=["claude", "--model", "opus"], resume=False)
@@ -151,7 +153,7 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
         startup_prompts = tomllib.loads(manifest.read_text(encoding="utf-8"))[
             "adapter"
         ]["startup_prompts"]
-        return PartylineAdapter(
+        adapter = PartylineAdapter(
             {
                 "command": ["claude"],
                 "id": "attachment-1",
@@ -166,6 +168,7 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
             post,
             status,
         )
+        return event_clock(adapter)
 
     async def test_guard_requires_the_structural_trust_menu(self):
         attention = AsyncMock()
@@ -386,6 +389,7 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
             post,
             on_status,
         )
+        event_clock(adapter)
         # This test isolates transcript parsing. The process has already received a real wake.
         adapter._silent_until_wake = False
         adapter.alive = lambda: True
@@ -393,7 +397,7 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         # These tests isolate the poll and the tail, not transcript identity:
         # their paths are names, not files on disk.
         adapter._recorded_our_token = lambda path: True
-        return adapter
+        return event_clock(adapter)
 
     async def run_fixture_records(self, records, posts):
         adapter = self.make_adapter(posts)
@@ -647,7 +651,7 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         ):
             await adapter._run()
         mock_write.assert_not_called()
-        self.assertEqual(mock_keys.call_count, 2)  # initial + one retry
+        self.assertEqual(mock_keys.call_count, 1)  # one briefing; discovery reacts to events
         self.assertEqual(posts, [("claude", "agent", "after retry")])
 
 
@@ -704,11 +708,12 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
              "adapter_metadata": {"capabilities": {"transcript": True}}},
             post, on_status,
         )
+        event_clock(adapter)
         adapter.spawned_at = 1_000.0
         adapter.resume = False
         adapter._silent_until_wake = False
         adapter.alive = lambda: True
-        return adapter
+        return event_clock(adapter)
 
     def test_the_session_that_recorded_our_token_is_ours(self):
         adapter = self.make_adapter()

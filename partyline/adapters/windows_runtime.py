@@ -96,6 +96,7 @@ class WindowsRuntime:
                     pass
                 adapter._terminal_viewers.publish(data)
                 # ConPTY answers native console queries; raw bytes remain peek-only.
+                adapter.changed()
                 await adapter.on_output(data)
         finally:
             adapter._terminal_viewers.close()

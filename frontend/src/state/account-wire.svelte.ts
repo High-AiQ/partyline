@@ -4,6 +4,8 @@ import type { HelloEvent } from "../lib/contracts";
 import { screenStatus } from "./screen-status.svelte.js";
 import { room } from "./room.svelte.js";
 import { session } from "./session.svelte.js";
+import { voicePresets } from "./voice-presets.svelte.js";
+import { resources } from "./resources.svelte.js";
 import { wire } from "./wire.svelte.js";
 
 export function connectAccountWire(identity: WireIdentity, handshake: (hello: HelloEvent) => void): void {
@@ -14,6 +16,10 @@ export function connectAccountWire(identity: WireIdentity, handshake: (hello: He
       if (event.type === "screen_snapshot") {
         screenStatus.indicators = event.indicators;
         screenStatus.devices = event.devices;
+      } else if (event.type === "asr_presets_changed") {
+        voicePresets.receive(event.settings);
+      } else if (event.type === "resources") {
+        resources.snapshot = event.snapshot;
       }
     },
     () => undefined,

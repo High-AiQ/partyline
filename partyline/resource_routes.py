@@ -55,6 +55,8 @@ def register_resource_routes(app, runtime) -> None:
                         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                         (key, str(values[key])),
                     )
+        from .browser_snapshots import push_resources
+        await push_resources(runtime)
         return {
             **values,
             "host_ram_bytes": host.ram_bytes,
@@ -72,6 +74,8 @@ def register_resource_routes(app, runtime) -> None:
                 runtime.db.conn.executemany(
                     "DELETE FROM settings WHERE key=?", ((key,) for key in KEYS)
                 )
+        from .browser_snapshots import push_resources
+        await push_resources(runtime)
         current = defaults(host)
         return {
             **current,

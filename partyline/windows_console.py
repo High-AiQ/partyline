@@ -119,34 +119,25 @@ class WindowsConsole:
         return self.returncode
 
     async def wait(self):
-        while (code := self.poll()) is None:
-            await asyncio.sleep(0.02)
-        return code
+        result = await asyncio.to_thread(self.api.WaitForSingleObject, self.process.hProcess, 0xffffffff)
+        if result != 0:
+            win.check(False, 'WaitForSingleObject')
+        return self.poll()
+
+    def _read_output(self):
+        buffer = c.create_string_buffer(65536)
+        count = w.DWORD()
+        if not self.api.ReadFile(self.output, buffer, len(buffer), c.byref(count), None):
+            if c.get_last_error() in (109, 232):
+                return b''
+            win.check(False, 'ReadFile')
+        return buffer.raw[:count.value]
 
     async def _pump(self):
-        # Peek before each read; this task is the sole reader, so ReadFile can
-        # consume exactly the available bytes without blocking the event loop.
         try:
-            while True:
-                available = w.DWORD()
-                if not self.api.PeekNamedPipe(self.output, None, 0, None, c.byref(available), None):
-                    if c.get_last_error() in (109, 232):  # broken pipe / no data
-                        break
-                    win.check(False, 'PeekNamedPipe')
-                if not available.value:
-                    await asyncio.sleep(0.01)
-                    continue
-                buffer = c.create_string_buffer(min(available.value, 65536))
-                count = w.DWORD()
-                win.check(self.api.ReadFile(
-                    self.output, buffer, len(buffer), c.byref(count), None), 'ReadFile')
-                if not count.value:
-                    break
-                data = buffer.raw[:count.value]
+            while data := await asyncio.to_thread(self._read_output):
                 self._stream.feed(data)
                 if self._responses and not self._closing:
-                    # ConPTY can query device attributes during startup. Reply
-                    # as a terminal host; these bytes are never chat speech.
                     responses = ''.join(self._responses).encode()
                     self._responses.clear()
                     async with self._write_lock:

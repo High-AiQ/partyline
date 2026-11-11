@@ -1,7 +1,7 @@
 """Settings routes for speech presets: list, edit, order, default, test. People only.
 
 Every change rebuilds the shared registry (no restart) and broadcasts
-``asr_presets_changed`` so open browsers refetch the preset list. Keys are
+``asr_presets_changed`` with a fresh snapshot for open browsers. Keys are
 never accepted, stored, returned or logged: a preset names its variable and
 the listing says only whether that variable is set.
 """
@@ -55,18 +55,20 @@ def _view(registry: asr_presets.AsrRegistry, name: str) -> dict:
     }
 
 
+def listing(db) -> dict:
+    registry = asr_presets.shared_registry(db)
+    return {"default": registry.default, "presets": [_view(registry, name) for name in registry.entries]}
+
+
 def asr_settings_router(runtime, clock: Callable[[], float] = time.perf_counter) -> APIRouter:
     router = APIRouter()
     base = "/api/settings/asr"
 
-    def listing() -> dict:
-        registry = asr_presets.shared_registry(runtime.db)
-        return {"default": registry.default, "presets": [_view(registry, name) for name in registry.entries]}
-
     async def changed() -> dict:
         asr_presets.rebuild(runtime.db)
-        await runtime.broadcast_all(AsrPresetsChangedEvent())
-        return listing()
+        settings = listing(runtime.db)
+        await runtime.broadcast_all(AsrPresetsChangedEvent(settings=settings))
+        return settings
 
     def spec_for(name: str, body: AsrPresetIn) -> dict:
         try:
@@ -83,7 +85,7 @@ def asr_settings_router(runtime, clock: Callable[[], float] = time.perf_counter)
     @router.get(base, response_model=AsrSettings)
     def get_settings(request: Request):
         _require_human(request)
-        return listing()
+        return listing(runtime.db)
 
     @router.post(f"{base}/presets", response_model=AsrSettings, status_code=201)
     async def create(request: Request):

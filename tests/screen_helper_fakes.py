@@ -215,7 +215,8 @@ class FakeInputs:
                 for event in (notice + echo if self.x11 == "notice-first" else echo + notice):
                     self.on_key(*event)
 
-    def listen(self, on_key):
+    def listen(self, on_key, on_move=None):
+        self.on_move = on_move
         if self.fail == "listen":
             raise RuntimeError("The kill-switch key listener could not start.")
         self.on_key = on_key

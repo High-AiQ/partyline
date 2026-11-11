@@ -16,8 +16,7 @@ import os
 import sys
 
 from .docker_relay import _pump
-
-POLL_SECONDS = 2.0
+from .process_events import process_exited
 
 
 def die_with_parent() -> None:
@@ -79,9 +78,16 @@ async def serve(host: str, path: str) -> None:
     finally:
         os.umask(previous)
     os.chmod(path, 0o600)
+    print("READY", flush=True)
     try:
-        while owner_alive(owner, parent):
-            await asyncio.sleep(POLL_SECONDS)
+        # Register both lifetimes: sg may be an intermediate parent.
+        tasks = [asyncio.create_task(process_exited(pid)) for pid in {owner or parent, parent}]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
     finally:
         server.close()
         with contextlib.suppress(FileNotFoundError):

@@ -17,6 +17,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from tests.adapter_event_clock import install as event_clock
+
 from partyline.adapters.bundled.antigravity import adapter as antigravity_module
 from partyline.adapters.bundled.antigravity import conversation_log
 from partyline.adapters.bundled.antigravity import logparse
@@ -100,7 +102,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.statuses.append(value)
 
     def make(self, **extra):
-        return PartylineAdapter(attachment(**extra), self.post, self.status)
+        return event_clock(PartylineAdapter(attachment(**extra), self.post, self.status))
 
     def write_log(self, adapter, conversation=CONV_ID):
         Path(self.log_root).mkdir(parents=True, exist_ok=True)
@@ -646,8 +648,8 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             await adapter._run()
         self.assertIn("conversation line in this activation's log after 45s", self.messages[-1][2])
         self.assertTrue(self.messages[-1][2].startswith("agent: no Created or Resuming"))
-        self.assertEqual(write.call_count, 2)
-        self.assertEqual(adapter.send_keys.await_count, 3)
+        self.assertEqual(write.call_count, 0)
+        self.assertEqual(adapter.send_keys.await_count, 1)
 
     async def test_run_returns_quietly_when_process_exits_early(self):
         adapter = self.make()

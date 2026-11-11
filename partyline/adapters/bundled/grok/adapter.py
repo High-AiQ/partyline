@@ -7,10 +7,11 @@ than needing unsafe discovery by working directory or modification time.
 
 from __future__ import annotations
 
-import asyncio
 import glob
 import os
 from pathlib import Path
+
+from partyline.adapters.events import watch_files
 
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.grok.resume import (
@@ -162,11 +163,14 @@ class PartylineAdapter(Adapter):
     def prepare_delivery_receipt(self, message_ids: list[int]) -> None:
         self._wake_receipts.expect_wait(message_ids)
 
+    @watch_files(lambda self: [os.path.expanduser(
+        f"~/.grok/sessions/*/{self._session_id}/chat_history.jsonl")])
     async def _run(self):
         # The transcript's path is pinned, so waiting costs nothing and giving
         # up costs everything: a Grok parked on a folder-trust prompt opened
         # its session eight minutes after spawn, and a tail that had quit at
         # 45 s left every later reply unposted. Warn once, keep waiting.
+        started = self.event_time()
         waited = 0.0
         warned = False
         path = self._transcript()
@@ -180,8 +184,8 @@ class PartylineAdapter(Adapter):
                     "(folder trust, login, update); peek at its terminal and answer it. "
                     "Nothing it says is lost: tailing starts the moment the session opens",
                 )
-            await asyncio.sleep(self.POLL_SECONDS)
-            waited += self.POLL_SECONDS
+            await self.wait_for_change(None if warned else max(0, self.TRANSCRIPT_TIMEOUT - waited))
+            waited = self.event_time() - started
             path = self._transcript()
         if path is None:
             return
@@ -215,13 +219,8 @@ class PartylineAdapter(Adapter):
         await self._tail_grok_transcript(path, handle)
 
     async def _poll(self) -> None:
-        """The only wait the transcript tail is allowed to take.
-
-        Tests that need the tail to stop patch this method. Patching
-        ``adapter.asyncio.sleep`` after the loop moves to ``tail.py`` does
-        nothing, and the poll never yields.
-        """
-        await asyncio.sleep(self.POLL_SECONDS)
+        """Legacy patchable tail boundary, now waiting for a notification."""
+        await self.wait_for_change()
 
     async def _tail_grok_transcript(self, path: Path, handle) -> None:
         await tail_grok_transcript(self, path, handle)

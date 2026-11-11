@@ -18,6 +18,8 @@ from pathlib import Path
 if os.name != "nt":
     import tty
 
+from partyline.adapters.events import watch_files
+
 from partyline.adapters import Adapter
 from partyline.adapters.acp_receipts import deliver_prompt
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
@@ -189,9 +191,10 @@ class PartylineAdapter(Adapter):
         while self.alive():
             if path := self._find_log(self._session_id or ""):
                 return path
-            await asyncio.sleep(0.5)
+            await self.wait_for_change()
         raise RuntimeError("dsh exited before creating its session transcript")
 
+    @watch_files(lambda self: [self._sessions_root / "*" / "*" / "session.v*.jsonl*"])
     async def _run(self):
         try:
             self._prepare_pty()
@@ -238,25 +241,7 @@ class PartylineAdapter(Adapter):
 
     async def _tail(self):
         assert self._transcript is not None
-        with self._transcript.open(encoding="utf-8", errors="replace") as file:
-            while self.alive():
-                position = file.tell()
-                line = await asyncio.to_thread(file.readline)
-                if not line:
-                    file.seek(position)
-                    await asyncio.sleep(0.5)
-                    continue
-                if not line.endswith("\n"):
-                    file.seek(position)
-                    await asyncio.sleep(0.3)
-                    continue
-                self.observe_claim(line)
-                try:
-                    record = await asyncio.to_thread(json.loads, line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(record, dict):
-                    await self._handle_record(record)
+        await self._tail_jsonl(str(self._transcript), self._handle_record)
 
     async def _handle_record(self, record: dict):
         seq = record.get("seq")

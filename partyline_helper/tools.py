@@ -224,6 +224,7 @@ class Tools:
     async def renew_loop(self, grant):
         failures = 0
         while self.grant is grant:
+            # no-poll (c): ownership protocol lease renewal; no state discovery
             await self.session.sleep(RENEW)
             if self.grant is not grant:
                 return
@@ -243,6 +244,7 @@ class Tools:
             if wait <= 0:
                 await self.drop("idle for 15 minutes", local=False)
                 return
+            # no-poll (b): deadline derived from the last activity, not a periodic state check
             await self.session.sleep(wait)
 
     async def cancel(self, call_id):

@@ -87,18 +87,17 @@ class Bridge:
             command = shlex.join([sys.executable, "-m", "partyline.docker_bridge", host, self.path])
             self.proc = await asyncio.create_subprocess_exec(
                 sg, "docker", "-c", command, stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 start_new_session=True, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 env={**os.environ, "PARTYLINE_BRIDGE_OWNER": str(os.getpid())})
             drain = asyncio.get_running_loop().create_task(self._drain_stderr(self.proc))
-            deadline = time.monotonic() + SOCKET_WAIT
-            while time.monotonic() < deadline:
-                if os.path.exists(self.path):
+            try:
+                ready = await asyncio.wait_for(self.proc.stdout.readline(), SOCKET_WAIT)
+                if ready.strip() == b"READY" and self.proc.returncode is None:
                     self.last_error = None
                     return self.path
-                if self.proc.returncode is not None:
-                    break
-                await asyncio.sleep(0.05)
+            except TimeoutError:
+                pass
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(drain, 0.5)
             self.last_error = f"bridge did not start (exit {self.proc.returncode}): {self._tail()}"

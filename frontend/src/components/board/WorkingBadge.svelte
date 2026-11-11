@@ -19,6 +19,7 @@
 
   let now = $state(Date.now() / 1000);
   $effect(() => {
+    // no-poll (d): local display ticker; no request
     const timer = setInterval(() => {
       now = Date.now() / 1000;
     }, 15_000);

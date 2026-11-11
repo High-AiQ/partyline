@@ -848,11 +848,8 @@ class ServerTest(unittest.TestCase):
         lock_blocked = asyncio.Event()
         transition_task = None
         transition_crossed_before_write = False
-        real_sleep = asyncio.sleep
-
-        async def contended(_seconds):
-            lock_blocked.set()
-            await real_sleep(0)
+        from partyline import runtime_lock
+        native_lock = runtime_lock.lock
 
         async def exit_then_claim():
             await replacement_runtime.status_callback(
@@ -869,10 +866,17 @@ class ServerTest(unittest.TestCase):
 
         async def deliver(messages):
             nonlocal transition_task, transition_crossed_before_write
-            transition_task = asyncio.create_task(exit_then_claim())
-            await lock_blocked.wait()
-            transition_crossed_before_write = transition_task.done()
-            adapter.deliveries.append(messages)
+            loop = asyncio.get_running_loop()
+
+            def contended(descriptor):
+                loop.call_soon_threadsafe(lock_blocked.set)
+                native_lock(descriptor)
+
+            with patch.object(runtime_lock, 'lock', contended):
+                transition_task = asyncio.create_task(exit_then_claim())
+                await lock_blocked.wait()
+                transition_crossed_before_write = transition_task.done()
+                adapter.deliveries.append(messages)
 
         adapter.deliver = deliver
         message = server.runtime.db.add_message(
@@ -884,8 +888,7 @@ class ServerTest(unittest.TestCase):
             await transition_task
 
         try:
-            with patch("partyline.runtime_lock.asyncio.sleep", new=contended):
-                self.arun(deliver_then_wait_for_transition())
+            self.arun(deliver_then_wait_for_transition())
             self.assertFalse(transition_crossed_before_write)
             self.assertEqual(adapter.deliveries, [[message]])
             current = replacement.get_attachment("old")
@@ -910,25 +913,26 @@ class ServerTest(unittest.TestCase):
             )
         )
 
-        lock_blocked = asyncio.Event()
-        real_sleep = asyncio.sleep
-
-        async def contended(_seconds):
-            lock_blocked.set()
-            await real_sleep(0)
+        from partyline import runtime_lock
+        native_lock = runtime_lock.lock
 
         async def reserve_then_detach():
-            async with server.runtime.db.reserve_attachment_delivery(
-                "old", "old-generation"
-            ) as reserved:
+            loop = asyncio.get_running_loop()
+            lock_blocked = asyncio.Event()
+
+            def contended(descriptor):
+                loop.call_soon_threadsafe(lock_blocked.set)
+                native_lock(descriptor)
+
+            async with server.runtime.db.reserve_attachment_delivery("old", "old-generation") as reserved:
                 self.assertTrue(reserved)
-                detaching = asyncio.create_task(server.detach(self.principal_request(), "old"))
-                await lock_blocked.wait()
-                self.assertFalse(detaching.done())
+                with patch.object(runtime_lock, 'lock', contended):
+                    detaching = asyncio.create_task(server.detach(self.principal_request(), "old"))
+                    await lock_blocked.wait()
+                    self.assertFalse(detaching.done())
             await detaching
 
-        with patch("partyline.runtime_lock.asyncio.sleep", new=contended):
-            self.arun(reserve_then_detach())
+        self.arun(reserve_then_detach())
         self.assertEqual(server.runtime.db.get_attachment("old")["status"], "detached")
         self.assertEqual(
             server.runtime.db.list_messages("line")[-1]["body"], "@opus detached"
@@ -1023,9 +1027,10 @@ class ServerTest(unittest.TestCase):
 
         # The group is mid-teardown at the first check and dies moments later,
         # inside detach's bounded confirmation window — not as a 500.
-        alive = iter([True, True, False])
+        alive = iter([True, False])
         with patch("partyline.line_process_routes.process_group_alive",
-                   side_effect=lambda pgid: next(alive, False)):
+                   side_effect=lambda pgid: next(alive, False)), \
+                patch("partyline.line_process_routes.asyncio.sleep", new=AsyncMock()):
             response = self.arun(server.detach(self.principal_request(), "old"))
 
         self.assertEqual(response, {"ok": True})

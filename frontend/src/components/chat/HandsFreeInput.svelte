@@ -118,6 +118,7 @@
   // The "Voice sent" bubble floats over the feed, so it leaves on its own.
   $effect(() => {
     if (!lastSent) return;
+    // no-poll (b): one-shot UI deadline; no state request
     const timer = setTimeout(() => {
       lastSent = "";
     }, 8000);
@@ -131,6 +132,7 @@
     hiddenTimer = null;
     if (!document.hidden) suspended = false;
     else if (enabled)
+      // no-poll (b): one-shot UI deadline; no state request
       hiddenTimer = setTimeout(() => {
         suspended = true;
       }, handsFree.value.hiddenMs);

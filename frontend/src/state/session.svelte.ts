@@ -114,7 +114,7 @@ class Session {
     if (this.user && this.user.handle !== handle) this.user = { ...this.user, handle };
     void this.loadAdapters();
     // A restart may have added recognizers: the mic follows the server too.
-    voicePresets.refresh();
+    voicePresets.ensure();
   }
 
   async loadAdapters(): Promise<void> {

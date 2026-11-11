@@ -32,6 +32,7 @@
       const result = await api.importAdapters(repository.trim(), ref.trim());
       await session.loadAdapters();
       status = "loaded: " + result.loaded.join(", ");
+      // no-poll (b): one-shot UI deadline; no state request
       doneTimer = setTimeout(close, 1200);
     } catch (error: unknown) {
       status = error instanceof ApiError ? error.message : "import failed";

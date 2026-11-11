@@ -137,10 +137,12 @@ export class VoiceRecorder {
     }
     this.startedAt = Date.now();
     this.hooks.onelapsed(0);
+    // no-poll (d): local display ticker; no request
     this.ticker = setInterval(() => {
       this.hooks.onelapsed(Date.now() - this.startedAt);
     }, 250);
     const take = this.recorder;
+    // no-poll (b): one-shot UI deadline; no state request
     this.cap = setTimeout(() => {
       // Per-take: only the take that armed this timer may be stopped by it.
       if (this.recorder === take) this.stop();

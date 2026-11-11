@@ -43,18 +43,22 @@ def _revive_hint(db, att_id: str) -> str:
             if row['status'] == 'in_review' and staffed_by_preset(row) else "")
 
 
-async def _await_confirmation(probe) -> bool:
-    """Poll with doubling backoff: a stop can land after its stop call ends."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + DETACH_CONFIRM_TIMEOUT
-    delay = 0.05
-    while not probe():
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            return False
-        await asyncio.sleep(min(delay, remaining))
-        delay *= 2
-    return True
+async def _await_confirmation(probe, db=None) -> bool:
+    """Give an in-flight stop its single confirmation deadline."""
+    if db is not None:
+        with db.events.subscribe('attachments') as events:
+            deadline = asyncio.get_running_loop().time() + DETACH_CONFIRM_TIMEOUT
+            while not probe():
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    return False
+                await events.wait(remaining)
+            return True
+    if probe():
+        return True
+    # no-poll (b): one final check at the stop deadline, never a retry loop.
+    await asyncio.sleep(DETACH_CONFIRM_TIMEOUT)
+    return probe()
 
 
 async def _stop_confirmed(adapter, stop_error) -> bool:
@@ -88,7 +92,7 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hin
             def settled():
                 row = runtime.db.get_attachment(att_id)
                 return row is None or row["status"] not in LIVE
-            if await _await_confirmation(settled):
+            if await _await_confirmation(settled, runtime.db):
                 att = runtime.db.get_attachment(att_id) or att
                 adapter = runtime.live.get(att_id)
         runtime_owner = adapter.att.get("runtime_owner") if adapter else att.get("runtime_owner")

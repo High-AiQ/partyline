@@ -14,10 +14,22 @@ def display_text(value):
     return "".join(char for char in ANSI.sub("", str(value)) if char.isprintable())[:120]
 
 
+class InputQueue(queue.Queue):
+    def __init__(self, received):
+        super().__init__()
+        self.received = received
+
+    def put(self, *args, **kwargs):
+        super().put(*args, **kwargs)
+        self.received()
+
+
 class Terminal:
     def __init__(self, clock=time.monotonic, sleep=asyncio.sleep, read_stdin=True, dialog=None, status=None):
         self.clock, self.sleep, self.status = clock, sleep, status
-        self.lines = queue.Queue()
+        self._loop = None
+        self._input = asyncio.Event()
+        self.lines = InputQueue(self._received)
         # `dialog` (see consent_dialog.auto_dialog) replaces the y/N prompt when there is no terminal.
         self.dialog = dialog
         if read_stdin and dialog is None:
@@ -26,6 +38,11 @@ class Terminal:
     def _read(self):
         for line in sys.stdin:
             self.lines.put(line.strip().lower())
+
+
+    def _received(self):
+        if self._loop is not None and not self._loop.is_closed():
+            self._loop.call_soon_threadsafe(self._input.set)
 
     def attention(self, text):
         """Ask the tray for a balloon too, in case the dialog opens behind other windows."""
@@ -37,13 +54,33 @@ class Terminal:
             self.lines.get_nowait()
 
     async def read(self, timeout=None):
-        start = self.clock()
-        while timeout is None or self.clock() - start < timeout:
-            try:
-                return self.lines.get_nowait()
-            except queue.Empty:
-                await self.sleep(0.05)
-        return None
+        self._loop = asyncio.get_running_loop()
+
+        async def next_line():
+            while True:
+                self._input.clear()
+                try:
+                    return self.lines.get_nowait()
+                except queue.Empty:
+                    await self._input.wait()
+
+        try:
+            return self.lines.get_nowait()
+        except queue.Empty:
+            pass
+        if timeout is None:
+            return await next_line()
+        if timeout <= 0:
+            return None
+        incoming = asyncio.create_task(next_line())
+        deadline = asyncio.create_task(self.sleep(timeout))  # no-poll (b): prompt deadline
+        try:
+            done, _ = await asyncio.wait((incoming, deadline), return_when=asyncio.FIRST_COMPLETED)
+            return incoming.result() if incoming in done else None
+        finally:
+            for task in (incoming, deadline):
+                task.cancel()
+            await asyncio.gather(incoming, deadline, return_exceptions=True)
 
     async def consent(self, request, yes=False, timeout=60):
         self.clear()
