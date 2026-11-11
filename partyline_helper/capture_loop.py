@@ -7,6 +7,13 @@ import time
 from PIL import Image
 
 
+def _wgc_image(frame):
+    """Convert windows-capture's BGR frame to the RGB image sent to the server."""
+    frame = frame.convert_to_bgr()
+    return Image.frombytes("RGB", (frame.width, frame.height), frame.frame_buffer.tobytes(),
+                           "raw", "BGR")
+
+
 async def _stop_input(session, request, stopped):
     changes = session.control.input_changes
     while session.share is request:
@@ -55,23 +62,19 @@ class _WindowsCapture:
         from .windows_capture import window_for_region
 
         self.hwnd, self.bounds = window_for_region(request['region'])
-        import ctypes
-        if not ctypes.windll.user32.IsWindow(self.hwnd):
-            raise RuntimeError("The shared window closed before capture started")
         from windows_capture import WindowsCapture
 
         self.capture = WindowsCapture(window_hwnd=self.hwnd, cursor_capture=True, draw_border=False)
         self.control = None
 
-    def start(self, on_frame, on_closed):
+    def start(self, on_frame, closed):
         @self.capture.event
         def on_frame_arrived(frame, _control):
-            image = Image.fromarray(frame.to_bgr()[..., ::-1].copy(), "RGB")
-            on_frame(image, self.bounds)
+            on_frame(_wgc_image(frame), self.bounds)
 
         @self.capture.event
-        def on_capture_closed():
-            on_closed()
+        def on_closed():
+            closed()
 
         self.control = self.capture.start_free_threaded()
 

@@ -2,14 +2,18 @@
 
 import asyncio
 import ctypes
+import sys
+import time
+from types import SimpleNamespace
 import unittest
 from ctypes import wintypes
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 from PIL import Image
 
 from partyline.file_events import Changes
-from partyline_helper.capture_loop import capture
+from partyline_helper import desktop as desktop_module
+from partyline_helper.capture_loop import _WindowsCapture, capture
 from partyline_helper.windows_capture import window_for_region
 from tests.screen_helper_fakes import checkpoint
 
@@ -64,6 +68,58 @@ class FakeClock:
 
     def __call__(self):
         return self.now
+
+
+class FakeWgcFrameBuffer:
+    def tobytes(self):
+        # Two pixels in BGR order: red, then green.
+        return bytes((0, 0, 255, 0, 255, 0))
+
+
+class FakeWgcFrame:
+    width = 2
+    height = 1
+    frame_buffer = FakeWgcFrameBuffer()
+
+    def convert_to_bgr(self):
+        return self
+
+
+class FakeCaptureControl:
+    def __init__(self):
+        self.stop_count = 0
+        self.wait_count = 0
+
+    def stop(self):
+        self.stop_count += 1
+
+    def wait(self):
+        self.wait_count += 1
+
+
+class StrictFakeWindowsCapture:
+    """Match windows-capture's name-based event decorator contract."""
+
+    instances = []
+    emit_frame_on_start = False
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.handlers = {}
+        self.control = FakeCaptureControl()
+        self.internal_control = FakeCaptureControl()
+        self.instances.append(self)
+
+    def event(self, handler):
+        if handler.__name__ not in ("on_frame_arrived", "on_closed"):
+            raise ValueError("Invalid Event Handler Use on_frame_arrived Or on_closed")
+        self.handlers[handler.__name__] = handler
+        return handler
+
+    def start_free_threaded(self):
+        if self.emit_frame_on_start:
+            self.handlers["on_frame_arrived"](FakeWgcFrame(), self.internal_control)
+        return self.control
 
 
 class WindowsCaptureEventTests(unittest.IsolatedAsyncioTestCase):
@@ -143,19 +199,61 @@ class WindowsCaptureWindowSelectionTests(unittest.TestCase):
         user32.WindowFromPoint.assert_called_once()
 
 
+class WindowsCaptureBindingContractTests(unittest.TestCase):
+    def setUp(self):
+        StrictFakeWindowsCapture.instances.clear()
+        StrictFakeWindowsCapture.emit_frame_on_start = False
+        self.binding = SimpleNamespace(WindowsCapture=StrictFakeWindowsCapture)
+
+    def test_window_adapter_registers_supported_events_and_converts_frames(self):
+        request = {"region": {"x": 0, "y": 0, "width": 2, "height": 1}}
+        with patch("partyline_helper.windows_capture.window_for_region", return_value=(123, (0, 0))), \
+                patch.dict(sys.modules, {"windows_capture": self.binding}):
+            source = _WindowsCapture(request)
+            frames, closed = [], []
+            source.start(lambda image, bounds: frames.append((image, bounds)),
+                         lambda: closed.append(True))
+
+        binding = StrictFakeWindowsCapture.instances[-1]
+        self.assertEqual(binding.kwargs, {"window_hwnd": 123, "cursor_capture": True,
+                                          "draw_border": False})
+        self.assertEqual(set(binding.handlers), {"on_frame_arrived", "on_closed"})
+        binding.handlers["on_frame_arrived"](FakeWgcFrame(), binding.internal_control)
+        image, bounds = frames[0]
+        self.assertEqual((image.size, image.getpixel((0, 0)), image.getpixel((1, 0))),
+                         ((2, 1), (255, 0, 0), (0, 255, 0)))
+        self.assertEqual(bounds, (0, 0))
+        binding.handlers["on_closed"]()
+        self.assertEqual(closed, [True])
+        source.stop()
+        self.assertEqual((binding.control.stop_count, binding.control.wait_count), (1, 1))
+
+    def test_monitor_preview_uses_the_binding_one_based_indices(self):
+        desktop = desktop_module.Desktop.__new__(desktop_module.Desktop)
+        StrictFakeWindowsCapture.emit_frame_on_start = True
+        with patch.object(desktop_module.Desktop, "supports_capture", new_callable=PropertyMock,
+                          return_value=True), patch.dict(sys.modules, {"windows_capture": self.binding}):
+            first = desktop.grab({"id": 1})
+            second = desktop.grab({"id": 2})
+
+        self.assertEqual([instance.kwargs["monitor_index"] for instance in
+                          StrictFakeWindowsCapture.instances], [1, 2])
+        self.assertEqual(first.getpixel((0, 0)), (255, 0, 0))
+        self.assertEqual(second.getpixel((1, 0)), (0, 255, 0))
+
+
 @unittest.skipUnless(__import__("sys").platform == "win32", "Windows Graphics Capture is Windows only")
 class NativeWindowsCaptureTests(unittest.TestCase):
     def test_captures_a_real_tk_window(self):
         try:
-            import tkinter as tk
-            from partyline_helper.capture_loop import _WindowsCapture
-        except (ImportError, OSError):
-            self.skipTest("Tk or windows-capture is unavailable")
+            import windows_capture  # noqa: F401
+        except (ImportError, OSError) as exc:
+            self.skipTest(f"windows-capture binding is unavailable: {exc}")
+        import tkinter as tk
+        if sys.getwindowsversion().build < 18362:
+            self.skipTest("HWND GraphicsCaptureItem requires Windows 10 build 18362 or newer")
 
-        try:
-            root = tk.Tk()
-        except tk.TclError as exc:
-            self.skipTest(f"Tk desktop is unavailable: {exc}")
+        root = tk.Tk()
         root.title("Partyline WGC capture test")
         root.geometry("240x120+60+60")
         tk.Label(root, text="Windows Graphics Capture test").pack(expand=True)
@@ -163,21 +261,27 @@ class NativeWindowsCaptureTests(unittest.TestCase):
         rectangle = {"x": root.winfo_rootx(), "y": root.winfo_rooty(),
                      "width": root.winfo_width(), "height": root.winfo_height()}
         request = {"region": rectangle, "max_fps": 10}
-        try:
-            source = _WindowsCapture(request)
-        except (ImportError, OSError, RuntimeError) as exc:
-            root.destroy()
-            self.skipTest(f"Windows Graphics Capture is unavailable: {exc}")
+        source = _WindowsCapture(request)
         arrived, closed = __import__("threading").Event(), __import__("threading").Event()
-        frames = []
-        try:
+        frames, errors = [], []
+
+        def frame_arrived(image, _bounds):
             try:
-                source.start(lambda image, _bounds: (frames.append(image), arrived.set()), closed.set)
-            except (OSError, RuntimeError) as exc:
-                self.skipTest(f"Windows Graphics Capture could not start: {exc}")
+                frames.append(image)
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                arrived.set()
+
+        try:
+            source.start(frame_arrived, closed.set)
+            deadline = time.monotonic() + 3.0
+            while not arrived.is_set() and time.monotonic() < deadline:
+                root.update()
+                arrived.wait(0.025)
             root.update()
-            if not arrived.wait(0.75):
-                self.skipTest("Windows Graphics Capture delivered no frame on this runner")
+            self.assertTrue(arrived.is_set(), "Windows Graphics Capture delivered no frame within 3 seconds")
+            self.assertEqual(errors, [])
             self.assertGreater(frames[0].width, 0)
             self.assertGreater(frames[0].height, 0)
         finally:
