@@ -2,7 +2,7 @@
   import { onDestroy, onMount, untrack } from "svelte";
   import { screenApi, type ScreenDevice } from "../../lib/screen-api";
   import { walkthroughApi } from "../../lib/walkthrough-api";
-  import { voiceApi, type Transcript } from "../../lib/voice-api";
+  import { type Transcript } from "../../lib/voice-api";
   import { VoiceRecorder, browserSources, type RecorderSources } from "../../lib/voice-recorder";
   import { stageText, type WalkthroughStage } from "../../lib/walkthrough-status";
   import { WalkthroughMic } from "../../state/walkthrough-mic.svelte.js";
@@ -214,7 +214,7 @@
     let failed = false;
     abort = new AbortController();
     try {
-      transcript = await voiceApi.transcribe(take.line, take.audio, voicePresets.active, abort.signal);
+      transcript = await walkthroughApi.transcribe(take.line, take.audio, voicePresets.active, abort.signal);
     } catch {
       failed = true;
     }

@@ -14,11 +14,15 @@ export type VoicePreset = z.infer<typeof PresetSchema>;
 const ListingSchema = z.object({ default: z.string(), presets: z.array(PresetSchema) });
 export type VoiceListing = z.infer<typeof ListingSchema>;
 
-const TranscriptSchema = z.object({
+export const TranscriptSchema = z.object({
   text: z.string(),
   language: z.string(),
   duration: z.number(),
-  segments: z.array(z.object({ start: z.number(), end: z.number(), text: z.string() })).default([]),
+  segments: z
+    .array(
+      z.object({ start: z.number(), end: z.number(), text: z.string(), utterance: z.boolean().optional() }),
+    )
+    .default([]),
 });
 export type Transcript = z.infer<typeof TranscriptSchema>;
 

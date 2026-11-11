@@ -1,5 +1,18 @@
 # Lessons: the false-assumptions ledger
 
+## Text transcription is not timed narration
+
+The false assumption was that switching the default recognizer to GPT-Transcribe
+preserved the walkthrough's segment timestamps. Its JSON and streamed text have
+no audio offsets. Walkthrough transcription now keeps native segments when
+available, otherwise detects silence boundaries in PCM and transcribes utterances
+with bounded concurrency. Preserve those boundaries through message assembly even
+when the recognizer omits punctuation. Composer voice input remains one request.
+Synthetic-audio, fake-HTTP and full walkthrough flow regressions cover the timing.
+Padding can itself push an utterance over the chunk cap. Trim that excess padding
+instead of sending a silent sliver, and reserve a transcribable final piece when
+speech crosses the cap. Boundary regressions cover both padding and recording EOF.
+
 ## Detach requests need an audit trail
 
 An absent HTTP access log does not prove there was no request: self-detach can

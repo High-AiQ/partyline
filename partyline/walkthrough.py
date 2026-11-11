@@ -132,7 +132,7 @@ def speech_segments(segments: list[dict], no_input: bool) -> list[dict]:
     for segment in nonempty:
         part = dict(segment)
         part["text"] = part["text"].strip()
-        if (joined and not re.search(r'[.!?]["\']?$', joined[-1]["text"])
+        if (joined and not part.get("utterance") and not re.search(r'[.!?]["\']?$', joined[-1]["text"])
                 and part["start"] - joined[-1]["end"] <= 2):
             joined[-1]["text"] += " " + part["text"]
             joined[-1]["end"] = max(joined[-1]["end"], part["end"])

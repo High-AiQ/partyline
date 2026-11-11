@@ -73,7 +73,7 @@ function setup(extra: Partial<RecorderSources> = {}) {
     default: "fake",
     presets: [{ name: "fake", kind: "fake", available: true }],
   });
-  vi.spyOn(voiceApi, "transcribe").mockResolvedValue({
+  vi.spyOn(walkthroughApi, "transcribe").mockResolvedValue({
     text: "click",
     duration: 1,
     language: "en",
@@ -160,7 +160,7 @@ describe("walkthrough control", () => {
     expect(walkthroughApi.arm).toHaveBeenCalledExactlyOnceWith("l", "s");
     button("Stop and send")?.click();
     await settle();
-    expect(voiceApi.transcribe).toHaveBeenCalledOnce();
+    expect(walkthroughApi.transcribe).toHaveBeenCalledOnce();
     expect(finish).toHaveBeenCalledWith(
       "l",
       "s",
@@ -245,14 +245,17 @@ describe("walkthrough control", () => {
     await unmount(component);
   });
 
-  it("sends untimed transcript text without a synthetic segment", async () => {
+  it("sends recovered utterance timestamps from walkthrough transcription", async () => {
     const finish = vi.spyOn(walkthroughApi, "finish").mockResolvedValue({ message: { id: 1 } });
     const component = setup();
-    vi.mocked(voiceApi.transcribe).mockResolvedValue({
+    vi.mocked(walkthroughApi.transcribe).mockResolvedValue({
       text: "click the gear",
       duration: 0,
       language: "en",
-      segments: [],
+      segments: [
+        { start: 1.2, end: 2, text: "click", utterance: true },
+        { start: 4, end: 5, text: "the gear", utterance: true },
+      ],
     });
     await settle();
     await startWalkthrough();
@@ -263,8 +266,11 @@ describe("walkthrough control", () => {
       "l",
       "s",
       expect.objectContaining({
-        segments: [],
-        transcript_text: "click the gear",
+        segments: [
+          { start: 1.2, end: 2, text: "click", utterance: true },
+          { start: 4, end: 5, text: "the gear", utterance: true },
+        ],
+        transcript_text: "",
         transcription_error: false,
       }),
     );
@@ -290,7 +296,7 @@ describe("walkthrough control", () => {
   it("sends the frames with an explanation when recognition fails", async () => {
     const finish = vi.spyOn(walkthroughApi, "finish").mockResolvedValue({ message: { id: 2 } });
     const component = setup();
-    vi.mocked(voiceApi.transcribe).mockRejectedValue(new Error("recognizer failed"));
+    vi.mocked(walkthroughApi.transcribe).mockRejectedValue(new Error("recognizer failed"));
     await settle();
     await startWalkthrough();
     await settle();
