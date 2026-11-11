@@ -15,9 +15,18 @@ def speech_snapshot(db):
 async def hello_payload(runtime, *identity):
     from .handshake import hello_payload as identity_payload
     speech = await asyncio.to_thread(speech_snapshot, runtime.db)
-    resources = await asyncio.to_thread(_view, runtime)
+    resources = await resource_snapshot(runtime)
     return {**identity_payload(*identity), 'speech_settings': speech.settings.model_dump(),
             'resource_snapshot': resources}
+
+
+async def resource_snapshot(runtime):
+    """Read exact gauges for an explicit request or a connecting client."""
+    from .docker_workloads import inventory
+    from .memory_snapshot import refresh
+    await inventory.sample(runtime, force=True)
+    await refresh(runtime)
+    return await asyncio.to_thread(_view, runtime)
 
 
 async def push_resources(runtime):
