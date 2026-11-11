@@ -8,6 +8,7 @@ STAFFING_TRAITS = (
     "Staff implementers only from presets with Fast implementer checked; prefer free Fast "
     "implementers. Captains and reviewers need Can manage a line checked. A preset with neither "
     "role trait can only be attached directly by a person, who may also appoint a captain. "
+    "Raw helpers (idle-check, rotate-captain) hold no staffed role and need no trait. "
     "Prefer Reads images for visual work. "
     "Record durable rules from people in partyline doctrine, never only in private memory. "
     "GET {root}/staffing lists preset traits and live processes; a match is only the "

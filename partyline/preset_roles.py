@@ -73,6 +73,11 @@ def require_captain_assignment(db, conv_id, ident, before, *, person=False):
                          name=target.get('preset') or target['name'])
 
 
+def is_helper(att):
+    """Raw processes outside the worker count (idle-check, rotate-captain) hold no staffed role."""
+    return att['adapter'] == 'raw' and not att.get('counts_toward_total')
+
+
 def require_resume(db, ident, *, person=False):
     from .orchestrator_store import attachment_task
     if person:
@@ -88,7 +93,15 @@ def require_resume(db, ident, *, person=False):
         require_named_role(db, name, role)
         return role
     else:
-        role = 'captain' if att.get('is_lead') or att.get('is_successor') else 'implementer'
+        if att.get('is_lead') or att.get('is_successor'):
+            role = 'captain'
+        elif is_helper(att):
+            return None
+        else:
+            # No row records whether an agent or a person attached it, so a
+            # non-task, non-helper process fails closed: an agent resuming it
+            # needs the same Fast implementer preset it would to attach one.
+            role = 'implementer'
         require_role(attachment_preset(db, att), role, name=att.get('preset') or att['name'])
         return role
 
