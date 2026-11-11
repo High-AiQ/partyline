@@ -84,6 +84,9 @@ def refusal(db, a: dict, b: dict) -> str | None:
             return "unknown line"
         if line["archived_at"]:
             return f"line «{line['name']}» is archived"
+        if not any(att["status"] in LIVE for att in db.list_attachments(end["conv_id"])):
+            return (f"line «{line['name']}» has no running process; attach or resume one "
+                    "before opening a bridge")
         att = db.get_attachment(end["attachment_id"])
         if att is None or att["conv_id"] != end["conv_id"] or att["status"] not in LIVE:
             return f"the ambassador is not live on «{line['name']}»"

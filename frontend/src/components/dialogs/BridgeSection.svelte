@@ -4,6 +4,7 @@
   import { bridgeApi, type Bridge, type BridgeLogEntry } from "../../lib/bridge-api";
   import type { Attachment, Conversation } from "../../lib/contracts";
   import { isLive } from "../../lib/attachments";
+  import { hierarchyApi } from "../../lib/hierarchy-api";
   import { treeRootId } from "../../lib/line-hierarchy";
   import { room } from "../../state/room.svelte";
 
@@ -29,6 +30,8 @@
     room.conversations.filter(
       (line) =>
         !line.archived_at &&
+        line.live_count > 0 &&
+        line.id !== conversation.id &&
         treeRootId(line.id, room.conversations) !== treeRootId(conversation.id, room.conversations),
     ),
   );
@@ -57,16 +60,32 @@
     };
   });
 
-  async function pickLine(): Promise<void> {
+  $effect(() => {
+    const lineId = otherLineId;
+    const line = room.conversations.find((candidate) => candidate.id === lineId);
+    // A line_live event changes live_count, so refresh this one selection from
+    // the shared live state without polling while the dialog stays open.
+    const liveCount = line?.live_count;
     theirId = "";
     theirProcesses = [];
-    if (!otherLineId) return;
-    try {
-      theirProcesses = (await api.conversation(otherLineId)).attachments.filter(isLive);
-    } catch (error) {
-      fail(error, "could not load that line's processes");
-    }
-  }
+    if (!lineId || !liveCount) return;
+
+    let cancelled = false;
+    void Promise.all([api.conversation(lineId), hierarchyApi.lead(lineId)])
+      .then(([detail, captain]) => {
+        if (!cancelled) {
+          theirProcesses = detail.attachments
+            .filter(isLive)
+            .sort((a, b) => (a.id === captain.attachment_id ? -1 : b.id === captain.attachment_id ? 1 : 0));
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) fail(error, "could not load that line's processes");
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
 
   async function open(): Promise<void> {
     busy = true;
@@ -151,12 +170,16 @@
         {/each}
       </select>
       <label for="bridgeLine">other line</label>
-      <select id="bridgeLine" bind:value={otherLineId} disabled={busy} onchange={pickLine}>
-        <option value="">choose a line from another tree</option>
-        {#each otherLines as line (line.id)}
-          <option value={line.id}>{line.name}</option>
-        {/each}
-      </select>
+      {#if otherLines.length === 0}
+        <p class="text-cream-faint">no other line has a running process</p>
+      {:else}
+        <select id="bridgeLine" bind:value={otherLineId} disabled={busy}>
+          <option value="">choose a line from another tree</option>
+          {#each otherLines as line (line.id)}
+            <option value={line.id}>{line.name}</option>
+          {/each}
+        </select>
+      {/if}
       <label for="bridgeTheirs">its ambassador</label>
       <select id="bridgeTheirs" bind:value={theirId} disabled={busy || !otherLineId}>
         <option value="">choose a live process</option>
