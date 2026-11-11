@@ -230,7 +230,7 @@ class WorkflowTest(TaskFixture):
         self.db._exec("UPDATE attachments SET cli_session='existing-session' WHERE id=?", (ident,))
         with patch('partyline.server._resume_adapter', AsyncMock(side_effect=self.resume)) as resumed:
             await ensure_reviewer(self.runtime, row)
-            resumed.assert_awaited_once_with(ident)
+            self.assertEqual(resumed.await_args.args[0], ident)
         invalid = {**row, 'reviewer_id': row['implementer_id']}
         with self.assertRaises(HTTPException):
             await ensure_reviewer(self.runtime, invalid)
@@ -256,13 +256,14 @@ class WorkflowTest(TaskFixture):
         self.db.set_attachment_status(att['id'], 'detached', att['runtime_owner'])
         with (
             patch('partyline.server.ADAPTERS', {'fake': DiskSessionAdapter}),
-            patch('partyline.server._resume_adapter', AsyncMock()) as resumed,
+            patch('partyline.server._resume_adapter', AsyncMock(side_effect=self.resume)) as resumed,
             patch('partyline.server._start_attachment', AsyncMock()) as started,
         ):
             await restart(self.runtime, self.db.get_attachment(att['id']), 'implementer', 'builder')
-            resumed.assert_awaited_once_with(att['id'])
+            self.assertEqual(resumed.await_args.args[0], att['id'])
             started.assert_not_awaited()
             DiskSessionAdapter.exists = False
+            self.db.set_attachment_status(att["id"], "detached", att["runtime_owner"])
             resumed.reset_mock()
             await restart(self.runtime, self.db.get_attachment(att['id']), 'implementer', 'builder')
             resumed.assert_not_awaited()

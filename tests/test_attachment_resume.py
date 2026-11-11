@@ -175,6 +175,59 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     @patch("partyline.attachment_resume.bind_role_delivery")
     @patch("partyline.attachment_resume.bind_connection_hint")
     @patch("partyline.attachment_resume.provision_connection")
+    async def test_real_resume_suppresses_staged_backlog_during_a_wake(self, *_mocks):
+        from partyline.resume_continuation import drain, resume_with_backlog
+        old = self.db.add_message("line", "greg", "human", "@luna older")
+        await self.db.queue_delivery_ids("one", [old["id"]], None)
+        receipt = asyncio.Event()
+        staged = []
+
+        def make(*args, **kwargs):
+            adapter = self.make_adapter(*args, **kwargs)
+            adapter.stage_startup_delivery = lambda messages: (staged.extend(messages) or True)
+            adapter.wait_startup_delivery_received = receipt.wait
+            return adapter
+
+        async def post_during_start(*_args):
+            new = self.db.add_message("line", "greg", "human", "@luna newer")
+            adapter = self.runtime.live["one"]
+            await self.runtime.deliver_pending("line", self.db.get_attachment("one"), adapter)
+            self.assertEqual([m["id"] for m in adapter.deliveries[0]], [new["id"]])
+            self.assertEqual(self.db.get_attachment("one")["last_seen"], 0)
+            flush, *_ = self.runtime.held_wake_hooks("line", "one", "luna")
+            self.assertFalse(await flush([old["id"]]))
+            self.assertEqual(len(adapter.deliveries), 1)
+
+        async def resume(ident, pending):
+            return await resume_adapter(ident, pending, **self.resume_arguments(make))
+
+        with patch.object(self.runtime, "post_message", side_effect=post_during_start):
+            await resume_with_backlog(self.runtime, "one", resume)
+        self.assertEqual([m["id"] for m in staged], [old["id"]])
+        receipt.set()
+        await asyncio.wait_for(drain(), .5)
+        self.assertEqual(self.db.queued_delivery_ids("one"), [])
+        self.assertEqual(self.db.get_attachment("one")["last_seen"], old["id"] + 1)
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
+    async def test_startup_backlog_is_registered_before_adapter_starts(self, *_mocks):
+        message = self.db.add_message("line", "greg", "human", "@luna older")
+        def make(*args, **kwargs):
+            adapter = self.make_adapter(*args, **kwargs)
+            async def start():
+                self.assertEqual(
+                    self.runtime._live_uncredited("one", adapter.att["runtime_owner"]),
+                    {message["id"]},
+                )
+            adapter.start = start
+            return adapter
+        await resume_adapter("one", [message], **self.resume_arguments(make))
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
     async def test_non_listener_restarts_fresh_in_automatic_plan(self, *_mocks):
         from partyline.reattach import ReattachCoordinator, create_restart_plan
         from partyline.contracts import RestartPlanRequest

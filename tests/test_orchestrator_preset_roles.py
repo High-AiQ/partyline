@@ -90,7 +90,7 @@ class TaskPresetRolesTest(TaskFixture):
         self.db._exec("UPDATE presets SET command='fake --new-flag' WHERE name='inspector'")
         with patch('partyline.server._resume_adapter', new=AsyncMock(side_effect=self.resume)) as resume:
             await ensure_reviewer(self.runtime, self.row())
-            resume.assert_awaited_once_with(reviewer['id'])
+            resume.assert_awaited_once_with(reviewer['id'], [])
         self.assertEqual(require_resume(self.db, reviewer['id']), 'reviewer')
 
     async def test_person_can_resume_task_and_captain_when_agent_cannot(self):

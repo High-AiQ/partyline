@@ -27,6 +27,7 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 RESERVED_NAMES = {"all", "system"}  # @all rings everyone; system is the notice sender
 logger = logging.getLogger(__name__)
 
+
 def handle_error(handle: str) -> str | None:
     """Return a user-facing validation error, or ``None`` for a valid handle."""
     if not NAME_RE.match(handle):
@@ -48,8 +49,7 @@ class ChatRuntime(DeliveryCreditMixin):
         # Manual and restart-plan resumes must never start the same attachment
         # concurrently. Locks are process-local and keyed by durable id.
         self.resume_locks: dict[str, asyncio.Lock] = {}
-        # A planned process is queued behind its durable cursor, not unreachable.
-        self.reattaching: set[str] = set()
+        self.reattaching: set[str] = set()  # queued behind the durable cursor
         # Ids of the restart plan being worked, in order; see reattach_queue.
         self.restart_plan_order: list[str] = []
         # Pasted-but-unproved message ids, keyed per activation. Transcript
@@ -67,11 +67,7 @@ class ChatRuntime(DeliveryCreditMixin):
         return adapter.att.get("runtime_owner") == attachment.get("runtime_owner")
 
     def running_processes(self) -> list[dict]:
-        """Every live attachment, across every line, newest line first.
-
-        Stopping the server stops all of these, so whoever asks for that has to
-        be shown the whole list — not just the line they happen to be looking at.
-        """
+        """List all live attachments newest first, including every line a stop affects."""
         found = []
         for conv in self.db.list_conversations():
             for att in self.db.list_attachments(conv["id"]):
@@ -175,9 +171,14 @@ class ChatRuntime(DeliveryCreditMixin):
             if claims_transcript(adapter.att) and not transcript_claimed(adapter):
                 await self._hold_credit(conv_id, att, adapter, pending)
                 return True
-            if not self.db.set_last_seen(att["id"], pending[-1]["id"], runtime_owner):
+            if ours:
+                self._record_unproved(att, adapter, pending)
+            elif not self.db.set_last_seen(att["id"], pending[-1]["id"], runtime_owner):
                 raise RuntimeError("attachment ownership changed during mention delivery")
-            self.db.clear_queued_delivery_ids(att["id"], [m["id"] for m in pending])
+            else:
+                self.db.clear_queued_delivery_ids(att["id"], [m["id"] for m in pending])
+        if ours:
+            await self.confirm_delivery_ids(att["id"], [m["id"] for m in pending], runtime_owner)
         return True
 
     def held_wake_hooks(self, conv_id: str, att_id: str, name: str):

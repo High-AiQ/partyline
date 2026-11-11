@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## Resume backlogs must share delivery accounting
+
+The false assumption was that staging a startup prompt advanced delivery immediately.
+A wake could paste it again before transcript proof, while older persisted queue IDs
+were left behind the new briefing. Register startup IDs as unproved before routing,
+merge queued IDs into the ordered briefing, and credit only confirmed IDs. A
+coordinator timeout must not cancel the receipt waiter: late transcript proof
+releases the cursor and any newer confirmed mail.
+
 ## Review checkouts need their own JavaScript dependencies
 
 The false assumption was that Node would find usable dependencies in a fresh review checkout. Its upward search can instead reach the host checkout, where Vite writes are outside the reviewer’s fence. Give each locked package a real local dependency directory, verify installed lock data before linking, and surface installation failures before review. Package writes through those links are refused by the fence. Run fallback installers in a restricted sandbox with lifecycle scripts disabled: package-manager configuration can execute code.

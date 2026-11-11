@@ -120,9 +120,11 @@ class DeliveryCreditMixin:
         ):
             return None
         entry["claim_pending"] = False
+        message_ids = sorted(entry.get("claim_ids", entry["ids"]))
+        if not message_ids:
+            return None
         entry["claim_retry_pending"] = True
         entry["claim_retry_at"] = time.monotonic()
-        message_ids = sorted(entry["ids"])
         return message_ids
 
     def transcript_claimed(self, att_id: str, runtime_owner: str | None) -> None:
@@ -186,6 +188,7 @@ class DeliveryCreditMixin:
                 # An idle repool may already have pasted without proof. Those
                 # ids belong to runtime suppression again, not an empty queue.
                 entry["ids"].difference_update(handed_off)
+                entry.setdefault("claim_ids", set()).difference_update(message_ids)
                 entry.setdefault("confirmed", set()).difference_update(handed_off)
                 entry.pop("claim_retry_pending", None)
                 if not entry["ids"]:
@@ -195,6 +198,7 @@ class DeliveryCreditMixin:
             entry = self.uncredited.get(att_id)
             if entry is not None and entry["owner"] == runtime_owner:
                 entry["claim_pending"] = True
+                entry.setdefault("claim_ids", set()).update(message_ids)
                 entry.pop("claim_retry_pending", None)
 
     async def confirm_delivery_ids(
@@ -222,6 +226,7 @@ class DeliveryCreditMixin:
             ids = set(message_ids)
             entry["ids"].update(ids)
             entry["confirmed"].update(ids)
+            entry.get("claim_ids", set()).difference_update(ids)
             attachment = self.db.get_attachment(att_id)
             if attachment is None or attachment.get("runtime_owner") != runtime_owner:
                 return False
@@ -232,7 +237,7 @@ class DeliveryCreditMixin:
                 return False
             attachment = self.db.get_attachment(att_id)
             high_water = attachment["last_seen"] if attachment is not None else 0
-            credited = {mid for mid in entry["ids"] if mid <= high_water}
+            credited = {mid for mid in entry["confirmed"] if mid <= high_water}
             entry["ids"].difference_update(credited)
             entry["confirmed"].difference_update(credited)
             self.db.clear_queued_delivery_ids(att_id, list(credited))
@@ -253,6 +258,7 @@ class DeliveryCreditMixin:
         entry.setdefault("warned_ids", set())
         ids = {m["id"] for m in pending}
         entry["ids"].update(ids)
+        entry.setdefault("claim_ids", set()).update(ids)
         try:
             asyncio.get_running_loop().create_task(
                 self._diagnose_uncredited_delivery(

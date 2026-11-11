@@ -210,6 +210,21 @@ class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
         await adapter.att["confirm_delivery_ids"]([only])
         self.assertEqual(self.db.get_attachment("att")["last_seen"], only)
 
+    async def test_claim_retry_does_not_repeat_staged_startup_ids(self):
+        adapter = self.adapter(transcript=True, completion="receipt")
+        staged = self.say("staged")
+        staged_message = self.db.messages_by_ids("line", [staged])
+        self.runtime._record_unproved(self.attachment(), adapter, staged_message)
+        wake = self.say("wake")
+        await self.runtime.deliver_pending("line", self.attachment(), adapter)
+        self.assertEqual([m["id"] for m in adapter.deliveries[0]], [wake])
+        adapter.delivery_result = False
+        adapter.delivery_event.clear()
+        adapter.mark_ready()
+        await asyncio.wait_for(adapter.delivery_event.wait(), timeout=.5)
+        self.assertEqual([m["id"] for m in adapter.deliveries[1]], [wake])
+        self.assertIn(staged, self.runtime.uncredited["att"]["ids"])
+
     async def test_claim_before_presence_watch_retries_preclaim_paste(self):
         """A fast transcript claim cannot outrun registration of its retry hook."""
         adapter = RecordingAdapter("owner", transcript=True)

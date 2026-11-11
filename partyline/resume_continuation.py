@@ -20,7 +20,7 @@ import logging
 from fastapi import HTTPException
 
 from . import turn_marker
-from .continuation_delivery import deliver_continuation
+from .continuation_delivery import deliver_continuation, staged_receipt
 from .reattach import READY_TIMEOUT_SECONDS
 from .resume_backlog import addressed_backlog
 from .role_delivery import announce_restored
@@ -48,13 +48,11 @@ async def _settle(runtime, resumed, att_id: str, pending: list[dict], timeout: f
     adapter = resumed.adapter
     try:
         if resumed.startup_delivery_staged:
-            # Process creation proves intent; the structured transcript proves receipt.
-            if await asyncio.wait_for(adapter.wait_startup_delivery_received(), timeout):
-                runtime.db.set_last_seen(att_id, pending[-1]["id"], adapter.att.get("runtime_owner"))
-        elif await asyncio.wait_for(adapter.wait_ready(), timeout):
+            await staged_receipt(runtime, adapter, att_id, pending)
+        elif await adapter.wait_ready():
             await deliver_continuation(runtime, adapter, att_id, pending, timeout)
     except (TimeoutError, RuntimeError) as exc:
-        # Slow is not failed: the next mention delivers whatever is still unread.
+        # A failed continuation stays unread for a future activation.
         logger.info("resume backlog for %s not settled: %s", att_id, exc)
 
 

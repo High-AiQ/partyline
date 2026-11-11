@@ -19,6 +19,7 @@ from partyline.orchestrator_routes import orchestrator_router
 from partyline.orchestrator_service import create_task
 from partyline.orchestrator_store import task
 from partyline.runtime import ChatRuntime
+from partyline.reattach import ResumedAttachment
 
 
 def git(cwd, *args):
@@ -77,9 +78,15 @@ class TaskFixture(unittest.IsolatedAsyncioTestCase):
         self.runtime.live[att['id']] = adapter
         return self.db.get_attachment(att['id'])
 
-    async def resume(self, ident):
+    async def resume(self, ident, pending=None):
         att = self.db.get_attachment(ident)
-        return await self.start(att)
+        await self.start(att)
+        adapter = self.runtime.live[ident]
+        adapter.startup_messages = pending or []
+        adapter.wait_ready = AsyncMock(return_value=True)
+        if pending:
+            self.runtime._record_unproved(att, adapter, pending)
+        return ResumedAttachment(adapter, False)
 
     async def create(self, policy='inspector'):
         count = len(self.db._exec("SELECT conv_id FROM task_reviews").fetchall())

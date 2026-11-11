@@ -57,7 +57,8 @@ async def restart(runtime, att, role, preset_name):
     from . import server
     adapter = server.ADAPTERS[att['adapter']]
     if att.get('cli_session') or adapter.session_exists(att):
-        return await server._resume_adapter(att['id'])
+        from .resume_continuation import resume_with_backlog
+        return await resume_with_backlog(runtime, att['id'], server._resume_adapter)
     # A refused/failed first launch has no CLI session to resume. Keep the
     # assigned identity, rotate ownership, and retry a fresh real PTY start.
     owner = str(uuid.uuid4())

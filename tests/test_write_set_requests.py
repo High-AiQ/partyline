@@ -197,6 +197,42 @@ class WriteSetRequestTest(unittest.TestCase):
         self.assertTrue(cap.stopped)
         self.assertTrue(wrk.stopped)
 
+    def test_write_set_resume_preserves_queued_order_during_a_wake(self):
+        from partyline.mention_relay import post_private
+        from partyline.resume_continuation import drain
+        self.go_live("cap")
+        self.go_live("wrk")
+        old = self.db.add_message("line", "person", "human", "@worker older")
+        owner = self.db.get_attachment("wrk")["runtime_owner"]
+        self.db.set_last_seen("wrk", old["id"], owner)
+        staged, adapters = {}, {}
+
+        async def run():
+            await self.db.queue_delivery_ids("wrk", [old["id"]], owner)
+            self.db.add_message("line", "person", "human", "@worker newer")
+            async def resume(ident, pending):
+                att = self.db.get_attachment(ident)
+                adapter = FakeAdapter(att=att)
+                adapters[ident] = adapter
+                staged[ident] = pending
+                self.runtime._record_unproved(att, adapter, pending)
+                self.db.set_attachment_status(ident, "running", att["runtime_owner"])
+                self.runtime.live[ident] = adapter
+                if ident == "wrk":
+                    await post_private(self.runtime, "line", "captain", "agent", "wake",
+                                       audience=ident)
+                return ResumedAttachment(adapter, True)
+            await resume_line_attachments(self.runtime, "line", resume)
+            await drain()
+
+        asyncio.run(run())
+        bodies = [m["body"] for batch in [staged["wrk"], *adapters["wrk"].deliveries]
+                  for m in batch]
+        self.assertEqual(bodies.count("@worker older"), 1)
+        self.assertLess(bodies.index("@worker older"), bodies.index("@worker newer"))
+        self.assertEqual(bodies.count("wake"), 1)
+        self.assertEqual(self.db.queued_delivery_ids("wrk"), [])
+
     def test_approval_surfaces_a_resume_failure_and_still_resumes_the_rest(self):
         request_id = self.file(self.worker).json()["id"]
         self.go_live("cap")

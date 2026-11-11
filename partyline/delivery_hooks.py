@@ -20,9 +20,16 @@ def delivery_hooks(runtime, conv_id: str, att_id: str):
             att = runtime.db.get_attachment(att_id) or {}
             last_seen = att.get("last_seen", 0)
             persisted = set(runtime.db.queued_delivery_ids(att_id))
+            outstanding = set(runtime._live_uncredited(att_id, runtime_owner) or ())
+            entry = runtime.uncredited.get(att_id) or {}
+            if entry.get("claim_retry_pending"):
+                outstanding.difference_update(entry.get("claim_ids", ()))
             deliverable_ids = [
-                mid for mid in message_ids if mid in persisted or mid > last_seen
+                mid for mid in message_ids
+                if mid not in outstanding and (mid in persisted or mid > last_seen)
             ]
+            if outstanding.intersection(message_ids):
+                return False
             runtime.db.clear_queued_delivery_ids(att_id, message_ids)
             if not deliverable_ids:
                 return True
@@ -32,10 +39,14 @@ def delivery_hooks(runtime, conv_id: str, att_id: str):
                 # until its transcript receipt, including after the hello turn.
                 runtime._record_unproved(att, live, messages)
                 return False
-            if messages and not runtime.db.set_last_seen(
+            if messages and outstanding:
+                runtime._record_unproved(att, live, messages)
+            elif messages and not runtime.db.set_last_seen(
                 att_id, messages[-1]["id"], runtime_owner
             ):
                 raise RuntimeError("attachment ownership changed during held delivery")
+        if messages and outstanding:
+            await runtime.confirm_delivery_ids(att_id, [m["id"] for m in messages], runtime_owner)
         return True
 
     async def persist_ids(message_ids: list[int]) -> bool:

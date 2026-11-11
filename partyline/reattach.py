@@ -15,7 +15,7 @@ from .contracts import (
     ReattachOfferEvent, RestartPlanRequest, RestartPlanResponse,
 )
 from .db import Db, RestartPlan
-from .continuation_delivery import deliver_continuation
+from .continuation_delivery import track_continuation, track_staged_receipt
 from .restart_lease import run_automatic_restart_plan
 from .restart_summary import format_summary
 from .restart_response import restart_plan_response
@@ -275,40 +275,23 @@ class ReattachCoordinator:
                     expected_owners[attachment_id] = adapter.att.get("runtime_owner")
                     continuation_confirmed = not pending
                     if pending and resumed.startup_delivery_staged:
-                        # The immutable argv removes the pty timing race, but
-                        # process creation still proves only intent. Advance
-                        # the cursor after the claimed structured transcript
-                        # records that digest as user input.
+                        receipt = track_staged_receipt(self.runtime, adapter, attachment_id, pending)
                         delivered = await asyncio.wait_for(
-                            adapter.wait_startup_delivery_received(),
-                            timeout=self.ready_timeout,
+                            asyncio.shield(receipt), timeout=self.ready_timeout,
                         )
                         if not delivered:
-                            raise RuntimeError(
-                                "the process exited before accepting its continuation"
-                            )
-                        if not self.runtime.db.set_last_seen(
-                            attachment_id,
-                            pending[-1]["id"],
-                            adapter.att.get("runtime_owner"),
-                        ):
-                            raise RuntimeError(
-                                "attachment ownership changed before cursor advancement"
-                            )
+                            raise RuntimeError("the continuation was not credited to this activation")
                         continuation_confirmed = True
-                    is_ready = not adapter_listens(ADAPTER_METADATA.get(attachment["adapter"], {}))
-                    if not is_ready:
-                        is_ready = await asyncio.wait_for(
-                            adapter.wait_ready(), timeout=self.ready_timeout
-                        )
-                    if not is_ready:
-                        raise RuntimeError("the process exited before claiming its session")
-
                     if pending and not resumed.startup_delivery_staged:
-                        await deliver_continuation(
+                        delivery = track_continuation(
                             self.runtime, adapter, attachment_id, pending, self.ready_timeout
                         )
+                        if not await asyncio.wait_for(asyncio.shield(delivery), self.ready_timeout):
+                            raise RuntimeError("the process exited before claiming its session")
                         continuation_confirmed = True
+                    elif adapter_listens(ADAPTER_METADATA.get(attachment["adapter"], {})):
+                        if not await asyncio.wait_for(adapter.wait_ready(), timeout=self.ready_timeout):
+                            raise RuntimeError("the process exited before claiming its session")
                     self.runtime.reattaching.discard(attachment_id)
                 except TimeoutError:
                     if detail := await report_timeout_exit(self.runtime, adapter, attachment_id, line, name):
