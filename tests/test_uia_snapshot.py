@@ -110,6 +110,13 @@ class SnapshotTests(unittest.TestCase):
 
         self.assertEqual({"elements": []}, read(1, popen=succeeded, platform="win32"))
 
+        def crlf(args, **kwargs):  # a Windows child's text-mode print ends lines with CRLF
+            process = succeeded(args, **kwargs)
+            process.stdout = io.BytesIO(b'READY\r\n')
+            return process
+
+        self.assertEqual({"elements": []}, read(1, popen=crlf, platform="win32"))
+
     def test_deadline_starts_at_readiness_and_kills_hung_worker(self):
         import io
         import subprocess
