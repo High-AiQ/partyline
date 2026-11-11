@@ -91,6 +91,12 @@ class WindowsConsole:
             # An assignment failure leaves a suspended process outside our job.
             if terminal.process.hProcess:
                 terminal.api.TerminateProcess(terminal.process.hProcess, 1)
+            # The pump's blocking ReadFile ends only once every write end of the
+            # output pipe is closed, and CloseHandle(output) waits for that read.
+            for handle in (input_read, output_write):
+                if handle:
+                    terminal.api.CloseHandle(handle)
+                    handle.value = None
             await terminal.close()
             raise
         finally:
