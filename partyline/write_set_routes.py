@@ -116,8 +116,8 @@ def add_write_grant(db, conv_id: str, path: str, granted_by: str, docker_mode: s
 
 def write_set_router(runtime, resume=None) -> APIRouter:
     from .write_set_decisions import make_announcer
-    from .write_set_requests import (
-        file_write_set_request, resume_granted_scope)
+    from .write_set_requests import file_write_set_request
+    from .write_set_resume import resume_granted_scopes
 
     router = APIRouter()
 
@@ -155,10 +155,7 @@ def write_set_router(runtime, resume=None) -> APIRouter:
             docker_paths = [path for path in paths if docker_relay.is_docker_socket(path)]
             if resume is not None and docker_paths:
                 # Every live process must pick up the mount that hides the relays.
-                failed = []
-                for path in docker_paths:
-                    _done, failed_now = await resume_granted_scope(runtime, conv_id, path, resume)
-                    failed.extend(name for name in failed_now if name not in failed)
+                _done, failed = await resume_granted_scopes(runtime, conv_id, paths, resume)
                 text = (f"☏ {docker_workloads.mode_text(body.docker_mode or 'managed')} granted by "
                         f"@{principal.name} — every live process is resumed so other lines "
                         "cannot reach the relay")

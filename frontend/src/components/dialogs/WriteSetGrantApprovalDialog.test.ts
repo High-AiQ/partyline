@@ -5,14 +5,14 @@ import { writeSetApi } from "../../lib/write-set-api";
 import { room } from "../../state/room.svelte.js";
 import { writeSet } from "../../state/write-set.svelte.js";
 
-function open(path: string): void {
+function open(path: string, humanOnly = false): void {
   room.conversation = { id: "line" } as typeof room.conversation;
   writeSet.apply({
     id: "abc",
     conversation_id: "line",
     path,
     paths: [path],
-    human_only: false,
+    human_only: humanOnly,
     already_granted: [],
     requester: "astra",
     created_at: 1,
@@ -34,7 +34,7 @@ describe("write-set grant approval dialog", () => {
   });
 
   it("offers managed or unrestricted docker access and says what each means", async () => {
-    open("/var/run/docker.sock");
+    open("/var/run/docker.sock", true);
     const approve = vi.spyOn(writeSetApi, "approve").mockResolvedValue({ granted: [] });
     const dialog = mount(WriteSetGrantApprovalDialog, { target: document.body, props: { close: vi.fn() } });
     try {

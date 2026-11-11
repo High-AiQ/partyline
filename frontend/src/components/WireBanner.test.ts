@@ -9,7 +9,7 @@ describe("write-set notice banner", () => {
     document.body.innerHTML = "";
   });
 
-  it("says a person decides and hides the review action for a human-only request", async () => {
+  it("keeps person review accessible for a human-only request", async () => {
     writeSet.request = {
       id: "request-1",
       conversation_id: "child",
@@ -25,7 +25,7 @@ describe("write-set notice banner", () => {
     const banner = document.querySelector("#writeSetRequest");
     expect(banner?.textContent).toContain("a person decides");
     expect(banner?.textContent).toContain("/repo/e2e/.seed, /repo/e2e/results");
-    expect(banner?.querySelector("button")).toBeNull();
+    expect(banner?.querySelector("button")?.textContent).toContain("review");
     void unmount(component);
   });
 });

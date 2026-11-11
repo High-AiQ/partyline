@@ -422,11 +422,59 @@ class WriteSetRequestTest(unittest.TestCase):
         request = self.client.get("/api/conversations/line/write-set/request",
                                   headers=self.human).json()["request"]
         self.assertEqual(request["paths"], [self.target, second])
-        approved = self.client.post(
-            f"/api/conversations/line/write-set/request/{first_id}/approve", headers=self.human)
+        with patch("partyline.write_set_decisions.resume_line_attachments", self._resume_line):
+            approved = self.client.post(
+                f"/api/conversations/line/write-set/request/{first_id}/approve",
+                headers=self.human)
         self.assertEqual(approved.status_code, 200, approved.text)
         self.assertEqual([row["path"] for row in approved.json()["granted"]],
                          [self.target, second])
+        self.assertEqual(self.resumed, ["cap", "wrk"])
+
+    def test_merged_request_uses_the_retained_requester_for_decider_eligibility(self):
+        self.db.create_conversation("child", "Child", captain_mode="manager_tree")
+        self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='child'")
+        self.db.add_attachment("child-wrk", "child", "childworker", "fake", ["fake"], self.repo)
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='child-wrk'")
+        child_worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "child-wrk")}
+        second = os.path.join(self.target, "second")
+        os.makedirs(second)
+
+        # A captain's request stays person-decided when a worker merges into it.
+        captain_first = self.client.post(
+            "/api/conversations/child/write-set", json={"path": self.target},
+            headers=self.captain)
+        self.assertEqual(captain_first.status_code, 200, captain_first.text)
+        request_id = captain_first.json()["id"]
+        merged = self.client.post(
+            "/api/conversations/child/write-set", json={"path": second},
+            headers=child_worker)
+        self.assertEqual(merged.status_code, 200, merged.text)
+        self.assertTrue(merged.json()["human_only"])
+        self.assertEqual(self.client.post(
+            f"/api/conversations/child/write-set/request/{request_id}/approve",
+            headers=self.captain).status_code, 403)
+        self.client.post(f"/api/conversations/child/write-set/request/{request_id}/withdraw",
+                         headers=self.captain)
+
+        # A worker's request stays captain-decided when the captain merges.
+        worker_first = self.client.post(
+            "/api/conversations/child/write-set", json={"path": self.target},
+            headers=child_worker)
+        self.assertEqual(worker_first.status_code, 200, worker_first.text)
+        request_id = worker_first.json()["id"]
+        merged = self.client.post(
+            "/api/conversations/child/write-set", json={"path": second},
+            headers=self.captain)
+        self.assertEqual(merged.status_code, 200, merged.text)
+        self.assertFalse(merged.json()["human_only"])
+        self.assertEqual(merged.json()["decider_name"], "astra")
+        with patch("partyline.write_set_decisions.resume_line_attachments", self._resume_line):
+            approved = self.client.post(
+                f"/api/conversations/child/write-set/request/{request_id}/approve",
+                headers=self.captain)
+        self.assertEqual(approved.status_code, 200, approved.text)
 
     def test_request_for_a_granted_parent_is_reported_without_opening_banner(self):
         self.grant_on("line", self.target)
@@ -470,6 +518,7 @@ class WriteSetRequestTest(unittest.TestCase):
         self.db._exec("UPDATE conversations SET parent_id='mid' WHERE id='kid'")
         self.db.add_attachment("mid-cap", "mid", "midcaptain", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='mid-cap'")
+        mid_recorder = self.go_live("mid-cap")
         mid_captain = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "mid-cap")}
         other_repo, _sha = self._subtree_repo_with_commit()
         self.grant_on("mid", other_repo)
@@ -481,6 +530,12 @@ class WriteSetRequestTest(unittest.TestCase):
         root_notice = self.db.list_messages("line")[-1]["body"]
         self.assertIn("@midcaptain", root_notice)
         self.assertNotIn("@astra", root_notice)
+        mid_notices = [m for m in self.db.list_messages("mid")
+                       if "write-set decision needed" in m["body"]]
+        self.assertEqual(len(mid_notices), 1)
+        self.assertIn("@midcaptain", mid_notices[0]["body"])
+        self.assertEqual(len([m for m in mid_recorder.delivered if "write-set decision needed"
+                              in m["body"]]), 1)
         approved = self.client.post(
             f"/api/conversations/kid/write-set/request/{filed.json()['id']}/approve",
             headers=mid_captain)

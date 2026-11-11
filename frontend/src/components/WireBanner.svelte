@@ -116,13 +116,9 @@
         ? writeSet.request.paths.join(", ")
         : writeSet.request.path}{writeSet.request.human_only ? " — a person decides" : ""}</span
     >
-    {#if !writeSet.request.human_only}
-      <button
-        type="button"
-        class="primary flex-none"
-        onclick={() => dialogs.open(WriteSetGrantApprovalDialog)}>review</button
-      >
-    {/if}
+    <button type="button" class="primary flex-none" onclick={() => dialogs.open(WriteSetGrantApprovalDialog)}
+      >review</button
+    >
   </div>
 {/if}
 

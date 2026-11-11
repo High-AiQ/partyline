@@ -27,11 +27,11 @@ from .write_set_requests import (
     WriteSetGrantRequest,
     non_resumable_live_attachments,
     pending_model,
-    resume_granted_scope,
     resume_line_attachments,
 )
 from .contracts import WriteSetGrantRequestEvent
 from .write_set_routes import add_write_grant
+from .write_set_resume import resume_granted_scopes
 
 
 class ApproveIn(BaseModel):
@@ -157,11 +157,8 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                 "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
                 (conv_id, request_id))
             runtime.db.conn.commit()
-        failed: list[str] = []
-        for path in current.paths:
-            _resumed, failed_now = await resume_granted_scope(
-                runtime, conv_id, path, resume, resume_line_attachments)
-            failed.extend(name for name in failed_now if name not in failed)
+        _resumed, failed = await resume_granted_scopes(
+            runtime, conv_id, current.paths, resume, resume_line_attachments)
         await _clear_wait_reason(runtime.db, conv_id)
         listed_paths = ", ".join(f"`{path}`" for path in current.paths)
         text = (f"☏ write-set grant for {listed_paths} approved by @{who} — "

@@ -208,17 +208,6 @@ def non_resumable_live_attachments(runtime, conv_id: str, path: str | None = Non
     ]
 
 
-async def resume_granted_scope(runtime, conv_id: str, path: str, resume,
-                               resumer=None) -> tuple[list[str], list[str]]:
-    resumed: list[str] = []
-    failed: list[str] = []
-    for line in grant_scope(runtime, conv_id, path):
-        done, broke = await (resumer or resume_line_attachments)(runtime, line, resume)
-        resumed += done
-        failed += broke
-    return resumed, failed
-
-
 async def file_write_set_request(
     runtime, conv_id: str, paths: list[str], principal, *, announce_fn,
 ) -> WriteSetGrantRequest:
@@ -239,10 +228,13 @@ async def file_write_set_request(
             requester_attachment_id=principal.attachment_id, created_at=time.time(),
         )
     pending = get_pending_request(db, conv_id)
+    effective_requester_id = (
+        pending["requester_attachment_id"] if pending else principal.attachment_id
+    )
     if pending:
         old_paths = json.loads(pending.get("paths") or "[]") or [pending["path"]]
         paths = list(dict.fromkeys([*old_paths, *paths]))
-    decider = eligible_captain(db, conv_id, paths, principal.attachment_id)
+    decider = eligible_captain(db, conv_id, paths, effective_requester_id)
     human_only = decider is None
     all_paths = paths
     request = WriteSetGrantRequest(
@@ -293,5 +285,6 @@ async def file_write_set_request(
         approve=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/approve",
         decline=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/deny",
         actor=principal, human_only=human_only,
-        decider_name=request.decider_name)
+        decider_name=request.decider_name,
+        decider_conv_id=decider["conv_id"] if decider else "")
     return request
