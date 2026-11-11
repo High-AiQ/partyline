@@ -8,7 +8,8 @@ import platform
 import subprocess
 from pathlib import Path
 
-from .review_install_sandbox import DependencyError, cache_location, install_argv, local_cache
+from .review_install_sandbox import (DependencyError, cache_location, install_argv, local_cache,
+                                     run_installer)
 
 LOCKS = {
     "package-lock.json": ("npm", "ci", "--prefer-offline", "--ignore-scripts"),
@@ -152,8 +153,8 @@ def provision(path: str, sources: list[str] | None = None) -> None:
             else:
                 cache = ".yarn/berry/cache" if "--immutable" in command else ".cache/yarn"
                 env["YARN_CACHE_FOLDER"] = cache_location(path, "yarn", cache)
-            result = subprocess.run(install_argv(path, command), cwd=folder, capture_output=True,
-                                    text=True, check=False, timeout=300, env=env)
+            result = run_installer(install_argv(path, command, os.path.dirname(tmp)),
+                                   cwd=folder, timeout=300, env=env)
             if result.returncode:
                 detail = (result.stderr or result.stdout).strip()[-1000:]
                 raise ValueError(f"{locks[0]} install in {folder} failed: {detail}")
