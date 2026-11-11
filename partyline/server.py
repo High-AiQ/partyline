@@ -199,6 +199,8 @@ async def lifespan(app):
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+        from .docker_workloads import inventory
+        inventory.deadlines.close()
         await runtime.shutdown()
 app = FastAPI(lifespan=lifespan)
 app.state.bind = BindConfig()

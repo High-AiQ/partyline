@@ -113,6 +113,14 @@ class WorkloadsBase(unittest.IsolatedAsyncioTestCase):
 
 
 class InventoryTest(WorkloadsBase):
+    async def test_deadline_refreshes_daemon_state_before_enforcement(self):
+        with patch.object(self.inventory.deadlines, "update") as update:
+            await self.inventory.sample(self.runtime)
+        callback = update.call_args.args[2]
+        with patch.object(self.inventory, "sample", new_callable=AsyncMock) as sample:
+            await callback()
+        sample.assert_awaited_once_with(self.runtime, force=True)
+
     async def test_containers_are_attributed_by_label_and_strays_are_unattributed(self):
         await self.inventory.sample(self.runtime)
         rows = {r["name"]: r for r in self.inventory.view(self.db, None)["containers"]}

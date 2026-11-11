@@ -22,7 +22,8 @@ from urllib.parse import quote
 from fastapi import HTTPException
 
 from . import docker_api, docker_relay
-from .docker_lifetime import enforce_lifetimes
+from .docker_admission import max_seconds_cap
+from .docker_lifetime import LifetimeDeadlines, enforce_lifetimes
 from .machine_scope import visible_conversation_ids
 from .system_notice import post_system_notice
 
@@ -111,6 +112,7 @@ class Inventory:
         self.sampled_at: float | None = None
         self.error: str | None = None
         self._task: asyncio.Task | None = None
+        self.deadlines = LifetimeDeadlines()
 
     async def sample(self, runtime, *, force: bool = False) -> bool:
         """Refresh at most every ``INTERVAL`` s, and only while a docker grant exists."""
@@ -130,6 +132,8 @@ class Inventory:
                 self.containers = await asyncio.gather(*(_describe(item, gate) for item in found))
                 self.error = None
                 await enforce_lifetimes(runtime, self.containers)
+                self.deadlines.update(self.containers, max_seconds_cap(runtime.db),
+                                      lambda: asyncio.create_task(self.sample(runtime, force=True)))
         except Exception as exc:  # a hung or malformed daemon must not take the sampler or a route down
             self.error = str(exc) or type(exc).__name__
             logger.warning("docker workloads: cannot list containers: %s", self.error)

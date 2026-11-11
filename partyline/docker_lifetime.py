@@ -5,6 +5,7 @@ Stops, never removes, so the container's outputs survive; the owning line is tol
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -23,7 +24,42 @@ def allowed_seconds(c: dict, cap: int) -> int:
 def overdue(containers: list[dict], now: float, cap: int = 24 * 3600) -> list[dict]:
     """Running managed containers past their declared lifetime (capped), counted from the last start."""
     return [c for c in containers if c["state"] == "running" and c["managed"] and c["max_seconds"]
-            and c["started_at"] and now - c["started_at"] > allowed_seconds(c, cap)]
+            and c["started_at"] and now - c["started_at"] >= allowed_seconds(c, cap)]
+
+
+class LifetimeDeadlines:
+    """One cancellable deadline per running managed container.
+
+    The callback refreshes daemon state before deciding whether to stop, so a
+    restart observed by that refresh gets its own deadline.
+    """
+
+    def __init__(self):
+        self.handles: dict[str, tuple[float, asyncio.TimerHandle]] = {}
+
+    def update(self, containers: list[dict], cap: int, callback, *, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        loop = asyncio.get_running_loop()
+        deadlines = {c["id"]: c["started_at"] + allowed_seconds(c, cap)
+                     for c in containers if c["state"] == "running" and c["managed"]
+                     and c["max_seconds"] and c["started_at"]
+                     and c["started_at"] + allowed_seconds(c, cap) > now}
+        for ident, (expiry, handle) in list(self.handles.items()):
+            if deadlines.get(ident) != expiry:
+                handle.cancel()
+                del self.handles[ident]
+        for ident, expiry in deadlines.items():
+            if ident not in self.handles:
+                def fire(ident=ident):
+                    self.handles.pop(ident, None)
+                    callback()
+                # no-poll (b): one deadline computed from the container's start and lifetime
+                self.handles[ident] = (expiry, loop.call_at(loop.time() + expiry - now, fire))
+
+    def close(self) -> None:
+        for _, handle in self.handles.values():
+            handle.cancel()
+        self.handles.clear()
 
 
 async def enforce_lifetimes(runtime, containers: list[dict], now: float | None = None) -> None:
