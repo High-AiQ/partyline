@@ -22,7 +22,7 @@ from .attachment_start import start_attachment
 from .attachment_lifecycle_routes import register_attachment_lifecycle_routes
 from .memory_routes import register_memory_routes
 from .memory_requests import register_memory_request_routes
-from .memory_sampler import run as run_memory_sampler
+from .memory_events import run as run_memory_events
 from .attachment_view import attach_memory_usage, attachment_response
 from .auth_guard import (
     WS_FORBIDDEN,
@@ -93,7 +93,7 @@ from .approval_bubble import register_approval_routes
 from .tmp_reap_routes import register_tmp_reap_routes
 from .scratch_worktrees import register_scratch_routes
 from .startup_state import engage_startup
-from .event_loop_lag import monitor as monitor_event_loop_lag
+from . import op_timing
 from .line_gates import register_gates_routes
 from .prereview import register_prereview_route
 from .captain_docs import register_docs_route
@@ -164,6 +164,7 @@ async def _run_automatic_reattachment() -> None:
 @asynccontextmanager
 async def lifespan(app):
     deployment.prime()  # pin the served checkout's HEAD to this boot, before any pull
+    op_timing.register_stack_dump()  # kill -USR1 <pid>: every thread's stack, no timer
     probe_result = fence_probe.probe(
         check_fence=features.enabled("write_fence"),
         service_unit=service_guard.unit_from_cgroup(),
@@ -183,11 +184,10 @@ async def lifespan(app):
     app.state.automatic_reattach_task = automatic_task
     from .captain_handover import expire_offers
     from .browser_snapshots import resource_updates
-    tasks = [asyncio.create_task(resource_updates(runtime)), automatic_task,
-             asyncio.create_task(expire_offers(runtime)),
-             asyncio.create_task(maintenance(runtime)),
-             asyncio.create_task(monitor_event_loop_lag()),
-             asyncio.create_task(run_memory_sampler(runtime)),
+    from . import docker_events
+    tasks = [asyncio.create_task(resource_updates(runtime)), asyncio.create_task(docker_events.run(runtime)),
+             automatic_task, asyncio.create_task(expire_offers(runtime)),
+             asyncio.create_task(maintenance(runtime)), asyncio.create_task(run_memory_events(runtime)),
              asyncio.create_task(run_task_maintenance(runtime)),
              asyncio.create_task(run_resource_leases(runtime))]
     if features.enabled("heartbeat"):
@@ -199,12 +199,14 @@ async def lifespan(app):
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+        await docker_events.close()
         await runtime.shutdown()
 app = FastAPI(lifespan=lifespan)
 app.state.bind = BindConfig()
 user_sockets = UserSocketRegistry()
 install_auth_guard(app, runtime.db)
 install_static_cache(app)
+op_timing.install(app)  # outermost: times the whole request, auth included
 register_terminal_route(app, runtime)
 register_accept_route(app, runtime)
 register_accept_history_route(app, runtime)

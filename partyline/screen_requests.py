@@ -4,6 +4,7 @@ import asyncio
 import uuid
 
 from fastapi import WebSocketDisconnect
+from .op_timing import pushed
 
 SNAP_TIMEOUT_SECONDS = 3
 PREVIEW_TIMEOUT_SECONDS = 3
@@ -43,8 +44,8 @@ async def capture(hub, conv_id):
     hub.snap_waiters[request_id] = (share, future)
     try:
         async with asyncio.timeout(SNAP_TIMEOUT_SECONDS):
-            await device["socket"].send_json({"type": "snap", "share_id": share.share_id,
-                                               "request_id": request_id})
+            await pushed("screen", device["socket"].send_json({"type": "snap", "share_id": share.share_id,
+                                               "request_id": request_id}))
             frame = await _await_frame(future)
         if not active(hub, share):
             raise ValueError("screen sharing has stopped")
@@ -80,8 +81,9 @@ async def preview(hub, device_id, owner_id, monitor_id):
     hub.preview_waiters[request_id] = (device_id, actual_id, future)
     try:
         async with asyncio.timeout(PREVIEW_TIMEOUT_SECONDS):
-            await device["socket"].send_json({"type": "get_preview", "request_id": request_id,
-                                               "monitor_id": actual_id, "long_edge": 640})
+            await pushed("screen",
+                    device["socket"].send_json({"type": "get_preview", "request_id": request_id,
+                                               "monitor_id": actual_id, "long_edge": 640}))
             return await future
     except TimeoutError:
         raise

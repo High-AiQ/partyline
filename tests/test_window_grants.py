@@ -51,9 +51,14 @@ class WindowGrantTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
             socket.send_json = AsyncMock()
             socket.receive_json = AsyncMock(side_effect=[{"type": "hello", "client_id": "tab"},
                                                         WebSocketDisconnect()])
-            await self.runtime.websocket(socket, "alpha", "owner", "build", "1")
+            sent = []
+            socket.send_json.side_effect = lambda item, sent=sent: sent.append(item["type"])
+            with patch("partyline.docker_workloads.inventory.kick",
+                       side_effect=lambda runtime, sent=sent: sent.append("docker refresh")):
+                await self.runtime.websocket(socket, "alpha", "owner", "build", "1")
             messages = [call.args[0] for call in socket.send_json.await_args_list]
-            self.assertEqual(["hello", "screen_snapshot"], [item["type"] for item in messages])
+            # The Docker refresh, and so its resources push, starts only after the handshake.
+            self.assertEqual(["hello", "screen_snapshot", "docker refresh"], sent)
             self.assertEqual("g1", messages[1]["devices"][0]["window_grants"][0]["id"])
             self.assertEqual("alpha", messages[1]["indicators"][0]["conv_id"])
 

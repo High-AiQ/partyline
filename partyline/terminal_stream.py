@@ -8,12 +8,14 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
+from .op_timing import pushed
 from .adapters import Adapter
 from .auth_guard import (
     WS_FORBIDDEN, WS_POLICY_VIOLATION, bearer_token, resolve_principal, websocket_principal,
 )
 from .contracts import TerminalGeometry
 from .machine_scope import Capability, allows
+from . import op_timing
 from .terminal_viewers import TerminalViewer
 
 if TYPE_CHECKING:
@@ -50,10 +52,13 @@ class TerminalAuthority:
 
 async def _send_terminal(ws: WebSocket, viewer: TerminalViewer, authority: TerminalAuthority) -> None:
     while await authority.require("read"):
-        data = await viewer.queue.get()
-        if data is None or not await authority.require("read"):
+        item = await viewer.queue.get()
+        if item is None or not await authority.require("read"):
             return
-        await ws.send_bytes(data)
+        try:
+            await ws.send_bytes(item[0])
+        finally:  # enqueue to sent, even when the send then fails
+            op_timing.record("push terminal", op_timing.clock() - item[1])
 
 
 async def _watch_authority(authority):
@@ -101,13 +106,13 @@ def terminal_endpoint(runtime: "ChatRuntime"):
             cols, rows = adapter.terminal_dimensions()
             if not await authority.require("read"):
                 return
-            await ws.send_text(TerminalGeometry(cols=cols, rows=rows).model_dump_json())
+            await pushed("terminal", ws.send_text(TerminalGeometry(cols=cols, rows=rows).model_dump_json()))
             if not await authority.require("read"):
                 return
             if ws.query_params.get("replay") == "1" and viewer.replay_available:
-                await ws.send_bytes(viewer.replay)
+                await pushed("terminal", ws.send_bytes(viewer.replay))
             else:
-                await ws.send_text(viewer.snapshot)
+                await pushed("terminal", ws.send_text(viewer.snapshot))
             tasks = [asyncio.create_task(_send_terminal(ws, viewer, authority)),
                      asyncio.create_task(_receive_terminal(ws, adapter, authority)),
                      asyncio.create_task(_watch_authority(authority))]

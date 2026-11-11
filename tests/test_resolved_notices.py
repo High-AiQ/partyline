@@ -56,6 +56,12 @@ class ResolvedNoticesTest(unittest.TestCase):
         self.runtime.memory_usage["cap"] = {"usage_bytes": 4 * GIB, "cap_bytes": 4 * GIB}
         self.assertIn(mid, self.backlog_ids())
 
+    def test_pressure_notice_survives_even_below_usage_threshold(self):
+        mid = self.memory_notice(4 * GIB)
+        self.runtime.memory_usage["cap"] = {"usage_bytes": GIB, "cap_bytes": 4 * GIB,
+                                             "pressure_notice": True}
+        self.assertIn(mid, self.backlog_ids())
+
     def test_report_wake_dropped_when_acknowledged(self):
         row, _ = reports.add(self.db, "root", "kid", "w", "done", notify=True)
         mid = self.private("root", f"@lead needs attention: report {row['id']}", "cap")

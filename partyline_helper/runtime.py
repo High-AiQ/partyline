@@ -53,8 +53,9 @@ def start_helper(paired, ensure, tell=None):
 
 CHECKED = ("partyline_helper.client", "partyline_helper.desktop", "partyline_helper.inputs",
            "partyline_helper.border", "partyline_helper.tray", "partyline_helper.dialog_proc",
-           "websockets.asyncio.client", "mss", "pynput.keyboard", "pynput.mouse", "pystray", "PIL.ImageDraw")
-WINDOWS_CHECKED = ("comtypes.client", "comtypes.gen.UIAutomationClient")
+           "partyline_helper.capture_loop", "partyline_helper.windows_capture",
+           "websockets.asyncio.client", "pynput.keyboard", "pynput.mouse", "pystray", "PIL.ImageDraw")
+WINDOWS_CHECKED = ("comtypes.client", "comtypes.gen.UIAutomationClient", "windows_capture")
 
 
 def selfcheck(modules=CHECKED, load=importlib.import_module, windows=None, initialize=None):

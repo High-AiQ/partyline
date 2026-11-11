@@ -32,7 +32,7 @@ uv run --locked partyline   # http://127.0.0.1:8642
 On Linux, this command automatically creates a temporary memory-limited scope for the
 foreground server; Windows uses native Job Objects. No service installation is needed. The default server cap is 2 GiB (lower on
 small machines), and each attached CLI gets a 4 GiB memory budget. On Linux the budget
-is advisory — warnings fire as a process nears and passes it — and the kernel kills only at
+is advisory — pressure and limit events drive warnings — and the kernel kills only at
 a higher emergency backstop; Windows enforces the budget as a hard Job Object limit; macOS
 uses best-effort per-process address-space limits. See
 [memory limits](docs/write-fence.md) for platform requirements and configuration.

@@ -860,6 +860,7 @@ class HelperProtocolCompatibilityTest(unittest.IsolatedAsyncioTestCase):
         message = command.model_dump()
         helper.validate(message)
         helper.share, helper.accepted, helper.started = message, True, 1
+        helper.last_capture_image = desktop.image.copy()
         await helper.frame("snap")
         self.assertEqual(HelperFrame.model_validate(socket.sent[2]).request_id, "snap")
         self.assertIsInstance(socket.sent[3], bytes)

@@ -95,19 +95,22 @@ heartbeat = true   # off by default since 1.23.0
 
 ## Environment and config file
 
-The event-loop lag monitor logs a rate-limited warning when a scheduled wake
-is delayed. `PARTYLINE_LOOP_LAG_INTERVAL` sets the sampling interval in seconds
-(default 0.1, minimum 0.01), `PARTYLINE_LOOP_LAG_THRESHOLD` sets the warning
-threshold (default 0.25 seconds), and `PARTYLINE_LOOP_LAG_COOLDOWN` sets the
-minimum time between warnings (default 10 seconds). Warnings contain the delay,
-not callback representations, request URLs, or message contents. They name the
-slowest overlapping instrumented periodic job when one is known; overlap alone
-does not establish the cause. A separate watchdog thread samples only code
-locations when the loop stops responding. `PARTYLINE_LOOP_WATCHDOG_THRESHOLD`
-(default 0.3 seconds), `PARTYLINE_LOOP_WATCHDOG_INTERVAL` (default 0.1 seconds),
-and `PARTYLINE_LOOP_WATCHDOG_COOLDOWN` (default 5 seconds) tune its threshold,
-polling interval, and warning cooldown. The threshold and interval minimum is
-0.01 seconds; the cooldown minimum is zero.
+Partyline measures delay on real traffic and never samples an idle loop. Each HTTP request
+(until its response starts), every websocket send (chat events from the moment they were handed
+over, terminal output from its enqueue, screen and local-tool messages from the call; a send that
+then fails is still counted), and every call an adapter makes back into the runtime (speech,
+status, session id, compaction, resume backlog, delivery credit; wrapped once in the base
+adapter, so every adapter is covered) is timed with a monotonic clock. One that takes
+longer than `PARTYLINE_SLOW_OP_THRESHOLD` seconds (default 0.25) logs
+`slow operation <name> took N ms`, at most once per name per `PARTYLINE_SLOW_OP_COOLDOWN`
+seconds (default 10). The check runs when the operation ends, so no timer exists. Names are
+the route template (`POST /api/hooks/{att_id}/{token}`), `push <event type>`,
+`push terminal`, `push screen`, `push chat` or `dispatch <adapter> <callback>`; they never contain
+request URLs, tokens, queries or message contents. The duration is wall time and includes awaited I/O, so a slow name says
+where to look, not that the loop was blocked. A loop that never returns logs nothing until it
+does; send `SIGUSR1` to the server process (`kill -USR1 <pid>`) to print every thread's stack
+(code locations only) to its stderr. The sampling interval and watchdog settings of the
+earlier probe no longer exist.
 
 | env var | default | notes |
 |---|---|---|

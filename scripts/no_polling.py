@@ -13,12 +13,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 CATEGORY = re.compile(r'no-poll\s+\(([bcde])\):\s*\S')
 TIMERS = re.compile(r'\b(setInterval|setTimeout)\s*\(')
-# Phase 1 exceptions awaiting Greg's decision; docs/polling-audit.md explains each.
+# Exceptions awaiting Greg's decision; all three are decided (docs/polling-audit.md), so none remain.
 UNRESOLVED = {
-    ('partyline/memory_sampler.py', 'asyncio.sleep(INTERVAL)'): 1,
-    ('partyline/event_loop_lag.py', 'asyncio.sleep(0.1)'): 1,
-    ('partyline/event_loop_lag.py', 'asyncio.sleep(interval)'): 1,
-    ('partyline_helper/capture_loop.py', "sleep(1 / request['max_fps'])"): 1,
 }
 
 

@@ -231,7 +231,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(self.border.hidden, 2)
 
     async def test_capture_exception_hides_and_sharing_end_is_reported(self):
-        with patch.object(self.desktop, "grab", side_effect=RuntimeError("capture failed")):
+        with patch.object(self.session, "capture_factory", side_effect=RuntimeError("capture failed")):
             await self.session.start(request())
         self.assertEqual(self.border.shown, [request()["region"]])
         self.assertEqual(self.border.hidden, 1)

@@ -9,6 +9,7 @@ existing detach and retire controls, and it stays put.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 
 from fastapi import FastAPI, Request
@@ -109,4 +110,6 @@ def register_process_overview_route(app: FastAPI, runtime) -> None:
     )
     async def get_process_overview(request: Request, conv_id: str):
         deny_unless(runtime.db, request_principal(request), conv_id, "read")
-        return process_overview(runtime, conv_id)
+        from .memory_snapshot import refresh
+        await refresh(runtime)
+        return await asyncio.to_thread(process_overview, runtime, conv_id)

@@ -9,6 +9,7 @@ import time
 import uuid
 
 
+
 def _normal(text: str) -> str:
     return " ".join(text.split())
 

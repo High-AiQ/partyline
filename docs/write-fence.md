@@ -92,8 +92,8 @@ it is a fence against accidents, not a jail against malice. See
 On Linux, the server wraps every launch in a separate transient systemd scope
 before entering bubblewrap, even when the filesystem fence is disabled.
 The per-process memory budget defaults to `4G` and can be changed with
-`PARTYLINE_PROCESS_MEMORY_LIMIT`. The budget is advisory — the memory sampler
-warns as a process nears and passes it — and the scope's `MemoryMax` is an
+`PARTYLINE_PROCESS_MEMORY_LIMIT`. The budget is advisory — memory pressure and
+limit notifications drive warnings — and the scope's `MemoryMax` is an
 emergency backstop above it (1.5× or +1 GiB, within 3/4 of host RAM; see
 `docs/resource-budget.md`); swap is disabled. A verifier runs inside the scope
 and refuses to start the CLI unless it sees a finite `memory.max` at or below
@@ -385,20 +385,22 @@ and `partyline.attachment=<att id>`. A process with a docker grant finds both in
 `PARTYLINE_DOCKER_LABELS` (space-separated `key=value` words) so a launcher can pass
 `--label`/`labels:` itself. Unlabeled containers still show, as *unattributed*.
 
-**Inventory.** While any docker grant exists the server lists the daemon's containers
-(`/containers/json?all=1`), inspects running ones for `HostConfig.Memory` and takes a
-one-shot stats reading, at most every 15 s (`docker_workloads.py`, in the memory sampler's
-tick). `GET /api/docker-workloads` returns them with their line, `attribution` and
+**Inventory.** While a docker grant exists, the server reads the container list,
+running container limits and one-shot stats on request and after Docker's `oom`, `die`,
+`start`, and `stop` events. `GET /api/docker-workloads` returns them with their line, `attribution` and
 `uncapped` (a running container with `Memory=0`): a person sees all, a process only its
 line's tree. The resource push and `ResourceIndicator` show a separate *Docker
 workloads: outside CLI budgets* figure with the count of containers that have no RAM cap.
-The sample runs in its own task with a 60 s timeout (a hung daemon cannot delay the memory
-warnings), tolerates malformed replies, and keeps going after the last docker grant ends
+Each inventory read has a 60 s timeout, tolerates malformed replies, and continues after the last docker grant ends
 for as long as labeled containers were running at the last look, since that is when
 survivors matter. Labels are trustworthy only on managed lines, where the proxy sets
 them; an *unrestricted* line can start containers with any labels, or none, and so can
 spoof ownership. Stopping is limited to the lines the caller can see (its own, and for a
 captain those under it).
+
+Managed container lifetimes use one-shot deadlines based on the last start and declared
+duration. A deadline reads the daemon again before stopping an overdue container; Docker
+events reschedule or cancel deadlines as the inventory changes.
 
 **Survivors and stop.** When a detach or close leaves a line with no live process, a
 notice lists that line's still-running labeled containers (once per set, per 10 minutes;
@@ -444,7 +446,7 @@ combined workload fits; the captain still needs to consider other live processes
 First inspect the failed command and its error output. A failing assertion that
 prints a huge object graph needs a bounded diagnostic, not more RAM. Run uncertain
 tests under a smaller independent cap so the test can fail while the agent lives.
-The early memory warning names the process's three largest descendants — pid,
+The memory warning names the process's largest command groups — pid,
 RSS and a short command line — with each pid as the process itself sees it (the
 last `NSpid` field), so the fix is targeted. Stop one with `kill <pid>`, or with
 `POST /api/attachments/<id>/signal {"pid": N, "signal": "TERM"|"KILL"}`, which

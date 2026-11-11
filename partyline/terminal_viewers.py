@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from . import op_timing
 from .terminal_replay import RawReplay, replay_limit
 
 
@@ -12,7 +13,7 @@ VIEWER_QUEUE_LIMIT = 32
 
 @dataclass(frozen=True)
 class TerminalViewer:
-    queue: asyncio.Queue[bytes | None]
+    queue: asyncio.Queue[tuple[bytes, float] | None]  # (bytes, enqueue time) or the close sentinel
     snapshot: str
     replay: bytes
     replay_available: bool
@@ -27,13 +28,13 @@ class TerminalViewerRegistry:
     def __init__(self, snapshot: Callable[[], str]):
         self._snapshot = snapshot
         self._replay = RawReplay(replay_limit())
-        self._queues: set[asyncio.Queue[bytes | None]] = set()
+        self._queues: set[asyncio.Queue[tuple[bytes, float] | None]] = set()
         self._closed = False
 
     def attach(self) -> TerminalViewer:
         """Snapshot and subscribe atomically from the event loop's viewpoint."""
         snapshot = self._snapshot()
-        queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=VIEWER_QUEUE_LIMIT)
+        queue: asyncio.Queue[tuple[bytes, float] | None] = asyncio.Queue(maxsize=VIEWER_QUEUE_LIMIT)
         if self._closed:
             queue.put_nowait(None)
         else:
@@ -52,7 +53,7 @@ class TerminalViewerRegistry:
                 queue.put_nowait(None)
                 self._queues.discard(queue)
                 continue
-            queue.put_nowait(data)
+            queue.put_nowait((data, op_timing.clock()))
 
     def close(self) -> None:
         if self._closed:

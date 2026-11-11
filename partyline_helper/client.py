@@ -12,7 +12,7 @@ from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidSta
 from .bounds import MAX_MESSAGE_BYTES, bounded, validate_request
 from .control import CONTROL_VERSION, Control
 from .desktop import pointer_state
-from .images import changed, encode, thumbnail
+from .images import encode
 from .status import Status
 from .tools import MESSAGES as TOOL_MESSAGES, TOOLS_VERSION, Tools
 from .transport import CertificateError, certificate_failure
@@ -29,11 +29,12 @@ class Revoked(Exception):
 class Session(SessionTransport):
     def __init__(self, socket, desktop, terminal, name, yes=False, preview_times=None,
                  clock=time.monotonic, sleep=asyncio.sleep, border=None, allow_control=False,
-                 inputs=None, status=None):
+                 inputs=None, status=None, capture_factory=None):
         self.socket, self.desktop, self.terminal = socket, desktop, terminal
         self.status = status or Status()
         self.name, self.yes, self.border = name, yes, border
         self.clock, self.sleep = clock, sleep
+        self.capture_factory = capture_factory or getattr(desktop, "capture_factory", None)
         self.lock = asyncio.Lock()
         self.frame_lock = asyncio.Lock()
         self.preview_times = preview_times if preview_times is not None else {}
@@ -43,7 +44,7 @@ class Session(SessionTransport):
         self.worker = None
         self.pending_id = None
         self.last_received = self.clock()
-        self.previous = self.last_pointer = None
+        self.last_capture_image = None
         self.control = Control(self, inputs, allow_control)
         self.tools = Tools(self)
         self.window = WindowAccess(self)
@@ -88,7 +89,8 @@ class Session(SessionTransport):
                 return
             self.accepted = False
             self.started = self.clock()
-            self.previous = self.last_pointer = self.last_frame_at = None
+            self.last_frame_at = None
+            self.last_capture_image = None
             self.share = request
             if self.border:
                 self.border.show(request["region"])
@@ -100,7 +102,7 @@ class Session(SessionTransport):
             if request.get("control") is True:  # the person asked for agent control with the share
                 await self.control.request(dict(request, type="control_request"))
             from .capture_loop import capture
-            await capture(self, request)
+            await capture(self, request, self.capture_factory, self.clock)
         except (ValueError, TypeError, KeyError, RuntimeError, OSError) as exc:
             accepted = self.share is not None
             self.share = None
@@ -120,7 +122,7 @@ class Session(SessionTransport):
 
     async def _frame(self, request_id, force=False):
         share = self.share
-        if not share or not self.accepted:
+        if not share or not self.accepted or self.last_capture_image is None:
             return
         if (not force and self.last_frame_at is not None
                 and self.clock() - self.last_frame_at < 1 / share["max_fps"]):
@@ -129,18 +131,25 @@ class Session(SessionTransport):
                                 message="Snap rate limit: wait for the next frame")
             return
         region = share["region"]
-        image = self.desktop.grab(region)
-        thumb = thumbnail(image)
+        image = self.last_capture_image
+        await self._send_capture_frame(image, region, share, request_id)
+
+    async def frame_from_capture(self, request, image):
+        """Send one WGC event frame, provided the exact consented share is still active."""
+        async with self.frame_lock:
+            if self.share is not request or not self.accepted:
+                return
+            self.last_capture_image = image
+            region = request["region"]
+            await self._send_capture_frame(image, region, request, None)
+
+    async def _send_capture_frame(self, image, region, share, request_id):
         pointer = pointer_state(self.desktop, region)
-        if (request_id is None and not changed(self.previous, thumb, share["min_change"])
-                and pointer == self.last_pointer):
-            return
         binary, width, height, mime = encode(image, share["long_edge"])
         await self.send("frame", binary, share_id=share["share_id"], request_id=request_id,
                         ts_ms=int((self.clock() - self.started) * 1000), region=region,
                         out_width=width, out_height=height, pointer=pointer, mime=mime)
         self.last_uia_frame = (dict(region), width, height)
-        self.previous, self.last_pointer = thumb, pointer
         self.last_frame_at = self.clock()
 
     async def dispatch(self, message):
@@ -169,7 +178,8 @@ class Session(SessionTransport):
             self.preview_times[monitor["id"]] = now
             print(f"Taking preview of monitor {monitor['id']}", flush=True)
             edge = min(480, int(bounded(message.get("long_edge"), 480, 1, 32768)))
-            binary, width, height, mime = encode(self.desktop.grab(monitor), edge)
+            image = await asyncio.to_thread(self.desktop.grab, monitor)
+            binary, width, height, mime = encode(image, edge)
             await self.send("preview", binary, request_id=message["request_id"], monitor_id=monitor["id"],
                             out_width=width, out_height=height, mime=mime)
         elif kind in ("control_request", "control_revoked", "action"):

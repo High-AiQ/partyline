@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 
-from .periodic_timing import tick as timed_tick
 import logging
 import time
 
@@ -243,8 +242,7 @@ async def run(runtime, *, sleep=asyncio.sleep, clock=time.time) -> None:
         while True:
             with events.processing():
                 try:
-                    with timed_tick('lead heartbeat'):
-                        await tick(runtime, now=clock())
+                    await tick(runtime, now=clock())
                 except asyncio.CancelledError:
                     raise
                 except Exception:

@@ -3,7 +3,7 @@
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
-from .resource_budget import defaults, memory_ceiling, settings, snapshot, validate_settings
+from .resource_budget import defaults, memory_ceiling, settings, validate_settings
 from .resource_contracts import ResourceSettings, ResourceSettingsIn, ResourceSnapshot
 
 KEYS = (
@@ -16,10 +16,10 @@ def register_resource_routes(app, runtime) -> None:
     from .kernel_log import register_kernel_log_route
     register_kernel_log_route(app, runtime)
     @app.get("/api/resources", response_model=ResourceSnapshot)
-    def resources(request: Request):
+    async def resources(request: Request):
         request_principal(request)  # all authenticated people and machines may read
-        view = snapshot(runtime.db, runtime=runtime)
-        return {**view, "memory_ceiling_bytes": memory_ceiling()}
+        from .browser_snapshots import resource_snapshot
+        return await resource_snapshot(runtime)
 
     @app.get("/api/settings/resources", response_model=ResourceSettings)
     def get_resource_settings(request: Request):

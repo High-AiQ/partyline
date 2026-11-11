@@ -82,13 +82,7 @@ class ResourceSnapshot(BaseModel):
 
 
 class ResourceSnapshotEvent(BaseModel):
-    """The host memory picture, pushed once per sampler tick when it moved.
-
-    Replaces the per-tab 5 s poll: the sampler already runs on that cadence,
-    so the snapshot is computed once per tick and pushed to every open tab,
-    instead of every tab recomputing it over HTTP. A heartbeat rides at least
-    every 60 s so a quiet tab still sees fresh numbers arrive.
-    """
+    """The host memory picture, pushed after an observed resource event."""
     type: Literal["resources"] = "resources"
     snapshot: ResourceSnapshot
 

@@ -15,6 +15,7 @@ from .screen_element_actions import ElementAction, element_action
 from .screen_tree import MAX_NODES, MAX_TREE, OUT_BYTES, Snapshot
 from .screen_tree_ids import IdSpace
 from .screen_tree_answer import answer, elements_options
+from .op_timing import pushed
 
 ELEMENT_OPTIONS = Annotated[dict, Depends(elements_options)]
 SNAPSHOT_TTL = 600  # seconds a captured tree answers queries before it must be taken again
@@ -41,8 +42,8 @@ class ElementsHub:
         self.waiters[ident] = (device["id"], future)
         try:
             async with asyncio.timeout(35):
-                await device["socket"].send_json({"type": kind, "request_id": ident,
-                                                 "grant_id": grant["id"], **fields})
+                await pushed("screen", device["socket"].send_json({"type": kind, "request_id": ident,
+                                                 "grant_id": grant["id"], **fields}))
                 response = await future
             try:
                 require_window(self.hub, principal, grant["id"])

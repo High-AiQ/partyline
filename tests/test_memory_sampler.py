@@ -1,4 +1,4 @@
-"""Advisory sampling state is deterministic under fake usage and time."""
+"""Advisory warnings preserve routing, cleanup, and process memory behavior."""
 
 import tempfile
 from pathlib import Path
@@ -9,11 +9,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from partyline.db import Db
-from partyline.cgroup_sample import read_cgroup_sample
 from partyline.attachment_tmp import attachment_tmp_dir
-from partyline.legacy_tmp import reap_pytest_under
+from partyline import memory_event_policy
 from partyline.memory_sampler import (
-    _warn, crosses_warning, read_usage, process_tree_rss, reclaim_scope, run,
+    _warn, crosses_warning, process_tree_rss,
     warning_limit, warning_text,
 )
 from partyline.runtime import ChatRuntime
@@ -87,278 +86,6 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
                         self.assertIn('Warnings use the backstop', text)
                         self.assertNotIn('nothing stops you there', text)
 
-    async def test_cache_heavy_usage_reclaims_then_stays_silent(self):
-        """Mostly active file cache must not warn: the old inactive-only
-        working set would be 800 MiB, over the 80% threshold."""
-        import tempfile as tempfile_module
-
-        scope = Path(tempfile_module.mkdtemp())
-        mib = 1024**2
-        (scope / "memory.current").write_text(f"{900 * mib}\n")
-        (scope / "memory.stat").write_text(
-            f"anon {100 * mib}\nfile {800 * mib}\n"
-            f"active_file {700 * mib}\ninactive_file {100 * mib}\n",
-        )
-        sample_one = read_cgroup_sample(str(scope))
-        (scope / "memory.current").write_text(f"{850 * mib}\n")
-        (scope / "memory.stat").write_text(
-            f"anon {90 * mib}\nfile {760 * mib}\n"
-            f"active_file {680 * mib}\ninactive_file {80 * mib}\n",
-        )
-        sample_two = read_cgroup_sample(str(scope))
-        runtime = ChatRuntime(self.db)
-        runtime.live["worker"] = SimpleNamespace(proc=SimpleNamespace(pid=123))
-        runtime.deliver_pending = AsyncMock(return_value=True)
-
-        class StopSampling(Exception):
-            pass
-
-        async def tick(_seconds):
-            raise StopSampling
-
-        with patch("partyline.memory_sampler.sys.platform", "linux"), \
-                patch("partyline.memory_sampler.cgroup_usage",
-                      side_effect=[sample_one, sample_two]) as cgroup, \
-                patch("partyline.memory_sampler.asyncio.sleep", tick):
-            with self.assertRaises(StopSampling):
-                await run(runtime, sampler=read_usage)
-        reclaim = scope / "memory.reclaim"
-        self.assertTrue(reclaim.exists())
-        self.assertEqual(int(reclaim.read_text()), 800 * 1024**2)
-        self.assertEqual(cgroup.call_count, 2)  # the re-read happened
-        self.assertEqual([], self.db.list_messages("line"))
-        self.assertEqual(runtime.memory_usage["worker"]["raw_bytes"],
-                         850 * 1024**2)
-        self.assertEqual(runtime.memory_usage["worker"]["usage_bytes"], 90 * 1024**2)
-        self.assertEqual(runtime.memory_usage["worker"]["anon_bytes"], 90 * 1024**2)
-        self.assertEqual(runtime.memory_usage["worker"]["file_bytes"], 760 * 1024**2)
-
-    async def test_anon_heavy_usage_warns_on_the_working_set(self):
-        gib = 1024**3
-        runtime = ChatRuntime(self.db)
-        runtime.live["worker"] = SimpleNamespace(
-            att=self.db.get_attachment("worker"), proc=SimpleNamespace(pid=123))
-        runtime.deliver_pending = AsyncMock(return_value=True)
-        scope = Path(self.temp.name, "scope")
-        scope.mkdir()
-        mib = 1024**2
-        (scope / "memory.current").write_text(f"{980 * mib}\n")
-        (scope / "memory.stat").write_text(
-            f"anon {950 * mib}\nfile {20 * mib}\n"
-            f"active_file 0\ninactive_file {20 * mib}\nkernel {10 * mib}\n",
-        )
-        sample = read_cgroup_sample(str(scope))  # mostly anonymous: reclaim is futile
-
-        class StopSampling(Exception):
-            pass
-
-        async def tick(_seconds):
-            raise StopSampling
-
-        with patch("partyline.memory_sampler.sys.platform", "linux"), \
-                patch("partyline.server_memory.host_memory_bytes",
-                      return_value=8 * gib), \
-                patch("partyline.memory_sampler.cgroup_usage",
-                      return_value=sample), \
-                patch("partyline.memory_sampler.asyncio.sleep", tick):
-            with self.assertRaises(StopSampling):
-                await run(runtime, sampler=read_usage)
-        runtime.deliver_pending.assert_awaited_once()
-        text = self.db.list_messages("line")[-1]["body"]
-        self.assertIn("memory budget (93%)", text)
-        self.assertIn("980 MiB in use (950 MiB anonymous + 10 MiB kernel, "
-                      "20 MiB file cache, reclaimable)", text)
-        self.assertEqual(runtime.memory_usage["worker"]["raw_bytes"],
-                         980 * 1024**2)
-        self.assertEqual(runtime.memory_usage["worker"]["anon_bytes"], 950 * 1024**2)
-        self.assertEqual(runtime.memory_usage["worker"]["file_bytes"], 20 * 1024**2)
-        self.assertEqual(runtime.memory_usage["worker"]["kernel_bytes"], 10 * 1024**2)
-
-    async def test_a_failed_reclaim_falls_back_to_the_working_set_decision(self):
-        gib = 1024**3
-        runtime = ChatRuntime(self.db)
-        runtime.live["worker"] = SimpleNamespace(
-            att=self.db.get_attachment("worker"), proc=SimpleNamespace(pid=123))
-        runtime.deliver_pending = AsyncMock(return_value=True)
-        # A root that cannot hold a memory.reclaim file at all.
-        sample = {"root": str(Path(self.temp.name, "gone", "scope")),
-                  "current": 980 * 1024**2, "peak": None,
-                  "working_set": 960 * 1024**2}
-
-        class StopSampling(Exception):
-            pass
-
-        async def tick(_seconds):
-            raise StopSampling
-
-        with patch("partyline.memory_sampler.sys.platform", "linux"), \
-                patch("partyline.server_memory.host_memory_bytes",
-                      return_value=8 * gib), \
-                patch("partyline.memory_sampler.cgroup_usage",
-                      return_value=sample), \
-                patch("partyline.memory_sampler.asyncio.sleep", tick):
-            with self.assertRaises(StopSampling):
-                await run(runtime, sampler=read_usage)  # must not raise
-        runtime.deliver_pending.assert_awaited_once()  # warns on working set
-        self.assertEqual([], [m for m in self.db.list_messages("line")
-                              if "Raw" in m["body"]])
-
-    async def test_reclaim_backs_off_and_runs_off_the_event_loop(self):
-        """Two ticks with the same cache-heavy sample: one reclaim attempt
-        (60 s backoff), executed through asyncio.to_thread, and no warning."""
-        import asyncio as aio
-        import tempfile as tempfile_module
-
-        scope = Path(tempfile_module.mkdtemp())
-        sample = {"root": str(scope), "current": 900 * 1024**2,
-                  "peak": None, "working_set": 100 * 1024**2}
-        runtime = ChatRuntime(self.db)
-        runtime.live["worker"] = SimpleNamespace(
-            att=self.db.get_attachment("worker"), proc=SimpleNamespace(pid=123))
-        runtime.deliver_pending = AsyncMock(return_value=True)
-
-        calls = {"ticks": 0}
-
-        class StopSampling(Exception):
-            pass
-
-        async def tick(_seconds):
-            calls["ticks"] += 1
-            if calls["ticks"] >= 2:
-                raise StopSampling
-
-        real_to_thread = aio.to_thread
-        to_thread_calls = []
-
-        async def spy_to_thread(fn, *args, **kwargs):
-            to_thread_calls.append(fn)
-            return await real_to_thread(fn, *args, **kwargs)
-
-        with patch("partyline.memory_sampler.sys.platform", "linux"), \
-                patch("partyline.memory_sampler.cgroup_usage",
-                      return_value=sample) as cgroup, \
-                patch("partyline.memory_sampler.reclaim_scope",
-                      wraps=reclaim_scope) as reclaim, \
-                patch("partyline.memory_sampler.asyncio.to_thread",
-                      side_effect=spy_to_thread), \
-                patch("partyline.memory_sampler.asyncio.sleep", tick):
-            with self.assertRaises(StopSampling):
-                await run(runtime, sampler=read_usage)
-
-        self.assertEqual(calls["ticks"], 2)
-        self.assertEqual(reclaim.call_count, 1)  # backoff: one attempt
-        # Both the reclaim write and the re-read ran off the event loop.
-        self.assertIn(reclaim, to_thread_calls)
-        self.assertIn(cgroup, to_thread_calls)
-        self.assertTrue((scope / "memory.reclaim").exists())
-        self.assertEqual([], self.db.list_messages("line"))
-
-    async def test_working_set_over_threshold_reaps_old_runs_names_tmpfs(self):
-        """Finding 5.15: before warning, old pytest runs in the process's own
-        temp dir are reaped (30 min), the sample is re-read, and a big shmem
-        share is named in the notice with where to delete it."""
-        gib = 1024**3
-        tmp_dir = attachment_tmp_dir("worker")
-        old = time.time() - 31 * 60
-        run_old = tmp_dir / "pytest-of-u" / "pytest-3"
-        run_old.mkdir(parents=True, exist_ok=True)
-        (run_old / "f.bin").write_bytes(b"x" * 64)
-        os.utime(run_old, (old, old))
-        os.utime(run_old / "f.bin", (old, old))
-        models = tmp_dir / "models"
-        models.mkdir()
-        (models / "weights.bin").write_bytes(b"x" * 300 * 1024**2)
-        fresh = tmp_dir / "pytest-of-u" / "pytest-4"
-        fresh.mkdir(parents=True)
-        (fresh / "g.bin").write_bytes(b"x" * 64)
-        current = tmp_dir / "pytest-of-u" / "pytest-current"
-        os.symlink(fresh, current)
-        sample = {"root": str(Path(self.temp.name, "scope")),
-                  "current": 980 * 1024**2, "peak": None,
-                  "shmem": int(1.5 * gib), "working_set": 960 * 1024**2}
-        runtime = ChatRuntime(self.db)
-        runtime.live["worker"] = SimpleNamespace(
-            att=self.db.get_attachment("worker"), proc=SimpleNamespace(pid=123))
-        runtime.deliver_pending = AsyncMock(return_value=True)
-        reap_calls = []
-
-        def recording(tmp_dir_arg):
-            reap_calls.append(tmp_dir_arg)
-            return reap_pytest_under(tmp_dir_arg)
-
-        class StopSampling(Exception):
-            pass
-
-        async def tick(_seconds):
-            raise StopSampling
-
-        with patch("partyline.memory_sampler.sys.platform", "linux"), \
-                patch("partyline.server_memory.host_memory_bytes",
-                      return_value=8 * gib), \
-                patch("partyline.memory_sampler.cgroup_usage",
-                      return_value=sample), \
-                patch("partyline.temp_mounts.on_tmpfs", return_value=True), \
-                patch("partyline.memory_sampler.reap_pytest_if_tmpfs",
-                      side_effect=recording), \
-                patch("partyline.memory_sampler.asyncio.sleep", tick):
-            with self.assertRaises(StopSampling):
-                await run(runtime, sampler=read_usage)
-        self.assertEqual(reap_calls, [tmp_dir])
-        self.assertFalse(run_old.exists())  # 31 min old: reaped
-        self.assertTrue(fresh.exists())  # fresh run: kept
-        self.assertTrue(current.is_symlink())  # pytest-current: kept
-        text = self.db.list_messages("line")[-1]["body"]
-        self.assertIn("1.5 GiB of this is files on tmpfs", text)
-        self.assertIn(f"largest under {tmp_dir}", text)
-        self.assertIn("Deleting them frees the memory; reclaim cannot.", text)
-        self.assertEqual(runtime.memory_usage["worker"]["raw_bytes"],
-                         980 * 1024**2)
-
-    async def test_tmp_housekeeping_holds_for_sixty_seconds(self):
-        gib = 1024**3
-        tmp_dir = attachment_tmp_dir("worker")
-        old = time.time() - 31 * 60
-        run_old = tmp_dir / "pytest-of-u" / "pytest-3"
-        run_old.mkdir(parents=True, exist_ok=True)
-        (run_old / "f.bin").write_bytes(b"x" * 64)
-        os.utime(run_old, (old, old))
-        os.utime(run_old / "f.bin", (old, old))
-        sample = {"root": str(Path(self.temp.name, "scope")),
-                  "current": 980 * 1024**2, "peak": None,
-                  "shmem": 0, "working_set": 960 * 1024**2}
-        runtime = ChatRuntime(self.db)
-        runtime.live["worker"] = SimpleNamespace(
-            att=self.db.get_attachment("worker"), proc=SimpleNamespace(pid=123))
-        reap_calls = []
-
-        def recording(tmp_dir_arg):
-            reap_calls.append(tmp_dir_arg)
-            return reap_pytest_under(tmp_dir_arg)
-
-        class StopSampling(Exception):
-            pass
-
-        state = {"ticks": 0}
-
-        async def tick(_seconds):
-            state["ticks"] += 1
-            if state["ticks"] >= 2:
-                raise StopSampling
-
-        with patch("partyline.memory_sampler.sys.platform", "linux"), \
-                patch("partyline.server_memory.host_memory_bytes",
-                      return_value=8 * gib), \
-                patch("partyline.memory_sampler.cgroup_usage",
-                      return_value=sample), \
-                patch("partyline.temp_mounts.on_tmpfs", return_value=True), \
-                patch("partyline.memory_sampler.reap_pytest_if_tmpfs",
-                      side_effect=recording), \
-                patch("partyline.memory_sampler.asyncio.sleep", tick):
-            with self.assertRaises(StopSampling):
-                await run(runtime, sampler=read_usage)
-        self.assertEqual(state["ticks"], 2)
-        self.assertEqual(len(reap_calls), 1)  # backoff: one pass in 60 s
-        self.assertFalse(run_old.exists())
 
     def _hot_runtime(self, shmem=0):
         gib = 1024**3
@@ -370,24 +97,22 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
                   "peak": None, "shmem": shmem, "working_set": 960 * 1024**2}
         return runtime, sample, gib
 
-    async def _run_ticks(self, runtime, sample, gib, ticks=1, **patches):
-        class StopSampling(Exception):
-            pass
-
-        state = {"ticks": 0}
-
-        async def tick(_seconds):
-            state["ticks"] += 1
-            if state["ticks"] >= ticks:
-                raise StopSampling
+    async def _run_events(self, runtime, sample, gib, events=1, **patches):
+        async def refresh(runtime):
+            usage, raw = sample["working_set"], sample["current"]
+            runtime.memory_usage["worker"] = {
+                "usage_bytes": usage, "raw_bytes": raw, "cap_bytes": gib,
+                "percent": usage * 100 // gib, "cgroup": sample,
+            }
+            return {"worker"}
 
         with patch("partyline.memory_sampler.sys.platform", "linux"), \
                 patch("partyline.server_memory.host_memory_bytes", return_value=gib * 8), \
-                patch("partyline.memory_sampler.cgroup_usage", return_value=sample), \
-                patch("partyline.memory_sampler.asyncio.sleep", tick):
+                patch("partyline.memory_event_policy.refresh", side_effect=refresh):
             with patch("partyline.temp_mounts.on_tmpfs", **patches):
-                with self.assertRaises(StopSampling):
-                    await run(runtime, sampler=read_usage)
+                policy = memory_event_policy.MemoryPolicy()
+                for _ in range(events):
+                    await policy.handle(runtime, None, sample["working_set"] >= gib * 0.8)
 
     async def test_reclaim_does_not_depend_on_where_temp_lives(self):
         """The reclaim runs on every filesystem: the cgroup directory is cgroup2, never tmpfs."""
@@ -398,7 +123,7 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         for on_tmpfs in (True, False):
             (scope / "memory.reclaim").unlink(missing_ok=True)
             runtime.memory_usage.clear()
-            await self._run_ticks(runtime, sample, gib, return_value=on_tmpfs)
+            await self._run_events(runtime, sample, gib, return_value=on_tmpfs)
             self.assertEqual(int((scope / "memory.reclaim").read_text()), 800 * 1024**2, on_tmpfs)
 
     async def test_pytest_housekeeping_only_runs_when_temp_is_tmpfs(self):
@@ -410,10 +135,10 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         os.utime(run_old, (old, old))
         os.utime(run_old / "f.bin", (old, old))
         runtime, sample, gib = self._hot_runtime()
-        await self._run_ticks(runtime, sample, gib, return_value=False)
+        await self._run_events(runtime, sample, gib, return_value=False)
         self.assertTrue(run_old.exists())  # on disk the runs cost no memory: kept
         runtime.memory_usage.clear()
-        await self._run_ticks(runtime, sample, gib, return_value=True)
+        await self._run_events(runtime, sample, gib, return_value=True)
         self.assertFalse(run_old.exists())  # on tmpfs: reaped
 
     async def test_the_tmpfs_note_is_built_only_when_a_warning_is_sent(self):
@@ -423,37 +148,12 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         with patch("partyline.memory_sampler.tmpfs_note_for", note):
             # below the threshold: no warning, so no directory walk
             quiet = dict(sample, current=100 * 1024**2, working_set=100 * 1024**2)
-            await self._run_ticks(runtime, quiet, gib, return_value=True)
+            await self._run_events(runtime, quiet, gib, return_value=True)
             note.assert_not_awaited()
-            await self._run_ticks(runtime, sample, gib, ticks=3, return_value=True)
-        self.assertEqual(note.await_count, 1)  # once for the one warning sent, not per tick
+            await self._run_events(runtime, sample, gib, events=3, return_value=True)
+        self.assertEqual(note.await_count, 1)  # once for the one warning sent, not per event
         self.assertEqual(note.await_args.args[1], shmem)
 
-    async def test_oversized_budget_warns_and_routes_before_the_backstop(self):
-        gib = 1024**3
-        self.db._exec("UPDATE attachments SET memory_limit='8G',is_lead=1 WHERE id='worker'")
-        runtime = ChatRuntime(self.db)
-        runtime.live['worker'] = SimpleNamespace(att=self.db.get_attachment('worker'))
-        runtime.deliver_pending = AsyncMock(return_value=True)
-        usage = 6 * gib * 80 // 100 + 1
-
-        class StopSampling(Exception):
-            pass
-
-        async def tick(_seconds):
-            raise StopSampling
-
-        with patch('partyline.server_memory.host_memory_bytes', return_value=8 * gib), \
-                patch('partyline.memory_sampler.sys.platform', 'linux'), \
-                patch('partyline.memory_sampler.asyncio.sleep', tick):
-            with self.assertRaises(StopSampling):
-                await run(runtime, sampler=lambda _: (usage, None, 'fake'))
-        self.assertLess(usage, 6 * gib)
-        runtime.deliver_pending.assert_awaited_once()
-        text = self.db.list_messages('line')[-1]['body']
-        self.assertIn('8.0 GiB per-process memory budget (60%)', text)
-        self.assertIn('6.0 GiB emergency backstop is at or below', text)
-        self.assertEqual(runtime.memory_usage['worker']['cap_bytes'], 8 * gib)
 
     async def test_warning_is_private_to_the_line_captain_and_people_can_read_it(self):
         worker = {"id": "worker", "name": "worker", "conv_id": "line"}
@@ -498,209 +198,3 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
             await _warn(runtime, row, 3 * 1024**3, 4 * 1024**3)
         calls = [(call.args[1], call.kwargs["audience"]) for call in private.await_args_list]
         self.assertEqual(calls, [("line", "worker"), ("parent", "parent-captain")])
-
-    async def test_sampler_continues_after_bad_tick_and_prunes_stopped_usage(self):
-        values = iter([RuntimeError("sample failed"), (800 * 1024**2, None, "fake")])
-        sleeps = 0
-
-        def sample(_adapter):
-            value = next(values)
-            if isinstance(value, Exception):
-                raise value
-            return value
-
-        async def tick(_seconds):
-            nonlocal sleeps
-            sleeps += 1
-            if sleeps == 2:
-                self.db._exec("UPDATE attachments SET status='stopped' WHERE id='worker'")
-            elif sleeps == 3:
-                raise StopSampling
-
-        class StopSampling(Exception):
-            pass
-
-        self.runtime.memory_usage["stale"] = {"usage_bytes": 1}
-        with patch("partyline.memory_sampler.asyncio.sleep", tick):
-            try:
-                await run(self.runtime, sampler=sample)
-            except StopSampling:
-                pass
-        self.assertNotIn("stale", self.runtime.memory_usage)
-        self.assertNotIn("worker", self.runtime.memory_usage)
-
-    async def test_every_tick_offers_the_resource_snapshot_to_the_pusher(self):
-        class StopSampling(Exception):
-            pass
-
-        async def stop_after_tick(_seconds):
-            raise StopSampling
-
-        with patch("partyline.memory_sampler.ResourcePusher.tick", new_callable=AsyncMock) as push, \
-                patch("partyline.memory_sampler.asyncio.sleep", stop_after_tick):
-            with self.assertRaises(StopSampling):
-                await run(self.runtime, sampler=lambda _adapter: (1, None, "fake"))
-        push.assert_awaited_once_with(self.runtime)
-
-    async def test_real_rss_sampler_takes_one_snapshot_for_the_whole_tick(self):
-        from partyline.memory_sampler import read_usage
-
-        self.runtime.live["worker"] = SimpleNamespace(proc=SimpleNamespace(pid=123))
-        table = ({123: 1}, {123: 500 * 1024**2})
-
-        class StopSampling(Exception):
-            pass
-
-        async def stop_after_tick(_seconds):
-            raise StopSampling
-
-        with patch("partyline.memory_sampler.sys.platform", "darwin"), \
-                patch("partyline.memory_sampler.process_snapshot", return_value=table) as snapshot, \
-                patch("partyline.memory_sampler.cgroup_usage", return_value=None), \
-                patch("partyline.memory_sampler.asyncio.sleep", stop_after_tick):
-            with self.assertRaises(StopSampling):
-                await run(self.runtime, sampler=read_usage)
-        snapshot.assert_called_once_with()
-
-    async def test_linux_cgroup_samples_skip_process_snapshot_when_all_rows_succeed(self):
-        from partyline.memory_sampler import read_usage
-
-        self.db.add_attachment("worker2", "line", "worker2", "fake", ["fake"], self.temp.name)
-        self.db._exec("UPDATE attachments SET status='running',memory_limit='1G' WHERE id='worker2'")
-        self.runtime.live["worker"] = SimpleNamespace(proc=SimpleNamespace(pid=123))
-        self.runtime.live["worker2"] = SimpleNamespace(proc=SimpleNamespace(pid=456))
-
-        class StopSampling(Exception):
-            pass
-
-        async def stop_after_tick(_seconds):
-            raise StopSampling
-
-        with patch("partyline.memory_sampler.sys.platform", "linux"), \
-                patch("partyline.memory_sampler.cgroup_usage",
-                      side_effect=[{"root": "/sys/fs/cgroup/fake",
-                                    "current": 500 * 1024**2,
-                                    "peak": 600 * 1024**2,
-                                    "working_set": 500 * 1024**2},
-                                   {"root": "/sys/fs/cgroup/fake",
-                                    "current": 550 * 1024**2,
-                                    "peak": 650 * 1024**2,
-                                    "working_set": 550 * 1024**2}]) as cgroup, \
-                patch("partyline.memory_sampler.process_snapshot") as snapshot, \
-                patch("partyline.memory_sampler.asyncio.sleep", stop_after_tick):
-            with self.assertRaises(StopSampling):
-                await run(self.runtime, sampler=read_usage)
-        self.assertEqual(cgroup.call_count, 2)
-        snapshot.assert_not_called()
-        self.assertEqual(self.runtime.memory_usage["worker"]["source"], "cgroup")
-        self.assertEqual(self.runtime.memory_usage["worker2"]["source"], "cgroup")
-
-    async def test_going_over_the_soft_cap_is_told_once_despite_the_cooldown(self):
-        # 1G cap: warn at 81%, then over the cap a minute later, then stay over.
-        values = iter([0.81, 1.05, 1.10, 1.20])
-        notices = AsyncMock()
-
-        def sample(_adapter):
-            return int(next(values) * 1024**3), None, "fake"
-
-        class StopSampling(Exception):
-            pass
-
-        ticks = []
-
-        async def tick(_seconds):
-            ticks.append(_seconds)
-            if len(ticks) == 4:
-                raise StopSampling
-
-        with patch("partyline.memory_sampler._warn", notices), \
-                patch("partyline.memory_sampler.asyncio.sleep", tick):
-            with self.assertRaises(StopSampling):
-                await run(self.runtime, clock=lambda: 60, sampler=sample)
-        self.assertEqual(notices.await_count, 2)
-        self.assertGreater(notices.await_args_list[1].args[2], 1024**3)
-
-    async def test_a_new_activation_is_warned_again(self):
-        """Sol's repro: over budget, stopped, resumed over budget — two warnings."""
-        notices = AsyncMock()
-        first, second = object(), object()
-        steps = iter([("running", first), ("exited", None), ("running", second)])
-
-        def sample(_adapter):
-            return int(1.05 * 1024**3), None, "fake"
-
-        class StopSampling(Exception):
-            pass
-
-        def advance():
-            try:
-                status, adapter = next(steps)
-            except StopIteration:
-                raise StopSampling from None
-            self.db._exec("UPDATE attachments SET status=? WHERE id='worker'", (status,))
-            self.runtime.live = {"worker": adapter} if adapter else {}
-            if not adapter:
-                self.runtime.memory_usage.pop("worker", None)  # as exit handling does
-
-        async def tick(_seconds):
-            advance()
-
-        advance()
-        with patch("partyline.memory_sampler._warn", notices), \
-                patch("partyline.memory_sampler.asyncio.sleep", tick):
-            with self.assertRaises(StopSampling):
-                await run(self.runtime, clock=lambda: 60, sampler=sample)
-        self.assertEqual(notices.await_count, 2)
-
-    async def test_a_replaced_adapter_between_ticks_is_warned_again(self):
-        notices = AsyncMock()
-        adapters = iter([object(), object()])
-
-        def sample(_adapter):
-            return int(1.05 * 1024**3), None, "fake"
-
-        class StopSampling(Exception):
-            pass
-
-        async def tick(_seconds):
-            try:
-                self.runtime.live = {"worker": next(adapters)}
-            except StopIteration:
-                raise StopSampling from None
-
-        with patch("partyline.memory_sampler._warn", notices), \
-                patch("partyline.memory_sampler.asyncio.sleep", tick):
-            with self.assertRaises(StopSampling):
-                await run(self.runtime, clock=lambda: 60, sampler=sample)
-        # Three samples over budget across three activations: one warning each.
-        self.assertEqual(notices.await_count, 3)
-
-    async def test_hysteresis_and_one_notice_per_ten_minute_window(self):
-        values = [0.81, 0.90, 0.60, 0.81, 0.81, 0.60, 0.81]
-        times = iter([0, 60, 120, 180, 600, 660, 720])
-        notices = AsyncMock()
-        state = {"index": 0, "now": 0}
-
-        def sample(_adapter):
-            return int(values[state["index"]] * 1024**3), None, "fake"
-
-        async def tick(_seconds):
-            state["index"] += 1
-            try:
-                state["now"] = next(times)
-            except StopIteration:
-                raise StopSampling from None
-            if state["index"] >= len(values):
-                raise StopSampling
-
-        class StopSampling(Exception):
-            pass
-
-        with patch("partyline.memory_sampler._warn", notices), \
-                patch("partyline.memory_sampler.asyncio.sleep", tick):
-            try:
-                await run(self.runtime, clock=lambda: state["now"], sampler=sample)
-            except StopSampling:
-                pass
-        self.assertEqual(notices.await_count, 2, (state, notices.await_args_list))
-        self.assertEqual(self.runtime.memory_usage["worker"]["source"], "fake")

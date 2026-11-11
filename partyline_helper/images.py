@@ -1,18 +1,7 @@
 """Bounded image encoding and change detection."""
 from io import BytesIO
 
-from PIL import ImageChops, ImageStat
-
 MAX_BYTES = 4_000_000
-
-
-def thumbnail(image):
-    return image.convert("L").resize((64, 36))
-
-
-def changed(previous, current, threshold):
-    return (previous is None or
-            ImageStat.Stat(ImageChops.difference(previous, current)).mean[0] / 255 > threshold)
 
 
 def encode(image, long_edge):
