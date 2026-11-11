@@ -61,16 +61,16 @@ class Desktop:
         if not self.supports_capture:
             raise RuntimeError("Monitor capture is unsupported on this platform")
         from threading import Event
-        from PIL import Image
         from windows_capture import WindowsCapture
+        from .capture_loop import _wgc_image
 
         arrived, frames, control = Event(), [], []
-        capture = WindowsCapture(monitor_index=monitor["id"] - 1, cursor_capture=True, draw_border=False)
+        capture = WindowsCapture(monitor_index=monitor["id"], cursor_capture=True, draw_border=False)
 
         @capture.event
         def on_frame_arrived(frame, capture_control):
             if not frames:
-                frames.append(Image.fromarray(frame.to_bgr()[..., ::-1].copy(), "RGB"))
+                frames.append(_wgc_image(frame))
                 capture_control.stop()
                 arrived.set()
 
