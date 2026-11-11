@@ -126,8 +126,9 @@ class Inventory:
         while True:
             self._dirty = False
             try:
-                await self.sample(runtime)
-                if any(getattr(runtime, "sockets", {}).values()):
+                had_view = self.sampled_at is not None
+                # No grant before or after means the view did not change: no push to every tab.
+                if (await self.sample(runtime) or had_view) and any(getattr(runtime, "sockets", {}).values()):
                     await push_resources(runtime)
             except Exception:
                 logger.exception("docker workloads: background refresh failed")

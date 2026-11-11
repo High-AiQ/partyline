@@ -134,6 +134,24 @@ class InventoryTest(WorkloadsBase):
         self.assertEqual(len(calls), 2)
         await self.inventory.close()
 
+    async def test_refresh_pushes_only_when_the_view_can_have_changed(self):
+        self.runtime.sockets = {"alpha": {object()}}
+        self.grant = False
+        with patch("partyline.browser_snapshots.push_resources", new_callable=AsyncMock) as push:
+            self.inventory.kick(self.runtime)
+            await self.inventory._task
+            push.assert_not_awaited()  # no grant before or after: nothing to tell every tab
+            self.grant = True
+            with patch.object(docker_workloads.docker_api, "request", AsyncMock(return_value=(200, []))):
+                self.inventory.kick(self.runtime)
+                await self.inventory._task
+            self.assertEqual(push.await_count, 1)
+            self.grant = False
+            self.inventory.kick(self.runtime)
+            await self.inventory._task
+            self.assertEqual(push.await_count, 2)  # the grant ended: tabs drop the Docker numbers
+        await self.inventory.close()
+
     async def test_no_grant_clears_deadlines(self):
         handle = Mock()
         self.inventory.deadlines.handles["old"] = (1, handle)

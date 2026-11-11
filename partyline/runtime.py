@@ -281,6 +281,8 @@ class ChatRuntime(DeliveryCreditMixin):
                     )))
                     from .screen_snapshot import send_snapshot
                     await send_snapshot(self, ws, conv_id)
+                    from .docker_workloads import inventory  # after hello: its push never precedes it
+                    inventory.kick(self)
                     if reattacher is not None and (offer := reattacher.offer(conv_id)):
                         await pushed("chat", ws.send_json(offer.model_dump()))
                     continue

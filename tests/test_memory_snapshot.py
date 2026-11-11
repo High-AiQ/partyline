@@ -27,7 +27,7 @@ class MemorySnapshotTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.memory_usage["worker"]["percent"], 40)
         table.assert_not_called()
 
-    async def test_connect_reads_memory_and_requests_docker_refresh(self):
+    async def test_hello_reads_memory_and_leaves_the_docker_refresh_to_after_hello(self):
         runtime = SimpleNamespace(db=object())
         speech = SimpleNamespace(settings=SimpleNamespace(model_dump=lambda: {}))
         with patch.object(browser_snapshots, "speech_snapshot", return_value=speech), \
@@ -35,11 +35,13 @@ class MemorySnapshotTest(unittest.IsolatedAsyncioTestCase):
                 patch("partyline.docker_workloads.inventory.kick") as docker, \
                 patch.object(memory_snapshot, "refresh", new_callable=AsyncMock) as refresh:
             hello = await browser_snapshots.hello_payload(runtime, "line", "name", "build", "1", None)
+            docker.assert_not_called()  # the runtime kicks once hello is sent, so its push follows hello
+            self.assertEqual((await browser_snapshots.resource_snapshot(runtime))["live_processes"], 7)
         self.assertEqual(hello["resource_snapshot"]["live_processes"], 7)
         docker.assert_called_once_with(runtime)
-        refresh.assert_awaited_once_with(runtime)
+        self.assertEqual(refresh.await_count, 2)
 
-    async def test_connect_does_not_wait_for_a_hung_docker_daemon(self):
+    async def test_a_resource_read_does_not_wait_for_a_hung_docker_daemon(self):
         import asyncio
         from partyline.docker_workloads import Inventory
 
@@ -57,8 +59,8 @@ class MemorySnapshotTest(unittest.IsolatedAsyncioTestCase):
                 patch.object(memory_snapshot, "refresh", new_callable=AsyncMock), \
                 patch.object(browser_snapshots, "speech_snapshot", return_value=speech), \
                 patch.object(browser_snapshots, "_view", return_value={"live_processes": 7}):
-            hello = await browser_snapshots.hello_payload(runtime, "line", "name", "build", "1", None)
-            self.assertEqual(hello["resource_snapshot"]["live_processes"], 7)
+            view = await browser_snapshots.resource_snapshot(runtime)
+            self.assertEqual(view["live_processes"], 7)
             await started.wait()
             await inventory.close()
 

@@ -15,18 +15,19 @@ def speech_snapshot(db):
 async def hello_payload(runtime, *identity):
     from .handshake import hello_payload as identity_payload
     speech = await asyncio.to_thread(speech_snapshot, runtime.db)
-    resources = await resource_snapshot(runtime)
+    resources = await resource_snapshot(runtime, refresh_docker=False)  # runtime kicks after hello
     return {**identity_payload(*identity), 'speech_settings': speech.settings.model_dump(),
             'resource_snapshot': resources}
 
 
-async def resource_snapshot(runtime):
-    """Read memory now and refresh the cached Docker inventory in the background."""
+async def resource_snapshot(runtime, *, refresh_docker=True):
+    """Read memory now and, unless told not to, refresh the cached Docker inventory in the background."""
     from .docker_workloads import inventory
     from .memory_snapshot import refresh
     await refresh(runtime)
     view = await asyncio.to_thread(_view, runtime)
-    inventory.kick(runtime)
+    if refresh_docker:
+        inventory.kick(runtime)
     return view
 
 
