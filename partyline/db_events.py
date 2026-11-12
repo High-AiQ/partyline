@@ -71,10 +71,13 @@ class Subscription:
             _current.reset(token)
 
     async def wait(self, delay=None):
+        # The cursor belongs to the subscription, not to whichever task happens to wait: a
+        # consumer that waits in a fresh task each time would otherwise start behind every
+        # earlier notification and never block again.
         if delay is None:
-            await self.changes.wait()
+            await self.changes.wait(self)
         else:
             try:
-                await asyncio.wait_for(self.changes.wait(asyncio.current_task()), max(0, delay))
+                await asyncio.wait_for(self.changes.wait(self), max(0, delay))
             except TimeoutError:
                 pass  # no-poll (b): one deadline computed from persisted state
