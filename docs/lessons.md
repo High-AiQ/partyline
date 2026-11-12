@@ -1,5 +1,18 @@
 # Lessons: the false-assumptions ledger
 
+## Matching a message's text does not prove the message was pasted
+
+The false assumption was that a pending message whose whole digest line appears in the kept
+session's later records has been delivered. A message is not delimited in a paste: the line
+`[captain]: @worker rebase onto main` is also the opening line of an earlier, longer message
+by the same speaker, so the short one was credited as held, left out of the resume, and the
+cursor moved past it and past the next (integration review of #507, the second finding on the
+same feature after the bound that dropped unseen messages). Tightening the pattern only moves
+the ambiguity. The resume skip is switched off (`resume_replay.CREDIT_KEPT_SESSION`), so
+every pending message is replayed as before; it returns when a paste is proven by its marker
+recorded with the ids it carried. Proof of delivery must come from an identifier partyline
+wrote, never from what the content looks like. Tests: `tests/test_resume_unseen.py`.
+
 ## Object existence does not protect a pruned checkout's only copy
 
 The false assumption was that cat-file success proved durable preservation.

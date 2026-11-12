@@ -1,9 +1,10 @@
 """What a resumed process is pasted of the messages addressed to it while it was away.
 
 A process that kept its own session already holds some of them, and pasting those again costs
-its context a second time. So a resume skips only what the session *provably* holds and says how
-to reread it. Every other message is pasted in full, oldest first, on every adapter: a bound on
-unseen messages would let the delivery receipt move the cursor past ones never delivered.
+its context a second time. So a resume may skip only what the session *provably* holds and say
+how to reread it. Every other message is pasted in full, oldest first, on every adapter: a bound
+on unseen messages would let the delivery receipt move the cursor past ones never delivered.
+The skip itself is switched off (``CREDIT_KEPT_SESSION``) until the proof is sound.
 """
 
 from __future__ import annotations
@@ -15,6 +16,12 @@ from .message_visibility import BRIDGE_DIGEST_CLAUSE
 from .notice_policy import is_informational
 
 READ_PAGE = 50
+# Off: every pending message is replayed, as before 2.116.0. The proof is a match on text, and
+# text cannot tell a message from the opening lines of an earlier, longer one by the same
+# speaker, so a message never pasted was credited as held (integration review of #507). The
+# skip returns when a paste is proven by its marker (`[partyline-paste: ...]`) recorded with
+# the message ids it carried, not by what its words look like.
+CREDIT_KEPT_SESSION = False
 
 
 def _skipped_note(att: dict, skipped: list[dict]) -> dict:
@@ -61,7 +68,7 @@ def credited_tail(runtime, att: dict, count: int = 5) -> list[dict]:
 
 async def for_resume(runtime, att: dict, pending: list[dict]) -> list[dict]:
     """``pending`` less what the kept session provably holds; the cursor follows only that run."""
-    if att.get("adapter") == "opencode-v2" and att.get("cli_session") and pending:
+    if CREDIT_KEPT_SESSION and att.get("adapter") == "opencode-v2" and att.get("cli_session") and pending:
         from partyline.adapters.bundled.opencode.seen import seen_ids
 
         credited = credited_tail(runtime, att)

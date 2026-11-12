@@ -21,6 +21,8 @@ STORE = "partyline.adapters.bundled.opencode.seen.store_path"
 
 
 class UnseenResumeTest(unittest.TestCase):
+    CREDIT = True
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -29,6 +31,10 @@ class UnseenResumeTest(unittest.TestCase):
         self.runtime = ChatRuntime(self.db)
         self.db.create_conversation("line", "Line")
         self.db.add_attachment("cap", "line", "cap", "fake", ["fake"], "/tmp", "co")
+        if self.CREDIT:  # the mechanism under test; production keeps it off
+            credit = patch("partyline.resume_replay.CREDIT_KEPT_SESSION", True)
+            credit.start()
+            self.addCleanup(credit.stop)
 
     def worker(self, adapter):
         self.db.add_attachment("w", "line", "worker", adapter, ["x"], "/tmp", "wo")
@@ -91,6 +97,28 @@ class UnseenResumeTest(unittest.TestCase):
         row = self.db.get_attachment("w")
         self.assertEqual(row["last_seen"], ids[-1])  # after the paste, all delivered or provably seen
         self.assertEqual(digest_candidates(self.db, "line", row["last_seen"], "worker", "w"), [])
+
+
+class ShippedResumeTest(UnseenResumeTest):
+    """As shipped, the kept session vouches for nothing: every pending message is pasted."""
+
+    CREDIT = False
+    test_interleaved_seen_and_unseen_pastes_every_unseen_and_credits_only_the_unbroken_run = None
+
+    def test_a_message_that_opens_like_an_earlier_longer_one_is_pasted_not_credited(self):
+        """The text proof took "rebase onto main" for the first line of a longer message the
+        session held, credited it unpasted and moved the cursor past it (review of #507)."""
+        att = self.worker("opencode-v2")
+        ids = [self.db.add_message("line", "cap", "agent", body)["id"] for body in (
+            "@worker rebase onto main\n\nDetails: keep the merge commit.",
+            "@worker rebase onto main",
+            "@worker and run the gates afterwards")]
+        backlog = addressed_backlog(self.runtime, att)
+        store = self.session([f"[cap]: {backlog[0]['body']}"])  # pasted once, its proof lost
+        with patch(STORE, lambda _att: store):
+            replay = asyncio.run(for_resume(self.runtime, att, backlog))
+        self.assertEqual([m["id"] for m in replay], ids)
+        self.assertEqual(self.db.get_attachment("w")["last_seen"], 0)
 
 
 if __name__ == "__main__":

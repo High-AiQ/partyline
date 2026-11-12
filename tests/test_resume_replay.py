@@ -31,6 +31,10 @@ class ReplayTest(unittest.TestCase):
         self.att = {**self.db.get_attachment("me")}
         self.runtime = type("R", (), {"db": self.db})()
         self.store = Path(self.directory.name) / "opencode.db"
+        # The mechanism under test; production keeps it off (see CREDIT_KEPT_SESSION).
+        credit = patch("partyline.resume_replay.CREDIT_KEPT_SESSION", True)
+        credit.start()
+        self.addCleanup(credit.stop)
 
     def session(self, lines, session="ses"):
         db = sqlite3.connect(self.store)
