@@ -7,6 +7,7 @@ import socket
 import tempfile
 import threading
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 import uvicorn
@@ -142,6 +143,48 @@ class StreamFollowerTests(unittest.TestCase):
         server._poll_capabilities()
         self.assertTrue(server._revoked)
         self.assertEqual((len(streams), server._poll_stop.delays), (1, []))
+
+
+class StreamParsingTests(unittest.TestCase):
+    def test_a_line_that_is_not_a_revision_breaks_the_stream_rather_than_being_guessed_at(self):
+        class Response:
+            status = 200
+
+            def __init__(self, lines):
+                self.lines = iter(lines)
+
+            def readline(self, _limit):
+                return next(self.lines, b"")
+
+        class Connection:
+            def __init__(self, lines):
+                self.sock, self.response, self.closed = unittest.mock.Mock(), Response(lines), False
+
+            def connect(self):
+                pass
+
+            def request(self, *args, **kwargs):
+                pass
+
+            def getresponse(self):
+                return self.response
+
+            def close(self):
+                self.closed = True
+
+        for garbage in (b"not json\n", b"[1]\n", b'{"version": 7}\n'):
+            client = PartylineClient.__new__(PartylineClient)
+            client.connection = {"api": "http://127.0.0.1:1", "token": "secret"}
+            client._active_lock, client._active_connections = threading.Lock(), set()
+            client._interrupted = False
+            connection = Connection([b'{"version": "epoch:1"}\n', garbage])
+            client._origin = lambda connection=connection: connection
+            stream = client.capability_stream()
+            self.assertEqual(next(stream), "epoch:1")
+            with self.subTest(garbage=garbage), self.assertRaisesRegex(ApiError, "invalid capability"):
+                next(stream)
+            self.assertTrue(connection.closed)
+            self.assertEqual(client._active_connections, set())
 
 
 class CapabilityStreamRoundtripTests(unittest.TestCase):
