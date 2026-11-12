@@ -86,8 +86,9 @@ class MCPServer:
                 if version != self._capability_version and not self._refresh_signature():
                     return False
                 delivered = True
-        except Exception:
-            if not self._poll_stop.is_set():
+        except Exception as exc:
+            self._revoked = self._revoked or (isinstance(exc, ApiError) and "HTTP 401" in str(exc))
+            if not (self._poll_stop.is_set() or self._revoked):
                 logger.warning("MCP capability stream failed; it will reconnect", exc_info=True)
             return False
         return delivered

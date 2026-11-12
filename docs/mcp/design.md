@@ -71,7 +71,7 @@ The server lists tools for the caller's live state only. Names are short and uni
 | --- | --- | --- | --- |
 | `whoami` | always | own line detail and children; capability state is refreshed by MCP before tool dispatch | identity, role, actions, members, parent, live children, a count of retired children |
 | `guide` | always | `/api/docs` by category and topic; local tool schemas for no-argument worker calls | all attached processes read docs on demand; `topic: captain` with no category returns captain operations (empty unless a live lead), while `topic: worker` returns the caller's live non-captain core, task, resource, and handover tools plus the docs route |
-| `read_messages` | `read` | messages, messages around an id | limit clamped to 1 to 50; unset fields omitted; a page over the reply bound keeps whole messages nearest the cursor and returns `resume` |
+| `read_messages` | `read` | messages, messages around an id | limit clamped to 1 to 50; unset fields omitted; a page over the reply bound keeps whole messages nearest the cursor (the newest; the oldest after `after_id`; the target and its neighbours on both sides for `around_id`) and returns `resume` |
 | `post_message` | listed for `write` or `assign` | message post | refuses the caller's own line; `client_key` required; no action check in MCP, the message route decides |
 | `react` | listed for `write` | reactions, by message id | POST toggles the reaction; `remove: true` uses DELETE; the route decides line authorization |
 | `upload_file` | `upload` on the target line (own line or task root for workers) | files | one regular file of at most 20 MiB; `client_key` required |

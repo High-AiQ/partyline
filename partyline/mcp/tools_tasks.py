@@ -111,10 +111,12 @@ def tool_list(state):
         if name == 'tasks':
             schema['properties']['include_retired'] = {'type': 'boolean', 'description': (
                 'Also list tasks whose line is retired, oldest first. Default false: the live board.')}
+            schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1, 'description': (
+                'A task line id: return that one task in full, nothing cut.')}
             description = ("The board: every task on a live line, with status, handles and workspaces. "
                            "Workspaces show real and mirror tips; the mirror tip is where the worker's "
                            f"commits live until accept. Text over {BOARD_TEXT} characters is cut short; "
-                           "read the task's line for all of it.")
+                           "pass conv_id for one task in full.")
         result.append({'name': name, 'description': description, 'inputSchema': schema})
     return result
 
@@ -127,6 +129,8 @@ def call(client, name, args, state):
     body = dict(args)
     conv = body.pop('conv_id', client.home)
     method, tail = _PATHS[name]
+    if name == 'tasks' and 'conv_id' in args:
+        return client.request('GET', f"/api/conversations/{quote(conv, safe='')}/task")
     if name == 'tasks':
         tail += '?include_retired=true' if body.get('include_retired') else ''
         return _board(client.request('GET', f"/api/conversations/{quote(conv, safe='')}/{tail}"))

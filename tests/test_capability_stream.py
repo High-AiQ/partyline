@@ -145,6 +145,25 @@ class StreamFollowerTests(unittest.TestCase):
         self.assertEqual((len(streams), server._poll_stop.delays), (1, []))
 
 
+class StreamRevocationTests(StreamFollowerTests):
+    def test_a_401_on_the_stream_itself_ends_the_watcher_without_a_traceback_a_retry(self):
+        client = FakeClient()
+        streams = []
+
+        def capability_stream():
+            streams.append(1)
+            raise ApiError("Partyline HTTP 401")
+            yield  # pragma: no cover - makes this a generator
+
+        client.capability_stream = capability_stream
+        server, _ = self.server(client)
+        server._poll_stop = self.Stop(waits=99)
+        with self.assertNoLogs("partyline.mcp.server", "WARNING"):
+            server._poll_capabilities()
+        self.assertTrue(server._revoked)
+        self.assertEqual((len(streams), server._poll_stop.delays), (1, []))
+
+
 class StreamParsingTests(unittest.TestCase):
     def test_a_line_that_is_not_a_revision_breaks_the_stream_rather_than_being_guessed_at(self):
         class Response:
@@ -279,11 +298,19 @@ class CapabilityStreamRoundtripTests(unittest.TestCase):
         self.assertEqual(second, self.versions.current("att-a"))
         self.assertNotEqual(second, first)
         # A row the tool list depends on changes: the database trace pushes it.
-        self.db.set_attachment_status("att-a", "detached", "owner")
+        self.db.create_conversation("another", "Another")
         self.assertNotEqual(following(), second)
         self.stop()  # the stream is still open; shutdown must end it, not wait on it
         while (line := following()) is not StopIteration:
             self.assertIsInstance(line, str)  # a revision pushed before the stop
+
+    def test_the_stream_of_a_process_that_was_detached_ends(self):
+        following = self.follow(self.client(self.token))
+        self.assertIsInstance(following(), str)
+        self.db.set_attachment_status("att-a", "detached", "owner")
+        while (line := following()) is not StopIteration:
+            self.assertIsInstance(line, str)
+        self.assertEqual(self.versions._waiters, {})
 
     def test_the_bridge_can_abandon_an_idle_stream(self):
         client = self.client(self.token)

@@ -44,6 +44,34 @@ class MessagePageTests(unittest.TestCase):
         self.assertEqual(kept, list(range(11, kept[-1] + 1)))
         self.assertEqual(page["resume"], {"after_id": kept[-1]})
 
+    def test_a_page_around_a_message_keeps_that_message_and_both_its_sides(self):
+        """Trimmed like the latest page, a long tail pushed the message asked for off the reply."""
+        client = FakeClient()
+        rows = [message(ident, "x" * 300) for ident in range(80, 100)]
+        rows += [message(100, "the target")] + [message(ident, "y" * 1200) for ident in range(101, 121)]
+        client.request = lambda method, path, payload=None: {
+            "messages": rows, "has_more_before": False, "has_more_after": True}
+        page = tools_core.call(client, "read_messages", {"around_id": 100, "limit": 20}, client.state)
+        kept = [row["id"] for row in page["messages"]]
+        self.assertIn(100, kept)
+        self.assertEqual(kept, list(range(kept[0], kept[-1] + 1)))
+        self.assertLess(kept[0], 100)
+        self.assertGreater(kept[-1], 100)
+        self.assertEqual(page["resume"], {"before_id": kept[0], "after_id": kept[-1]})
+        self.assertEqual((page["has_more_before"], page["has_more_after"]), (True, True))
+        self.assertNotIn("has_more", page)
+        self.assertLess(len(render(page, "http://127.0.0.1:8643")), MAX_TEXT)
+        long_both = [message(ident, "z" * 1500) for ident in range(1, 42)]
+        client.request = lambda method, path, payload=None: {
+            "messages": long_both, "has_more_before": False, "has_more_after": False}
+        page = tools_core.call(client, "read_messages", {"around_id": 21, "limit": 20}, client.state)
+        kept = [row["id"] for row in page["messages"]]
+        self.assertLessEqual(abs((21 - kept[0]) - (kept[-1] - 21)), 1)  # grown evenly outwards
+        self.assertEqual(page["resume"], {"before_id": kept[0], "after_id": kept[-1]})
+        self.assertEqual((page["has_more_before"], page["has_more_after"]), (True, True))
+        small = self.page(FakeClient(), {"around_id": 2}, [message(1, "a"), message(2, "b")])
+        self.assertNotIn("resume", small)
+
     def test_one_message_larger_than_the_reply_is_still_returned(self):
         page = self.page(FakeClient(), {}, [message(1), message(2, "y" * 50_000)])
         self.assertEqual([row["id"] for row in page["messages"]], [2])

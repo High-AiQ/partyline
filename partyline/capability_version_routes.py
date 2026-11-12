@@ -22,6 +22,9 @@ def router_for(runtime):
 
         async def lines():
             async for version in versions.changes(principal.attachment_id):
+                current = runtime.db.get_attachment(principal.attachment_id)
+                if current is None or current["status"] not in ("starting", "running"):
+                    return  # its credential died with it; the bridge's next request gets the 401
                 yield json.dumps({"version": version}) + "\n"
 
         return StreamingResponse(lines(), media_type="application/x-ndjson",

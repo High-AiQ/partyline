@@ -41,7 +41,8 @@ class CapabilityVersions:
             table = words[2]
         else:
             return
-        table = table.strip('"`[]').split(".")[-1]
+        # "INSERT INTO attachments(id, ...)": the column list is not part of the name.
+        table = table.split("(")[0].strip('"`[]').split(".")[-1]
         if table not in self._tables:
             return
         if operation == "update":

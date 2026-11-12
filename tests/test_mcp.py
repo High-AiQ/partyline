@@ -806,6 +806,8 @@ class RenderAndServerTests(unittest.TestCase):
         connection.execute("INSERT INTO conversations VALUES ('line')")
         after = versions.current("att-2")
         self.assertNotEqual(before, after)
+        connection.execute("INSERT INTO conversations(id) VALUES ('no space before the columns')")
+        self.assertNotEqual(after, versions.current("att-2"))
         connection.execute("CREATE TABLE messages (id INTEGER)")
         unrelated = versions.current("att-2")
         connection.execute("INSERT INTO messages VALUES (1)")

@@ -178,7 +178,7 @@ def call(client, name: str, args: dict, home_state: dict):
                 query.append(f"{key}={int(args[key])}")
         path = f"/api/conversations/{quote(conv, safe='')}/messages{'' if around is None else '/around'}"
         return message_page(client.request("GET", f"{path}?{'&'.join(query)}"),
-                            forward=around is None and args.get("after_id") is not None)
+                            around is None and args.get("after_id") is not None, around)
     if name == "post_message":
         conv = args.get("conv_id", "")
         if not conv or conv == client.home:

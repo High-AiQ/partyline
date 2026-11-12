@@ -37,6 +37,11 @@ class TaskToolsTest(unittest.TestCase):
             'GET', '/api/conversations/root/tasks?include_retired=true')
         with self.assertRaises(ValueError):
             tools_tasks.call(self.client, 'tasks', {'include_retired': 'yes'}, self.root)
+        full = {'conv_id': 'task id', 'findings': 'finding ' * 400}
+        self.client.request.return_value = full
+        self.assertEqual(tools_tasks.call(self.client, 'tasks', {'conv_id': 'task id'}, self.root), full)
+        self.client.request.assert_called_with('GET', '/api/conversations/task%20id/task')
+        self.client.request.return_value = {'ok': True}
         tools_tasks.call(self.client, 'review_verdict', {
             'conv_id': 'task id', 'verdict': 'approve', 'findings': 'reviewed'}, self.root)
         self.client.request.assert_called_with('POST', '/api/conversations/task%20id/review-verdict',
