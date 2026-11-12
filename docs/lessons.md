@@ -2163,3 +2163,36 @@ detached and no wake was registered. The false assumption was that a future acti
 in a status message would arrange its own continuation. Check structured open work
 at turn end and surface a stranded tree immediately; register an actual wake for
 future work rather than relying on prose.
+
+## 2026-11-12 — A captain that detaches itself on a timer cannot see new work arrive
+
+The false assumption was that "detach everything, yourself last" was safe to leave to the captain. A self-detach
+stops the CLI before its last message is relayed, so the captain worked around it: a background `sleep 90` followed
+by its own `DELETE /api/attachments/<id>`, started just before its closing message. The timer is blind. The new
+idle alert woke the captain with real work seconds after one such message; the timer fired 87 seconds later and
+stopped it in the middle of that work, during a compaction, with no report. The same rule read "completely blocked
+waiting on a person" as "asked a person a question", so the captain left after every question and had to be resumed
+for every answer; the CLI greeted each such resume with a synthetic `No response requested.` that was relayed as
+speech. The rule is now the one a person stated: a worker detaches nothing, a captain detaches other processes, and
+a captain detaches itself only when a person explicitly tells it to or through a handover. The server enforces it:
+a captain's own detach is refused unless it names the person who asked (`?told_by=<handle>`), and a captain-called
+`attachments/close` leaves the caller attached. The Claude adapter no longer relays the CLI's synthetic filler. A
+rule a process can satisfy with a timer will be satisfied with a timer; put the gate in the server. Finding out who
+had detached it took a transcript read: the detach audit lines added after an earlier incident were logged at INFO
+under loggers the service leaves at WARNING, so the journal held none of them. Those loggers are now configured, and
+a test reads the configured output rather than `assertLogs`, which sees a record whether or not it would be written.
+Tests: `tests/test_self_detach.py`, `tests/test_server.py`, `tests/test_line_process_routes.py`,
+`tests/test_claude_adapter.py`, `tests/test_access_logging.py`.
+
+## 2026-11-12 — A new alert must be run against an old database before it ships
+
+The false assumption was that every unacknowledged report is open work. Retiring a line never acknowledged its
+reports, so a long-lived root held 62 of them from lines closed weeks earlier. The idle alert shipped with tests
+that only ever built a fresh tree, and its first act on the real one was to recite all 62, one by one, to the room
+and to the captain. The alert now walks only live lines, ignores a retired line's reports, and names five items
+before counting the rest. Its sibling shipped the same day with the mirror-image flaw: "an unknown handle wakes
+the speaker" was tested with a made-up name and met real prose, where `@mention` and `@names` are words. It woke
+the captain three times in a row over its own apologies. Unknown names in code, or in a message that reached
+someone, are no longer reported unless they resemble a real handle. A check that reads accumulated state or free
+text needs a regression built from that state and that text, not from a clean fixture. Tests:
+`tests/test_captain_idle.py`, `tests/test_unreached_notice.py`.

@@ -19,6 +19,7 @@ from .mcp_attach import remove_config
 from .resource_leases import release_attachment_leases
 from .attachment_tmp import reap_tmp_dir
 from .attachment_stop_audit import actor
+from .self_detach import asked_self_detach as asked_self_detach, own
 
 LIVE = ("starting", "running")
 DETACH_STOP_TIMEOUT = 2.5
@@ -281,10 +282,11 @@ def register_line_process_routes(app: FastAPI, runtime) -> None:
         deny_unless(runtime.db, principal, conv_id, "close")
         if conversation["archived_at"] is not None:
             raise HTTPException(409, "restore the line before closing its processes")
-        live = live_attachments(runtime.db, conv_id, include_children)
+        # A captain clearing its tree stays attached itself (``self_detach``).
+        live = [attachment for attachment in live_attachments(runtime.db, conv_id, include_children)
+                if not own(principal, attachment["id"])]
         for attachment in live:
-            await detach_attachment(runtime, attachment["id"], hint=True, self_detach=(
-                principal.kind == "machine" and principal.attachment_id == attachment["id"]),
-                source="api.close_line_processes",
-                caller=principal.attachment_id or f"{principal.kind}:{principal.user_id}")
+            await detach_attachment(runtime, attachment["id"], hint=True,
+                                    source="api.close_line_processes",
+                                    caller=principal.attachment_id or f"{principal.kind}:{principal.user_id}")
         return {"ok": True, "stopped": [attachment["name"] for attachment in live]}
