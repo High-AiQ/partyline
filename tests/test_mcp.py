@@ -12,6 +12,7 @@ from partyline.mcp import client as client_module
 from partyline.mcp.client import ApiError, PartylineClient
 from partyline.mcp.render import MAX_TEXT, render
 from partyline.mcp import server as server_module
+from partyline.mcp.validation import validate_arguments
 from partyline.mcp.server import MCPServer
 from partyline.mcp import tools_core
 from partyline.mcp import tools_captain
@@ -589,15 +590,15 @@ class CoreArgumentValidationTests(unittest.TestCase):
 
     def test_required_types_and_array_bounds_are_validated(self):
         with self.assertRaisesRegex(ValueError, "missing required"):
-            server_module.validate_arguments({"required": ["x"]}, {})
+            validate_arguments({"required": ["x"]}, {})
         with self.assertRaisesRegex(ValueError, "wrong type"):
-            server_module.validate_arguments(
+            validate_arguments(
                 {"properties": {"x": {"type": "integer"}}}, {"x": True})
         schema = {"properties": {"items": {"type": "array", "minItems": 1,
                                             "maxItems": 2, "items": {"type": "string"}}}}
         for value in ([], ["a", "b", "c"], [1]):
             with self.assertRaises(ValueError):
-                server_module.validate_arguments(schema, {"items": value})
+                validate_arguments(schema, {"items": value})
 
     def test_non_object_arguments_are_not_coerced_to_empty_object(self):
         client = FakeClient()
@@ -770,7 +771,10 @@ class RenderAndServerTests(unittest.TestCase):
                  ["result"]["tools"]}
         self.assertIn("screen_frame", names)
         self.assertIn("screen_elements", names)
-        self.assertIn("screen_click", names)
+        self.assertNotIn("screen_click", names)
+        extras = next(tool for tool in json.loads(output.getvalue().splitlines()[-1])["result"]["tools"]
+                      if tool["name"] == "extras")
+        self.assertIn("screen_click", extras["description"])
 
     def test_live_screen_capabilities_resolve_attachment_grants(self):
         from types import SimpleNamespace
@@ -846,7 +850,8 @@ class RenderAndServerTests(unittest.TestCase):
         reports_tool = next(item for item in promoted if item["name"] == "reports")
         self.assertIn("2000", reports_tool["inputSchema"]["properties"]["body"]["description"])
         self.assertIn("/api/conversations/home/reports", str(client.requests))
-        self.assertIn("set_goal", [item["name"] for item in promoted])
+        captain_tool = next(item for item in promoted if item["name"] == "captain")
+        self.assertIn("set_goal", captain_tool["description"])
         self.assertNotIn("set_goal", [item["name"] for item in demoted])
         self.assertIn("captain", [item["name"] for item in demoted])
         self.assertNotIn("post_message", [item["name"] for item in demoted])

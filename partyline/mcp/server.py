@@ -10,10 +10,7 @@ import threading
 from .. import __version__
 from .client import ApiError, PartylineClient
 from .render import render
-from . import tools_blender, tools_captain, tools_check, tools_control, tools_core, tools_tasks
-from . import tools_resources, tools_handover
-from .captain_schemas import ACK_HINT
-from .validation import validate_arguments
+from . import catalog
 
 logger = logging.getLogger(__name__)
 MAX_LINE = 1_000_000
@@ -137,10 +134,7 @@ class MCPServer:
                 self._capability_version = state.get("capability_version")
                 if self._dynamic_screen_tools:
                     self._watch_ready.set()
-                tools = (tools_core.tool_list(state) + tools_captain.tool_list(state)
-                         + tools_tasks.tool_list(state) + tools_resources.tool_list(state)
-                         + tools_handover.tool_list(state) + tools_control.tool_list(state)
-                         + tools_blender.tool_list(state) + tools_check.tool_list(state))
+                tools = catalog.listed(state)
                 return self.response(ident, {"tools": tools})
             except ApiError as exc:
                 self._revoked = self._revoked or "HTTP 401" in str(exc)
@@ -168,38 +162,7 @@ class MCPServer:
                 self._state_signature = signature
                 if changed:
                     self.send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
-            core_names = {tool["name"] for tool in tools_core.tool_list(state)}
-            captain_names = {tool["name"] for tool in tools_captain.tool_list(state)}
-            task_names = {tool["name"] for tool in tools_tasks.tool_list(state)}
-            resource_names = {tool['name'] for tool in tools_resources.tool_list(state)}
-            handover_names = {tool['name'] for tool in tools_handover.tool_list(state)}
-            control_names = {tool['name'] for tool in tools_control.tool_list(state)}
-            blender_names = {tool['name'] for tool in tools_blender.tool_list(state)}
-            if name in blender_names:
-                value = tools_blender.call(self.client, name, args, state)
-            elif name in {tool['name'] for tool in tools_check.tool_list(state)}:
-                value = tools_check.call(self.client, name, args, state)
-            elif name in control_names:
-                value = tools_control.call(self.client, name, args, state)
-            elif name in handover_names:
-                value = tools_handover.call(self.client, name, args, state)
-            elif name in resource_names:
-                value = tools_resources.call(self.client, name, args, state)
-            elif name in task_names:
-                value = tools_tasks.call(self.client, name, args, state)
-            elif name in core_names:
-                schema = next(tool["inputSchema"] for tool in tools_core.tool_list(state)
-                              if tool["name"] == name)
-                validate_arguments(schema, args, ACK_HINT if name == "reports" else "")
-                value = tools_core.call(self.client, name, args, state)
-            elif name in captain_names:
-                value = tools_captain.call(self.client, name, args, state)
-            else:
-                if name in {"screen_frame", "screen_elements", "screen_element_action",
-                            "screen_control_request", "screen_click", "screen_move",
-                            "screen_drag", "screen_scroll", "screen_type", "screen_key"}:
-                    raise ApiError("no screen shared with you")
-                raise ValueError("tool is not currently available to this attachment")
+            value = catalog.dispatch(self.client, name, args, state)
             text = render(value, self.client.connection["api"].rstrip("/"))
             return self.response(ident, {"content": [{"type": "text", "text": text}]})
         except (ApiError, ValueError, KeyError, TypeError, OSError) as exc:
