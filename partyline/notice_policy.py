@@ -4,8 +4,8 @@ A system notice is *needs-action* when the process that would read it may have t
 decide or learn something it cannot know otherwise, and *informational* when it only records
 what already happened: a restart that finished, a wait that was declared, a worktree the
 process itself asked for. (A reaction on an older message posts no notice at all.) People read
-every notice in the line and the UI; this rule only decides what is pasted into a process's turn, where each line
-costs tokens on every later turn.
+every notice in the line and the UI; this rule only decides what is pasted into a process's turn,
+where each line costs tokens on every later turn.
 
 Unknown notices are needs-action. A new system notice is delivered until someone reads it
 and adds it here, because wrongly hiding an instruction costs more than a stale line.

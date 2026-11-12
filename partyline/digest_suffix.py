@@ -18,10 +18,17 @@ class SuffixGate:
         self.deliveries = 0
         self.through = 0
         self.credited = 0
+        self.compactions: int | None = None
         self.last: dict[str, tuple[str, int, int]] = {}  # key -> text, delivery number, carrier's top id
 
-    def begin(self, messages: list[dict], credited: int) -> None:
-        """One delivery is starting: its top message id, and how far the host has proof of."""
+    def begin(self, messages: list[dict], credited: int, compactions: int = 0) -> None:
+        """One delivery is starting: its top message id, and how far the host has proof of.
+
+        A compaction summarises the lines away, so the next delivery carries them all again.
+        """
+        if self.compactions is not None and compactions != self.compactions:
+            self.last.clear()
+        self.compactions = compactions
         self.deliveries += 1
         self.through = max((int(m.get("id") or 0) for m in messages), default=0)
         self.credited = credited
@@ -43,5 +50,5 @@ def begin_gate(att: dict, messages: list[dict]):
     """The attachment's gate, started for this delivery; None when it has none (always send)."""
     gate = att.get("suffix_gate")
     if gate is not None:
-        gate.begin(messages, att["credited_through"]())
+        gate.begin(messages, att["credited_through"](), att["compaction_count"]())
     return gate

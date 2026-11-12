@@ -2603,12 +2603,13 @@ last. The listings now return live lines first and a page of retired ones, with 
 ## 2026-11-12 — A system notice that asks nothing of the reader is not worth pasting
 
 The false assumption was that every system notice should ride the next digest of every process. "Waiting, not
-stalled", reaction echoes (a 👍 pasted to the process that was thanked), "resumed" and "ready after restart"
-lines asked nothing of the reader and were most of the system text a process received in an hour. Each notice
+stalled", reaction echoes on old messages, "resumed" and "ready after restart" lines asked nothing of the reader and were most of the system text a process received in an hour. Each notice
 is now classified in `partyline/notice_policy.py`: a registry of the informational ones, and anything unknown
 is needs-action, so a new notice type fails safe. Only needs-action notices reach a process; every notice is
-still stored, broadcast and shown to people. A reaction other than ❌ no longer wakes the process; it reads the
-reaction with `read_messages`. Tests: `tests/test_notice_policy.py`, `tests/test_reactions.py`.
+still stored, broadcast and shown to people. A reaction is a notice only when a person reacts to the process's own
+most recent message on the line: that may be the whole answer to "shall I proceed?" and must wake it, any emoji.
+A reaction on an older message, or from another process, posts no notice and wakes nobody; the process reads it
+with `read_messages`. (A first cut dropped every non-❌ reaction and would have stalled a process waiting on a 👍.) Tests: `tests/test_notice_policy.py`, `tests/test_reactions.py`.
 
 ## 2026-11-12 — "Unseen" on resume is not "never pasted"
 
@@ -2618,7 +2619,10 @@ advances only on proof of a paste, so a paste whose proof was lost (the process 
 25,000 characters for thirty messages. A resume now reads the kept session's own user records
 (`partyline/adapters/bundled/opencode/seen.py`), credits and skips what it holds, and pastes at most
 `REPLAY_CHARS` of the rest, newest first, with one line naming the omitted ids and `read_messages(after_id=…)`.
-Any failure to read the session replays everything, which is the safe direction. Tests:
+Any failure to read the session replays everything, which is the safe direction. A message counts as seen only
+when its whole digest line (speaker and full body, JSON-decoded) sits on its own lines in a record pasted after
+the last paste the cursor credits; a first cut matched first lines as substrings and hid a new "yes" or "stop"
+behind an older, longer line. A fresh instance without the kept session is replayed everything, bounded. Tests:
 `tests/test_resume_replay.py`.
 
 ## 2026-11-12 — A reminder repeated on every delivery is not a reminder
@@ -2627,7 +2631,9 @@ The false assumption was that the `(cwd git: …)`, `(reminder: …)` and `(capt
 digest. They are state a process already holds; repeated, they were a few hundred characters per wake for the life
 of the process. `partyline/digest_suffix.py` sends a line when it is new, when it changed, when the digest that
 last carried it was never proven delivered, and on every eighth delivery. The briefing carries the same text for a
-process that has not yet seen one. Tests: `tests/test_digest_suffix.py`.
+process that has not yet seen one. The count belongs to the attachment's adapter, so a restart or rotation starts
+again with the full suffix, and a compaction clears it too: the summary drops the lines. Tests:
+`tests/test_digest_suffix.py`.
 
 ## 2026-11-12 — `request.base_url` is not an address a reader can open
 

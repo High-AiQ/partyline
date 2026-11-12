@@ -9,7 +9,7 @@ from .notice_policy import digest_candidates
 from .accept_sha import handoff_rider
 from .bridge_pack import pack_for
 from .captain_docs import reminder_line
-from .compaction_events import current_turns
+from .compaction_events import compaction_count, current_turns
 from .digest_suffix import SuffixGate
 from .line_depth import depth as line_depth, has_captain, staffed_split_reason
 from .role_briefing import WORKER_REMINDER, role_instructions, worker_instructions
@@ -129,7 +129,8 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
                           state_text(db, att["id"], runtime)) if part)
     original_rider = att["digest_rider"]
     gate = att["suffix_gate"] = SuffixGate()
-    att["credited_through"] = lambda: int(db.get_attachment(att["id"])["last_seen"] or 0)
+    att["credited_through"] = lambda: int((db.get_attachment(att["id"]) or {}).get("last_seen") or 0)
+    att["compaction_count"] = lambda: compaction_count(db, att["id"])
     task_goal_delivery = _task_goal_delivery(db, att, runtime)
     # The startup briefing already carries the pack for both fresh and resumed
     # attachments.  A resume therefore starts at the current role just like a

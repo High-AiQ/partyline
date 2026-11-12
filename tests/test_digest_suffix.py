@@ -45,6 +45,26 @@ class GatePerAttachmentTest(unittest.TestCase):
         self.assertEqual((one["suffix_gate"].deliveries, two["suffix_gate"].deliveries), (2, 0))
         self.assertIn(DIGEST_FOOTER, digest(two["suffix_gate"], 1, 0))
 
+    def test_a_compaction_makes_the_next_delivery_carry_every_line_again(self):
+        att = self.bind("one")
+        gate = att["suffix_gate"]
+        with patch("partyline.adapters.briefing.cwd_git_digest", lambda _cwd: "(cwd git: abc clean)"):
+            for ident in (1, 2):
+                gate.begin(msg(ident), ident - 1, att["compaction_count"]())
+                body = format_digest(msg(ident), "", "/x", gate=gate)
+            self.assertEqual(body, "[cap]: go")
+            self.db._exec("INSERT INTO compaction_events(attachment_id, runtime_owner, trigger, turn, created_at)"
+                          " VALUES('one','o','auto',1,1)")
+            gate.begin(msg(3), 2, att["compaction_count"]())
+            after = format_digest(msg(3), "", "/x", gate=gate)
+        self.assertIn("(cwd git: abc clean)", after)
+        self.assertIn(DIGEST_FOOTER, after)
+
+    def test_a_vanished_attachment_row_credits_nothing_instead_of_failing(self):
+        att = self.bind("never-stored")
+        self.assertEqual(att["credited_through"](), 0)
+        self.assertEqual(att["compaction_count"](), 0)
+
     def test_a_restart_or_rotated_session_binds_a_new_gate_with_the_full_suffix(self):
         before = self.bind("one")
         digest(before["suffix_gate"], 1, 0)
