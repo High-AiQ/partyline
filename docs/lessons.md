@@ -1,5 +1,35 @@
 # Lessons: the false-assumptions ledger
 
+## A kqueue watch of "every transcript" is not free
+
+The false assumption was that watching every file a pattern matches costs only
+inotify-style bookkeeping. kqueue holds one descriptor per exact file (a directory
+vnode does not report appends to its children), and macOS starts a process with 256.
+Every live Claude adapter watched `~/.claude/projects/*/*.jsonl` for its whole life,
+so a Mac with a long Claude history held thousands of descriptors per adapter and an
+OpenCode v2 captain next to them detached with `[Errno 24] Too many open files`.
+Measured with `scripts/measure-watch-descriptors` (100 transcripts in 10 projects:
+112 descriptors searching and 116 tailing; 400 in 40: 442 and 446). A watch set
+is now bounded by what can still matter: the project directories, the pinned session
+and files written since spawn while searching (`ClaudeSession._may_hold_our_token`
+is the one rule for both what the search reads and what the watch holds), then only
+the claimed file and its directory (6 and 6 whatever the history, 0 after stop).
+Codex narrows at claim too. `tests/test_watch_descriptors.py` states the invariant
+(a session this activation owns is never missed: pinned, re-exec'd, resumed) and
+proves the tail still follows appends, rotation and unlink/recreate.
+
+## Running out of descriptors is not a reason to stop a process
+
+The false assumption was that any failure to register a watch means the process can
+no longer be monitored. Descriptor exhaustion (EMFILE/ENFILE) is the host's state, not
+the process's: the OpenCode v2 watcher treated it like a bad store path, posted
+"monitoring failed" and stopped an attached captain, and the error stuck in the shared
+`Changes` so every later wait raised it again. A `FileEvents` given an `exhausted`
+hook (every adapter's `file_events`) now reports it once on the line, keeps what it
+could register, and retries on the next wake of the shared `Changes`. Only that errno
+is tolerated: a permission error, the 4096-entry cap or anything else still stops the
+owner. `tests/test_watch_exhaustion.py` covers both sides.
+
 ## Read-only SQLite connections can wake their own watchers
 
 The false assumption was that a read-only connection cannot generate a write

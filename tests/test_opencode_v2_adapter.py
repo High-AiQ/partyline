@@ -1,6 +1,7 @@
 """OpenCode v2 fixtures mirror its session_v2/session_message store."""
 
 import asyncio
+import errno
 import json
 import sqlite3
 import sys
@@ -208,6 +209,41 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await self.adapter._poll())
         self.adapter._close_store()
         self.assertIsNone(self.adapter._reader)
+
+    async def run_with_backend(self, backend):
+        """Run the real watcher loop over a claimed store, returning (stop calls, posts)."""
+        from partyline.adapters.events import AdapterEvents
+
+        self.claim()
+        adapter = self.adapter
+        adapter._resolve_store = Mock(return_value=self.store)
+        adapter.file_events = lambda *paths, **kw: AdapterEvents.file_events(
+            adapter, *paths, backend=backend, **kw)
+        wakes = iter(range(6))
+        adapter.alive = lambda: next(wakes, None) is not None
+        adapter.stop = AsyncMock()
+        with patch("partyline.attachment_stop_audit.direct_stop") as direct_stop:
+            await adapter._run()
+            await asyncio.sleep(0)  # let the one report task post
+        return adapter.stop.await_count + direct_stop.call_count
+
+    async def test_running_out_of_descriptors_keeps_the_process_attached_and_retries(self):
+        from tests.test_watch_exhaustion import Backend
+
+        backend = Backend(creation=[OSError(errno.EMFILE, "Too many open files")])
+        self.assertEqual(await self.run_with_backend(backend), 0)
+        self.assertEqual(len(backend.made), 1)  # the next wake re-created the watch
+        notices = [c.args[2] for c in self.post.await_args_list if c.args[0] == "system"]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("file descriptors", notices[0])
+
+    async def test_any_other_watch_failure_still_stops_the_process(self):
+        from tests.test_watch_exhaustion import Backend
+
+        backend = Backend(creation=[PermissionError(errno.EACCES, "denied")])
+        self.assertEqual(await self.run_with_backend(backend), 2)
+        failure = [c.args[2] for c in self.post.await_args_list if "monitoring failed" in c.args[2]]
+        self.assertEqual(len(failure), 1)
 
     async def watch(self, wakes, polls):
         """Drive the watcher loop with named wakes; return the delays it asked to wait."""

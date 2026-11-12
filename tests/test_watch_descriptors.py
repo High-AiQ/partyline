@@ -1,0 +1,193 @@
+"""A Claude adapter holds descriptors for what can still matter, not for the machine's history.
+
+The invariant these tests state: every transcript the search would read
+(``_may_hold_our_token``) is either held by the watch or reported by its directory when
+it appears, so a session this activation owns is never missed. Once one is claimed the
+adapter watches that file and its directory only.
+"""
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+from functools import partial
+from pathlib import Path
+
+from partyline.adapters.bundled.claude.adapter import PartylineAdapter
+from partyline.file_events import FileEvents
+from partyline.file_notify_linux import LinuxNotify
+from tests import watch_descriptors as w
+
+
+def assistant(text):
+    return {'type': 'assistant', 'uuid': text, 'timestamp': 't',
+            'message': {'content': [{'type': 'text', 'text': text}]}}
+
+
+async def until(condition):
+    for _ in range(5000):
+        if condition():
+            return
+        await w._REAL_SLEEP(0)
+    raise AssertionError('the expected event never arrived')
+
+
+class DescriptorTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        PartylineAdapter._CLAIMED.clear()
+        self.addCleanup(PartylineAdapter._CLAIMED.clear)
+
+    async def test_counts_stay_small_however_long_the_history_is(self):
+        for transcripts, directories in ((60, 6), (240, 24)):
+            with self.subTest(transcripts=transcripts), tempfile.TemporaryDirectory() as root:
+                counts = await w.measure(root, transcripts, directories)
+                self.assertTrue(counts['claimed'])
+                # projects/ and each project directory, plus the one kernel queue.
+                self.assertEqual(counts['searching'], directories + 2)
+                # The claimed file and its directory, in the run-wide watch and the tail's own.
+                self.assertEqual(counts['tailing'], 6)
+                self.assertEqual(counts['after_stop'], 0)
+
+    async def test_the_old_watch_cost_one_descriptor_per_transcript(self):
+        """The measurement the change started from, kept so the contrast is reproducible."""
+        kernel = w.Kernel()
+        projects = w.populate(self.root, 60, 6)
+        with w.environment(self.root):
+            async with FileEvents(str(projects / '*' / '*.jsonl'), backend=kernel.backend):
+                self.assertEqual(kernel.held(), 60 + 6 + 1 + 1)
+
+    async def test_no_descriptor_leaks_through_a_whole_run(self):
+        w.populate(self.root, 30, 3)
+        before = w.real_fds()
+        kernel = w.Kernel()
+        async with w.Run(kernel, self.root) as run:
+            run.session('-work-project-1', 'random-name')
+            await w.settle()
+        if before is not None:
+            self.assertEqual(w.real_fds(), before)
+        self.assertEqual(kernel.held(), 0)
+
+    async def test_old_unrelated_sessions_hold_nothing_and_recent_ones_are_released_at_claim(self):
+        w.populate(self.root, 20, 4)
+        kernel = w.Kernel()
+        async with w.Run(kernel, self.root) as run:
+            self.assertFalse([p for p in kernel.watched() if p.name.startswith('old-')])
+            stranger = run.session('-work-project-2', 'stranger', token=False)
+            kernel.fire(stranger.parent)
+            await w.settle()
+            self.assertIn(stranger, kernel.watched())  # written since spawn: it can still matter
+            mine = run.session('-work-project-3', 'random-name')
+            kernel.fire(mine.parent)
+            await w.settle()
+            self.assertEqual(run.adapter._transcript, str(mine))
+            self.assertEqual(kernel.watched(), {mine, mine.parent})
+
+    async def test_a_pinned_session_created_after_start_is_found_by_its_directory(self):
+        w.populate(self.root, 10, 2)
+        kernel = w.Kernel()
+        async with w.Run(kernel, self.root) as run:
+            mine = run.session('-work-project-0', 'attachment-1')
+            kernel.fire(mine.parent)
+            await w.settle()
+            self.assertEqual(run.adapter._transcript, str(mine))
+
+    async def test_a_reexec_into_a_new_project_directory_is_found(self):
+        w.populate(self.root, 10, 2)
+        kernel = w.Kernel()
+        async with w.Run(kernel, self.root) as run:
+            projects = self.root / '.claude' / 'projects'
+            mine = run.session('-work-brand-new', 'random-name')
+            kernel.fire(projects)  # the new directory is announced by its parent
+            await w.settle()
+            self.assertEqual(run.adapter._transcript, str(mine))
+
+    async def test_a_resumed_session_appended_to_wakes_the_search(self):
+        """The pinned file is old, so it is held by name, not because it is recent."""
+        w.populate(self.root, 10, 2)
+        pinned = self.root / '.claude' / 'projects' / '-work-project-1' / 'attachment-1.jsonl'
+        pinned.write_text(json.dumps({'type': 'mode'}) + '\n', encoding='utf-8')
+        os.utime(pinned, (w.LONG_AGO, w.LONG_AGO))
+        kernel = w.Kernel()
+        async with w.Run(kernel, self.root, resume=True) as run:
+            self.assertIn(pinned, kernel.watched())
+            self.assertEqual({p.name for p in kernel.watched() if p.suffix == '.jsonl'},
+                             {'attachment-1.jsonl'})
+            record = {'type': 'user', 'cwd': '/work',
+                      'message': {'content': run.adapter._claim_token}}
+            with pinned.open('a', encoding='utf-8') as file:
+                file.write(json.dumps(record) + '\n')
+            os.utime(pinned, (w.SPAWNED_AT + 5, w.SPAWNED_AT + 5))
+            kernel.fire(pinned)
+            await w.settle()
+            self.assertEqual(run.adapter._transcript, str(pinned))
+            self.assertEqual(kernel.watched(), {pinned, pinned.parent})
+
+    async def test_the_claimed_tail_follows_appends_rotation_and_recreation(self):
+        w.populate(self.root, 10, 2)
+        kernel = w.Kernel()
+        async with w.Run(kernel, self.root) as run:
+            run.adapter._fresh = lambda _stamp: True
+            posted = []
+
+            async def post(sender, kind, body):
+                posted.append(body)
+
+            run.adapter.post = post
+            mine = run.session('-work-project-1', 'random-name')
+            kernel.fire(mine.parent)
+            await until(lambda: getattr(run.adapter, '_jsonl_tail_path', None) == str(mine))
+            self.assertEqual(kernel.watched(), {mine, mine.parent})
+
+            async def write(text, mode='a'):
+                with mine.open(mode, encoding='utf-8') as file:
+                    file.write(json.dumps(assistant(text)) + '\n')
+
+            await write('appended')
+            kernel.fire(mine)
+            await until(lambda: posted == ['appended'])
+
+            replacement = mine.with_name('swap')  # rotation: a new file takes the name
+            replacement.write_text(json.dumps(assistant('rotated')) + '\n', encoding='utf-8')
+            os.replace(replacement, mine)
+            kernel.fire(mine.parent)
+            await until(lambda: 'rotated' in posted)
+
+            mine.unlink()  # unlink, then recreate
+            kernel.fire(mine)
+            await w.settle()
+            await write('recreated', 'w')
+            kernel.fire(mine.parent)
+            await until(lambda: 'recreated' in posted)
+            self.assertEqual(kernel.watched(), {mine, mine.parent})
+            self.assertEqual(posted, ['appended', 'rotated', 'recreated'])
+
+    @unittest.skipUnless(sys.platform == 'linux', 'native inotify')
+    async def test_inotify_watches_narrow_too_and_unrelated_writes_stop_waking(self):
+        w.populate(self.root, 12, 3)
+        loop = w.QuietLoop()
+        backends = []
+
+        def backend(_, changed, failed):
+            backends.append(LinuxNotify(loop, changed, failed))
+            return backends[-1]
+
+        run = w.Run(w.Kernel(), self.root)
+        run.adapter.file_events = partial(FileEvents, backend=backend)
+        async with run:
+            outer = backends[0]
+            self.assertEqual(len(outer.watches), 3 + 1)  # each project directory and projects/
+            stranger = run.session('-work-project-0', 'stranger', token=False)
+            mine = run.session('-work-project-2', 'random-name')
+            outer.readable()
+            await w.settle()
+            self.assertEqual(run.adapter._transcript, str(mine))
+            self.assertEqual(set(outer.watches), {mine.parent})
+            before = run.adapter._changes.version
+            stranger.write_text('{}\n')
+            outer.readable()
+            await w.settle()
+            self.assertEqual(run.adapter._changes.version, before)  # a stranger no longer wakes it

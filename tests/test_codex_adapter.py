@@ -10,7 +10,7 @@ import time
 import tomllib
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from tests.adapter_event_clock import install as event_clock
 
@@ -540,6 +540,21 @@ class CodexDiscoveryTest(unittest.IsolatedAsyncioTestCase):
                       return_value=999.9),
             ):
                 self.assertEqual(adapter._find_rollout(), rollout)
+
+    def test_a_claimed_rollout_narrows_the_watch_to_itself(self):
+        """Every rollout of a long-lived home was held open for as long as the adapter ran."""
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = self.make_adapter()
+            rollout = self.write_rollout(
+                os.path.join(tmp, "rollout-ours.jsonl"), {"id": "sess-1", "cwd": "/work", "source": {}},
+                [json.dumps({"payload": {"type": "user_message", "message": adapter._claim_token}})])
+            adapter._watch_events = Mock()
+            with (
+                patch("partyline.adapters.bundled.codex.adapter.glob.glob", return_value=[rollout]),
+                patch("partyline.adapters.bundled.codex.adapter.os.path.getmtime", return_value=999.9),
+            ):
+                self.assertEqual(adapter._find_rollout(), rollout)
+            adapter._watch_events.rewatch.assert_called_once_with(rollout)
 
     def test_stale_mtime_is_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
