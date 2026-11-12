@@ -20,6 +20,19 @@ from .line_worktree import _git, repo_root, rev
 
 SESSIONS_ROOT = os.environ.get("PARTYLINE_SESSIONS_ROOT", os.path.expanduser("~/.partyline/sessions"))
 SESSION_HOME_KINDS = ("codex", "pi")  # id-keyed homes; fence mirrors and logs are not ours to clear
+# Adapters that pin their session to the attachment and keep it in the home, recording no id.
+PINNED_SESSION_KINDS = frozenset({"pi"})
+
+
+def resumable(att, conv, kind: str) -> bool:
+    """Whether this home still holds a session a resume would use.
+
+    Judged by a recorded session id alone, a stopped pi process lost its whole home, the
+    only copy of a session the resume route still accepts.
+    """
+    if not att or (conv or {}).get("archived_at"):
+        return False
+    return bool(att.get("cli_session")) or kind in PINNED_SESSION_KINDS
 LIVE = ("starting", "running")
 BUDGET_SECONDS = 10.0
 
@@ -125,8 +138,7 @@ def session_candidates(db) -> Category:
             att = db.get_attachment(name)
             reason = _in_use(db, name, planned)
             if reason is None and att is not None:
-                conv = db.get_conversation(att["conv_id"]) or {}
-                if att.get("cli_session") and not conv.get("archived_at"):
+                if resumable(att, db.get_conversation(att["conv_id"]), kind):
                     reason = "it can still be resumed"
             if reason:
                 cat.skipped.append({"path": path, "reason": reason})

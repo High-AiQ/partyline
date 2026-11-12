@@ -62,7 +62,7 @@ def clean_attachments(db, report, ident=None):
                 kept(report, home, reason)
                 continue
 
-            def clean(home=home):
+            def clean(home=home, kind=kind):
                 with db._runtime_serialized():
                     reason = attachment_reason(db, home.name)
                     if reason:
@@ -70,7 +70,7 @@ def clean_attachments(db, report, ident=None):
                     # Reclassify after sizing: a restored line must keep its session.
                     att = db.get_attachment(home.name)
                     conv = db.get_conversation(att['conv_id']) if att else None
-                    resumable = bool(att and att.get('cli_session') and not (conv or {}).get('archived_at'))
+                    resumable = survey.resumable(att, conv, kind)
                     target = home / 'cache' if resumable else home
                     if target.exists():
                         remove_path(target)

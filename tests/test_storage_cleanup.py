@@ -35,6 +35,30 @@ class CleanupTest(CleanupFixture):
         self.assertFalse(orphan.exists())
         self.assertEqual(list(Path(self.db.path + '.agent-connections').iterdir()), [])
 
+    def test_a_stopped_pi_process_keeps_the_session_pinned_to_its_attachment(self):
+        """pi records no session id: its session is pinned to the attachment and lives in the home.
+
+        Judged by a recorded id alone, every stop deleted the only copy of a session the
+        resume route still accepts (integration review of the 2.114.0 batch).
+        """
+        from partyline import storage_survey
+
+        self.att('pinned', session=None)
+        (self.sessions / 'pi').mkdir(exist_ok=True)
+        (self.sessions / 'codex' / 'pinned').rename(self.sessions / 'pi' / 'pinned')
+        home = self.sessions / 'pi' / 'pinned'
+        gc.cleanup(self.db, attachment_id='pinned')  # the cleanup a process exit runs
+        self.assertTrue((home / 'session.jsonl').exists())
+        self.assertFalse((home / 'cache').exists())
+        skipped = {item['path']: item['reason']
+                   for item in storage_survey.session_candidates(self.db).skipped}
+        self.assertEqual(skipped[str(home)], 'it can still be resumed')  # the manual Clear agrees
+        gc.cleanup(self.db)  # a full sweep keeps it too
+        self.assertTrue((home / 'session.jsonl').exists())
+        self.db.archive_conversation('root')
+        gc.cleanup(self.db)
+        self.assertFalse(home.exists())  # a retired line's session is not coming back
+
     def test_starting_running_and_restart_plan_keep_every_file(self):
         homes = [self.att('starting', 'starting'), self.att('running', 'running'), self.att('planned')]
         self.plan(['planned'])
