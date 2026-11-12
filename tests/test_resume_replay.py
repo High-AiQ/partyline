@@ -92,6 +92,52 @@ class ReplayTest(unittest.TestCase):
             self.assertEqual([m["id"] for m in asyncio.run(for_resume(self.runtime, self.att, pending))],
                              [1, 2])
 
+    def test_a_longer_line_that_starts_the_same_does_not_hide_a_new_message(self):
+        # The reviewer's repro: the session holds two other digests; none of these was pasted.
+        pending = [{**messages(1)[0], "id": 10, "sender": "greg", "body": "yes"},
+                   {**messages(1)[0], "id": 11, "sender": "greg", "body": "y"},
+                   {**messages(1)[0], "id": 12, "sender": "cap", "body": "@impl-x stop"}]
+        self.session(["[greg]: yes", "[cap]: @impl-x stop: the plan changed, do not continue"])
+        self.assertEqual(seen_ids(self.att, pending, self.store), {10})  # whole-line "yes" only
+
+    def test_a_multiline_body_must_match_whole_not_by_its_first_line(self):
+        pending = [{**messages(1)[0], "id": 3, "body": "plan\nstep two"}]
+        self.session(["[cap]: plan\nstep three"])
+        self.assertEqual(seen_ids(self.att, pending, self.store), set())
+        self.session(["[cap]: plan\nstep two\n(cwd git: abc clean)"])
+        self.assertEqual(seen_ids(self.att, pending, self.store), {3})
+
+    def test_a_line_pasted_before_the_cursor_does_not_hide_a_new_identical_one(self):
+        old = {**messages(1)[0], "id": 4, "sender": "greg", "body": "yes"}
+        new = {**messages(1)[0], "id": 9, "sender": "greg", "body": "yes"}
+        self.session(["[greg]: yes", "[cap]: other"])
+        credited = [{**old, "id": 1}]
+        self.assertEqual(seen_ids(self.att, [new], self.store, credited), set())
+        # A later "yes" is indistinguishable from the credited one, so the window starts after it:
+        # replaying is the safe direction. Anything pasted after the credited paste is seen.
+        self.session(["[greg]: yes", "[cap]: other", "[greg]: yes"], session="ses2")
+        att = {**self.att, "cli_session": "ses2"}
+        self.assertEqual(seen_ids(att, [new], self.store, credited), set())
+        later = {**messages(1)[0], "id": 9, "body": "other"}
+        self.assertEqual(seen_ids(self.att, [later], self.store, credited), {9})
+
+    def test_a_credited_paste_that_cannot_be_found_vouches_for_nothing(self):
+        pending = messages(2)
+        self.session([f"[cap]: {m['body']}" for m in pending])
+        gone = [{**messages(1)[0], "id": 1, "body": "never in this session"}]
+        self.assertEqual(seen_ids(self.att, pending, self.store, gone), set())
+
+    def test_for_resume_anchors_on_the_credited_tail_from_the_database(self):
+        first = self.db.add_message("line", "greg", "human", "yes")
+        self.db._exec("UPDATE attachments SET last_seen=? WHERE id='me'", (first["id"],))
+        att = {**self.db.get_attachment("me")}
+        second = self.db.add_message("line", "greg", "human", "yes")
+        self.session(["[greg]: yes"])  # only the credited paste is in the session
+        with patch("partyline.adapters.bundled.opencode.seen.store_path", lambda _att: self.store):
+            replay = asyncio.run(for_resume(self.runtime, att, [second]))
+        self.assertEqual([m["id"] for m in replay], [second["id"]])
+        self.assertEqual(self.db.get_attachment("me")["last_seen"], first["id"])
+
     def test_a_fresh_instance_without_the_kept_session_gets_the_full_bounded_replay(self):
         pending = messages(30)
         # The previous instance's session still exists in the store; the new one has no claim on it.
