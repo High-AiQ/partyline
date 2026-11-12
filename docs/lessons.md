@@ -2241,6 +2241,8 @@ The false assumption, a second time in two days, was that a notice which is not 
 unreached-handle notice wakes the speaker; woken by nothing else, the speaker answers it, and the natural answer
 names the same handle ("@worker is detached, restarting it"), which earned the same notice and another wake. The
 notice now remembers what it last told each speaker and stays quiet while the speaker's only wake since has been
-that notice; any other delivery makes the same slip news again. For every notice that wakes a process, ask what
+that notice. Another delivery to the speaker, or a later message of its own that reaches the handle, makes the
+same slip news again; a message that merely does not repeat it does not (review broke that shortcut with a
+two-message turn). For every notice that wakes a process, ask what
 the process will say next and whether those words re-trigger it. Tests: `tests/test_unreached_notice.py`.
 

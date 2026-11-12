@@ -61,18 +61,23 @@ class Unreached:
         finally:
             _origin.reset(token)
 
-    async def send(self, runtime) -> None:
+    async def send(self, runtime, reached=frozenset()) -> None:
+        """Tell the speaker, unless the notice it is answering already said all of this.
+
+        ``reached`` are the handles this message did get to. A remembered line about one
+        of them is forgotten, so the same failure later is news again; a message that
+        merely does not repeat a line (a plain sentence before the reply) forgets nothing.
+        """
         memory = getattr(getattr(runtime, "returns", None), "told", {})
         notice, told = memory.get(self.speaker["id"], (None, ()))
-        if all(line in told for line in self.lines):
-            # Nothing, or only what the notice it is answering already said. A line this
-            # message did not repeat is forgotten: the handle was reached, or not named,
-            # so the same failure later is news again.
-            repeated = tuple(line for line in told if line in self.lines)
-            if repeated:
-                memory[self.speaker["id"]] = (notice, repeated)
+        still = tuple(line for line in told if not _named(line) & set(reached))
+        if still != told:
+            told = still
+            if told:
+                memory[self.speaker["id"]] = (notice, told)
             else:
                 memory.pop(self.speaker["id"], None)
+        if all(line in told for line in self.lines):
             return
         from .orchestrator_notices import tell  # it imports mention_relay
 
@@ -84,6 +89,11 @@ class Unreached:
             f"{listed}\nDo not count on a handle listed here as handed off.",
         )
         memory[self.speaker["id"]] = ((notice or {}).get("id"), tuple(self.lines))
+
+
+def _named(line: str) -> set[str]:
+    """The handles a notice line is about: ``gone: detached`` or ``@a, @b: unknown handle``."""
+    return {name.strip().lstrip("@").lower() for name in line.split(":", 1)[0].split(",")}
 
 
 def delivered(told: dict, att_id: str, messages: list[dict]) -> None:

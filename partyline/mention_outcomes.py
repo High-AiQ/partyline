@@ -22,7 +22,7 @@ async def settle_mentions(
         return await _settle(runtime, conv_id, message, names, unreachable, delivered, queued, unreached)
     with unreached.collecting():
         await _settle(runtime, conv_id, message, names, unreachable, delivered, queued, unreached)
-    await unreached.send(runtime)
+    await unreached.send(runtime, delivered | queued)
 
 
 async def _settle(runtime, conv_id, message, names, unreachable, delivered, queued, unreached) -> None:

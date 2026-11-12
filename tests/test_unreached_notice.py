@@ -149,6 +149,19 @@ class AgentSpeakerTest(Tree):
         self.assertEqual(len(self.told("worker")), 2)
         self.assertIn("builder is on line", self.told("worker")[1]["body"])
 
+    async def test_a_reply_that_is_not_the_turns_first_message_is_still_an_answer(self):
+        """A plain sentence, or a word to someone else, before the reply must not reset the memory.
+
+        Found in review of #496: forgetting whatever a message did not repeat brought the
+        loop back for every turn of two messages, which is an ordinary turn.
+        """
+        await self.say("worker", "@gone hello")
+        for turn in range(3):
+            await self.say("worker", "Let me look into why that did not go through.")
+            await self.say("worker", "@lead I am checking on gone")
+            await self.say("worker", "@gone is detached, so I will ask for it to be resumed")
+            self.assertEqual(len(self.told("worker")), 1, turn)
+
     async def test_a_handle_reached_in_between_is_reported_when_it_is_gone_again(self):
         """The memory must not outlive a hand-off that worked: found in review of #496."""
         await self.say("worker", "@gone hello")

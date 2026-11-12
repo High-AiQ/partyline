@@ -112,7 +112,7 @@ def tool_list(state):
             schema['properties']['include_retired'] = {'type': 'boolean', 'description': (
                 'Also list tasks whose line is retired, oldest first. Default false: the live board.')}
             schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1, 'description': (
-                'A task line id: return that one task in full, nothing cut.')}
+                'A task line id: return that one task with no field shortened.')}
             description = ("The board: every task on a live line, with status, handles and workspaces. "
                            "Workspaces show real and mirror tips; the mirror tip is where the worker's "
                            f"commits live until accept. Text over {BOARD_TEXT} characters is cut short; "

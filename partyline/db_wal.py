@@ -89,8 +89,8 @@ class Checkpointer:
     def stop(self) -> None:
         self.stopped = True
         self.wake.set()
-        if self.thread is not None:
-            self.thread.join()
+        if (thread := self.thread) is not None:
+            thread.join()
 
 
 def connect(path) -> sqlite3.Connection:

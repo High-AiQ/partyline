@@ -145,7 +145,8 @@ are in its Decisions section (1 to 14):
   section 10: Claude Code and OpenCode V2 re-list (retained runs against the fixture), and Codex
   does not.
 - Screen catalog refresh uses `/api/capability-stream`: one request the server holds open and pushes
-  a line down whenever the in-memory per-attachment revision changes, without querying the database.
+  a line down whenever the in-memory per-attachment revision changes. Each push reads only the
+  attachment's own row, to end the stream of a process that is no longer live.
   Relevant SQL mutations and screen/control state changes push it; the bridge fetches
   `/api/capabilities` only after a pushed revision differs. Nothing times the stream out. A stopping
   server ends it before it waits on connections, and the bridge reconnects after a break with
