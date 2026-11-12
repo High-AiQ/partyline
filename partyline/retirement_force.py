@@ -96,11 +96,11 @@ def _remove(state):
                 if not owner:
                     raise OSError("nested worktree registration changed")
                 remove_directory(full, owner)
-                git(owner, "worktree", "prune")
+                git(owner, "worktree", "remove", "--force", full)
         remove_directory(state["cwd"], state["root"])
     except OSError as exc:
         raise HTTPException(409, "worktree removal did not complete; registration retained") from exc
-    git(state["root"], "worktree", "prune")
+    git(state["root"], "worktree", "remove", "--force", state["cwd"])
     if owned:
         git(state["root"], "update-ref", "-d", f"refs/heads/{state['branch']}", owned)
     return True
@@ -228,6 +228,9 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
                                                           if line["id"] not in completed],
                 "recovery_refs": recovery, "preserved_paths": preserved_paths})
         await asyncio.to_thread(reap_legacy_temp, db)
+        from .storage_cleanup import automatic
+        for line_id in completed:
+            await automatic(db, line=db.get_conversation(line_id))
         await _audit(db, audit_id, principal, target, "completed", decision, recovery)
         notice_line = principal.conv_id or target
         await post_system_notice(runtime, notice_line,

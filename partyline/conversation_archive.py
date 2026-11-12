@@ -163,6 +163,12 @@ def register_archive_route(app: FastAPI, presence):
         # One walk of the legacy locations for the whole archive, after the
         # per-line loop — not one walk per archived line.
         await asyncio.to_thread(reap_legacy_temp, db)
+        from .storage_cleanup import automatic
+        for line_id in archived:
+            line = db.get_conversation(line_id)
+            cleanup = await automatic(db, line=line)
+            if line_id == conv_id and line.get("cwd") in cleanup["removed"]:
+                removed, kept_reason = True, None
         await runtime.broadcast_all(ConversationsChangedEvent())
         return {"ok": True, "archived": True, "stopped": stopped,
                 "archived_ids": archived, "worktree_removed": removed,

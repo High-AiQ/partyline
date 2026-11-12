@@ -227,8 +227,9 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(self.adapters, [])
 
     def test_boundary_zero_is_refused_and_plain_checkpoint_briefing_is_supported(self):
-        self.assertEqual(fresh_checkpoint_briefing("intro", None), "intro")
-        self.assertIn("docs/state.md", fresh_checkpoint_briefing("intro", "docs/state.md"))
+        self.assertEqual(fresh_checkpoint_briefing("intro", {}), "intro")
+        briefing = fresh_checkpoint_briefing("intro", {"fresh_checkpoint": "docs/state.md"})
+        self.assertIn("docs/state.md", briefing)
         self.assertEqual(self.fresh({"checkpoint": "docs/state.md", "after_message_id": 0}).status_code, 422)
 
     def test_fresh_refuses_a_live_handle_on_a_related_line(self):

@@ -28,7 +28,9 @@ from partyline.adapters.events import watch_files
 
 from partyline.adapters import Adapter
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
+from partyline.adapters.store_wake import StoreWake
 from partyline.adapters.bundled.opencode.wakes import WakeSettlement
+from partyline.adapters.bundled.opencode.boundary import boundary_event
 
 logger = logging.getLogger(__name__)
 
@@ -37,31 +39,21 @@ STORE = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 RESUME_PROBE_INTERVAL = 5.0
 
 
-def boundary_event(role: str | None, finish: str | None) -> str | None:
-    """The turn boundary one message row represents, if any.
-
-    ``tool-calls`` means the loop continues with another step; anything else
-    on a completed assistant message means the CLI is waiting for input again.
-    """
-    if role == "user":
-        return BEGAN
-    if role == "assistant" and finish != "tool-calls":
-        return ENDED
-    return None
-
-
 class PartylineAdapter(WakeSettlement, Adapter):
     kind = "opencode"
 
-    # A session created by a fresh TUI has no caller-supplied identifier.  Do
-    # discovery one at a time and claim the result so concurrent attachments in
-    # one directory never tail the same transcript.
+    # Serialize discovery so concurrent attachments claim separate transcripts.
     _CLAIMED: set[str] = set()
     _DISCOVERY = asyncio.Lock()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._wakes_init()
+        self._reader = None
+        self._store_version = None
+        self._discovery_version = None
+        self._candidates = []
+        self._discovery_failed = False
 
     async def stop(self):
         self._CLAIMED.discard(getattr(self, "_session_id", "") or "")
@@ -73,28 +65,32 @@ class PartylineAdapter(WakeSettlement, Adapter):
             cmd += ["--session", self.att["cli_session"]]
         return cmd
 
-    @staticmethod
-    def _connect() -> sqlite3.Connection:
-        # This is deliberately a short-lived, read-only connection: the store
-        # belongs to the interactive application and is commonly in WAL mode.
-        return sqlite3.connect(f"{STORE.as_uri()}?mode=ro", uri=True)
+    def _connect(self) -> sqlite3.Connection:
+        if self._reader is None:
+            self._reader = sqlite3.connect(f"{STORE.as_uri()}?mode=ro", uri=True)
+        return self._reader
 
     def _find_session(self) -> str | None:
+        self._discovery_failed = False
         if self.resume and (session_id := self.att.get("cli_session")):
             return str(session_id) if session_id not in self._CLAIMED else None
         if not STORE.exists():
             return None
         cutoff = int((self.spawned_at - 2) * 1000)
         try:
-            with contextlib.closing(self._connect()) as db:
-                rows = db.execute(
-                    "SELECT id FROM session WHERE directory = ? AND time_created >= ? "
-                    "ORDER BY time_created DESC",
-                    (self.att["cwd"], cutoff),
-                ).fetchall()
+            with contextlib.nullcontext(self._connect()) as db:
+                version = db.execute("PRAGMA data_version").fetchone()[0]
+                if version != self._discovery_version:
+                    self._candidates = db.execute(
+                        "SELECT id FROM session WHERE directory = ? AND time_created >= ? "
+                        "ORDER BY time_created DESC",
+                        (self.att["cwd"], cutoff),
+                    ).fetchall()
+                    self._discovery_version = version
         except sqlite3.Error:
+            self._discovery_failed = True
             return None
-        for (session_id,) in rows:
+        for (session_id,) in self._candidates:
             if session_id not in self._CLAIMED:
                 return str(session_id)
         return None
@@ -102,7 +98,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
     def _briefing_ingested(self, session_id: str) -> bool:
         """The current TUI is ready only after its startup input is a user part."""
         try:
-            with contextlib.closing(self._connect()) as db:
+            with contextlib.nullcontext(self._connect()) as db:
                 rows = db.execute(
                     "SELECT part.data FROM part "
                     "JOIN message ON message.id = part.message_id "
@@ -131,6 +127,14 @@ class PartylineAdapter(WakeSettlement, Adapter):
 
     @watch_files(lambda self: [STORE])
     async def _run(self):
+        try:
+            await self._run_session()
+        finally:
+            if self._reader is not None:
+                self._reader.close()
+                self._reader = self._store_version = self._discovery_version = None
+
+    async def _run_session(self):
         await asyncio.sleep(3.0)
         if not self.alive():
             return
@@ -142,13 +146,19 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 await self.send_keys(self.briefing())
             deadline = self.event_time() + 45.0
             waited = 0.0
+            wake = StoreWake(self)
             while session_id is None and self.alive():
+                observed = wake.observed()
                 session_id = self._find_session()
+                wake.read(observed, bool(session_id), error=self._discovery_failed)
                 if session_id:
                     self._CLAIMED.add(session_id)
                     self._session_id = session_id
                     break
-                await self.wait_for_change(max(0, deadline - self.event_time()))
+                delay = max(0, deadline - self.event_time())
+                if wake.delay() is not None:
+                    delay = min(delay, wake.delay())
+                await self.wait_for_change(delay)
                 waited = 45.0 - max(0, deadline - self.event_time())
                 if waited >= 45.0:
                     await self.post(
@@ -174,48 +184,64 @@ class PartylineAdapter(WakeSettlement, Adapter):
         # The next row in the session proves which — an abort writes no
         # completing row, so supersession is its only deterministic end.
         abandoned: dict[str, int] = {}
+        seen_user_parts: set[str] = set()
         briefing_ready = False
+        wake = StoreWake(self)
         while self.alive():
+            observed = wake.observed()
             try:
-                with contextlib.closing(self._connect()) as db:
-                    rows = db.execute(
-                        "SELECT part.id, part.data FROM part "
-                        "JOIN message ON message.id = part.message_id "
-                        "WHERE part.session_id = ? AND part.time_created >= ? "
-                        "AND json_extract(message.data, '$.role') = 'assistant' "
-                        "AND json_extract(message.data, '$.time.completed') IS NOT NULL "
-                        "AND json_extract(part.data, '$.type') = 'text' "
-                        "ORDER BY part.time_created, part.id",
-                        (session_id, started_ms),
-                    ).fetchall()
-                    boundaries = db.execute(
-                        "SELECT id, time_created, json_extract(data, '$.role'), "
-                        "json_extract(data, '$.finish'), "
-                        "json_extract(data, '$.time.completed') IS NOT NULL, data FROM message "
-                        "WHERE session_id = ? AND time_created >= ? "
-                        "AND json_extract(data, '$.role') IN ('user', 'assistant') "
-                        "ORDER BY time_created, id",
-                        (session_id, started_ms),
-                    ).fetchall()
-                    # The pasted digest lives in a user-message *part*: the
-                    # message rows are empty shells, so the claim token is
-                    # only visible here. Observed before any relay — speech
-                    # posted before the gate opens is dropped and `seen`
-                    # never retries it.
-                    user_parts = db.execute(
-                        "SELECT part.id, part.data FROM part "
-                        "JOIN message ON message.id = part.message_id "
-                        "WHERE part.session_id = ? AND part.time_created >= ? "
-                        "AND json_extract(message.data, '$.role') = 'user' "
-                        "AND json_extract(part.data, '$.type') = 'text'",
-                        (session_id, started_ms),
-                    ).fetchall()
+                with contextlib.nullcontext(self._connect()) as db:
+                    version = db.execute("PRAGMA data_version").fetchone()[0]
+                    changed = version != self._store_version
+                    if not changed:
+                        rows, boundaries, user_parts = [], [], []
+                    else:
+                        rows = db.execute(
+                            "SELECT part.id, part.data FROM part "
+                            "JOIN message ON message.id = part.message_id "
+                            "WHERE part.session_id = ? AND part.time_created >= ? "
+                            "AND json_extract(message.data, '$.role') = 'assistant' "
+                            "AND json_extract(message.data, '$.time.completed') IS NOT NULL "
+                            "AND json_extract(part.data, '$.type') = 'text' "
+                            "ORDER BY part.time_created, part.id",
+                            (session_id, started_ms),
+                        ).fetchall()
+                        boundaries = db.execute(
+                            "SELECT id, time_created, json_extract(data, '$.role'), "
+                            "json_extract(data, '$.finish'), "
+                            "json_extract(data, '$.time.completed') IS NOT NULL, data FROM message "
+                            "WHERE session_id = ? AND time_created >= ? "
+                            "AND json_extract(data, '$.role') IN ('user', 'assistant') "
+                            "ORDER BY time_created, id",
+                            (session_id, started_ms),
+                        ).fetchall()
+                        # The pasted digest lives in a user-message *part*: the
+                        # message rows are empty shells, so the claim token is
+                        # only visible here. Observed before any relay — speech
+                        # posted before the gate opens is dropped and `seen`
+                        # never retries it.
+                        user_parts = db.execute(
+                            "SELECT part.id, part.data FROM part "
+                            "JOIN message ON message.id = part.message_id "
+                            "WHERE part.session_id = ? AND part.time_created >= ? "
+                            "AND json_extract(message.data, '$.role') = 'user' "
+                            "AND json_extract(part.data, '$.type') = 'text'",
+                            (session_id, started_ms),
+                        ).fetchall()
                     for part_id, raw_part in user_parts:
                         self.observe_claim(raw_part)
                         await self._observe_user_part(raw_part, part_id=part_id)
+                    self._store_version = version
+                found = (any(part_id not in seen for part_id, _ in rows)
+                         or any(part_id not in seen_user_parts for part_id, _ in user_parts)
+                         or any(ident not in seen_boundaries and (completed or ident not in abandoned)
+                                for ident, _, _, _, completed, _ in boundaries))
+                seen_user_parts.update(part_id for part_id, _ in user_parts)
+                wake.read(observed, found)
             except sqlite3.Error as exc:
+                wake.read(observed, False, error=True)
                 logger.debug("opencode poll skipped: %s", exc)
-                await self.wait_for_change()
+                await self.wait_for_change(wake.delay())
                 continue
             for part_id, raw_data in rows:
                 if part_id in seen:
@@ -271,4 +297,4 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 # handshake; only its fresh user part opens readiness.
                 await self.send_keys(self._resume_probe())
                 last_resume_probe = time.monotonic()
-            await self.wait_for_change()
+            await self.wait_for_change(wake.delay())

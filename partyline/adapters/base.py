@@ -335,7 +335,7 @@ class Adapter(TimedCallbacks, AdapterEvents, JsonlPasteReceipts, activation.Acti
         text += connection_briefing(self.att)
         if topic := (self.att.get("topic") or "").strip():
             text += TOPIC_BRIEFING.format(topic=topic)
-        return self._with_claim(fresh_checkpoint_briefing(text, self.att.get("fresh_checkpoint")))
+        return self._with_claim(fresh_checkpoint_briefing(text, self.att))
 
     def alive(self) -> bool:
         return self.proc is not None and self.proc.poll() is None

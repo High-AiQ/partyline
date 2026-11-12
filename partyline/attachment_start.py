@@ -77,7 +77,7 @@ async def rollback_start(runtime, att):
 
 async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
                            checkpoint="", fresh=False, staffing_role=None, principal=None,
-                           staffing_preset=None):
+                           staffing_preset=None, announce=True):
     if staffing_role and (principal is None or principal.kind != 'user'):
         from .preset_roles import attachment_preset, require_named_role, require_role
         try:
@@ -111,7 +111,8 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
         )
         from .memory_events import lifecycle_changed
         lifecycle_changed(runtime)
-        await announce_attachment(runtime, att, fresh=fresh)
+        if announce:  # a rotation says it once, when it stops the old process
+            await announce_attachment(runtime, att, fresh=fresh)
         await deliver_since_attach(runtime, ident)
         return attach_memory_usage(
             await attachment_response(runtime.db.get_attachment(ident)),

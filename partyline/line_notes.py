@@ -73,7 +73,9 @@ def write_notes(db, conv_id: str, scope: str, notes: str,
 NOTES_NUDGE_EVERY_TURNS = 8
 NOTES_STALE_SETTING = "notes_stale_turns"
 NOTES_STALE_TURNS = 16
-NUDGE = ("Update your attachment notes now: PUT "
+NUDGE = ("Update your attachment notes now (state, decisions made, next step, paths and SHAs; at "
+         "most 4000 characters; a fresh instance of you is briefed from this note alone) with the "
+         "notes tool, scope attachment, or PUT "
          "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/notes?scope=attachment")
 
 

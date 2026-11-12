@@ -275,6 +275,7 @@ class RetirementTest(AcceptAndRetireFixture):
     async def retire(self):
         from partyline.worktree_lifecycle import archive_worktree_if_safe
 
+        await self.runtime.stop_attachments(self.conv_id)
         return archive_worktree_if_safe(self.db, self.conv_id)
 
     async def test_a_merged_plain_task_folder_is_removed_and_the_commits_stay_on_the_branches(self):

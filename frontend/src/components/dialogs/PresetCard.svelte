@@ -29,6 +29,8 @@
   let command = $state(preset.command);
   /* svelte-ignore state_referenced_locally */
   let traits = $state(traitsFrom(preset));
+  /* svelte-ignore state_referenced_locally */
+  let maxCompactions = $state<number | null>(preset.max_compactions ?? null);
   let error = $state("");
   let busy = $state(false);
 
@@ -42,6 +44,7 @@
         adapter,
         command: command.trim(),
         ...traits,
+        max_compactions: maxCompactions,
       };
       if (preset.id) draft.id = preset.id;
       const saved = await api.savePreset(draft);
@@ -94,6 +97,22 @@
       >command</label
     >
     <input id="pCmd-{preset.id ?? 'new'}" bind:value={command} placeholder="blank = adapter default" />
+  </div>
+
+  <div class="grid grid-cols-[78px_1fr] gap-x-2.5 items-center">
+    <label
+      class="text-cream-faint text-[10px] tracking-[0.05em] text-right"
+      for="pMaxCompactions-{preset.id ?? 'new'}">max compactions</label
+    >
+    <input
+      id="pMaxCompactions-{preset.id ?? 'new'}"
+      type="number"
+      min="0"
+      max="20"
+      step="1"
+      bind:value={maxCompactions}
+      placeholder="blank = instance setting, 0 = never rotate"
+    />
   </div>
 
   <ProcessTraits bind:traits idPrefix={"pTrait-" + (preset.id ?? "new")} />

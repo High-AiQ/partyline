@@ -14,6 +14,7 @@ from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.bundled.claude.session import ClaudeSession
 from partyline.adapters.compaction import compaction_hooks_declared, is_compaction_record
 from partyline.adapters.session_seed import seed_claude_home
+from partyline.adapters.session_pin import pinned_session
 from partyline.mcp_attach import claude_command
 
 
@@ -50,9 +51,9 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
     def build_command(self) -> list[str]:
         cmd = list(self.att["command"]) or ["claude"]
         if self.resume:
-            cmd += ["--resume", self.att["id"]]
+            cmd += ["--resume", pinned_session(self.att)]
         elif "--session-id" not in cmd:
-            cmd += ["--session-id", self.att["id"]]
+            cmd += ["--session-id", pinned_session(self.att)]
         hook_url = self.att.get("hook_url")
         if hook_url and "--settings" not in cmd:
             settings = self._hook_settings(hook_url, compaction_hooks_declared(self.att))

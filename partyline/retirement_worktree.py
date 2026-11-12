@@ -22,7 +22,10 @@ def refuse_orphan(root, path, branch=None):
         return  # a plain task folder under a non-repository root
     try:
         listing = _git("worktree", "list", "--porcelain", "-z", cwd=root)
-        registered = listing.returncode == 0 and f"worktree {path}\0" in listing.stdout
+        registered = listing.returncode == 0 and any(
+            os.path.normcase(os.path.realpath(field.removeprefix("worktree "))) ==
+            os.path.normcase(os.path.realpath(path)) for field in listing.stdout.split("\0")
+            if field.startswith("worktree "))
         common = rev(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
         valid = bool(common and linked_owner(path) == os.path.realpath(common)) if registered else False
     except (OSError, subprocess.SubprocessError):

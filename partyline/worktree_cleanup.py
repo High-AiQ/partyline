@@ -39,6 +39,10 @@ def cleanup(db, root: str, path: str, merged: bool, *, force: bool = False) -> t
     """Snapshot merged dirt; explicit force anchors commits. Always protect nested repos."""
     if os.path.realpath(path) != path or os.path.realpath(root) != root:
         return False, "worktree paths must be canonical"
+    from .storage_worktrees import in_use
+    owner = db._exec("SELECT id FROM conversations WHERE cwd=?", (path,)).fetchone()
+    if protection := in_use(db, path, dict(owner) if owner else None):
+        return False, protection
     reason = None
     try:
         nested = repositories(path, check_files=True)
@@ -56,12 +60,19 @@ def cleanup(db, root: str, path: str, merged: bool, *, force: bool = False) -> t
             elif status.stdout.strip() and not force:
                 save_snapshot(db, root, path)
             if reason is None:
-                if force:
+                from .storage_git import recover, state
+                before = recover(root, path, owner["id"] if owner else None, merged=merged)
+                if force and not merged:
                     _preserve_head(root, path)
                 record_kept(db, root, path, None)
-                remove_directory(path, root)
+                with db._runtime_serialized():
+                    if protection := in_use(db, path, dict(owner) if owner else None):
+                        return False, protection
+                    if before != state(root, path, owner["id"] if owner else None):
+                        return False, "worktree changed after recovery; retained"
+                    remove_directory(path, root)
                 try:
-                    _git("worktree", "prune", cwd=root)
+                    _git("worktree", "remove", "--force", path, cwd=root)
                 except (OSError, subprocess.SubprocessError):
                     pass  # Never report failure after successful removal.
                 return not os.path.isdir(path), None

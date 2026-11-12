@@ -230,7 +230,9 @@ def sweep_scratch_worktrees(db, root: str) -> None:
             db._exec("SELECT path, conv_id FROM scratch_worktrees").fetchall()}
     for name in sorted(os.listdir(directory)):
         path = os.path.join(directory, name)
-        if db._exec("SELECT 1 FROM retirement_preserved_paths WHERE path=?", (path,)).fetchone():
+        from .storage_worktrees import in_use
+        if in_use(db, path) or db._exec("SELECT 1 FROM retirement_preserved_paths WHERE path=?",
+                                       (path,)).fetchone():
             continue
         if not os.path.isdir(path):
             continue

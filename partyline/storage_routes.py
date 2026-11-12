@@ -16,6 +16,8 @@ from .nested_repositories import keep_reason
 from .review_worktrees import remove_review_path
 from .scratch_worktrees import remove_scratch_path
 from .system_notice import post_system_notice
+from .storage_cleanup import cleanup
+from .storage_details import CleanupResult, StorageDetails, details
 
 CLEARABLE = {"sessions": survey.session_candidates, "tmp": survey.tmp_candidates,
              "review": survey.review_candidates, "scratch": survey.scratch_candidates}
@@ -86,6 +88,10 @@ def clear(db, key: str) -> dict:
     removed, freed = [], 0
     skipped = list(category.skipped)
     for path in category.candidates:
+        # Listing is advisory: re-read each candidate at the moment of deletion.
+        if path not in CLEARABLE[key](db).candidates:
+            skipped.append({"path": path, "reason": "it is now in use"})
+            continue
         done = _remove(db, key, path)
         if done is None:
             skipped.append({"path": path, "reason": "it could not be removed"})
@@ -93,6 +99,13 @@ def clear(db, key: str) -> dict:
             removed.append(path)
             freed += done
     return {"removed": removed, "freed_bytes": freed, "skipped": skipped}
+
+
+def clean_all(db):
+    report = cleanup(db)
+    for item in report['skipped']:
+        item['size_bytes'] = survey.Budget().size(item['path'])
+    return report
 
 
 def _root_line(db, conv_id: str | None) -> str | None:
@@ -122,6 +135,16 @@ def storage_router(runtime, media_root) -> APIRouter:
     async def usage(request: Request):
         _human(request)
         return await asyncio.to_thread(survey_all, db, media_root)
+
+    @router.get("/api/storage/details", response_model=StorageDetails)
+    async def inventory(request: Request):
+        _human(request)
+        return await asyncio.to_thread(details, db)
+
+    @router.post("/api/storage/cleanup", response_model=CleanupResult)
+    async def clean_now(request: Request):
+        _human(request)
+        return await asyncio.to_thread(clean_all, db)
 
     @router.post("/api/storage/{key}/clear")
     async def clear_category(request: Request, key: str, body: ClearIn | None = None):

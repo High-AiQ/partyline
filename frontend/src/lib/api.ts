@@ -74,6 +74,7 @@ export interface PresetDraft {
   reads_images?: boolean;
   can_manage?: boolean;
   implements?: boolean;
+  max_compactions?: number | null | undefined;
 }
 
 import type { FileUpload } from "./screen-upload";

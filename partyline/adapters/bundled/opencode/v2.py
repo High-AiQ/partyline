@@ -6,27 +6,28 @@ assistant completion alone can precede another tool step.
 """
 
 import asyncio
-import contextlib
-import json
 import logging
 import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import threading
 import time
 
 from partyline.adapters import Adapter
+from partyline.adapters.bundled.opencode.command import Command
 from partyline.adapters.bundled.opencode.provider_log import ProviderLog
+from partyline.adapters.bundled.opencode.store import SessionStore
 from partyline.adapters.bundled.opencode.wakes import WakeSettlement
 from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
-from partyline.mcp_attach import opencode_config_content, server_for
 
 logger = logging.getLogger(__name__)
 RESUME_READY_TIMEOUT_SECONDS = 30.0
+RECHECK_SECONDS = 0.05
 
 
-class PartylineAdapter(WakeSettlement, Adapter):
+class PartylineAdapter(Command, SessionStore, WakeSettlement, Adapter):
     kind = "opencode-v2"
     _CLAIMED: dict[tuple[str, str], str] = {}
 
@@ -43,40 +44,12 @@ class PartylineAdapter(WakeSettlement, Adapter):
         self.last_transcript_progress = time.monotonic()
         self._row_versions: dict[str, int] = {}
         self._resume_claimed_at: float | None = None
-
-    def build_command(self) -> list[str]:
-        cmd = list(self.att["command"]) or ["opencode2"]
-        # A remote/shared server would execute tools outside this process's fence.
-        if any(arg in ("--server", "--no-standalone")
-               or arg.startswith(("--server=", "--standalone=")) for arg in cmd):
-            raise ValueError("OpenCode v2 requires a private --standalone server")
-        if any(arg == "--prompt" or arg.startswith("--prompt=") for arg in cmd):
-            raise ValueError("Partyline supplies the OpenCode v2 startup prompt")
-        if "--standalone" not in cmd:
-            cmd.append("--standalone")
-        if "--auto" not in cmd:
-            cmd.append("--auto")
-        if self.resume and self.att.get("cli_session"):
-            if any(arg in ("--session", "-s") or arg.startswith("--session=") for arg in cmd):
-                raise ValueError("Partyline supplies the resumed OpenCode v2 session")
-            cmd += ["--session", str(self.att["cli_session"])]
-        prompt = self._with_claim(
-            "Partyline resume check. Reply READY, then wait for the next instruction."
-        ) if self.resume else self.briefing()
-        return cmd + ["--prompt", prompt]
-
-    def spawn_env(self) -> dict[str, str]:
-        # V1 and v2 otherwise share opencode.db. Keep their schema migrations apart.
-        return {"OPENCODE_DB": os.environ.get("OPENCODE_DB", "opencode-v2.db"), **self.mcp_env()}
-
-    def mcp_env(self) -> dict[str, str]:
-        # Merged into the inline config the preset wrapper also merges into;
-        # OPENCODE_CONFIG_DIR is not used because it can hide the user's config.
-        server = server_for(self.att)
-        if server is None:
-            return {}
-        content = opencode_config_content(os.environ.get("OPENCODE_CONFIG_CONTENT", ""), server)
-        return {} if content is None else {"OPENCODE_CONFIG_CONTENT": content}
+        # Wakes that were terminal output or exit; the notification count last acted on;
+        # and the one later look owed after a notification that showed nothing new.
+        self._other_wakes = 0
+        self._read_at: int | None = None
+        self._recheck_at: float | None = None
+        self._store_lock = threading.Lock()
 
     async def start(self):
         path = await asyncio.to_thread(self._resolve_path, "log")
@@ -103,13 +76,9 @@ class PartylineAdapter(WakeSettlement, Adapter):
             raise ValueError("OpenCode v2 must use an absolute, on-disk diagnostic path")
         return path
 
-    def _connect(self):
-        assert self._store is not None
-        return sqlite3.connect(f"{self._store.as_uri()}?mode=ro", uri=True)
-
     def _find_session(self) -> str | None:
         """Only a user row containing this activation's nonce can claim a session."""
-        with contextlib.closing(self._connect()) as db:
+        with self._reading() as db:
             rows = db.execute(
                 "SELECT s.id, m.seq, m.data FROM session_v2 s "
                 "JOIN session_message m ON m.session_id = s.id "
@@ -131,14 +100,6 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 return session
         return None
 
-    @staticmethod
-    def _decode(raw) -> dict:
-        try:
-            data = json.loads(raw)
-        except (TypeError, ValueError):
-            return {}
-        return data if isinstance(data, dict) else {}
-
     async def _poll_provider(self):
         if self._provider_log is None:
             return
@@ -155,14 +116,10 @@ class PartylineAdapter(WakeSettlement, Adapter):
                                 f"⚠ @{self.att['name']}: model provider error — {cause}")
         await receipt(self.att, ENDED)
 
-    async def _poll(self):
-        with contextlib.closing(self._connect()) as db:
-            rows = db.execute(
-                "SELECT id, type, data FROM session_message "
-                "WHERE session_id = ? AND seq >= ? ORDER BY seq",
-                (self._session_id, self._claim_seq),
-            ).fetchall()
-        for ident, kind, raw in rows:
+    async def _poll(self) -> bool:
+        """Settle what is new; False when nothing was committed since the last read."""
+        rows = await asyncio.to_thread(self._unsettled_rows)
+        for ident, kind, raw in rows or ():
             version = hash((kind, raw))
             if self._row_versions.get(ident) != version:
                 self._row_versions[ident] = version
@@ -175,11 +132,15 @@ class PartylineAdapter(WakeSettlement, Adapter):
             if kind == "compaction":
                 # The row type is the shape; only completed ones count. The
                 # seen-set is the dedup: a re-read row never counts twice.
-                if is_compaction_record("opencode-v2", {**data, "type": kind}):
-                    noted = self.att.get("on_compaction")
-                    if noted:
-                        await noted(data.get("reason") or "auto")
+                # A row first seen while the compaction runs is read again until it is
+                # complete: settled on first sight, it was never counted.
+                if not is_compaction_record("opencode-v2", {**data, "type": kind}):
+                    continue
+                noted = self.att.get("on_compaction")
+                if noted:
+                    await noted(data.get("reason") or "auto")
                 self._seen.add(ident)
+                self._row_versions.pop(ident, None)
                 continue
             if kind == "assistant":
                 timing = data.get("time")
@@ -202,6 +163,14 @@ class PartylineAdapter(WakeSettlement, Adapter):
                     await receipt(self.att, BEGAN)
                 if not self.resume:
                     self.mark_ready()
+            elif kind == "synthetic":
+                # A background job or subagent finishing prompts the model with no user
+                # row. Without this the process read as idle while it worked, and its
+                # turn never ended for the return path. An unfinished assistant row is
+                # not the signal: an aborted step leaves one behind after its idle.
+                if not self._busy:
+                    self._busy = True
+                    await receipt(self.att, BEGAN)
             elif kind == "idle":
                 if self._busy:
                     self._busy = False
@@ -211,6 +180,11 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 self.mark_ready()
                 self._schedule_unproved_repool()
             self._seen.add(ident)
+            self._row_versions.pop(ident, None)
+        self._after_poll()
+        return rows is not None
+
+    def _after_poll(self):
         # Readiness must not strand sequential recovery if the provider hangs
         # or errors without an idle row. This opens no delivery credit or idle.
         if (self.resume and self._resume_claimed_at is not None
@@ -239,9 +213,11 @@ class PartylineAdapter(WakeSettlement, Adapter):
             # A watcher that ends must never leave a readiness waiter stranded.
             self._mark_not_ready()
             self._release_claim()
+            self._close_store()
 
     async def _tail_session(self):
         self._store = await asyncio.to_thread(self._resolve_store)
+        self._store_open = True
         paths = [self._store]
         if self._provider_log is not None:
             paths.append(self._provider_log.path)
@@ -275,14 +251,29 @@ class PartylineAdapter(WakeSettlement, Adapter):
             raise RuntimeError("no claimed OpenCode v2 session appeared after 45s; "
                                "check the terminal for startup errors")
         while self.alive():
-            try:
-                await self._poll()
-            except sqlite3.Error as exc:
-                logger.debug("OpenCode v2 poll skipped: %s", exc)
-            await self._poll_provider()
+            stored = self._changes.version - self._other_wakes
+            due = self._recheck_at is not None and self.event_time() >= self._recheck_at
+            if stored == self._read_at and not due:
+                self._after_poll()  # a deadline or terminal output: nothing new to read
+            else:
+                try:
+                    await self._poll()
+                    # A notification can arrive before the commit it announces is visible,
+                    # and a read that found one commit can still be short of the next.
+                    # no-poll (b): one later look per notification; that look arms nothing
+                    self._recheck_at = (self.event_time() + RECHECK_SECONDS
+                                        if stored != self._read_at else None)
+                    self._read_at = stored
+                except sqlite3.Error as exc:
+                    self._recheck_at = None  # a failing store is retried on the next wake only
+                    logger.debug("OpenCode v2 poll skipped: %s", exc)
+                await self._poll_provider()
             delay = None
             if self.resume and not self._ready.is_set() and self._resume_claimed_at is not None:
                 delay = max(0, self._resume_claimed_at + RESUME_READY_TIMEOUT_SECONDS - time.monotonic())
+            if self._recheck_at is not None:
+                remaining = max(0, self._recheck_at - self.event_time())
+                delay = remaining if delay is None else min(delay, remaining)
             await self.wait_for_change(delay)
 
     def _release_claim(self):

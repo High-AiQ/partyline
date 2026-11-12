@@ -39,6 +39,11 @@ os.environ["PARTYLINE_DB"] = os.path.join(_SANDBOX, "partyline.db")
 # Temp directories never touch the real /tmp either: every attachment's
 # TMPDIR is created under the sandbox (finding 5.12).
 os.environ["PARTYLINE_TMP_BASE"] = os.path.join(_SANDBOX, "tmp")
+# Automatic cleanup must never inspect or delete the operator's session homes.
+from partyline import storage_survey as _storage_survey, git_fence as _git_fence
+os.environ["PARTYLINE_SESSIONS_ROOT"] = os.path.join(_SANDBOX, "sessions")
+_storage_survey.SESSIONS_ROOT = os.environ["PARTYLINE_SESSIONS_ROOT"]
+_git_fence.FENCE_ROOT = os.path.join(_SANDBOX, "sessions", "fence")
 # The platform temp directory too: nothing a test creates through ``tempfile`` or
 # ``gettempdir()`` lands in the real /tmp (finding 5.15). (The sandbox itself, not a
 # subdirectory: Unix socket paths are short.) Not on Windows: there is no tmpfs /tmp to

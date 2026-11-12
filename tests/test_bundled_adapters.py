@@ -68,6 +68,9 @@ class RowsConnection:
     def fetchall(self):
         return self.current
 
+    def fetchone(self):
+        return (1,)
+
     def close(self):
         pass
 

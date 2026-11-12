@@ -1,5 +1,95 @@
 # Lessons: the false-assumptions ledger
 
+## Read-only SQLite connections can wake their own watchers
+
+The false assumption was that a read-only connection cannot generate a write
+notification. Closing a connection to a live WAL closes its WAL and shared-memory
+files, which Linux reports to the watcher; reopening it on every wake made the
+reader run continuously. Keep the reader open until its tail ends, check
+`data_version` before listing, and allow one delayed look when an event beats its
+commit. A Linux regression exercises real FileEvents with a separate WAL writer;
+Hermes already keeps its reader open and produced no notifications in the same
+control. Close threaded readers under the same lock as reads.
+
+## Lifecycle cleanup must not queue behind the full sweep
+
+The false assumption was that narrowing the runtime lock was sufficient while
+all cleaners still shared a sweep lock. Awaited detach and exit cleanup then queued
+behind startup's entire inventory and recovery pass, parking executor threads and
+delaying shutdown and broadcasts. Serialize only full sweeps. Attachment and line
+cleanup bypass that lock and rely on per-candidate rechecks for safe concurrent
+removal. A regression blocks a full sweep, limits the executor to two workers, and
+finishes detach, twenty exit callbacks and line cleanup before releasing the sweep.
+The lock probe fails immediately on regression rather than hanging the test.
+
+## Cleanup inventory must not hold the fleet's ownership lock
+
+The false assumption was that placing a sweep in a thread kept it from delaying
+unrelated processes. Holding the shared runtime lock through walks, snapshots and
+fetches still blocks every delivery and activation. Measure and preserve outside
+that lock; serialize only each candidate's final recheck and deletion. Lifecycle
+hooks target their own line, and startup runs the full sweep as a background task
+after stale rows settle. Regressions probe the lock during walks and snapshots,
+verify the final deletion is locked, and let reattachment finish while housekeeping
+is held on a controlled event.
+
+## Resume must claim ownership before publishing connection files
+
+The false assumption was that newly provisioned coordinates proved an attachment
+was starting. Until claim_resume changes the row, cleanup correctly sees it as
+stopped and can remove both connection and MCP files. Claim first, then provision
+and stage startup delivery; preparation failures return the row to exited. A
+regression runs cleanup during provisioning and verifies both files survive startup.
+
+## Clean merged worktrees do not need recovery refs
+
+The false assumption was that snapshotting every removed worktree was harmless.
+It accumulates permanent recovery refs for content already in the repository's
+merged history. Inspect and recheck those checkouts without creating recovery
+refs; keep snapshots for dirty or unmerged state. Regressions cover both automatic
+and existing cleanup paths, including a missing but merged registration.
+
+## Storage paths are not unique row keys
+
+The false assumption was that every reported storage path appeared once. Aliased
+roots or repeated kept reports can produce duplicates. Render the reports without
+path uniqueness as a requirement; a component regression supplies duplicate paths.
+
+## Retained storage needs another lifecycle event
+
+The false assumption was that keeping a directory during retirement was enough:
+retired lines and old orphans were never revisited, and resumable CLI homes kept
+large recreatable caches forever. Stops now reclaim caches without losing session
+transcripts, and retirement, purge, startup and a one-click storage action revisit
+leftovers. A fixture includes hundreds of retired lines and homes; protected live
+and restart-planned attachments retain every file.
+
+## Forced removal must preserve working files as well as commit tips
+
+The false assumption was that anchoring HEAD before forced worktree removal also
+saved its dirty files. Both the automatic path and existing removal helper now use
+the forced-retirement Git snapshot machinery before deletion. A regression reads
+the staged and working file contents from recovery refs while the original folder
+still exists, then proves the folder is removed. Nested linked checkouts receive
+recovery refs in their surviving owners; independent clones stay with a reason.
+
+## Recovery refs must survive without their mirror objects
+
+The false assumption was that copying a ref, or fetching with the mirror's object
+alternates still visible to the destination, proved recovery. The surviving clone
+must own the objects too: otherwise Git can decide it already has a mirror-only
+object and lose it when the mirror is removed. A regression creates a commit only
+inside a bare mirror, removes that mirror, and reads the commit through its new
+recovery ref in the real repository. Missing worktree registrations also preserve
+detached HEADs before removal; cleanup deregisters only the checkout it removed,
+rather than globally pruning other checkouts before their HEADs are preserved.
+
+## Deployment sync must retain the server's extras
+
+The false assumption was that a locked dependency sync preserved installed optional
+voice dependencies. Plain sync removes them. Restart and agent instructions now
+require the extras used by that server, matching the existing voice documentation.
+
 ## Pressure events are not continuous memory gauges
 
 The false assumption was that a pressure notification reports every crossing of
@@ -2245,4 +2335,54 @@ that notice. Another delivery to the speaker, or a later message of its own that
 same slip news again; a message that merely does not repeat it does not (review broke that shortcut with a
 two-message turn). For every notice that wakes a process, ask what
 the process will say next and whether those words re-trigger it. Tests: `tests/test_unreached_notice.py`.
+
+## 2026-11-12 — A watcher that reads the file it watches can wake itself
+
+The false assumption was that reading is silent. The OpenCode v2 watcher opened a read-only SQLite connection for
+every read of OpenCode's store and closed it afterwards. Closing a write-ahead database closes its `-wal` and
+`-shm` files even for a reader, and that close is a file notification on the very names being watched, so every
+read caused the next one. The watcher never waited: 237 reads a second measured in review, each on the event
+loop, a full core whether the process was working or idle, with the store's size and mtime unchanged throughout. The
+service sat near 6% CPU before an OpenCode process attached and at about 100% afterwards, and ordinary requests
+showed up as 500 ms "slow operation" lines. A first fix blamed terminal redraws, made each read cheaper and left
+the loop spinning faster (2,885 reads a second); the review found the real cause by counting notifications with
+nothing writing. A second fix shared the one connection with a worker thread and closed it on the loop thread
+when the watcher was cancelled, which crashed the interpreter; the connection is now used and closed under a lock. The
+watcher now keeps one connection for its life, asks `PRAGMA data_version` whether another connection committed
+before listing anything, lists row ids without bodies and fetches only rows that are not settled, in a thread;
+once a session is claimed, terminal output no longer triggers a read. Because a notification can precede the
+commit it announces becoming visible, and a read that found one commit can still be short of the next, every
+notification earns one later look, which arms nothing further and is dropped if the store fails. Two smaller faults in the
+same adapter: a turn started by a background job or subagent finishing (a `synthetic` row, no user row) showed no
+working badge and never ended for the return path, and a compaction first seen while it was running was never
+counted. When an event wait replaces a poll, prove the watcher is quiet when nothing happens: count its wakes
+against a store nobody is writing. The Codex thread-history reader had the same fault (8,661 reads a second in
+review) and so did OpenCode v1; both are fixed in the same release ("Read-only SQLite connections can wake their
+own watchers"). Hermes already kept one connection. Tests: `tests/test_opencode_v2_adapter.py`.
+
+## 2026-11-12 — A form that does not know a field must not reset it
+
+The false assumption was that a preset save carries the whole preset. The Settings preset form sends only the
+fields it knows, and `PUT /api/presets/<id>` wrote the defaults for the rest, so editing a title silently reset
+`max_instances` and `auto_compact_tokens` to 0. Adding the compaction override made it visible. A save now keeps
+the stored value of any knob the client did not send (`model_fields_set`), while an explicit value, including an
+explicit `null` or `0`, still wins. Tests: `tests/test_compaction_limit.py`.
+
+## 2026-11-12 — A fresh session on an old attachment must not reuse the attachment's session id
+
+The false assumption was that a new CLI session for an attachment can always take the attachment id as its
+session id. Claude, pi and grok pin their session to that id, so starting a second session on the same
+attachment either collides with the old transcript or reopens it, which defeats a fresh start. A rotation now
+stores a new `session_pin` on the attachment and every launch, resume and transcript lookup uses
+`pinned_session(att)`, which falls back to the attachment id for attachments never rotated. Tests:
+`tests/test_compaction_rotation.py`.
+
+## 2026-11-12 — "Resumable" is the adapter's answer, not one column's
+
+The false assumption was that a session home with no recorded session id holds nothing a resume needs. pi pins
+its session to the attachment and keeps the transcript in the home, recording no id, and its resume route
+accepts that. Behind a manual, confirmed Clear the rule cost a session only to a person who confirmed it; made
+automatic at every process stop, it deleted the only copy of a session that could still be resumed. Found by the integration review
+of the batch, not by the task's own three rounds: nothing on the machine that built it has a pi home. A rule that
+was safe behind a confirmation needs re-reading when it becomes automatic. Tests: `tests/test_storage_cleanup.py`.
 

@@ -2020,7 +2020,7 @@ class ShutdownTest(ServerTest):
                          return_value=str(tmp_root)), \
                      patch("partyline.startup_state.reap_legacy_temp", new=recording):
                     async with server.lifespan(server.app):
-                        pass
+                        await server.app.state.startup_housekeeping_task
             # The assertion reads the recording: this sandbox's tmp tree is
             # pruned by an external janitor, so filesystem aftermath is not
             # reliable evidence.

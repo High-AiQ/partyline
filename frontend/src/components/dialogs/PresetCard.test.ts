@@ -66,7 +66,42 @@ describe("PresetCard process traits", () => {
           reads_images: true,
           can_manage: true,
           implements: false,
+          max_compactions: null,
         });
+      });
+    } finally {
+      void unmount(card);
+    }
+  });
+});
+
+describe("PresetCard compaction limit", () => {
+  it("sends the override, and null when the field is blank", async () => {
+    session.adapters = [adapter];
+    const savePreset = vi.spyOn(api, "savePreset").mockResolvedValue(preset);
+    vi.spyOn(session, "loadPresets").mockResolvedValue();
+    const card = mount(PresetCard, {
+      target: document.body,
+      props: { preset: { ...preset, max_compactions: 3 } },
+    });
+    try {
+      const field = document.querySelector<HTMLInputElement>("#pMaxCompactions-preset-1");
+      expect(field?.value).toBe("3");
+      if (!field) throw new Error("missing field");
+      field.value = "0";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      document.querySelector<HTMLButtonElement>("button.save")?.click();
+      await vi.waitFor(() => {
+        expect(savePreset).toHaveBeenLastCalledWith(expect.objectContaining({ max_compactions: 0 }));
+      });
+      await vi.waitFor(() => {
+        expect(document.querySelector<HTMLButtonElement>("button.save")?.disabled).toBe(false);
+      });
+      field.value = "";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      document.querySelector<HTMLButtonElement>("button.save")?.click();
+      await vi.waitFor(() => {
+        expect(savePreset).toHaveBeenLastCalledWith(expect.objectContaining({ max_compactions: null }));
       });
     } finally {
       void unmount(card);

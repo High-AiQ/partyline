@@ -203,7 +203,7 @@ def ui_session(lines=(), *, out_dir="/var/tmp/partyline-ui", headless=True, view
     os.unlink(db_path)  # let the server create it, so migrations run on a fresh file
 
     env = dict(os.environ, PARTYLINE_DB=db_path, PARTYLINE_PORT=str(port),
-               PARTYLINE_HOST="127.0.0.1")
+               PARTYLINE_HOST="127.0.0.1", PARTYLINE_SESSIONS_ROOT=db_path + ".sessions")
     server = subprocess.Popen([sys.executable, "-m", "partyline.server"], cwd=REPO_ROOT,
                               env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               preexec_fn=_die_with_parent)

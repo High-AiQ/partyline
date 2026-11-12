@@ -107,7 +107,7 @@ class PresetRolesTest(unittest.TestCase):
             ('orchestrator_staff.py', 'spawn'), ('orchestrator_service.py', 'spawn'),
             ('hierarchy_routes.py', 'set_lead'), ('conversation_routes.py', 'start_staffed'),
             ('preset_roles.py', 'seat_captain'), ('adapters/windows_runtime.py', 'spawn'),
-            ('windows_probe.py', 'spawn'),
+            ('windows_probe.py', 'spawn'), ('compaction_rotation.py', '_start_attachment'),
         }
         self.assertEqual(actual, expected)
         self.assertEqual(references, {
@@ -117,6 +117,7 @@ class PresetRolesTest(unittest.TestCase):
             ('orchestrator_staff.py', '_start_attachment'), ('orchestrator_staff.py', '_resume_adapter'),
             ('orchestrator_staff.py', 'resume_with_backlog'), ('memory_requests.py', 'resume_with_backlog'),
             ('write_set_requests.py', 'resume_with_backlog'),
+            ('compaction_rotation.py', '_start_attachment'),
         })
         # Memory and write-set approvals resume live processes; server restart
         # recovery also continues live processes, rather than staffing new ones.

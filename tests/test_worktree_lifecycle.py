@@ -299,10 +299,24 @@ class WorktreeLifecycleTest(unittest.TestCase):
              "--allow-empty", "-m", "unmerged", cwd=mid["cwd"])
         archived = self.client.delete(f"/api/conversations/{mid['id']}")
         self.assertEqual(archived.status_code, 200, archived.text)
-        self.assertTrue(os.path.isdir(mid["cwd"]))  # kept: dirty
+        self.assertFalse(os.path.isdir(mid["cwd"]))  # retired: recovery refs precede removal
         purged = self.client.delete(f"/api/conversations/{mid['id']}/purge")
         self.assertEqual(purged.status_code, 200, purged.text)
         self.assertFalse(os.path.exists(mid["cwd"]))
+
+    def test_archiving_one_line_does_not_sweep_another_retired_line(self):
+        repo = self._repo()
+        self._root_on(repo)
+        target = self.child("root", "target", self.machine("root-lead"))
+        unrelated = self.child("root", "unrelated", self.machine("root-lead"))
+        self.db.archive_conversation(unrelated["id"])
+        path = os.path.join(unrelated["cwd"], "only-copy.txt")
+        with open(path, "w") as stream:
+            stream.write("unrelated work")
+        response = self.client.delete(f"/api/conversations/{target['id']}")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(os.path.isfile(path))
+        self.assertFalse(os.path.isdir(target["cwd"]))
 
     # -- startup sweep ---------------------------------------------------------
 

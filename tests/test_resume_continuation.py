@@ -228,7 +228,7 @@ class ResumeContinuationTest(unittest.IsolatedAsyncioTestCase):
         adapter.stop = stop
         self.runtime.live["one"] = adapter
         with patch("partyline.tmp_owners.record"), \
-             patch("partyline.line_process_routes.remove_config"), \
+             patch("partyline.storage_cleanup.automatic", new_callable=AsyncMock), \
              patch("partyline.line_process_routes.announce_survivors", new_callable=AsyncMock):
             await detach_attachment(self.runtime, "one", self_detach=True)
         self.assertEqual(self.db.get_attachment("one")["turn_open"], 0)

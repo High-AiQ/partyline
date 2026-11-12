@@ -156,9 +156,20 @@ def child_env(env: Mapping[str, str], att: dict) -> dict[str, str]:
     return result
 
 
-def fresh_checkpoint_briefing(text: str, checkpoint: str | None) -> str:
-    """A fresh session loads a durable pointer, never its predecessor's transcript."""
-    if checkpoint:
+def fresh_checkpoint_briefing(text: str, att: dict) -> str:
+    """A fresh session loads a durable pointer, never its predecessor's transcript.
+
+    A rotation sets ``fresh_resume_now``: the work is mid-flight and nobody is
+    going to ring this instance with an assignment, so it continues from the
+    hand-off note instead of waiting for a first @mention.
+    """
+    checkpoint, resume_now = att.get("fresh_checkpoint"), att.get("fresh_resume_now")
+    if checkpoint and resume_now:
+        text += ("\n\nYou started with fresh context, replacing an instance of you that "
+                 "reached its compaction limit. Read this briefing, verify the state it "
+                 "names, and continue the work now; do not wait for a new assignment:\n"
+                 + checkpoint)
+    elif checkpoint:
         text += ("\n\nYou started with fresh context. Read this checkpoint and verify its "
                  "authoritative state, announce readiness, then wait for the first @mention before "
                  "resuming work; that wake delivers messages retained after the checkpoint:\n"
