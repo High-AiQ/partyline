@@ -18,6 +18,18 @@ class ClaudeSession:
     def session_exists(cls, att: dict) -> bool:
         return any(os.path.isfile(path) for path in glob.glob(pinned_transcript_glob(att)))
 
+    @staticmethod
+    def harness_filler(record: dict) -> bool:
+        """An assistant line the CLI wrote itself, not the model.
+
+        Resuming after an interrupted turn, Claude Code records a synthetic
+        "No response requested." reply. It is nobody's speech, and relaying it
+        put a meaningless line in the room on every such resume. A synthetic
+        API error stays: that one tells people why the process went quiet.
+        """
+        message = record.get("message") or {}
+        return message.get("model") == "<synthetic>" and not record.get("isApiErrorMessage")
+
     def transcript_glob(self) -> str:
         return pinned_transcript_glob(self.att)
 
