@@ -15,13 +15,13 @@ _ACTION = {
 }
 
 
-def _lead(state):
+def is_lead(state):
     return (state.get("kind") == "machine" and state.get("role") == "lead"
             and state.get("is_lead") is True)
 
 
 def permitted(state):
-    if not _lead(state):
+    if not is_lead(state):
         return ()
     actions = set(state.get("actions", []))
     return tuple(op for op in OPERATIONS if op in {"list_presets", "docs_read"}
@@ -96,7 +96,7 @@ def call(client, name: str, args: dict, state: dict):
         op, operation_args = name, args
         if op not in OPERATIONS:
             raise ValueError("unknown captain MCP tool")
-    if not _lead(state):
+    if not is_lead(state):
         from .client import ApiError
         raise ApiError("current attachment is not a line captain")
     if op not in permitted(state):
