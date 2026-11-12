@@ -62,3 +62,24 @@ it("renders duplicate kept paths from aliased roots", async () => {
     await unmount(component);
   }
 });
+
+it("lists mirror and permission reasons in inventory and cleanup results", async () => {
+  const kept = [
+    { path: "/sessions/fence/old/git-123", reason: "cannot inspect mirror refs", size_bytes: 4000 },
+    { path: "/repo/retired", reason: "/repo/retired/__pycache__: permission denied", size_bytes: 2000 },
+  ];
+  vi.spyOn(storageCleanupApi, "details").mockResolvedValue({ kept, idle_lines: [] });
+  vi.spyOn(storageCleanupApi, "cleanup").mockResolvedValue({ removed: [], freed_bytes: 0, skipped: kept });
+  const component = mount(StorageCleanup, { target: document.body, props: { refreshed: vi.fn() } });
+  try {
+    await settle();
+    expect(document.body.textContent).toContain("Kept worktrees, mirrors and orphans (2)");
+    document.querySelector("button")?.click();
+    await settle();
+    for (const item of kept) {
+      expect(document.body.textContent.split(item.reason)).toHaveLength(3);
+    }
+  } finally {
+    await unmount(component);
+  }
+});

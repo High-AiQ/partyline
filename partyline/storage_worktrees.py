@@ -4,7 +4,7 @@ import logging
 import os
 
 from .line_worktree import _git
-from .retirement_nested import linked_owner
+from .retirement_nested import linked_owner, surviving_owner
 from .retirement_worktree import remove_directory
 from .storage_cleanup import attachment_reason, attempt
 from .storage_git import merged_tips, recover, recover_plain, state
@@ -64,48 +64,51 @@ def remove_worktree(db, root, path, owner=None, purging=False):
             if done.returncode:
                 return 'cannot remove missing checkout registration'
         return None
-    nested = repositories(path, check_files=True)
+    if common := linked_owner(path):
+        if not inside(common, path):
+            root = common
+    errors = []
+    nested = repositories(path, check_files=True, errors=errors)
+    excluded = tuple(os.path.relpath(error.filename, path) for error in errors)
+    if any(name == '.' or name.startswith('..' + os.sep) for name in excluded):
+        return 'cannot inspect worktree; retained'
+    options = {'excluded': excluded} if excluded else {}
     # Preflight the whole folder before removing any nested checkout.
     for name in nested:
         full = os.path.join(path, name)
-        common = linked_owner(full)
-        if not common or inside(common, path):
+        common = surviving_owner(full, path)
+        if not common:
             return f'contains independent nested repository {name}; its commits may exist nowhere else'
         if reason := protected(db, full):
             return reason
     for name in nested:
         full = os.path.join(path, name)
         common = linked_owner(full)
-        before = recover(common, full, owner['id'] if owner else None)
-        with db._runtime_serialized():
-            if reason := protected(db, path, owner, purging):
-                return reason
-            if before != state(common, full, owner['id'] if owner else None):
-                return 'nested worktree changed after recovery; retained'
-            remove_directory(full, common)
-        _git('worktree', 'remove', '--force', full, cwd=common)
+        reason = remove_worktree(db, common, full, owner, purging)
+        if reason:
+            return f'{full}: {reason}'
     if not os.path.isdir(path):
         return None
     if os.path.lexists(os.path.join(path, '.git')):
-        before = recover(root, path, owner['id'] if owner else None)
+        before = recover(root, path, owner['id'] if owner else None, **options)
         with db._runtime_serialized():
             if reason := protected(db, path, owner, purging):
                 return reason
-            if before != state(root, path, owner['id'] if owner else None):
+            if before != state(root, path, owner['id'] if owner else None, **options):
                 return 'worktree changed after recovery; retained'
-            remove_directory(path, root)
+            remove_directory(path, root, **options)
         _git('worktree', 'remove', '--force', path, cwd=root)
     else:
         # Plain task folders and unregistered leftovers get a tree in a surviving clone.
         repo = root
         if owner and (spaces := workspaces(db, owner['id'])):
             repo = spaces[0]['repository']
-        recover_plain(repo, path)
+        recover_plain(repo, path, **options)
         with db._runtime_serialized():
             if reason := protected(db, path, owner, purging):
                 return reason
             from .storage_cleanup import remove_path
-            remove_path(path)
+            remove_path(path, **options)
 
     return None
 

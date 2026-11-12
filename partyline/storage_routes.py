@@ -102,7 +102,7 @@ def clear(db, key: str) -> dict:
 
 
 def clean_all(db):
-    report = cleanup(db)
+    report = cleanup(db, retry_mirrors=True)
     for item in report['skipped']:
         item['size_bytes'] = survey.Budget().size(item['path'])
     return report

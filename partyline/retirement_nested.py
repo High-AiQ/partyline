@@ -43,6 +43,14 @@ def linked_owner(full):
         return None
 
 
+def surviving_owner(full, retiring):
+    """Only linked worktrees with metadata outside the retiring tree are removable."""
+    from .storage_survey import inside
+
+    owner = linked_owner(full)
+    return owner if owner and not inside(owner, retiring) else None
+
+
 def nested_evidence(cwd, path, conv_id=None):
     """Accept attached worktrees matching their durable host or private mirror tip.
 

@@ -60,7 +60,7 @@
   {/if}
   {#if inventory.kept.length}
     <details class="text-[12px] text-cream-dim">
-      <summary>Kept worktrees and orphans ({inventory.kept.length})</summary>
+      <summary>Kept worktrees, mirrors and orphans ({inventory.kept.length})</summary>
       <ul>
         {#each inventory.kept as item, index (index)}
           <li class="break-words py-1">{item.path} · {humanSize(item.size_bytes)} — {item.reason}</li>

@@ -1,5 +1,62 @@
 # Lessons: the false-assumptions ledger
 
+## A nested managed path does not identify its Git repository
+
+The false assumption was that everything below a managed worktree belongs to
+its outer repository. A second repository's linked products checkout was then
+refused as an orphan of the first repository. Cleanup now resolves the registered
+linked owner through retirement_nested, checks that owner survives outside the
+retiring folder, and recursively recovers/removes inner worktrees first. Fixtures
+cover dirty, unmerged second and third repositories under a missing line, while
+independent nested clones remain untouched.
+
+## Preview evidence limits are not recovery limits
+
+The false assumption was that cleanup needed the retirement preview's per-file
+listing. Its 2,000-file ceiling stranded large orphans, even deletion-only ones.
+Cleanup now compares Git trees built with private indexes plus index content
+identity, and preserves working/index/HEAD tips in recovery refs. Interactive
+preview limits still apply. A 4,200-path fixture reads all 2,100 new files from the
+snapshot and deleted originals from its parent; a staged-only fixture protects
+index contents even when working files match HEAD.
+
+## One denied entry must not strand removable siblings
+
+The false assumption was that rmtree either succeeds or leaves useful progress.
+It stopped at container-owned cache entries, leaving later siblings behind.
+Recovery now excludes explicitly uninspectable subtrees, and deletion always
+retains those subtrees even if permissions change before removal. Other readable
+content is recovered before best-effort removal; failures retain the checkout's
+Git link/registration and report offending paths. Fixtures deny both unlink and
+scandir without relying on the test user's privileges. Partial reclaimed bytes
+are counted, and a denied entry does not stop subsequent candidates.
+
+## A refs overlay is not necessarily a standalone Git directory
+
+The false assumption was that every fence mirror accepted --git-dir directly.
+Older refresh_mirror writes refs/logs/packed-refs without HEAD or objects: Git
+rejects the missing HEAD even when GIT_OBJECT_DIRECTORY supplies the surviving
+store (exit 128 without HEAD, exit 0 with it in the same overlay).
+Cleanup reads a temporary repository view with synthetic HEAD, copied refs and
+explicit object alternates, then imports mirror-only objects through that view.
+The source overlay remains intact until verification. Fixtures cover a real
+legacy overlay, private objects, invalid packed refs and warning-only broken
+loose refs. Failures retain their reason durably outside the mirror; automatic
+startup skips them, while the person's Clean up now action retries after repair.
+
+## Ownership metadata must precede Git discovery
+
+The false assumption was that inventorying owning repositories was cheap before
+checking mirror ownership. Each legacy attachment repeated repo_root even when
+its line already required keeping the mirror. Cleanup now classifies those homes
+first, discovers repositories lazily, and coalesces managed checkout paths before discovery. A mixed inventory
+regression includes an eligible orphan among retained managed checkouts, so
+lazy discovery cannot accidentally reintroduce per-attachment Git calls. On the
+same isolated 3,000-mirror fixture, the old code took 3.773 seconds and 3,003 Git
+subprocesses; the optimized zero-Git run took 0.813 seconds. The regression
+asserts zero subprocesses, not a machine-dependent wall-clock threshold. Settings
+and cleanup results list retained mirrors and their reasons without Git probes.
+
 ## A kqueue watch of "every transcript" is not free
 
 The false assumption was that watching every file a pattern matches costs only

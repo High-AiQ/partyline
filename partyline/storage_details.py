@@ -5,6 +5,8 @@ import time
 from pydantic import BaseModel
 
 from .storage_worktrees import candidates, protected
+from . import storage_kept
+from .storage_fence_inventory import folders, mirrors, retention
 from .storage_survey import Budget, inside
 from .worktree_storage import kept_reason, repositories
 
@@ -52,11 +54,24 @@ def details(db, now=None):
                 previous.append(path)
         if owner and not owner.get('archived_at'):
             continue
-        nested = repositories(path)
+        try:
+            nested = repositories(path)
+        except OSError as exc:
+            nested = []
+            kept.append(StoragePath(path=path, reason=str(exc), size_bytes=size))
+            continue
         reason = protected(db, path, owner) or kept_reason(db, root, path) or (
             'contains nested repositories: ' + ', '.join(nested) if nested else
             'awaiting cleanup; changes will be saved in recovery refs')
         kept.append(StoragePath(path=path, reason=reason, size_bytes=size))
+    for folder in folders(db):
+        owner_reason = retention(db, folder)
+        def failed(path, reason):
+            kept.append(StoragePath(path=path, reason=reason, size_bytes=0))
+
+        for mirror in mirrors(folder, failed):
+            reason = owner_reason or storage_kept.reason(db, mirror) or 'awaiting mirror recovery and cleanup'
+            kept.append(StoragePath(path=str(mirror), reason=reason, size_bytes=budget.size(mirror)))
     idle = []
     for line in db.list_conversations():
         if any(att['status'] in ('starting', 'running') for att in db.list_attachments(line['id'])):

@@ -209,7 +209,7 @@ class NestedRetirementGuardTest(SafetyFixture, unittest.TestCase):
     def test_interrupted_removal_keeps_registration_and_retry_succeeds(self):
         child = self.child()
         Path(child["cwd"], "ignored").mkdir()
-        with patch("partyline.retirement_worktree.shutil.rmtree", side_effect=OSError("interrupted")):
+        with patch("partyline.storage_removal.shutil.rmtree", side_effect=OSError("interrupted")):
             response = self.force(child)
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn(child["cwd"], _git("worktree", "list", "--porcelain", cwd=self.repo).stdout)
