@@ -14,7 +14,6 @@ from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.bundled.claude.session import ClaudeSession
 from partyline.adapters.compaction import compaction_hooks_declared, is_compaction_record
 from partyline.adapters.session_seed import seed_claude_home
-from partyline.adapters.transcript_scan import scan_lines
 from partyline.mcp_attach import claude_command
 
 
@@ -118,36 +117,6 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
             return os.path.getmtime(path) >= self.spawned_at
         except OSError:
             return False
-
-    def _recorded_our_token(self, path: str) -> bool:
-        """Whether this transcript recorded the token we pasted into our pty.
-
-        Nothing else writes this pty, and no other attachment pastes this
-        token, so a match is proof rather than inference — and it holds
-        however the sessions interleave, whatever order the scan runs in, and
-        however many attachments share a working directory. An ``@all`` wake
-        that reaches two resumed attachments carries a different token into
-        each, which is what digest text alone could not do.
-        """
-        try:
-            for line in scan_lines(path):
-                if self._claim_token not in line:
-                    continue
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if record.get("type") != "user":
-                    continue
-                content = (record.get("message") or {}).get("content")
-                if isinstance(content, str) and self._claim_token in content:
-                    # The token's own record names the directory; a leftover
-                    # record from another directory earlier in a long
-                    # session says nothing about who wrote the token.
-                    return record.get("cwd") in (None, "", self.att["cwd"])
-        except OSError:
-            return False
-        return False
 
     def _claimed_by_another(self, path: str) -> bool:
         """Whether a live adapter other than this one is tailing ``path``."""

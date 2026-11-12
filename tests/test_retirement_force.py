@@ -8,6 +8,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 from partyline import auth_store
+from partyline.retirement_evidence import unpack
 from partyline.retirement_git import inspect_git
 from tests import test_retirement as base
 
@@ -55,7 +56,8 @@ class ForcedRetirementTest(unittest.TestCase):
         audit = self.db._exec("SELECT * FROM retirement_audit").fetchone()
         self.assertEqual(audit["decision"], "completed")
         self.assertEqual(json.loads(audit["principal"])["attachment_id"], "root-lead")
-        self.assertIn("tracked", audit["evidence"])
+        self.assertTrue(audit["evidence"].startswith("zlib:"))  # megabytes on a real line
+        self.assertIn("tracked", json.dumps(unpack(audit["evidence"])))
         self.assertIn(tip, audit["recovery"])
 
     def test_explicit_flag_and_token_required(self):
@@ -151,7 +153,8 @@ class ForcedRetirementTest(unittest.TestCase):
         snapshot = next(v for k, v in refs.items() if k.endswith("/snapshot"))
         paths = _git("ls-tree", "--name-only", snapshot, cwd=self.repo).stdout
         self.assertNotIn("ignored", paths)
-        self.assertIn("ignored", self.db._exec("SELECT evidence FROM retirement_audit").fetchone()[0])
+        evidence = unpack(self.db._exec("SELECT evidence FROM retirement_audit").fetchone()[0])
+        self.assertIn("ignored", evidence["plan"]["lines"][0]["git"]["ignored"])
 
     def test_preview_limits_files_and_bytes(self):
         child = self.child()
@@ -175,6 +178,41 @@ class ForcedRetirementTest(unittest.TestCase):
         response = self.client.get(f"/api/conversations/{child['id']}/retirement-audit", headers=self.captain)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()[0]["decision"], "completed")
+        self.assertEqual(response.json()[0]["evidence"]["plan"]["target"], child["id"])
+
+    def test_rows_written_before_compression_are_packed_once_and_read_back_whole(self):
+        from partyline import retirement_evidence
+
+        old = {"force_discard": True, "plan": {"target": "gone", "lines": [
+            {"git": {"ignored": [f"node_modules/pkg-{index}/index.js" for index in range(2000)]}}]}}
+        for ident in ("old-1", "old-2"):
+            self.db._exec("INSERT INTO retirement_audit VALUES(?,?,?,?,?,?,?,?)", (
+                ident, "{}", "gone", "completed", json.dumps(old), "{}", None, 1.0))
+        raw = len(json.dumps(old))
+        with self.assertLogs("partyline.retirement_evidence", "WARNING"):
+            self.assertEqual(retirement_evidence.pack_stored(self.db), 2)
+        stored = [row[0] for row in self.db._exec("SELECT evidence FROM retirement_audit").fetchall()]
+        self.assertTrue(all(len(text) < raw / 5 for text in stored))
+        self.assertEqual([unpack(text) for text in stored], [old, old])
+        self.assertEqual(unpack(json.dumps(old)), old)  # a row not yet packed reads the same
+        with self.assertNoLogs("partyline.retirement_evidence", "WARNING"):
+            self.assertEqual(retirement_evidence.pack_stored(self.db), 0)  # nothing left to do
+
+    def test_packing_hands_the_freed_pages_back_when_they_are_worth_a_rewrite(self):
+        from partyline import retirement_evidence
+
+        filler = json.dumps({"plan": {"files": ["x" * 200 + str(index) for index in range(3000)]}})
+        self.db._exec("INSERT INTO retirement_audit VALUES(?,?,?,?,?,?,?,?)", (
+            "big", "{}", "gone", "completed", filler, "{}", None, 1.0))
+        before = os.path.getsize(self.db.path) + os.path.getsize(self.db.path + "-wal")
+        with patch.object(retirement_evidence, "VACUUM_FREE_BYTES", 4096), \
+                self.assertLogs("partyline.retirement_evidence", "WARNING"):
+            retirement_evidence.pack_stored(self.db)
+        self.assertEqual(self.db._exec("PRAGMA freelist_count").fetchone()[0], 0)
+        self.db._exec("PRAGMA wal_checkpoint(TRUNCATE)")
+        self.assertLess(os.path.getsize(self.db.path), before)
+        self.assertEqual(unpack(self.db._exec(
+            "SELECT evidence FROM retirement_audit WHERE id='big'").fetchone()[0]), json.loads(filler))
 
     def test_root_authority_is_rechecked_after_preview(self):
         child = self.child()

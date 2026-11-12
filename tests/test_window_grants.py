@@ -42,6 +42,26 @@ class WindowGrantTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         await self.hub.window_grants.revoke("g1")
         self.assertEqual([], socket.send_json.await_args.args[0]["indicators"])
 
+    async def test_a_greeting_to_a_socket_closed_underneath_it_is_a_disconnect(self):
+        """Every restart logged an ASGI traceback: the hello raced the shutdown's close."""
+        from starlette.websockets import WebSocketState
+
+        closed = RuntimeError('Cannot call "send" once a close message has been sent.')
+        for line, state, raises in (("~account", WebSocketState.DISCONNECTED, False),
+                                    ("alpha", WebSocketState.DISCONNECTED, False),
+                                    ("alpha", WebSocketState.CONNECTED, True)):
+            socket = Mock(screen_owner_id=self.owner["id"], application_state=state)
+            socket.accept = AsyncMock()
+            socket.receive_json = AsyncMock(return_value={"type": "hello", "client_id": "tab"})
+            socket.send_json = AsyncMock(side_effect=closed)
+            with self.subTest(line=line, state=state):
+                if raises:  # a send that fails on an open socket is still a fault
+                    with self.assertRaises(RuntimeError):
+                        await serve_wire(self.runtime, socket, line, "owner", "build", "1")
+                else:
+                    await serve_wire(self.runtime, socket, line, "owner", "build", "1")
+                self.assertNotIn(socket, self.runtime.sockets.get(line, set()))
+
     async def test_socket_hello_and_reconnect_push_current_screen_snapshot(self):
         await self.grant("a")
         for _ in range(2):

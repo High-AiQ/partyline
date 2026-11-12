@@ -57,15 +57,38 @@ class PartylineClient:
         result = self.request("GET", path)
         return result if isinstance(result, dict) else {}
 
-    def capability_version(self, since: str | None, timeout: float = 65) -> str:
-        path = "/api/capability-version"
-        if since is not None:
-            path += "?since=" + quote(since, safe="")
-        result = self.request("GET", path, timeout=timeout)
-        version = result.get("version") if isinstance(result, dict) else None
-        if not isinstance(version, str):
-            raise ApiError("Partyline returned an invalid capability version")
-        return version
+    def capability_stream(self):
+        """Yield each capability revision the server pushes, the current one first.
+
+        The read has no deadline: only a pushed line, the server closing the stream, or
+        ``interrupt`` ends it. TCP keepalive notices a peer that vanished without closing.
+        """
+        connection = self._origin()
+        with self._active_lock:
+            if self._interrupted:
+                raise OSError("MCP bridge is shutting down")
+            self._active_connections.add(connection)
+        try:
+            connection.connect()
+            connection.sock.settimeout(None)
+            connection.sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            connection.request("GET", "/api/capability-stream", headers={
+                "Authorization": "Bearer " + self.connection["token"]})
+            response = connection.getresponse()
+            if response.status < 200 or response.status >= 300:
+                raise self._error(response.status, response.read(4096))
+            while line := response.readline(4096):
+                try:
+                    version = json.loads(line).get("version")
+                except (ValueError, AttributeError):
+                    version = None
+                if not isinstance(version, str):
+                    raise ApiError("Partyline returned an invalid capability version")
+                yield version
+        finally:
+            with self._active_lock:
+                self._active_connections.discard(connection)
+            connection.close()
 
     def interrupt(self):
         """Interrupt outstanding HTTP reads when the stdio bridge shuts down."""

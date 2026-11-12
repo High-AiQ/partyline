@@ -39,6 +39,8 @@ class Unreached:
     def __init__(self, speaker: dict):
         self.speaker = speaker
         self.lines: list[str] = []
+        # Handles this message did get to, on this line or by relay on another.
+        self.reached: set[str] = set()
 
     def add(self, handle: str, why: str) -> None:
         self.note(f"{handle}: {why}")
@@ -62,17 +64,50 @@ class Unreached:
             _origin.reset(token)
 
     async def send(self, runtime) -> None:
-        if not self.lines:
+        """Tell the speaker, unless the notice it is answering already said all of this.
+
+        A remembered line about a handle this message reached is forgotten, so the same
+        failure later is news again; a message that merely does not repeat a line (a
+        plain sentence before the reply) forgets nothing.
+        """
+        memory = getattr(getattr(runtime, "returns", None), "told", {})
+        notice, told = memory.get(self.speaker["id"], (None, ()))
+        still = tuple(line for line in told if not _named(line) & self.reached)
+        if still != told:
+            told = still
+            if told:
+                memory[self.speaker["id"]] = (notice, told)
+            else:
+                memory.pop(self.speaker["id"], None)
+        if all(line in told for line in self.lines):
             return
         from .orchestrator_notices import tell  # it imports mention_relay
 
         listed = "\n".join(f"• {line}" for line in self.lines)
-        await tell(
+        notice = await tell(
             runtime,
             self.speaker["id"],
             "⚠ your message did not reach everyone you mentioned:\n"
             f"{listed}\nDo not count on a handle listed here as handed off.",
         )
+        memory[self.speaker["id"]] = ((notice or {}).get("id"), tuple(self.lines))
+
+
+def _named(line: str) -> set[str]:
+    """The handles a notice line is about: ``gone: detached`` or ``@a, @b: unknown handle``."""
+    return {name.strip().lstrip("@").lower() for name in line.split(":", 1)[0].split(",")}
+
+
+def delivered(told: dict, att_id: str, messages: list[dict]) -> None:
+    """A wake other than its own unreached notice makes the speaker's next slip news again.
+
+    ``told`` maps a speaker to the notice that last told it and the lines it carried.
+    Woken by the notice alone, a speaker tends to answer it by naming the same handle
+    ("@worker is detached, restarting it"). Telling it that again woke it again.
+    """
+    notice = told.get(att_id, (None, ()))[0]
+    if any(message.get("id") != notice for message in messages):
+        told.pop(att_id, None)
 
 
 def unreached_for(db, conv_id: str, message: dict) -> Unreached | None:

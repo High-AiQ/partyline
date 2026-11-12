@@ -59,6 +59,26 @@ _DESCRIBE = {
 }
 
 
+BOARD_TEXT = 240
+_PROSE = ('goal', 'what', 'location', 'findings', 'previous_findings', 'wait_reason')
+
+
+def _board(rows):
+    """A listing a captain can read whole: unset fields dropped, long prose cut short.
+
+    A full record runs to kilobytes and the reply is bounded, so a few tasks' findings
+    used to push every later task off the end of the listing.
+    """
+    board = []
+    for row in rows if isinstance(rows, list) else []:
+        item = {key: value for key, value in row.items() if value not in (None, '', [])}
+        for key in _PROSE:
+            if isinstance(item.get(key), str) and len(item[key]) > BOARD_TEXT:
+                item[key] = item[key][:BOARD_TEXT] + '…'
+        board.append(item)
+    return board
+
+
 def _refusal(name):
     if name in _WHO:
         return f'{name} is available to {_WHO[name]}'
@@ -89,8 +109,14 @@ def tool_list(state):
             schema['required'].append('conv_id')
         description = _DESCRIBE.get(name, f'Server-authorized task operation: {name}.')
         if name == 'tasks':
-            description += (" Workspaces show real and mirror tips; the mirror tip is where the worker's "
-                            "commits live until accept.")
+            schema['properties']['include_retired'] = {'type': 'boolean', 'description': (
+                'Also list tasks whose line is retired, oldest first. Default false: the live board.')}
+            schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1, 'description': (
+                'A task line id: return that one task with no field shortened.')}
+            description = ("The board: every task on a live line, with status, handles and workspaces. "
+                           "Workspaces show real and mirror tips; the mirror tip is where the worker's "
+                           f"commits live until accept. Text over {BOARD_TEXT} characters is cut short; "
+                           "pass conv_id for one task in full.")
         result.append({'name': name, 'description': description, 'inputSchema': schema})
     return result
 
@@ -103,5 +129,10 @@ def call(client, name, args, state):
     body = dict(args)
     conv = body.pop('conv_id', client.home)
     method, tail = _PATHS[name]
+    if name == 'tasks' and 'conv_id' in args:
+        return client.request('GET', f"/api/conversations/{quote(conv, safe='')}/task")
+    if name == 'tasks':
+        tail += '?include_retired=true' if body.get('include_retired') else ''
+        return _board(client.request('GET', f"/api/conversations/{quote(conv, safe='')}/{tail}"))
     return client.request(method, f"/api/conversations/{quote(conv, safe='')}/{tail}",
                           body if method == 'POST' else None)

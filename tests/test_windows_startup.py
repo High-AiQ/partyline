@@ -16,7 +16,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from partyline import launch, server, windows_server
 class LocalServer:
-    def __init__(self, config):
+    def __init__(self, config, close_streams):
         self.config = config
     def run(self):
         assert windows_server._server_job is not None
@@ -31,7 +31,7 @@ class LocalServer:
             assert status['ok'], status
             assert status['backend'] == 'restricted-token', status
             assert client.get('/').status_code == 200
-with patch.object(server.uvicorn, 'Server', LocalServer):
+with patch.object(server, 'StreamClosingServer', LocalServer):
     launch.main([])
 assert windows_server._server_job is None
 server.runtime.db.close()

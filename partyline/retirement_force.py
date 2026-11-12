@@ -25,6 +25,7 @@ from .retirement_git import git, snapshot
 from .retirement_worktree import remove_directory
 from .task_teardown import teardown
 from .retirement_preview import force_authorized, identity, plan, token
+from .retirement_evidence import pack
 from .retirement_auxiliary import auxiliary_heads, cleanup_auxiliary, recover_auxiliary
 from .system_notice import post_system_notice
 
@@ -43,11 +44,12 @@ def admission(db, target, include_children):
         db.retiring_lines -= ids
 
 
-def _audit(db, audit_id, principal, target, decision, evidence, recovery, error=None):
+async def _audit(db, audit_id, principal, target, decision, evidence, recovery, error=None):
+    packed = await asyncio.to_thread(pack, evidence)  # megabytes of inventory: not on the loop
     db._exec(
         "INSERT OR REPLACE INTO retirement_audit "
         "(id,principal,target,decision,evidence,recovery,error,created_at) VALUES(?,?,?,?,?,?,?,?)",
-        (audit_id, json.dumps(identity(principal)), target, decision, json.dumps(evidence),
+        (audit_id, json.dumps(identity(principal)), target, decision, packed,
          json.dumps(recovery), error, time.time()),
     )
 
@@ -170,7 +172,7 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
         decision = {"force_discard": True, "include_children": include_children,
                     "clear_goal": clear_goal, "stop_processes": stop_processes,
                     "preview_token": preview_token, "plan": evidence}
-        _audit(db, audit_id, principal, target, "attempted", decision, recovery)
+        await _audit(db, audit_id, principal, target, "attempted", decision, recovery)
         try:
             # Every snapshot succeeds before any process or line is retired.
             for line in evidence["lines"]:
@@ -180,7 +182,7 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
                         snapshot, line["git"], audit_id + "/" + line["id"])
                 recovery[line["id"]].update(await asyncio.to_thread(
                     recover_auxiliary, line, audit_id + "/" + line["id"]))
-                _audit(db, audit_id, principal, target, "snapshotted", decision, recovery)
+                await _audit(db, audit_id, principal, target, "snapshotted", decision, recovery)
             fresh = await asyncio.to_thread(plan, db, principal, target, include_children, presence,
                                             f"refs/partyline/discarded/{audit_id}/")
             if evidence != fresh:
@@ -210,7 +212,7 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
                     set_goal(db, line_id, "")
                 await archive_line(runtime, line_id)
                 completed.append(line_id)
-                _audit(db, audit_id, principal, target, "in_progress",
+                await _audit(db, audit_id, principal, target, "in_progress",
                        {**decision, "completed": completed}, recovery)
         except Exception as exc:
             detail = (exc.detail if isinstance(exc, HTTPException)
@@ -218,7 +220,7 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
             preserved_paths = [row["path"] for row in db._exec(
                 "SELECT path FROM retirement_preserved_paths WHERE audit_id=? ORDER BY path",
                 (audit_id,)).fetchall()]
-            _audit(db, audit_id, principal, target, "failed",
+            await _audit(db, audit_id, principal, target, "failed",
                    {**decision, "completed": completed}, recovery, str(detail))
             await runtime.broadcast_all(ConversationsChangedEvent())
             return JSONResponse(status_code=409, content={"detail": detail, "audit_id": audit_id,
@@ -226,7 +228,7 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
                                                           if line["id"] not in completed],
                 "recovery_refs": recovery, "preserved_paths": preserved_paths})
         await asyncio.to_thread(reap_legacy_temp, db)
-        _audit(db, audit_id, principal, target, "completed", decision, recovery)
+        await _audit(db, audit_id, principal, target, "completed", decision, recovery)
         notice_line = principal.conv_id or target
         await post_system_notice(runtime, notice_line,
             f"☏ forced retirement by {principal.name}: {target}; audit {audit_id}; "

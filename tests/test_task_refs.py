@@ -35,6 +35,30 @@ class TaskRefTest(TaskFixture):
         self.assertIn('matches 2 tasks', response.text)
         self.assertEqual(task_line(self.db, self.captain, second['tag']), second['conv_id'])
 
+    async def test_a_name_reused_after_a_retirement_means_the_live_task(self):
+        retired = await self.create()
+        live = await self.create()
+        self.db.rename_conversation(live['conv_id'], 'slice')
+        self.db._exec("UPDATE conversations SET archived_at=1 WHERE id=?", (retired['conv_id'],))
+        self.assertEqual(task_line(self.db, self.captain, 'slice'), live['conv_id'])
+        # History is still reachable by a name only it carries.
+        self.assertEqual(task_line(self.db, self.captain, retired['tag']), retired['conv_id'])
+
+    async def test_the_board_lists_live_tasks_and_history_only_on_request(self):
+        """A long-lived root has hundreds of retired tasks, oldest first.
+
+        On 2026-11-12 the root's listing was 636 KB for 193 tasks, none live; the MCP
+        reply is cut at 20,000 characters, so a captain saw only weeks-old retired tasks.
+        """
+        retired = await self.create()
+        live = await self.create()
+        self.db._exec("UPDATE conversations SET archived_at=1 WHERE id=?", (retired['conv_id'],))
+        self.actor = self.captain
+        board = self.client.get('/api/conversations/root/tasks').json()
+        self.assertEqual([row['conv_id'] for row in board], [live['conv_id']])
+        history = self.client.get('/api/conversations/root/tasks?include_retired=true').json()
+        self.assertEqual([row['conv_id'] for row in history], [retired['conv_id'], live['conv_id']])
+
     async def test_a_person_resolves_names_across_every_task(self):
         row = await self.create()
         person = Principal(kind='user', name='human')

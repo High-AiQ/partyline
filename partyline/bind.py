@@ -212,3 +212,20 @@ def uvicorn_config(app, host: str, port: int, env: Mapping[str, str] | None = No
         proxy_headers=True,
         forwarded_allow_ips=forwarded_allow_ips(os.environ if env is None else env),
     )
+
+
+class StreamClosingServer(uvicorn.Server):
+    """Ends the server's open response streams before uvicorn waits on its connections.
+
+    uvicorn stops listening and then waits, with no limit, for every request to finish.
+    A stream that only ends when the client leaves would hold each restart open.
+    """
+
+    def __init__(self, config, close_streams):
+        super().__init__(config)
+        self.close_streams = close_streams
+
+    async def shutdown(self, sockets=None):
+        self.close_streams()
+        await super().shutdown(sockets)
+

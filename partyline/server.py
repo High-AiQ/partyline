@@ -9,7 +9,6 @@ import sys
 from collections.abc import Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -37,8 +36,8 @@ from .machine_scope import (
     deny_unless_attachment,
     visible_conversation_ids,
 )
-from .bind import (BindConfig, apply_server_config, load_bind_config, load_dotenv,
-                   parse_bind_args, uvicorn_config)
+from .bind import (BindConfig, StreamClosingServer, apply_server_config, load_bind_config,
+                   load_dotenv, parse_bind_args, uvicorn_config)
 from .compact_routes import register_compact_route
 from . import features
 from . import fence_probe
@@ -606,7 +605,8 @@ def main(argv: Sequence[str] | None = None):
     global _uvicorn_server
     # Hold the server object so /api/shutdown can ask it to stop rather than
     # signalling blindly.
-    _uvicorn_server = uvicorn.Server(uvicorn_config(app, host, port, os.environ))
+    _uvicorn_server = StreamClosingServer(uvicorn_config(app, host, port, os.environ),
+                                          runtime.capability_versions.close)
     _uvicorn_server.run()
 
 

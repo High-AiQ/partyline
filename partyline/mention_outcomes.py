@@ -18,6 +18,9 @@ async def settle_mentions(
 ) -> None:
     """Report the ``names`` the delivery loop did not reach, as the speaker should hear it."""
     unreached = unreached_for(runtime.db, conv_id, message)
+    if unreached is not None:
+        # A relay copy settles on its target's line into the speaker's own collector.
+        unreached.reached |= delivered | queued
     if unreached is None or unreached.borrowed:  # a borrowed collector is sent by its owner
         return await _settle(runtime, conv_id, message, names, unreachable, delivered, queued, unreached)
     with unreached.collecting():

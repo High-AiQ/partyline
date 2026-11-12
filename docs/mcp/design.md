@@ -69,9 +69,9 @@ The server lists tools for the caller's live state only. Names are short and uni
 
 | Tool | Requires | Routes | Notes |
 | --- | --- | --- | --- |
-| `whoami` | always | own line detail and children; capability state is refreshed by MCP before tool dispatch | identity, role, actions, members, parent, children |
+| `whoami` | always | own line detail and children; capability state is refreshed by MCP before tool dispatch | identity, role, actions, members, parent, live children, a count of retired children |
 | `guide` | always | `/api/docs` by category and topic; local tool schemas for no-argument worker calls | all attached processes read docs on demand; `topic: captain` with no category returns captain operations (empty unless a live lead), while `topic: worker` returns the caller's live non-captain core, task, resource, and handover tools plus the docs route |
-| `read_messages` | `read` | messages, messages around an id | limit clamped to 1 to 50 |
+| `read_messages` | `read` | messages, messages around an id | limit clamped to 1 to 50; unset fields omitted; a page over the reply bound keeps whole messages nearest the cursor (the newest; the oldest after `after_id`; the target and its neighbours on both sides for `around_id`) and returns `resume` |
 | `post_message` | listed for `write` or `assign` | message post | refuses the caller's own line; `client_key` required; no action check in MCP, the message route decides |
 | `react` | listed for `write` | reactions, by message id | POST toggles the reaction; `remove: true` uses DELETE; the route decides line authorization |
 | `upload_file` | `upload` on the target line (own line or task root for workers) | files | one regular file of at most 20 MiB; `client_key` required |
@@ -144,10 +144,12 @@ are in its Decisions section (1 to 14):
 - Named tools are a convenience on clients that re-list. Measured clients behave as recorded in
   section 10: Claude Code and OpenCode V2 re-list (retained runs against the fixture), and Codex
   does not.
-- Screen catalog refresh uses `/api/capability-version`, a long poll that waits on in-memory per-
-  attachment revisions without querying the database. Relevant SQL mutations and screen/control state
-  changes wake it; the bridge fetches `/api/capabilities` only after a revision changes. A 55-second
-  timeout bounds idle requests to about one per minute, and transient transport failures retry with
+- Screen catalog refresh uses `/api/capability-stream`: one request the server holds open and pushes
+  a line down whenever the in-memory per-attachment revision changes. Each push reads only the
+  attachment's own row, to end the stream of a process that is no longer live.
+  Relevant SQL mutations and screen/control state changes push it; the bridge fetches
+  `/api/capabilities` only after a pushed revision differs. Nothing times the stream out. A stopping
+  server ends it before it waits on connections, and the bridge reconnects after a break with
   capped backoff. Claude Code and OpenCode V2 get screen tools only for live grants. Codex keeps the
   legacy catalog because it does not re-list on `list_changed`; its calls are checked against live grants.
 
@@ -362,7 +364,7 @@ from `/api/capabilities`. Every HTTP handler independently authorizes the caller
 | Tool | Caller | HTTP operation |
 | --- | --- | --- |
 | `create_task(name, goal, implementer, review?)` | Orchestrator root captain | POST `/api/conversations/{root}/tasks` |
-| `tasks()` | Orchestrator root captain | GET `/api/conversations/{root}/tasks`; each task includes bounded per-workspace branch visibility |
+| `tasks(include_retired?)` | Orchestrator root captain | GET `/api/conversations/{root}/tasks`: tasks on live lines, or every task with `include_retired`; unset fields are dropped and prose over 240 characters is cut so the board fits one reply; each task includes bounded per-workspace branch visibility |
 | `blocked(reason)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/blocked` |
 | `waiting(reason, seconds?)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/waiting` |
 | `request_review(sha?, what, where)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/request-review` |

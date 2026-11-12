@@ -1,7 +1,6 @@
 """Forced retirement removes debris; dirty auxiliary work has a bounded lifecycle."""
 
 import asyncio
-import json
 import os
 import unittest
 from pathlib import Path
@@ -11,6 +10,7 @@ from fastapi import HTTPException
 
 from partyline.conversation_purge import execute_purge
 from partyline.media import MediaStore
+from partyline.retirement_evidence import unpack
 from tests import test_retirement_force as base
 
 
@@ -61,7 +61,7 @@ class RetirementAuxiliaryTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(set(response.json()["preserved_paths"]), set(paths.values()))
         self.assertEqual(self.preserved_count(), 2)
-        audit = json.loads(self.db._exec("SELECT evidence FROM retirement_audit").fetchone()[0])
+        audit = unpack(self.db._exec("SELECT evidence FROM retirement_audit").fetchone()[0])
         for table, path in paths.items():
             self.assertIn(path, audit["plan"]["lines"][0]["auxiliary_worktrees_preserved"][table])
             self.assertEqual(Path(path, "unfinished").read_text(), "retain")

@@ -16,7 +16,7 @@ from .query_result import materialize
 from .conversation_queries import ACTIVE_CONVERSATIONS, ARCHIVED_CONVERSATIONS, CONVERSATION_BY_ID
 from .message_queries import MESSAGE_SELECT, as_message, select_message_by_id, select_message_page
 from .message_visibility import BRIDGE_DIGEST_CLAUSE
-from . import runtime_lock
+from . import db_wal, runtime_lock
 from .db_events import DatabaseEvents
 
 RestartPlanMode = Literal["offer", "automatic"]
@@ -73,7 +73,7 @@ class Db:
         # SQLite transactions do not protect pty writes; this cross-process
         # lock serializes ownership changes against authorized deliveries.
         self.runtime_lock_path = f"{self.path}.runtime.lock"
-        self.conn = sqlite3.connect(path, check_same_thread=False)
+        self.conn = db_wal.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.lock = threading.Lock()
         with self.lock:

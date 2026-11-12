@@ -1,6 +1,7 @@
 """The ordinary chat wire's account view, used while no line is open."""
 
 from fastapi import WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from .browser_snapshots import hello_payload
 from .screen_snapshot import send_snapshot
@@ -27,8 +28,15 @@ async def serve_account_wire(runtime, ws, handle, build, version, instance):
 
 async def serve_wire(runtime, ws, conv_id, handle, frontend_build, server_version,
                      instance_name=None, reattacher=None):
-    if conv_id == ACCOUNT_WIRE:
-        await serve_account_wire(runtime, ws, handle, frontend_build, server_version, instance_name)
-    else:
-        await runtime.websocket(ws, conv_id, handle, frontend_build, server_version,
-                                instance_name, reattacher)
+    try:
+        if conv_id == ACCOUNT_WIRE:
+            await serve_account_wire(runtime, ws, handle, frontend_build, server_version,
+                                     instance_name)
+        else:
+            await runtime.websocket(ws, conv_id, handle, frontend_build, server_version,
+                                    instance_name, reattacher)
+    except RuntimeError:
+        # Shutdown, or a reconnect that superseded this socket, closed it while a reply
+        # was being prepared. Sending to a closed socket is a disconnect, not a fault.
+        if ws.application_state is not WebSocketState.DISCONNECTED:
+            raise

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from partyline.unreached import explain
 from tests.orchestrator_fixture import TaskFixture
-from tests.test_return_path import Tree
+from tests.test_return_path import Recorder, Tree
 
 MARK = "did not reach everyone"
 
@@ -136,6 +136,78 @@ class AgentSpeakerTest(Tree):
         self.assertEqual(len(self.told("worker")), 1)
         self.assertEqual(self.runtime.returns.requesters.get("worker", {}), {})
         self.assertEqual(self.returns_to("worker"), [])
+
+    async def test_answering_the_notice_by_naming_the_same_handle_is_not_told_again(self):
+        """Woken by the notice alone, a speaker's reply about that handle woke it again."""
+        await self.say("worker", "@gone hello")
+        self.assertEqual(len(self.told("worker")), 1)
+
+        await self.say("worker", "@gone is detached, so I will ask for it to be resumed")
+        self.assertEqual(len(self.told("worker")), 1)  # the notice already said so
+
+        await self.say("worker", "@gone @builder then")  # a handle the notice did not carry
+        self.assertEqual(len(self.told("worker")), 2)
+        self.assertIn("builder is on line", self.told("worker")[1]["body"])
+
+    async def test_a_reply_that_is_not_the_turns_first_message_is_still_an_answer(self):
+        """A plain sentence, or a word to someone else, before the reply must not reset the memory.
+
+        Found in review of #496: forgetting whatever a message did not repeat brought the
+        loop back for every turn of two messages, which is an ordinary turn.
+        """
+        await self.say("worker", "@gone hello")
+        for turn in range(3):
+            await self.say("worker", "Let me look into why that did not go through.")
+            await self.say("worker", "@lead I am checking on gone")
+            await self.say("worker", "@gone is detached, so I will ask for it to be resumed")
+            self.assertEqual(len(self.told("worker")), 1, turn)
+
+    async def test_a_handle_reached_in_between_is_reported_when_it_is_gone_again(self):
+        """The memory must not outlive a hand-off that worked: found in review of #496."""
+        await self.say("worker", "@gone hello")
+        self.assertEqual(len(self.told("worker")), 1)
+
+        self.db.set_attachment_status("gone", "running", "x")
+        revived = Recorder("x")
+        revived.att.update(id="gone", name="gone")
+        self.runtime.live["gone"] = self.presence.watch(
+            revived, "parent", "gone", "receipt", *self.runtime.held_wake_hooks("parent", "gone", "gone"))
+        await self.say("worker", "@gone are you back")  # this one is delivered
+        self.assertEqual(len(revived.delivered), 1)
+        self.assertNotIn("worker", self.runtime.returns.told)
+        self.db.set_attachment_status("gone", "detached", "x")
+        self.runtime.live.pop("gone")
+
+        await self.say("worker", "@gone the branch is ready, please merge it")
+        self.assertEqual(len(self.told("worker")), 2)
+
+    async def test_a_handle_reached_by_relay_on_another_line_is_reported_when_gone_again(self):
+        """A captain naming a process on the line below is the ordinary hand-off (review of #496)."""
+        builder = self.runtime.live.pop("builder")
+        self.db.set_attachment_status("builder", "detached", "own")
+        await self.say("lead", "@builder build it")
+        self.assertEqual(len(self.told("lead")), 1)
+
+        self.db.set_attachment_status("builder", "running", "own")
+        self.runtime.live["builder"] = builder
+        await self.say("lead", "@builder are you back")
+        self.assertEqual(len(self.adapters["builder"].delivered), 1)  # the relay reached it
+        self.assertNotIn("lead", self.runtime.returns.told)
+
+        self.runtime.live.pop("builder")
+        self.db.set_attachment_status("builder", "detached", "own")
+        await self.say("lead", "@builder the branch is ready, please merge it")
+        self.assertEqual(len(self.told("lead")), 2)
+
+    async def test_a_new_wake_makes_the_same_slip_news_again(self):
+        await self.say("worker", "@gone hello")
+        await self.human("parent", "@worker try gone once more")  # real work arrives
+
+        await self.say("worker", "@gone hello again")
+
+        self.assertEqual(len(self.told("worker")), 2)
+        self.runtime.returns.forget("worker")
+        self.assertNotIn("worker", self.runtime.returns.told)
 
     async def test_a_bridge_message_keeps_its_behaviour(self):
         message = self.db.add_message("parent", "worker", "agent", "@gone hello")

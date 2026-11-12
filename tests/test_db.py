@@ -26,6 +26,10 @@ class DbTest(unittest.TestCase):
         self.assertEqual(self.db.messages_after("first", one["id"]), [two])
         self.assertEqual(self.db.messages_after("first", 0, exclude_sender="a"), [two])
 
+        # A commit no longer takes a millisecond, so two lines can share a clock tick.
+        self.db._exec("UPDATE conversations SET created_at=1.0")
+        self.assertEqual([c["id"] for c in self.db.list_conversations()], ["second", "first"])
+
         self.db.archive_conversation("first")
         self.assertEqual([c["id"] for c in self.db.list_conversations()], ["second"])
         self.assertEqual([c["id"] for c in self.db.list_conversations(archived=True)], ["first"])

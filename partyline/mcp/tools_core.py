@@ -2,6 +2,7 @@
 from urllib.parse import quote
 from ..upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
 from .client import ApiError, MAX_UPLOAD, MAX_MODEL_UPLOAD
+from .pages import live_children, message_page
 from .uploads import validate_uploads
 from .tools_media import GET_MEDIA_DESCRIPTION, model_upload_tool, multi_upload_tool, validate_model_path
 from .tools_screen import screen_elements_tool, screen_frame_tool
@@ -16,7 +17,7 @@ def tool_list(state):
     tools = [
         {
             "name": "whoami",
-            "description": "Show identity, role, line members, and permitted hierarchy.",
+            "description": "Show identity, role, line members, live child lines and a count of retired ones.",
             "inputSchema": _schema(),
         },
         {
@@ -37,7 +38,8 @@ def tool_list(state):
             *([screen_elements_tool()] if screen_elements else []),
             {
                 "name": "read_messages",
-                "description": "Read a bounded page, optionally around a message id.",
+                "description": ("Read a bounded page, optionally around a message id. A page too large "
+                                "for one reply keeps whole messages; `resume` says where to continue."),
                 "inputSchema": _schema({
                     "conv_id": _prop("string", "Visible line; defaults to your line."),
                     "after_id": _prop("integer", "Return newer messages after this id."),
@@ -169,14 +171,14 @@ def call(client, name: str, args: dict, home_state: dict):
     if name == "read_messages":
         conv, _ = _target(client, home_state, args.get("conv_id"), ("read",))
         limit = max(1, min(int(args.get("limit", 20)), 50))
-        if args.get("around_id") is not None:
-            query = f"message_id={int(args['around_id'])}&limit={limit}"
-            return client.request("GET", f"/api/conversations/{quote(conv, safe='')}/messages/around?{query}")
-        query = [f"limit={limit}"]
-        for key in ("after_id", "before_id"):
+        around = args.get("around_id")
+        query = [f"limit={limit}"] if around is None else [f"message_id={int(around)}", f"limit={limit}"]
+        for key in ("after_id", "before_id") if around is None else ():
             if args.get(key) is not None:
                 query.append(f"{key}={int(args[key])}")
-        return client.request("GET", f"/api/conversations/{quote(conv, safe='')}/messages?{'&'.join(query)}")
+        path = f"/api/conversations/{quote(conv, safe='')}/messages{'' if around is None else '/around'}"
+        return message_page(client.request("GET", f"{path}?{'&'.join(query)}"),
+                            around is None and args.get("after_id") is not None, around)
     if name == "post_message":
         conv = args.get("conv_id", "")
         if not conv or conv == client.home:
@@ -247,13 +249,13 @@ def _whoami(client, state):
     line = detail.get("conversation", {}) if isinstance(detail, dict) else {}
     members = [{key: item.get(key) for key in ("id", "name", "status", "is_lead", "adapter")}
                for item in detail.get("attachments", []) if isinstance(item, dict)]
-    children = client.request("GET", f"/api/conversations/{quote(conv, safe='')}/children")
+    children, retired = live_children(
+        client.request("GET", f"/api/conversations/{quote(conv, safe='')}/children"))
     return {"identity": client.connection["handle"], "attachment_id": client.connection["attachment_id"],
             "line": {"id": conv, "name": line.get("name"), "topic": line.get("topic")},
             "role": state.get("role"), "capabilities": state.get("actions", []),
             "members": members, "parent_id": state.get("parent_id"),
-            "children": [{"id": row.get("id"), "name": row.get("name")}
-                         for row in children if isinstance(row, dict)]}
+            "children": children, "retired_children": retired}
 
 
 def _notes(client, state, args):

@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 from tests.adapter_event_clock import install as event_clock
 
+from partyline.adapters.bundled.claude import session as session_module
 from partyline.adapters.bundled.claude.adapter import PartylineAdapter
 
 
@@ -734,6 +735,54 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         mine = self.write_session("random-id", pasted=adapter.briefing())
 
         with self.searching():
+            self.assertEqual(adapter._find_transcript(), mine)
+
+    def test_the_search_reads_only_sessions_written_since_spawn_and_changed_since_last_read(self):
+        """One write to any session used to re-read every transcript on the machine.
+
+        472 transcripts sat beside the live ones on 2026-11-12, and the search read up
+        to a megabyte of each, on the event loop, every time any of them changed.
+        """
+        adapter = self.make_adapter()
+        old = [self.write_session(f"old-{index}") for index in range(5)]
+        for path in old:
+            os.utime(path, (adapter.spawned_at - 60, adapter.spawned_at - 60))
+        strangers = [self.write_session(f"live-{index}") for index in range(2)]
+        read = []
+        real_scan = session_module.scan_lines
+
+        def scan(path, *args):
+            read.append(path)
+            return real_scan(path, *args)
+
+        with self.searching(), patch.object(session_module, "scan_lines", scan):
+            self.assertIsNone(adapter._find_transcript())
+            self.assertEqual(sorted(read), sorted(strangers))  # nothing from before the spawn
+            read.clear()
+            self.assertIsNone(adapter._find_transcript())
+            self.assertEqual(read, [])  # unchanged since the last read
+            with open(strangers[0], "a", encoding="utf-8") as file:
+                file.write(json.dumps({"type": "assistant"}) + "\n")
+            self.assertIsNone(adapter._find_transcript())
+            self.assertEqual(read, [strangers[0]])  # only the one that grew
+            mine = self.write_session("random-id", pasted=adapter.briefing())
+            self.assertEqual(adapter._find_transcript(), mine)
+            self.assertEqual(adapter._find_transcript(), mine)  # a match is never cached away
+
+    def test_a_transcript_that_could_not_be_read_is_searched_again(self):
+        """A read error is not "no match": cached, it hid an owned session until the file changed."""
+        adapter = self.make_adapter()
+        mine = self.write_session("random-id", pasted=adapter.briefing())
+        real_scan = session_module.scan_lines
+        failures = iter([OSError("too many open files")])
+
+        def scan(path, *args):
+            for failure in failures:
+                raise failure
+            return real_scan(path, *args)
+
+        with self.searching(), patch.object(session_module, "scan_lines", scan):
+            self.assertIsNone(adapter._find_transcript())
             self.assertEqual(adapter._find_transcript(), mine)
 
     def test_a_session_that_recorded_nothing_of_ours_is_not_adopted(self):
