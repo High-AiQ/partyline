@@ -181,6 +181,24 @@ class AgentSpeakerTest(Tree):
         await self.say("worker", "@gone the branch is ready, please merge it")
         self.assertEqual(len(self.told("worker")), 2)
 
+    async def test_a_handle_reached_by_relay_on_another_line_is_reported_when_gone_again(self):
+        """A captain naming a process on the line below is the ordinary hand-off (review of #496)."""
+        builder = self.runtime.live.pop("builder")
+        self.db.set_attachment_status("builder", "detached", "own")
+        await self.say("lead", "@builder build it")
+        self.assertEqual(len(self.told("lead")), 1)
+
+        self.db.set_attachment_status("builder", "running", "own")
+        self.runtime.live["builder"] = builder
+        await self.say("lead", "@builder are you back")
+        self.assertEqual(len(self.adapters["builder"].delivered), 1)  # the relay reached it
+        self.assertNotIn("lead", self.runtime.returns.told)
+
+        self.runtime.live.pop("builder")
+        self.db.set_attachment_status("builder", "detached", "own")
+        await self.say("lead", "@builder the branch is ready, please merge it")
+        self.assertEqual(len(self.told("lead")), 2)
+
     async def test_a_new_wake_makes_the_same_slip_news_again(self):
         await self.say("worker", "@gone hello")
         await self.human("parent", "@worker try gone once more")  # real work arrives

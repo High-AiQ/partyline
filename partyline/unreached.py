@@ -39,6 +39,8 @@ class Unreached:
     def __init__(self, speaker: dict):
         self.speaker = speaker
         self.lines: list[str] = []
+        # Handles this message did get to, on this line or by relay on another.
+        self.reached: set[str] = set()
 
     def add(self, handle: str, why: str) -> None:
         self.note(f"{handle}: {why}")
@@ -61,16 +63,16 @@ class Unreached:
         finally:
             _origin.reset(token)
 
-    async def send(self, runtime, reached=frozenset()) -> None:
+    async def send(self, runtime) -> None:
         """Tell the speaker, unless the notice it is answering already said all of this.
 
-        ``reached`` are the handles this message did get to. A remembered line about one
-        of them is forgotten, so the same failure later is news again; a message that
-        merely does not repeat a line (a plain sentence before the reply) forgets nothing.
+        A remembered line about a handle this message reached is forgotten, so the same
+        failure later is news again; a message that merely does not repeat a line (a
+        plain sentence before the reply) forgets nothing.
         """
         memory = getattr(getattr(runtime, "returns", None), "told", {})
         notice, told = memory.get(self.speaker["id"], (None, ()))
-        still = tuple(line for line in told if not _named(line) & set(reached))
+        still = tuple(line for line in told if not _named(line) & self.reached)
         if still != told:
             told = still
             if told:
