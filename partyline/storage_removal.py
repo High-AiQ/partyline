@@ -1,15 +1,42 @@
 """Best-effort removal after recovery, retaining explicitly uninspected subtrees."""
 
+import errno
 import os
 import shutil
 
 
+class RetainedEntries(OSError):
+    """An expected partial removal, with bounded diagnostic evidence."""
+
+
+class Failures:
+    def __init__(self):
+        self.count = 0
+        self.directories = set()
+        self.examples = []
+
+    def add(self, target, error, *, directory=False):
+        # Directory-not-empty is a consequence, not another denied file.
+        if (getattr(error, 'errno', None) in (errno.ENOTEMPTY, errno.EEXIST) and
+                str(target) in self.directories):
+            return
+        self.count += 1
+        self.directories.add(str(target) if directory else os.path.dirname(str(target)))
+        if len(self.examples) < 5:
+            self.examples.append(f'{str(target)[:250]}: {str(error)[:150]}')
+
+    def reason(self):
+        folders = ', '.join(name[:250] for name in sorted(self.directories)[:3])
+        return (f'entries retained: {self.count} failures in {len(self.directories)} directories; '
+                f'directories: {folders}; examples: ' + '; '.join(self.examples))[:2400]
+
+
 def remove_contents(path, *, excluded=(), keep_git=False):
-    failures = []
+    failures = Failures()
     excluded = {os.path.normpath(name) for name in excluded}
 
     def failed(function, target, info):
-        failures.append(f'{target}: {info[1]}')
+        failures.add(target, info[1], directory=function in (os.rmdir, os.scandir))
 
     def visit(folder, relative=''):
         try:
@@ -19,7 +46,7 @@ def remove_contents(path, *, excluded=(), keep_git=False):
                     if keep_git and name == '.git':
                         continue
                     if name in excluded:
-                        failures.append(f'{entry.path}: cannot inspect; subtree retained')
+                        failures.add(entry.path, 'cannot inspect; subtree retained', directory=True)
                         continue
                     try:
                         if entry.is_dir(follow_symlinks=False):
@@ -30,10 +57,10 @@ def remove_contents(path, *, excluded=(), keep_git=False):
                         else:
                             os.unlink(entry.path)
                     except OSError as exc:
-                        failures.append(f'{entry.path}: {exc}')
+                        failures.add(entry.path, exc)
         except OSError as exc:
-            failures.append(f'{folder}: {exc}')
+            failures.add(folder, exc, directory=True)
 
     visit(path)
-    if failures:
-        raise OSError('entries retained: ' + '; '.join(failures))
+    if failures.count:
+        raise RetainedEntries(failures.reason())

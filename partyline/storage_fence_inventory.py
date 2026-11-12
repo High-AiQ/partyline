@@ -38,3 +38,17 @@ def mirrors(folder, onerror):
     except OSError as exc:
         onerror(str(folder), str(exc))
         return []
+
+
+def summarize(entries, db, folder, reason, count):
+    if not count:
+        return
+    attachment = db.get_attachment(folder.name)
+    owner_id = attachment['conv_id'] if attachment else folder.name
+    owner = db.get_conversation(owner_id) or {}
+    for item in entries:
+        if item['owner_id'] == owner_id and item['reason'] == reason:
+            item['count'] += count
+            return
+    entries.append({'owner_id': owner_id, 'name': owner.get('name') or owner_id,
+                    'reason': reason, 'count': count})

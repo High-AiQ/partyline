@@ -2,11 +2,11 @@
 
 import time
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .storage_worktrees import candidates, protected
 from . import storage_kept
-from .storage_fence_inventory import folders, mirrors, retention
+from .storage_fence_inventory import folders, mirrors, retention, summarize
 from .storage_survey import Budget, inside
 from .worktree_storage import kept_reason, repositories
 
@@ -24,9 +24,17 @@ class IdleLine(BaseModel):
     size_bytes: int
 
 
+class MirrorRetention(BaseModel):
+    owner_id: str
+    name: str
+    reason: str
+    count: int
+
+
 class StorageDetails(BaseModel):
     kept: list[StoragePath]
     idle_lines: list[IdleLine]
+    retained_mirrors: list[MirrorRetention] = Field(default_factory=list)
 
 
 class CleanupKept(BaseModel):
@@ -39,12 +47,13 @@ class CleanupResult(BaseModel):
     removed: list[str]
     freed_bytes: int
     skipped: list[CleanupKept]
+    retained_mirrors: list[MirrorRetention] = Field(default_factory=list)
 
 
 def details(db, now=None):
     now = time.time() if now is None else now
     budget = Budget()
-    kept, sizes, counted = [], {}, {}
+    kept, sizes, counted, retained = [], {}, {}, []
     for root, path, owner in candidates(db):
         size = budget.size(path)
         if owner:
@@ -60,7 +69,8 @@ def details(db, now=None):
             nested = []
             kept.append(StoragePath(path=path, reason=str(exc), size_bytes=size))
             continue
-        reason = protected(db, path, owner) or kept_reason(db, root, path) or (
+        previous = storage_kept.reason(db, path) or kept_reason(db, root, path)
+        reason = protected(db, path, owner) or previous or (
             'contains nested repositories: ' + ', '.join(nested) if nested else
             'awaiting cleanup; changes will be saved in recovery refs')
         kept.append(StoragePath(path=path, reason=reason, size_bytes=size))
@@ -69,8 +79,12 @@ def details(db, now=None):
         def failed(path, reason):
             kept.append(StoragePath(path=path, reason=reason, size_bytes=0))
 
-        for mirror in mirrors(folder, failed):
-            reason = owner_reason or storage_kept.reason(db, mirror) or 'awaiting mirror recovery and cleanup'
+        entries = mirrors(folder, failed)
+        if owner_reason:
+            summarize(retained, db, folder, owner_reason, len(entries))
+            continue
+        for mirror in entries:
+            reason = storage_kept.reason(db, mirror) or 'awaiting mirror recovery and cleanup'
             kept.append(StoragePath(path=str(mirror), reason=reason, size_bytes=budget.size(mirror)))
     idle = []
     for line in db.list_conversations():
@@ -82,4 +96,5 @@ def details(db, now=None):
         if now - since > 14 * 86400:
             idle.append(IdleLine(id=line['id'], name=line['name'], idle_since=since,
                                  size_bytes=sizes.get(line['id'], 0)))
-    return StorageDetails(kept=kept, idle_lines=idle)
+    return StorageDetails(kept=kept, idle_lines=idle,
+                          retained_mirrors=[MirrorRetention(**item) for item in retained])

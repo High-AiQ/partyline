@@ -39,8 +39,15 @@ export const StoragePathSchema = z.object({
   reason: z.string(),
   size_bytes: z.number().int().nonnegative(),
 });
+export const MirrorRetentionSchema = z.object({
+  owner_id: z.string(),
+  name: z.string(),
+  reason: z.string(),
+  count: z.number().int().nonnegative(),
+});
 export const StorageDetailsSchema = z.object({
   kept: z.array(StoragePathSchema),
+  retained_mirrors: z.array(MirrorRetentionSchema).optional(),
   idle_lines: z.array(
     z.object({
       id: z.string(),
@@ -55,6 +62,7 @@ export const StorageCleanupSchema = z.object({
   removed: z.array(z.string()),
   freed_bytes: z.number().int().nonnegative(),
   skipped: z.array(StoragePathSchema),
+  retained_mirrors: z.array(MirrorRetentionSchema).optional(),
 });
 export type StorageCleanup = z.infer<typeof StorageCleanupSchema>;
 

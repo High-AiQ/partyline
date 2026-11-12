@@ -9,6 +9,7 @@ from .line_worktree import _git, rev
 from .retirement_git import snapshot
 from .storage_git_state import add_paths, index_identity, working_tree
 from .retirement_worktree import refuse_orphan
+from .storage_recovery_space import require_space
 
 
 def state(root, path, conv_id=None, *, excluded=()):
@@ -24,6 +25,8 @@ def state(root, path, conv_id=None, *, excluded=()):
     branch = rev(path, 'symbolic-ref', '-q', 'HEAD')
     mirror = (mirror_branch_ref(path, conv_id, branch.removeprefix('refs/heads/'))
               if branch and conv_id else None)
+    common = git('rev-parse', '--path-format=absolute', '--git-common-dir')
+    require_space(common, path, excluded=excluded)
     tree = working_tree(path, mirror or head, excluded)
     staged = _git('diff', '--cached', '--quiet', 'HEAD', '--', cwd=path)
     if staged.returncode not in (0, 1):
@@ -80,6 +83,7 @@ def recover_plain(root, path, *, excluded=()):
         common = rev(root, 'rev-parse', '--path-format=absolute', '--git-common-dir')
         if not common:
             raise ValueError('no repository for orphan recovery')
+        require_space(common, path, registered=False, excluded=excluded)
         env = {**os.environ, 'GIT_DIR': common, 'GIT_WORK_TREE': path,
                'GIT_INDEX_FILE': os.path.join(directory, 'index'),
                'GIT_AUTHOR_NAME': 'Partyline', 'GIT_AUTHOR_EMAIL': 'partyline@local',

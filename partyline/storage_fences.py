@@ -1,5 +1,6 @@
 """Reclaim purged lines' private refs only after anchoring every tip in its owner."""
 
+import errno
 import hashlib
 import subprocess
 import uuid
@@ -8,8 +9,9 @@ from .line_worktree import _git, repo_root, rev
 from .worktree_paths import managed_root
 from .storage_cleanup import attempt, kept, remove_path
 from . import storage_kept
-from .storage_mirror import repository_view
-from .storage_fence_inventory import folders, mirrors, retention
+from .storage_mirror import MirrorUnreadable, repository_view
+from .storage_recovery_space import require_space
+from .storage_fence_inventory import folders, mirrors, retention, summarize
 
 
 def owners(db, line=None):
@@ -50,7 +52,7 @@ def mirror_refs(view):
                            '--format=%(objectname) %(refname)'],
                           capture_output=True, text=True, timeout=30)
     if done.returncode or done.stderr.strip():
-        raise ValueError('cannot inspect mirror refs: ' + done.stderr.strip())
+        raise MirrorUnreadable('cannot inspect mirror refs: ' + done.stderr.strip())
     return done.stdout.splitlines()
 
 
@@ -66,6 +68,7 @@ def preserve_view(mirror, view, root, common):
             continue
         recovery = 'refs/partyline/discarded/storage-' + uuid.uuid4().hex + '/mirror'
         if _git('cat-file', '-e', tip, cwd=root).returncode:
+            require_space(common, mirror / 'objects', registered=False)
             done = subprocess.run(['git', 'fetch', '--no-write-fetch-head', str(view),
                                    f'{ref}:{recovery}'], cwd=root,
                                   capture_output=True, text=True, timeout=30)
@@ -82,15 +85,16 @@ def preserve_view(mirror, view, root, common):
     return None
 
 
-def clean_fences(db, report, line=None, *, retry_failed=False):
+def clean_fences(db, report, line=None, *, retry_failed=False, recovery=None):
     repositories = None
     for folder in folders(db, line):
         reason = retention(db, folder, line)
-        for mirror in mirrors(folder, lambda path, error: kept(report, path, error)):
-            if reason:
-                kept(report, mirror, reason)
-                continue
-            if not retry_failed and (failure := storage_kept.reason(db, mirror)):
+        entries = mirrors(folder, lambda path, error: kept(report, path, error))
+        if reason:
+            summarize(report['retained_mirrors'], db, folder, reason, len(entries))
+            continue
+        for mirror in entries:
+            if not retry_failed and (failure := storage_kept.reason(db, mirror, suppressed_only=True)):
                 kept(report, mirror, failure)
                 continue
             if repositories is None:
@@ -104,12 +108,17 @@ def clean_fences(db, report, line=None, *, retry_failed=False):
                     storage_kept.remember(db, mirror, reason)
                     return reason
                 root, common = repositories[mirror.name]
+                if recovery:
+                    recovery.watch(common)
+                suppress = False
                 try:
                     reason = preserve(mirror, root, common)
                 except (OSError, ValueError, subprocess.SubprocessError) as exc:
                     reason = str(exc)
+                    suppress = isinstance(exc, MirrorUnreadable) or (
+                        isinstance(exc, OSError) and exc.errno in (errno.EACCES, errno.EPERM))
                 if reason:
-                    storage_kept.remember(db, mirror, reason)
+                    storage_kept.remember(db, mirror, reason, suppress_retry=suppress)
                     return reason
                 with db._runtime_serialized():
                     if reason := retention(db, folder, line):

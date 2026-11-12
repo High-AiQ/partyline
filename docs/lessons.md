@@ -1,5 +1,53 @@
 # Lessons: the false-assumptions ledger
 
+## Partial cleanup is not a fresh retirement on every startup
+
+The false assumption was that a retained checkout could safely be snapshotted
+again on every sweep. Permission failures left tracked deletions, producing more
+recovery refs for damage caused by the previous cleanup itself. Record partial
+removals in the database and suppress automatic retries until Clean up now.
+Actual POSIX permission and portable denial fixtures verify stable recovery refs
+across two sweeps and successful removal after repair. Transient mirror timeouts
+and changed refs remain retryable; removed paths' records are pruned.
+
+## Copy helpers can erase the evidence needed for retry decisions
+
+The false assumption was that a ref-copy PermissionError would reach retry
+classification unchanged. copytree wraps nested failures in shutil.Error and
+loses their errno. Copy ref files with native read errors intact, refuse symbolic
+ref directories conservatively, and verify unreadable refs with actual POSIX
+permissions. Otherwise a mirror that cannot be read is retried on every start.
+
+## Diagnostic evidence must be bounded even when deletion is best effort
+
+The false assumption was that reporting every failed unlink was useful. Six
+hundred denied cache files generated more than 100 KB of repeated paths across
+logs, retained metadata and Settings. Retention now reports a failure count,
+directory count, three directory examples and five file examples, capped at
+2,400 characters. Expected partial removals log a warning without a traceback.
+A many-denial fixture checks the complete report and Settings reason.
+
+## Protected storage summaries must not bury cleanup failures
+
+The false assumption was that one row per protected mirror made the inventory
+more informative. Thousands of ordinary line-owned mirrors hid actionable
+failures, and manual cleanup sized every one. Keep protected mirrors in counts
+grouped by line and reason, separate from retained failure paths. Fixtures verify
+one group for 3,000 mirrors, zero Git subprocesses for them, and no byte walks of
+protected mirrors in Settings or Clean up now.
+
+## Moving content into recovery is not the same as freeing it
+
+The false assumption was that deleting a checkout reclaimed all of its bytes.
+Recovery of incompressible untracked content may grow the surviving object store
+by at least that much. Watch each surviving Git directory before any recovery
+write and deduct its measured growth, including refs and registration metadata,
+from reclaimed source bytes. Fixtures compare actual source and Git-directory sizes. Before creating objects, check
+available space using a conservative estimate plus a 16 MiB reserve; stream Git
+names rather than accumulating preview evidence, and exclude ignored caches.
+Low-space fixtures retain the source without creating recovery objects. The UI
+labels the resulting nonnegative quantity as net freed bytes.
+
 ## A nested managed path does not identify its Git repository
 
 The false assumption was that everything below a managed worktree belongs to
@@ -34,15 +82,16 @@ are counted, and a denied entry does not stop subsequent candidates.
 ## A refs overlay is not necessarily a standalone Git directory
 
 The false assumption was that every fence mirror accepted --git-dir directly.
-Older refresh_mirror writes refs/logs/packed-refs without HEAD or objects: Git
+The current refresh_mirror writes refs/logs/packed-refs without HEAD or objects: Git
 rejects the missing HEAD even when GIT_OBJECT_DIRECTORY supplies the surviving
 store (exit 128 without HEAD, exit 0 with it in the same overlay).
 Cleanup reads a temporary repository view with synthetic HEAD, copied refs and
 explicit object alternates, then imports mirror-only objects through that view.
 The source overlay remains intact until verification. Fixtures cover a real
 legacy overlay, private objects, invalid packed refs and warning-only broken
-loose refs. Failures retain their reason durably outside the mirror; automatic
-startup skips them, while the person's Clean up now action retries after repair.
+loose refs. Structural read failures retain their reason in the database and
+pause automatic retries; state-change and timeout failures remain retryable.
+The person's Clean up now action retries paths after repair.
 
 ## Ownership metadata must precede Git discovery
 
@@ -53,7 +102,7 @@ first, discovers repositories lazily, and coalesces managed checkout paths befor
 regression includes an eligible orphan among retained managed checkouts, so
 lazy discovery cannot accidentally reintroduce per-attachment Git calls. On the
 same isolated 3,000-mirror fixture, the old code took 3.773 seconds and 3,003 Git
-subprocesses; the optimized zero-Git run took 0.813 seconds. The regression
+subprocesses; the grouped zero-Git run took 1.343 seconds. The regression
 asserts zero subprocesses, not a machine-dependent wall-clock threshold. Settings
 and cleanup results list retained mirrors and their reasons without Git probes.
 

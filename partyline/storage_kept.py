@@ -1,39 +1,25 @@
-"""Durable failure reasons; startup does not retry unreadable mirrors indefinitely."""
+"""Cleanup reasons and explicit retry suppression, stored with the service database."""
 
-import hashlib
-import json
 import os
-from pathlib import Path
-import tempfile
 
 
-def directory(db):
-    return Path(db.path + '.storage-kept')
-
-
-def entry(db, path):
-    return directory(db) / (hashlib.sha256(os.fsencode(path)).hexdigest() + '.json')
-
-
-def remember(db, path, reason):
-    directory(db).mkdir(parents=True, exist_ok=True)
-    target = entry(db, path)
-    descriptor, temporary = tempfile.mkstemp(dir=directory(db), suffix='.tmp')
-    try:
-        with os.fdopen(descriptor, 'w') as stream:
-            json.dump({'path': str(path), 'reason': str(reason)}, stream)
-        os.replace(temporary, target)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
+def remember(db, path, reason, *, suppress_retry=False):
+    db._exec('INSERT INTO storage_cleanup_kept(path,reason,suppress_retry) VALUES(?,?,?) '
+             'ON CONFLICT(path) DO UPDATE SET reason=excluded.reason, '
+             'suppress_retry=excluded.suppress_retry', (str(path), str(reason)[:2400], int(suppress_retry)))
 
 
 def forget(db, path):
-    entry(db, path).unlink(missing_ok=True)
+    db._exec('DELETE FROM storage_cleanup_kept WHERE path=?', (str(path),))
 
 
-def reason(db, path):
-    try:
-        value = json.loads(entry(db, path).read_text())['reason']
-        return value if isinstance(value, str) else None
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
+def reason(db, path, *, suppressed_only=False):
+    row = db._exec('SELECT reason,suppress_retry FROM storage_cleanup_kept WHERE path=?',
+                   (str(path),)).fetchone()
+    return row['reason'] if row and (not suppressed_only or row['suppress_retry']) else None
+
+
+def prune(db):
+    for row in db._exec('SELECT path FROM storage_cleanup_kept').fetchall():
+        if not os.path.lexists(row['path']):
+            forget(db, row['path'])

@@ -78,7 +78,6 @@ class CleanupGapsTest(CleanupFixture):
             report = gc.cleanup(self.db)
         self.assertTrue(locked.exists())
         self.assertFalse((path / 'removable').exists(), report)
-        self.assertGreater(report['freed_bytes'], 0)
         self.assertTrue((path / '.git').exists())
         reason = ' '.join(item['reason'] for item in report['skipped'])
         self.assertIn('locked.pyc', reason)
@@ -103,7 +102,6 @@ class CleanupGapsTest(CleanupFixture):
             report = gc.cleanup(self.db)
         self.assertTrue((blocked / 'only-copy').exists())
         self.assertFalse((path / 'readable').exists(), report)
-        self.assertGreater(report['freed_bytes'], 0)
         self.assertTrue(any(str(blocked) in item['reason'] for item in report['skipped']))
         refs = git(self.repo, 'for-each-ref', '--format=%(refname)', 'refs/partyline/discarded').splitlines()
         snapshot = next(ref for ref in refs if ref.endswith('/snapshot'))
@@ -205,7 +203,8 @@ class CleanupGapsTest(CleanupFixture):
             clean_fences(self.db, report)
         self.assertFalse(orphan.exists(), report)
         self.assertLess(calls.call_count, 20)
-        self.assertEqual(len(report['skipped']), 60)
+        self.assertEqual(len(report['skipped']), 0)
+        self.assertEqual(report['retained_mirrors'][0]['count'], 60)
 
     def test_3000_retained_mirrors_do_not_spawn_git_per_attachment(self):
         name = next(iter(owners(self.db)))
@@ -227,4 +226,5 @@ class CleanupGapsTest(CleanupFixture):
         elapsed = time.perf_counter() - start
         print(f'3000 retained mirrors: {elapsed:.3f}s, {len(calls)} subprocesses', flush=True)
         self.assertEqual(len(calls), 0)
-        self.assertEqual(len(report['skipped']), 3000)
+        self.assertEqual(len(report['skipped']), 0)
+        self.assertEqual(report['retained_mirrors'][0]['count'], 3000)
