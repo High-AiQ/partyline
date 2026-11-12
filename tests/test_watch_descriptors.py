@@ -214,6 +214,35 @@ class DescriptorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(adapter._transcript, str(quiet))
             self.assertEqual(kernel.watched(), {quiet, own})
 
+    async def test_the_65th_session_is_claimed_on_a_terminal_output_wake_alone(self):
+        """Past the held set no descriptor reports the append; the next pty chunk does.
+
+        Pasting a wake into the CLI always produces terminal output, ``Adapter.changed()``
+        runs for every chunk, and each wake rescans by mtime and size.
+        """
+        own = self.root / '.claude' / 'projects' / '-work'
+        own.mkdir(parents=True)
+        for number in range(OLD_SESSIONS_HELD + 1):
+            path = own / f'existing-{number}.jsonl'
+            path.write_text(json.dumps({'type': 'mode'}) + '\n', encoding='utf-8')
+            os.utime(path, (w.LONG_AGO + number, w.LONG_AGO + number))
+        oldest = own / 'existing-0.jsonl'
+        kernel = w.Kernel()
+        async with w.Run(kernel, self.root) as run:
+            self.assertEqual(len([p for p in kernel.watched() if p.parent == own]),
+                             OLD_SESSIONS_HELD)
+            self.assertNotIn(oldest, kernel.watched())
+            record = {'type': 'user', 'cwd': '/work',
+                      'message': {'content': run.adapter._claim_token}}
+            with oldest.open('a', encoding='utf-8') as file:
+                file.write(json.dumps(record) + '\n')
+            os.utime(oldest, (w.SPAWNED_AT + 90, w.SPAWNED_AT + 90))
+            await w.settle()
+            self.assertIsNone(run.adapter._transcript or None)  # no file event: still searching
+            run.adapter.changed()  # the CLI's next chunk of terminal output; nothing else
+            await w.settle()
+            self.assertEqual(run.adapter._transcript, str(oldest))
+
     async def test_a_file_that_became_recent_without_our_token_is_held_for_its_next_append(self):
         w.populate(self.root, 6, 2)
         old = self.root / '.claude' / 'projects' / '-work-project-1' / 'old-1.jsonl'
