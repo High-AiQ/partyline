@@ -95,6 +95,8 @@ async def check(runtime, presence, captain):
     """Check once at the receipt, without scheduling another check."""
     if not captain or not captain.get('is_lead') or presence is None:
         return
+    if getattr(runtime, 'stopping', False):
+        return  # a shutdown stops every worker first; that is not stranded work
     db = runtime.db
     if not hasattr(db, '_exec'):
         return

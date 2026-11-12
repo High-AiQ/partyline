@@ -2204,8 +2204,9 @@ rollback-journal mode every commit syncs the journal, the database and their dir
 on the event loop. On an idle disk that is under a millisecond; beside a test run or a build it reached 3.6 and
 7.4 seconds in the journal, with the stack in `commit` each time. A harness receipt gives up after five seconds,
 so those stalls surfaced as "turn receipt never arrived" and a turn that never closed. The database is now
-write-ahead with `synchronous=NORMAL`, and its checkpoints, the only remaining syncs, run on a worker thread
-woken by write volume (`partyline/db_wal.py`). The second-largest source was Claude transcript discovery: while
+write-ahead with `synchronous=NORMAL`, and its checkpoints run on a worker thread woken by write volume
+(`partyline/db_wal.py`). One sync remains on the loop, measured with `strace`: SQLite syncs the log's header when
+the log restarts after a completed checkpoint, about once per 500 writes rather than on every commit. The second-largest source was Claude transcript discovery: while
 one attachment waited for its session, every write to any Claude session on the machine re-read up to a megabyte
 of each of 472 transcripts, on the loop. It now reads only sessions written since the process started and changed
 since they were last read. Measure a blocking call where it runs, under the load it will meet, not on a quiet

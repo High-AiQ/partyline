@@ -194,6 +194,7 @@ class ForcedRetirementTest(unittest.TestCase):
         stored = [row[0] for row in self.db._exec("SELECT evidence FROM retirement_audit").fetchall()]
         self.assertTrue(all(len(text) < raw / 5 for text in stored))
         self.assertEqual([unpack(text) for text in stored], [old, old])
+        self.assertEqual(unpack(json.dumps(old)), old)  # a row not yet packed reads the same
         with self.assertNoLogs("partyline.retirement_evidence", "WARNING"):
             self.assertEqual(retirement_evidence.pack_stored(self.db), 0)  # nothing left to do
 

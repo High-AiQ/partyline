@@ -769,6 +769,22 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(adapter._find_transcript(), mine)
             self.assertEqual(adapter._find_transcript(), mine)  # a match is never cached away
 
+    def test_a_transcript_that_could_not_be_read_is_searched_again(self):
+        """A read error is not "no match": cached, it hid an owned session until the file changed."""
+        adapter = self.make_adapter()
+        mine = self.write_session("random-id", pasted=adapter.briefing())
+        real_scan = session_module.scan_lines
+        failures = iter([OSError("too many open files")])
+
+        def scan(path, *args):
+            for failure in failures:
+                raise failure
+            return real_scan(path, *args)
+
+        with self.searching(), patch.object(session_module, "scan_lines", scan):
+            self.assertIsNone(adapter._find_transcript())
+            self.assertEqual(adapter._find_transcript(), mine)
+
     def test_a_session_that_recorded_nothing_of_ours_is_not_adopted(self):
         """A CLI the user runs by hand in the same directory is not us."""
         adapter = self.make_adapter()

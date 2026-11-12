@@ -3,8 +3,10 @@
 A rollback journal syncs the journal, the database and their directory on every
 commit, and every commit here runs on the event loop: one slow sync on a busy disk
 held the whole server for seconds, long enough for turn receipts to time out. In
-write-ahead mode a commit appends to the log without syncing; the syncs happen in
-a checkpoint, which a worker thread runs on a connection of its own.
+write-ahead mode a commit appends to the log without syncing. The checkpoint's
+syncs run on a worker thread with a connection of its own. One sync is left on the
+committing thread: SQLite syncs the log's header when the log restarts after a
+completed checkpoint, about once per `CHECKPOINT_WRITES` statements, not per commit.
 
 `synchronous=NORMAL` keeps the database consistent through a power loss and a
 process crash loses nothing; only a power loss can drop the last few commits.
@@ -13,6 +15,7 @@ process crash loses nothing; only a power loss can drop the last few commits.
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import threading
 
@@ -66,7 +69,13 @@ class Checkpointer:
             logger.warning("database checkpoint failed; the next one retries", exc_info=True)
 
     def run(self) -> None:
-        connection = sqlite3.connect(self.path)
+        try:
+            connection = sqlite3.connect(self.path)
+        except sqlite3.Error:
+            logger.warning("database checkpoint worker could not open the file; the next "
+                           "threshold starts another", exc_info=True)
+            self.thread = None
+            return
         try:
             while True:
                 self.wake.wait()
@@ -100,7 +109,7 @@ def connect(path) -> sqlite3.Connection:
     connection.execute(f"PRAGMA wal_autocheckpoint={BACKSTOP_PAGES}")
     # After a burst the log file is cut back to this once it has been checkpointed.
     connection.execute(f"PRAGMA journal_size_limit={BACKSTOP_PAGES * 4096}")
-    connection.checkpointer = Checkpointer(str(path))
+    connection.checkpointer = Checkpointer(os.path.abspath(os.fspath(path)))
     return connection
 
 

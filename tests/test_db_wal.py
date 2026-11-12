@@ -136,6 +136,25 @@ class CheckpointerTests(unittest.TestCase):
             self.checkpointer.checkpoint(Broken())
         self.db.close()
 
+    def test_a_worker_that_cannot_open_the_file_says_so_and_the_next_threshold_tries_again(self):
+        self.assertTrue(os.path.isabs(self.checkpointer.path))
+        started = []
+        real_thread = db_wal.threading.Thread
+
+        def thread(**kwargs):
+            started.append(kwargs["target"])
+            return real_thread(**kwargs)
+
+        with patch.object(db_wal.sqlite3, "connect", side_effect=sqlite3.OperationalError("no")), \
+                self.assertLogs("partyline.db_wal", "WARNING"):
+            self.checkpointer.run()
+        self.assertIsNone(self.checkpointer.thread)
+        with patch.object(db_wal, "CHECKPOINT_WRITES", 1), \
+                patch.object(db_wal.threading, "Thread", thread):
+            self.db.create_conversation("line", "Line")
+        self.assertEqual(len(started), 1)
+        self.db.close()
+
     def test_closing_stops_a_worker_that_is_waiting(self):
         with patch.object(db_wal, "CHECKPOINT_WRITES", 1):
             self.db.create_conversation("line", "Line")

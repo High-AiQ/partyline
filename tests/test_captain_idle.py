@@ -44,6 +44,15 @@ class CaptainIdleTest(TaskFixture):
         self.assertTrue(all(row['id'] > closing['id'] for row in self.notices()))
         self.assertEqual(returns.idle.tasks, {})
 
+    async def test_a_receipt_just_before_a_shutdown_is_not_stranded_work(self):
+        await self.setup_tree()
+        self.runtime.stopping = True  # every worker is stopped first; nothing is "running"
+        await self.end()
+        self.assertEqual(self.notices(), [])
+        self.runtime.stopping = False
+        await self.end()
+        self.assertEqual(len(self.notices()), 2)
+
     async def test_a_delivery_during_the_grace_replaces_the_check(self):
         await self.setup_tree()
         returns = self.presence.returns

@@ -68,12 +68,12 @@ class ClaudeSession:
         stale = not named_ours and stat.st_mtime < self.spawned_at - 2
         if stale or unmatched.get(path) == stamp:
             return False
-        if self._token_record_is_ours(path):
-            return True
-        unmatched[path] = stamp
-        return False
+        ours = self._token_record_is_ours(path)
+        if ours is False:  # a file that could not be read was not searched: ask again
+            unmatched[path] = stamp
+        return bool(ours)
 
-    def _token_record_is_ours(self, path: str) -> bool:
+    def _token_record_is_ours(self, path: str) -> bool | None:
         try:
             for line in scan_lines(path):
                 if self._claim_token not in line:
@@ -91,6 +91,6 @@ class ClaudeSession:
                     # session says nothing about who wrote the token.
                     return record.get("cwd") in (None, "", self.att["cwd"])
         except OSError:
-            return False
+            return None
         return False
 
