@@ -158,3 +158,5 @@ async def shutdown_runtime(runtime) -> None:
             await adapter.stop()
         except Exception:
             pass
+    from .db_wal import settle
+    settle(runtime.db)

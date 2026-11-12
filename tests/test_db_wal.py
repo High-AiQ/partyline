@@ -70,6 +70,22 @@ class WriteAheadTests(unittest.TestCase):
         self.assertIsNone(connection.checkpointer)
         self.assertIn("journal mode", logs.output[0])
 
+    def test_an_orderly_stop_leaves_the_database_file_complete_on_its_own(self):
+        db = Db(self.path)
+        self.addCleanup(db.close)
+        db.create_conversation("line", "Line")
+        self.assertGreater(os.path.getsize(self.path + "-wal"), 0)
+        db_wal.settle(db)
+        self.assertEqual(os.path.getsize(self.path + "-wal"), 0)
+        alone = os.path.join(self.directory.name, "copied.db")
+        with open(self.path, "rb") as source, open(alone, "wb") as target:
+            target.write(source.read())
+        copy = sqlite3.connect(alone)
+        self.addCleanup(copy.close)
+        self.assertEqual(copy.execute("SELECT name FROM conversations").fetchone()[0], "Line")
+        with self.assertLogs("partyline.db_wal", "WARNING"):
+            db_wal.settle(object())  # a runtime without a database must not break shutdown
+
     def test_an_in_memory_database_needs_no_log_and_says_nothing(self):
         with self.assertNoLogs("partyline.db_wal", "WARNING"):
             connection = db_wal.connect(":memory:")

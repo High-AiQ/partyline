@@ -102,3 +102,13 @@ def connect(path) -> sqlite3.Connection:
     connection.execute(f"PRAGMA journal_size_limit={BACKSTOP_PAGES * 4096}")
     connection.checkpointer = Checkpointer(str(path))
     return connection
+
+
+def settle(db) -> None:
+    """An orderly stop folds the log into the database file, so that file alone is complete."""
+    try:
+        db._exec("PRAGMA wal_checkpoint(TRUNCATE)")
+    except (sqlite3.Error, AttributeError):
+        logger.warning("could not checkpoint the database at shutdown; the log is replayed on start",
+                       exc_info=True)
+

@@ -24,7 +24,7 @@ The server opens its SQLite database in write-ahead mode with `synchronous=NORMA
 (`partyline/db_wal.py`). A commit appends to `<db>-wal` and does not sync; a worker thread
 checkpoints the log into the main file after every few hundred writes, so no sync runs on the
 event loop. A process crash loses nothing. A power loss leaves the database consistent but can
-drop the last few commits. `<db>-wal` and `<db>-shm` belong to the database: copy all three, or
-stop the server first, when backing it up. The mode is recorded in the file, so an older build
+drop the last few commits. `<db>-wal` and `<db>-shm` belong to the database: copy all three while
+the server runs. An orderly stop folds the log into the main file, which is then complete alone. The mode is recorded in the file, so an older build
 opens it unchanged.
 
