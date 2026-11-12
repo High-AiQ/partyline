@@ -34,6 +34,7 @@ from .worktree_paths import managed_root
 from .worktree_lifecycle import archive_worktree_if_safe, discard_worktree
 from .retirement_preview import preview
 from .retirement_contracts import RetirementAudit, RetirementPreview
+from .retirement_evidence import unpack
 from .retirement_force import admission, retire
 
 
@@ -59,8 +60,8 @@ def register_archive_route(app: FastAPI, presence):
         rows = db._exec(
             "SELECT * FROM retirement_audit WHERE target=? ORDER BY created_at DESC LIMIT 20",
             (conv_id,)).fetchall()
-        return [{**dict(row), **{key: json.loads(row[key]) for key in
-                                ("principal", "evidence", "recovery")}} for row in rows]
+        return [{**dict(row), "evidence": unpack(row["evidence"]),
+                 **{key: json.loads(row[key]) for key in ("principal", "recovery")}} for row in rows]
 
     @app.delete(
         "/api/conversations/{conv_id}",

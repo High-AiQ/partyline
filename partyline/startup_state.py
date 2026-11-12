@@ -191,6 +191,11 @@ async def engage_startup(runtime) -> None:
     except Exception:
         logger.exception("previous tmp root reap failed; continuing")
     try:
+        from .retirement_evidence import pack_stored
+        await asyncio.to_thread(pack_stored, runtime.db)
+    except Exception:
+        logger.exception("retirement evidence packing failed; continuing")
+    try:
         from . import scope_sweep
         owned = [getattr(adapter, "memory_scope", None) for adapter in runtime.live.values()]
         await asyncio.to_thread(scope_sweep.sweep_empty_scopes, owned)
