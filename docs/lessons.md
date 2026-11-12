@@ -2386,3 +2386,17 @@ automatic at every process stop, it deleted the only copy of a session that coul
 of the batch, not by the task's own three rounds: nothing on the machine that built it has a pi home. A rule that
 was safe behind a confirmation needs re-reading when it becomes automatic. Tests: `tests/test_storage_cleanup.py`.
 
+## 2026-11-12 — One descriptor per watched file needs a limit raised to match
+
+The false assumption was that the default open-file limit is roomy. On macOS it is 256, and the native watcher
+there (kqueue vnode events) holds one descriptor for every watched file. A Claude adapter watches every Claude
+transcript on the machine for its whole life, so a few attachments used the limit up. The failure then surfaced
+somewhere else: the next `open` anywhere fails, and an OpenCode v2 watcher that got "[Errno 24] Too many open
+files" stopped its process, so a captain detached and work stopped. Linux never showed it, because inotify
+watches directories and the service limit is high. The server now raises its own soft limit at startup as far as
+the host allows (`partyline/fd_limit.py`), trying the lower ceiling macOS enforces, and warns with the remedy
+when it cannot. A design that spends a per-process resource per watched object must check that resource's
+default on every platform it runs on. Still open: a Claude adapter on macOS holds a descriptor per existing
+transcript, which a large history can exhaust even at the raised limit. Tests: `tests/test_fd_limit.py`,
+`tests/test_launch.py`.
+
