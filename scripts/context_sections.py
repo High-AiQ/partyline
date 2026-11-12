@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -72,20 +73,47 @@ def startup(world, adapter) -> dict:
     return result
 
 
-def resume(world, adapter, backlog=30, size=800) -> dict:
-    """What is pasted when a process comes back with its own session and a lagging cursor."""
+def _session_store(path, session, lines) -> None:
+    """A kept OpenCode v2 session: the digests already pasted into it, one user record each."""
+    import sqlite3
+
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE session_message(id TEXT, session_id TEXT, seq INT, type TEXT, data TEXT)")
+    for index, line in enumerate(lines):
+        db.execute("INSERT INTO session_message VALUES(?,?,?,?,?)",
+                   (f"m{index}", session, index, "user", json.dumps({"text": line})))
+    db.commit()
+    db.close()
+
+
+def resume(world, adapter, backlog=30, size=800, in_session=24) -> dict:
+    """What a restart pastes into a process whose cursor lags: ``in_session`` of ``backlog`` are
+    already in its own session (OpenCode v2 only), and the rest were said while it was away."""
+    import asyncio
+    from unittest.mock import patch
+
     row = attachment(world, "impl-task1", adapter)
     world.db._exec("UPDATE attachments SET last_seen=0 WHERE id='impl-task1'")
-    row["last_seen"] = 0
+    row.update(last_seen=0, cli_session="ses_kept")
     for _ in range(backlog):
         world.db.add_message("task1", "fable-api-oc", "agent", f"@{row['name']} " + "update " * (size // 7))
     runtime = SimpleNamespace(db=world.db)
     pending = addressed_backlog(runtime, row)
-    digest = format_digest(pending, safe_rider(row), cwd="", api="http://127.0.0.1:8643")
+    try:
+        from partyline.resume_replay import for_resume
+    except ImportError:  # before the bounded replay existed: everything unseen was pasted
+        async def for_resume(_runtime, _row, messages):
+            return messages
+    store = os.path.join(world.dir.name, "opencode.db")
+    _session_store(store, "ses_kept", [f"[{m['sender']}]: {m['body']}" for m in pending[:in_session]])
+    from pathlib import Path
+    with patch("partyline.adapters.bundled.opencode.seen.store_path", lambda _att: Path(store)):
+        replay = asyncio.run(for_resume(runtime, row, pending))
+    digest = format_digest(replay, safe_rider(row), cwd="", api="http://127.0.0.1:8643")
     check = "Partyline resume check. Reply READY, then wait for the next instruction."
     prompt = check if adapter == "opencode-v2" else ""
-    return {f"backlog of {backlog} unseen addressed messages": len(digest),
-            "resume check prompt": len(prompt), "messages replayed": len(pending)}
+    return {f"backlog of {backlog} addressed messages, {in_session} already in its session": len(digest),
+            "resume check prompt": len(prompt), "messages replayed": len(replay)}
 
 
 def suffix(world, adapter) -> dict:
