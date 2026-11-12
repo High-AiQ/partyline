@@ -2683,6 +2683,61 @@ transcript (2.114.2; see the lesson on a kqueue watch of every transcript). Test
 `tests/test_launch.py`.
 
 
+## 2026-11-12 — A process does not need to be offered every tool it may call
+
+The false assumption was that `tools/list` should carry every tool the attachment's capabilities allow. A root
+captain was handed about fifty schemas (Blender, render checks, 3D uploads, handover, eight screen-control tools)
+and a client pays for the whole catalog on every turn, whether or not the process ever calls one. Listing and
+permission are now separate: `partyline/mcp/catalog.py` lists the everyday tools in one line each and runs the
+rest through `captain(op, args)` and `extras(op, args)`; `guide()` lists every callable tool with a line and
+`guide(topic=<tool>)` gives its full text and schema. Calling a hidden tool by its own name still works. Clients
+that never re-list keep their screen-control tools behind `extras`, because they cannot gain one when a share
+starts. A per-role table (`tests/test_mcp_role_matrix.py`) fails if any role loses a tool it could call before.
+Tests: `tests/test_mcp.py`.
+
+## 2026-11-12 — A listing that includes history grows without bound
+
+The false assumption was that a line's staffing, overview and task board stay small. Retired task lines were
+listed forever, each with its reports and findings, so a busy week made every captain call cost more than the
+last. The listings now return live lines first and a page of retired ones, with `lines_total` and a
+`next_offset` (or `retired_more`) saying how to read the rest. Tests: `tests/test_listing_bounds.py`.
+
+## 2026-11-12 — A system notice that asks nothing of the reader is not worth pasting
+
+The false assumption was that every system notice should ride the next digest of every process. "Waiting, not
+stalled", reaction echoes (a 👍 pasted to the process that was thanked), "resumed" and "ready after restart"
+lines asked nothing of the reader and were most of the system text a process received in an hour. Each notice
+is now classified in `partyline/notice_policy.py`: a registry of the informational ones, and anything unknown
+is needs-action, so a new notice type fails safe. Only needs-action notices reach a process; every notice is
+still stored, broadcast and shown to people. A reaction other than ❌ no longer wakes the process; it reads the
+reaction with `read_messages`. Tests: `tests/test_notice_policy.py`, `tests/test_reactions.py`.
+
+## 2026-11-12 — "Unseen" on resume is not "never pasted"
+
+The false assumption was that the delivery cursor says what a resumed process has already read. The cursor
+advances only on proof of a paste, so a paste whose proof was lost (the process died first) left messages
+"unseen" that the process's own kept OpenCode v2 session still held, and a restart pasted them again, about
+25,000 characters for thirty messages. A resume now reads the kept session's own user records
+(`partyline/adapters/bundled/opencode/seen.py`), credits and skips what it holds, and pastes at most
+`REPLAY_CHARS` of the rest, newest first, with one line naming the omitted ids and `read_messages(after_id=…)`.
+Any failure to read the session replays everything, which is the safe direction. Tests:
+`tests/test_resume_replay.py`.
+
+## 2026-11-12 — A reminder repeated on every delivery is not a reminder
+
+The false assumption was that the `(cwd git: …)`, `(reminder: …)` and `(captain pack: …)` lines should ride every
+digest. They are state a process already holds; repeated, they were a few hundred characters per wake for the life
+of the process. `partyline/digest_suffix.py` sends a line when it is new, when it changed, when the digest that
+last carried it was never proven delivered, and on every eighth delivery. The briefing carries the same text for a
+process that has not yet seen one. Tests: `tests/test_digest_suffix.py`.
+
+## 2026-11-12 — `request.base_url` is not an address a reader can open
+
+The false assumption was that the origin a caller dialled is a link everyone can follow. An upload from a process
+that dialled `0.0.0.0` stored a digest line with `http://0.0.0.0:…/api/media/…`, and the same text went to people
+and to other processes. Digest lines and file listings are now host-relative (`/api/media/<id>/slim`); a process
+prefixes its own `PARTYLINE_API`, and `get_media` takes the id. Tests: `tests/test_media.py`.
+
 ## 2026-11-12 — A task notice has no meaning once its task is settled
 
 The false assumption was that a worker is never handed a review request, stall reminder or restart note after the
