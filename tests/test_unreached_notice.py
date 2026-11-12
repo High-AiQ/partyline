@@ -137,6 +137,28 @@ class AgentSpeakerTest(Tree):
         self.assertEqual(self.runtime.returns.requesters.get("worker", {}), {})
         self.assertEqual(self.returns_to("worker"), [])
 
+    async def test_answering_the_notice_by_naming_the_same_handle_is_not_told_again(self):
+        """Woken by the notice alone, a speaker's reply about that handle woke it again."""
+        await self.say("worker", "@gone hello")
+        self.assertEqual(len(self.told("worker")), 1)
+
+        await self.say("worker", "@gone is detached, so I will ask for it to be resumed")
+        self.assertEqual(len(self.told("worker")), 1)  # the notice already said so
+
+        await self.say("worker", "@gone @builder then")  # a handle the notice did not carry
+        self.assertEqual(len(self.told("worker")), 2)
+        self.assertIn("builder is on line", self.told("worker")[1]["body"])
+
+    async def test_a_new_wake_makes_the_same_slip_news_again(self):
+        await self.say("worker", "@gone hello")
+        await self.human("parent", "@worker try gone once more")  # real work arrives
+
+        await self.say("worker", "@gone hello again")
+
+        self.assertEqual(len(self.told("worker")), 2)
+        self.runtime.returns.forget("worker")
+        self.assertNotIn("worker", self.runtime.returns.told)
+
     async def test_a_bridge_message_keeps_its_behaviour(self):
         message = self.db.add_message("parent", "worker", "agent", "@gone hello")
         message = {**message, "bridge_id": "b1"}

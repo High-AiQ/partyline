@@ -10,7 +10,7 @@ import time
 
 from .hierarchy import lead_attachment
 from .return_captain import parent_captain
-from . import captain_idle
+from . import captain_idle, unreached
 from .goal_stall import wait_until_quiet
 from .mention_relay import LIVE, is_foreign, post_private, reaches_a_process, speaker_attachment
 from .mentions import addressees, line_addressed, mentioned_names
@@ -49,6 +49,7 @@ class ReturnPath:
         # att_id -> the return decision waiting out its grace
         self.pending: dict[str, asyncio.Task] = {}
         self.idle = captain_idle.Deferred(self)
+        self.told: dict[str, tuple] = {}  # speaker -> its last unreached notice (unreached.py)
         self.ended_at: dict[str, float] = {}
         self.clock = time.monotonic
         self.sleep = asyncio.sleep
@@ -64,6 +65,7 @@ class ReturnPath:
         self.addressed.discard(att_id)
         self.real_wake.discard(att_id)
         self.notify_parent.discard(att_id)
+        self.told.pop(att_id, None)
         self.cancel_check(att_id)
 
     def cancel_check(self, att_id: str) -> None:
@@ -78,6 +80,7 @@ class ReturnPath:
         if me is None:
             return
         task_stall.delivered(self.runtime.db, me, messages)
+        unreached.delivered(self.told, att_id, messages)
         if messages:
             self.cancel_check(att_id)
         self.last_said.pop(att_id, None)  # what was said before the wake is not an answer

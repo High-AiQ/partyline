@@ -2234,3 +2234,12 @@ compressed and packed in a thread, and old rows are packed once at startup. Anyt
 must be bounded where it is produced, and tested with a history as long as a real one. Tests:
 `tests/test_task_refs.py`, `tests/test_orchestrator_mcp.py`, `tests/test_retirement_force.py`.
 
+## 2026-11-12 — A waking notice must not be re-earned by the reply to it
+
+The false assumption, a second time in two days, was that a notice which is not itself routed cannot loop. The
+unreached-handle notice wakes the speaker; woken by nothing else, the speaker answers it, and the natural answer
+names the same handle ("@worker is detached, restarting it"), which earned the same notice and another wake. The
+notice now remembers what it last told each speaker and stays quiet while the speaker's only wake since has been
+that notice; any other delivery makes the same slip news again. For every notice that wakes a process, ask what
+the process will say next and whether those words re-trigger it. Tests: `tests/test_unreached_notice.py`.
+

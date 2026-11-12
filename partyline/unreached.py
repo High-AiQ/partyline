@@ -62,17 +62,32 @@ class Unreached:
             _origin.reset(token)
 
     async def send(self, runtime) -> None:
-        if not self.lines:
-            return
+        memory = getattr(getattr(runtime, "returns", None), "told", {})
+        told = memory.get(self.speaker["id"], (None, ()))[1]
+        if all(line in told for line in self.lines):
+            return  # nothing, or only what the notice it is answering already said
         from .orchestrator_notices import tell  # it imports mention_relay
 
         listed = "\n".join(f"• {line}" for line in self.lines)
-        await tell(
+        notice = await tell(
             runtime,
             self.speaker["id"],
             "⚠ your message did not reach everyone you mentioned:\n"
             f"{listed}\nDo not count on a handle listed here as handed off.",
         )
+        memory[self.speaker["id"]] = ((notice or {}).get("id"), tuple(self.lines))
+
+
+def delivered(told: dict, att_id: str, messages: list[dict]) -> None:
+    """A wake other than its own unreached notice makes the speaker's next slip news again.
+
+    ``told`` maps a speaker to the notice that last told it and the lines it carried.
+    Woken by the notice alone, a speaker tends to answer it by naming the same handle
+    ("@worker is detached, restarting it"). Telling it that again woke it again.
+    """
+    notice = told.get(att_id, (None, ()))[0]
+    if any(message.get("id") != notice for message in messages):
+        told.pop(att_id, None)
 
 
 def unreached_for(db, conv_id: str, message: dict) -> Unreached | None:
