@@ -24,11 +24,11 @@ class HelperResumeRolesTest(TaskFixture):
         self.helper()
         self.assertIsNone(require_resume(self.db, 'idle'))
 
-    def test_a_raw_process_in_the_worker_count_is_not_a_helper(self):
+    def test_a_raw_helper_counted_in_the_worker_total_is_still_a_helper(self):
+        # Counting toward the worker total is memory accounting, not a staffed role: the
+        # captain that may delete and re-point a raw process may resume it too.
         self.helper(counts=True)
-        with self.assertRaises(HTTPException) as error:
-            require_resume(self.db, 'idle')
-        self.assertIn('Fast implementer', error.exception.detail)
+        self.assertIsNone(require_resume(self.db, 'idle'))
 
     def test_a_process_a_person_attached_needs_a_fast_implementer_preset_for_an_agent(self):
         self.db.save_preset('plain', 'plain', 'plain', 'fake', 'fake', implements=False)
@@ -56,7 +56,13 @@ class HelperResumeRolesTest(TaskFixture):
         self.assertIn('Can manage a line', error.exception.detail)
 
     async def test_delete_patch_resume_of_a_raw_helper_as_an_agent(self):
-        self.helper()
+        await self.rotate(counts=False)
+
+    async def test_delete_patch_resume_of_a_counted_raw_helper_as_an_agent(self):
+        await self.rotate(counts=True)
+
+    async def rotate(self, counts):
+        self.helper(counts=counts)
         server.ADAPTERS['raw'] = SimpleNamespace
         server.ADAPTER_METADATA['raw'] = {'command': ['sh']}
         await self.start(self.db.get_attachment('idle'))

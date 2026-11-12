@@ -1247,7 +1247,7 @@ Preset role traits govern agent staffing: implementers need **Fast implementer**
 sub-captains and reviewers need **Can manage a line**. Choose a free Fast implementer
 for implementation. A person may attach, resume, replace or appoint a process directly
 without those role traits; agents cannot staff presets with neither role trait. Helper processes (raw
-adapters outside the worker count, such as the idle-check and rotate-captain helpers) hold no staffed role:
+adapters, counted in the worker total or not, such as the idle-check and rotate-captain helpers) hold no staffed role:
 they need no role trait, and a captain can restart one with delete, edit command and resume. An agent
 resuming any other process that is not a task worker, captain or helper still needs Fast implementer. When attaching a sub-captain, select the captain role; the server appoints it on a
 vacant line. **Reads images** is advisory; prefer it for image and screenshot work. Existing

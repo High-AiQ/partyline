@@ -2604,3 +2604,13 @@ The worker pack, the task pack, the attach briefing and the 400/403 refusals now
 will need in one request, and `create_task(write_set=[...])` lets the captain pre-grant them before the implementer
 starts, through the same validation (`validate_grantable`) and authority (`machine_grant_error`, shared with
 deciding a request) as an approval. Tests: `tests/test_write_set_requests.py`, `tests/test_task_write_set.py`.
+
+## 2026-11-12 — A raw helper in the worker count is still not a staffed role
+
+The false assumption was that a raw process counted in the worker total is a staffed worker, so an agent resuming
+it needs a preset trait. `counts_toward_total` only decides memory admission. On a captain handover the new
+captain deleted the idle-check helper, edited its command and resumed it, and the resume answered 403 "preset
+'raw-idle-check' cannot be staffed as implementer"; a person had to resume it after every rotation, although the
+same captain was allowed to delete and re-point it, which is the stronger act. Every raw process that is not a task
+worker, captain or successor is now a helper whatever its count (`preset_roles.is_helper`); the deprecated heartbeat
+is untouched. Tests: `tests/test_helper_resume_roles.py`.
