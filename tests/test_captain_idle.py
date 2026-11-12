@@ -1,4 +1,4 @@
-"""Turn receipts report stranded work without a timer or a wake loop."""
+"""Turn receipts report stranded work once, after one grace, without a wake loop."""
 
 import asyncio
 import time
@@ -16,7 +16,48 @@ class CaptainIdleTest(TaskFixture):
         self.captain_row = self.db.get_attachment('captain')
 
     async def end(self):
-        await self.presence.returns.turn_ended('captain')
+        """A receipt, then the grace that lets the turn's closing message post first."""
+        returns = self.presence.returns
+        returns.sleep = AsyncMock()
+        await returns.turn_ended('captain')
+        await returns.idle.drain()
+
+    async def test_the_alert_follows_the_closing_message_onto_the_line(self):
+        """The receipt beats the transcript tail; the alert used to post above the last words."""
+        await self.setup_tree()
+        returns = self.presence.returns
+        grace = asyncio.Event()
+        waited = []
+
+        async def sleep(seconds):
+            waited.append(seconds)
+            await grace.wait()
+
+        returns.sleep = sleep
+        await returns.turn_ended('captain')
+        await asyncio.sleep(0)
+        self.assertEqual((self.notices(), waited), ([], [returns.grace]))
+        closing = self.db.add_message('root', 'captain', 'agent', 'Done for now.')
+        grace.set()
+        await returns.idle.drain()
+        self.assertEqual(len(self.notices()), 2)
+        self.assertTrue(all(row['id'] > closing['id'] for row in self.notices()))
+        self.assertEqual(returns.idle.tasks, {})
+
+    async def test_a_delivery_during_the_grace_replaces_the_check(self):
+        await self.setup_tree()
+        returns = self.presence.returns
+        grace = asyncio.Event()
+        returns.sleep = lambda _seconds: grace.wait()
+        await returns.turn_ended('captain')
+        await asyncio.sleep(0)
+        returns.note_delivered('captain', [{'id': 5, 'body': 'new work', 'sender': 'greg',
+                                           'sender_type': 'human'}])
+        grace.set()
+        await returns.idle.drain()
+        self.assertEqual(self.notices(), [])
+        await returns.turn_ended(self.worker.attachment_id)  # a worker's receipt queues nothing
+        self.assertEqual(returns.idle.tasks, {})
 
     def notices(self):
         return [row for row in self.db.messages_after('root', 0)

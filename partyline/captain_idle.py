@@ -1,5 +1,6 @@
 """Event-driven warning when a captain ends a turn with stranded work."""
 
+import asyncio
 import json
 import logging
 
@@ -152,3 +153,39 @@ async def safe_check(runtime, presence, captain):
         await check(runtime, presence, captain)
     except Exception:
         logger.exception('Could not check captain idle state')
+
+
+class Deferred:
+    """One check per turn receipt, queued behind the turn's closing message.
+
+    The receipt beats the transcript tail, so a check run at the receipt posted its
+    alert above the message that ended the turn. It waits out the return path's grace
+    instead; a delivery to the captain, or its next receipt, replaces it.
+    """
+
+    def __init__(self, returns):
+        self.returns, self.tasks = returns, {}
+
+    def schedule(self, captain):
+        if not captain or not captain.get('is_lead'):
+            return
+        self.cancel(captain['id'])
+        self.tasks[captain['id']] = asyncio.create_task(self._check(captain['id']))
+
+    def cancel(self, att_id):
+        if task := self.tasks.pop(att_id, None):
+            task.cancel()
+
+    async def _check(self, att_id):
+        returns = self.returns
+        # no-poll (b): one deadline per receipt; nothing re-checks after it
+        await returns.sleep(returns.grace)
+        if self.tasks.get(att_id) is asyncio.current_task():
+            self.tasks.pop(att_id)
+        await safe_check(returns.runtime, returns.presence, returns._row(att_id))
+
+    async def drain(self):
+        """Wait out every queued check — for tests and shutdown."""
+        for task in list(self.tasks.values()):
+            await asyncio.gather(task, return_exceptions=True)
+

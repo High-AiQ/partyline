@@ -48,6 +48,7 @@ class ReturnPath:
         self.notify_parent: set[str] = set()
         # att_id -> the return decision waiting out its grace
         self.pending: dict[str, asyncio.Task] = {}
+        self.idle = captain_idle.Deferred(self)
         self.ended_at: dict[str, float] = {}
         self.clock = time.monotonic
         self.sleep = asyncio.sleep
@@ -63,12 +64,11 @@ class ReturnPath:
         self.addressed.discard(att_id)
         self.real_wake.discard(att_id)
         self.notify_parent.discard(att_id)
-        self.ended_at.pop(att_id, None)
-        if task := self.pending.pop(att_id, None):
-            task.cancel()
+        self.cancel_check(att_id)
 
     def cancel_check(self, att_id: str) -> None:
         self.ended_at.pop(att_id, None)
+        self.idle.cancel(att_id)
         if task := self.pending.pop(att_id, None):
             task.cancel()
 
@@ -177,9 +177,9 @@ class ReturnPath:
                 )
             await post_private(self.runtime, line_id, "system", "system", body,
                                audience=att_id, source=(source_att, source.get("conv_id")))
+        if not delivered_deferred:
+            self.idle.schedule(finisher)
         if att_id in self.pending:
-            if not delivered_deferred:
-                await captain_idle.safe_check(self.runtime, self.presence, finisher)
             return
         real = att_id in self.real_wake
         manager = lead_attachment(self.runtime.db, finisher["conv_id"]) if finisher else None
@@ -198,14 +198,10 @@ class ReturnPath:
                 self._close_speech(att_id)
             else:
                 self._clear(att_id)
-            if not delivered_deferred:
-                await captain_idle.safe_check(self.runtime, self.presence, finisher)
             return
         if parent:
             self.notify_parent.add(att_id)
         self.pending[att_id] = asyncio.create_task(self._settle(att_id))
-        if not delivered_deferred:
-            await captain_idle.safe_check(self.runtime, self.presence, finisher)
 
     def _working(self, att_id: str) -> bool:
         return bool(self.presence is not None and self.presence.is_working(att_id))
@@ -214,6 +210,7 @@ class ReturnPath:
         """Wait out every pending grace — for tests and shutdown."""
         for task in list(self.pending.values()):
             await task
+        await self.idle.drain()
 
     def _clear(self, att_id: str) -> tuple[dict, dict, str | None]:
         state = (
