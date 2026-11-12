@@ -50,12 +50,12 @@ def catalog(world, adapter, per_tool=False) -> dict:
     return result
 
 
-def attachment(world, att_id, adapter) -> dict:
+def attachment(world, att_id, adapter, runtime=None) -> dict:
     row = dict(world.db.get_attachment(att_id))
     row.update(adapter=adapter, conv_name=world.db.get_conversation(row["conv_id"])["name"],
                topic="", digest_rider=lambda: "", agent_command="/venv/bin/python /x/agent_client.py "
                "--connection /home/u/.db.agent-connections/c.json", agent_shell="")
-    bind_role_delivery(world.db, row, None)
+    bind_role_delivery(world.db, row, runtime)
     return row
 
 
@@ -117,14 +117,28 @@ def resume(world, adapter, backlog=30, size=800, in_session=24) -> dict:
 
 
 def suffix(world, adapter) -> dict:
-    """Everything a delivery adds around the messages themselves, per delivery."""
+    """Everything a delivery adds around the messages themselves, per delivery.
+
+    Each delivery is proven before the next (the cursor moves to it), and the
+    implementer's process has opened its transcript, as a live one has.
+    """
+    from partyline.adapters.briefing import begin_gate
+
     result = {}
-    message = [{"sender": "fable-api-oc", "body": "@x go", "sender_type": "agent"}]
     base = len("[fable-api-oc]: @x go")
     for role in ("task implementer", "root captain"):
-        row = attachment(world, ROLES[role], adapter)
+        live = SimpleNamespace(_ready_result=True)  # its transcript is open
+        row = attachment(world, ROLES[role], adapter, SimpleNamespace(live={ROLES[role]: live}))
         row["cwd"] = world.repo
-        sizes = [len(format_digest(message, safe_rider(row), world.repo, api="")) - base for _ in range(6)]
+        world.db._exec("UPDATE attachments SET last_seen=(SELECT MAX(id) FROM messages) WHERE id=?",
+                      (row["id"],))
+        sizes = []
+        for _ in range(6):
+            message = [world.db.add_message(row["conv_id"], "fable-api-oc", "agent", "@x go")]
+            gate = begin_gate(row, message) if "suffix_gate" in row else None
+            kwargs = {"gate": gate} if gate is not None else {}
+            sizes.append(len(format_digest(message, safe_rider(row), world.repo, api="", **kwargs)) - base)
+            world.db._exec("UPDATE attachments SET last_seen=? WHERE id=?", (message[0]["id"], row["id"]))
         result[f"{role}: delivery 1"] = sizes[0]
         result[f"{role}: delivery 2"] = sizes[1]
         result[f"{role}: 6 deliveries"] = sum(sizes)
