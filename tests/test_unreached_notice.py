@@ -73,6 +73,31 @@ class AgentSpeakerTest(Tree):
         self.assertIn("@workr: unknown handle — did you mean @worker?", notice["body"])
         self.assertNotIn("@sub", notice["body"])
 
+    async def test_a_transposed_handle_counts_as_a_slip(self):
+        await self.say("lead", "@wroker build it; @sub review it after")
+
+        [notice] = self.told("lead")
+        self.assertIn("@wroker: unknown handle — did you mean @worker?", notice["body"])
+
+    async def test_a_real_handle_gone_from_another_line_is_never_a_stray_word(self):
+        """Review of the first cut: reaching @sub hid that @builder, detached below, got nothing."""
+        self.db.set_attachment_status("builder", "detached", "own")
+        self.runtime.live.pop("builder")
+
+        await self.say("lead", "@sub review it; @builder build it")
+
+        [notice] = self.told("lead")
+        self.assertIn("@builder: no live process you can reach wears that handle now", notice["body"])
+
+    async def test_a_handle_from_an_unrelated_tree_is_not_offered_as_the_fix(self):
+        self.db.create_conversation("elsewhere", "Elsewhere")
+        self.db.add_attachment("stranger", "elsewhere", "stranger", "fake", ["fake"], self.tmp.name, "x")
+        self.db.set_attachment_status("stranger", "running", "x")
+
+        await self.say("lead", "@worker take this, not @strangr")
+
+        self.assertEqual(self.told("lead"), [])
+
     async def test_one_message_crossing_two_lines_wakes_its_speaker_once(self):
         for att_id in ("sub", "builder"):
             self.db.set_attachment_status(att_id, "starting", "own")
@@ -207,6 +232,21 @@ class TaskWorkerTest(TaskFixture):
         self.assertEqual(
             explain(self.db, "root", "astra", "captain"),
             "detached — a captain, and no captain is reachable right now; tell a person")
+
+    async def test_a_task_workers_stray_word_is_quiet_and_its_slip_still_wakes_it(self):
+        await self.setUp_task()
+        before = len(self.db.list_messages(self.conv_id))
+
+        await self.say(self.conv_id, "@captain done; @property was the fix", self.worker)
+
+        self.assertEqual(self.told(self.worker, self.conv_id), [])
+        self.assertFalse([m for m in self.db.list_messages(self.conv_id)[before + 1:]
+                          if "property" in m["body"]])
+
+        await self.say(self.conv_id, "@captain done; @captian please look", self.worker)
+
+        [notice] = self.told(self.worker, self.conv_id)
+        self.assertIn("@captian: unknown handle — did you mean @captain?", notice)
 
     async def test_one_notice_carries_a_former_captain_and_an_unknown_handle(self):
         await self.setUp_task()

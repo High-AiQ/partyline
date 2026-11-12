@@ -950,9 +950,11 @@ An unknown handle is a failed hand-off only when it plausibly was one. Agents wr
 over each of those makes the speaker apologise in public, which can trip the check
 again. So a name that appears only inside a code span or fence is never reported, and
 in a message that did reach someone (a live process, `@all`, or a person's handle) an
-unknown name is reported only when it is one slip away from a real handle, with the
-suggestion (`did you mean @worker?`). A message that reached nobody, or one already
-earning a notice for another reason, still lists every unknown name.
+unknown name is reported only when this tree has worn that handle (it is real, just
+not live where the speaker can reach) or when it is one slip away from a reachable
+handle, with the suggestion (`did you mean @worker?`). A task worker's names go through
+the same test. A message that reached nobody, or one already earning a notice for
+another reason, still lists every unknown name.
 
 The notice is a system message: routing it never produces another notice and the
 return path never counts it as a request. Bridge messages and relay copies keep

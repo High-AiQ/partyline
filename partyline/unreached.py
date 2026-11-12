@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from difflib import get_close_matches
 
-from .hierarchy import ancestors, lead_attachment
+from .hierarchy import ancestors, lead_attachment, tree_conversation_ids
 from .mention_relay import LIVE, is_foreign, speaker_attachment, task_root_captain
 from .mentions import known_mention_names
 from .orchestrator_store import attachment_task
@@ -29,6 +29,8 @@ from .orchestrator_store import attachment_task
 # however many lines it crossed.
 _origin: ContextVar = ContextVar("unreached_origin", default=None)
 GONE_WORDS = {"detached": "detached", "exited": "exited"}
+# Low enough to catch a transposition ("wroker", "gerg"), which difflib scores 0.75 to 0.83.
+SLIP_CUTOFF = 0.75
 
 
 class Unreached:
@@ -108,17 +110,26 @@ def slips(db, conv_id: str, unknown: set[str], handed_off: bool) -> dict[str, st
     A message that reached someone was handed off. A stray ``@word`` in it is
     prose (a decorator, a package scope, the word "mention" itself), and a
     notice about it wakes the speaker to apologise in public, which can trip
-    the check again. Only a name one slip away from a real handle is still a
-    failed hand-off there. A message that reached nobody reports every name.
+    the check again. There, only a handle this tree has worn (mapped to
+    itself: it is real, just not live where the speaker can reach) or a name
+    one slip away from a reachable handle is still a failed hand-off. A
+    message that reached nobody reports every name.
     """
     if not unknown:
         return {}
-    real = people(db) | {row["name"] for row in db._exec(
-        "SELECT DISTINCT lower(name) AS name FROM attachments"
-        " WHERE conv_id=? OR status IN ('starting','running')", (conv_id,)).fetchall()}
+    lines = tree_conversation_ids(db, conv_id)
+    rows = db._exec(
+        "SELECT DISTINCT lower(name) AS name, conv_id, status FROM attachments"
+        f" WHERE conv_id IN ({','.join('?' * len(lines))})", tuple(lines)).fetchall()
+    worn = {row["name"] for row in rows}
+    real = sorted(people(db) | {row["name"] for row in rows
+                                if row["conv_id"] == conv_id or row["status"] in LIVE})
     found: dict[str, str | None] = {}
     for name in sorted(unknown):
-        close = get_close_matches(name, sorted(real), n=1, cutoff=0.85)
+        if name in worn:
+            found[name] = name
+            continue
+        close = get_close_matches(name, real, n=1, cutoff=SLIP_CUTOFF)
         if close or not handed_off:
             found[name] = close[0] if close else None
     return found

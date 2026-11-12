@@ -54,25 +54,29 @@ async def _settle(runtime, conv_id, message, names, unreachable, delivered, queu
     handed_off = bool(delivered or queued or elsewhere or "all" in names or names & people(db))
     if unreached is not None and (unreached.lines or gone or unavailable):
         handed_off = False
-    reported: set[str] = set()
-    if message["sender_type"] == "agent":
-        reported = await hint_root_captain(
-            runtime, conv_id, message, rest - set(gone) - quoted,
-            None if foreign or handed_off else unreached)
+    unsaid = rest - set(gone) - quoted
+    unknown: dict[str, str | None] = {}
     if unreached is not None and not foreign and not message.get("audience_attachment_id"):
         # Every agent hears of a handle nobody wears, not only a task's worker.
         unknown = slips(db, conv_id, unknown_handles(
-            db, conv_id, rest - set(gone) - reported - quoted - {unreached.speaker["name"].lower()}),
-            handed_off)
-        for name, close in unknown.items():
-            if close:
-                unreached.add(f"@{name}", f"unknown handle — did you mean @{close}? Nothing was "
-                              "delivered for this name")
-        plain = sorted(name for name, close in unknown.items() if not close)
-        if plain:
-            unreached.add(", ".join(f"@{name}" for name in plain),
-                          "unknown handle — nobody here or reachable is called that; check the "
-                          "spelling (line names and task handles are not mentionable)")
+            db, conv_id, unsaid - {unreached.speaker["name"].lower()}), handed_off)
+        unsaid = {name for name, close in unknown.items() if not close}
+    reported: set[str] = set()
+    if message["sender_type"] == "agent":
+        reported = await hint_root_captain(
+            runtime, conv_id, message, unsaid, None if foreign else unreached)
+    for name, close in unknown.items():
+        if close == name:
+            unreached.add(f"@{name}", "no live process you can reach wears that handle now; "
+                          "nothing was delivered")
+        elif close:
+            unreached.add(f"@{name}", f"unknown handle — did you mean @{close}? Nothing was "
+                          "delivered for this name")
+    plain = sorted(name for name, close in unknown.items() if not close and name not in reported)
+    if plain:
+        unreached.add(", ".join(f"@{name}" for name in plain),
+                      "unknown handle — nobody here or reachable is called that; check the "
+                      "spelling (line names and task handles are not mentionable)")
     if unreached is not None:
         for name, why in gone.items():
             unreached.add(name, why)
