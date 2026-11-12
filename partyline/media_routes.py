@@ -129,8 +129,7 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
             if upload_key and caller_id and (original := original_for_key(
                 runtime.db, caller_id, upload_key, conv_id
             )) is not None:
-                base = str(request.base_url).rstrip("/")
-                files = store.for_message(original["id"], base)
+                files = store.for_message(original["id"])
                 replayed = MessageResponse.model_validate({
                     **original, "files": files, "replayed": True,
                 })
@@ -186,10 +185,10 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
                 share.last_message_ts[caller_id or who] = latest_ts
                 seen = share.attached.setdefault(caller_id or who, set())
                 seen.update(frame.sequence for frame in selected)
-            base = str(request.base_url).rstrip("/")
-            absolute = store.for_message(placeholder["id"], base)
-            relative = store.for_message(placeholder["id"])
-            caption = digest_body(body or "", absolute, base)
+            # Host-relative everywhere: request.base_url is whatever the caller dialled,
+            # and that was 0.0.0.0 often enough to hand processes links nobody can open.
+            relative = absolute = store.for_message(placeholder["id"])
+            caption = digest_body(body or "", relative, "")
             runtime.db._exec(
                 "UPDATE messages SET body=? WHERE id=?", (caption, placeholder["id"])
             )
@@ -235,7 +234,7 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
     async def list_files(conv_id: str, request: Request):
         require_line(conv_id, writing=False)
         deny_unless_media_read(runtime.db, request_principal(request), conv_id)
-        return store.list_conversation(conv_id, str(request.base_url).rstrip("/"))
+        return store.list_conversation(conv_id)
 
     router.add_api_route(
         "/api/conversations/{conv_id}/files",

@@ -270,7 +270,7 @@ class ImageApiTest(unittest.TestCase):
         self.assertEqual(image["thumb"]["mime"], "image/jpeg")
         self.assertEqual(image["slim"]["mime"], "image/jpeg")
         self.assertGreater(image["thumb"]["bytes"], 0)
-        self.assertTrue(image["urls"]["original"].startswith("http://"))
+        self.assertEqual(image["urls"]["original"], f"/api/media/{image['id']}/original")
         self.assertEqual(payload["message"]["sender_type"], "human")
         self.assertEqual(payload["message"]["files"][0]["id"], image["id"])
 
@@ -279,7 +279,8 @@ class ImageApiTest(unittest.TestCase):
         body = self.db.list_messages("line")[-1]["body"]
         caption, metadata = body.split("\n")
         self.assertEqual(caption, "look")
-        self.assertTrue(metadata.startswith("📷 A chart — revenue by quarter · 8×8 · thumb: http"))
+        self.assertTrue(metadata.startswith("📷 A chart — revenue by quarter · 8×8 · thumb: /api/media/"))
+        self.assertNotIn("http", metadata)  # never the host the caller happened to dial
 
     def test_metadata_lines_are_a_trailing_run_in_image_order(self):
         self.post(files=[
@@ -402,12 +403,12 @@ class ImageApiTest(unittest.TestCase):
         self.db.archive_conversation("line")
         self.assertEqual(self.post().status_code, 409)
 
-    def test_listing_a_line_returns_its_images_with_absolute_urls(self):
+    def test_listing_a_line_returns_its_images_with_host_relative_urls(self):
         self.post(title="one")
         self.post(title="two")
         listed = self.client.get("/api/conversations/line/images").json()
         self.assertEqual([image["title"] for image in listed], ["one", "two"])
-        self.assertTrue(listed[0]["urls"]["thumb"].startswith("http://"))
+        self.assertEqual(listed[0]["urls"]["thumb"], f"/api/media/{listed[0]['id']}/thumb")
 
     def test_listing_an_unknown_line_is_a_404(self):
         self.assertEqual(self.client.get("/api/conversations/nope/images").status_code, 404)

@@ -523,7 +523,7 @@ class FileRoutesTest(unittest.TestCase):
         via_images = self.client.get("/api/conversations/line/images").json()
         self.assertEqual(via_files, via_images)
         self.assertEqual(via_files[0]["id"], uploaded.json()["files"][0]["id"])
-        self.assertTrue(via_files[0]["urls"]["original"].startswith("http://"))
+        self.assertTrue(via_files[0]["urls"]["original"].startswith("/api/media/"))
 
     def test_listing_an_unknown_line_is_a_404_on_both_paths(self):
         self.assertEqual(self.client.get("/api/conversations/nope/files").status_code, 404)
