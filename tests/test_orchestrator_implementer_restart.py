@@ -135,7 +135,7 @@ class ImplementerRestartTest(TaskFixture):
         self.assertIn('no live implementer to message; call restart_implementer', dead.exception.detail)
         with self.assertRaises(HTTPException) as staffed:
             refuse_task_attach(self.db, self.conv_id)
-        self.assertIn('restart_implementer / restart_reviewer', staffed.exception.detail)
+        self.assertIn('captain(op="restart_implementer" or "restart_reviewer")', staffed.exception.detail)
         self.assertIn('restart_implementer', _revive_hint(self.db, self.row()['implementer_id']))
         self.assertEqual(_revive_hint(self.db, 'captain'), '')
 
@@ -151,7 +151,7 @@ class ImplementerRestartTest(TaskFixture):
         self.assertEqual(_revive_hint(self.db, impl), '')
         self.db._exec("UPDATE task_reviews SET status='in_review',reviewer_id='rv' WHERE conv_id=?",
                       (self.conv_id,))
-        self.assertEqual(_revive_hint(self.db, 'rv'), '; revive it with restart_reviewer')
+        self.assertEqual(_revive_hint(self.db, 'rv'), '; revive it with captain(op="restart_reviewer")')
         self.assertEqual(_revive_hint(self.db, impl), '')
         self.db._exec("UPDATE task_reviews SET policy='captain' WHERE conv_id=?", (self.conv_id,))
         self.assertEqual(_revive_hint(self.db, 'rv'), '')
@@ -164,5 +164,5 @@ class ImplementerRestartTest(TaskFixture):
         self.db._exec("UPDATE attachments SET status='running' WHERE id=?", (ident,))
         await self.resume(ident)
         await detach_attachment(self.runtime, ident, survivors=False, hint=True)
-        self.assertTrue(any('detached; revive it with restart_implementer' in m['body']
+        self.assertTrue(any('detached; revive it with captain(op="restart_implementer")' in m['body']
                             for m in self.db.list_messages(self.conv_id)))

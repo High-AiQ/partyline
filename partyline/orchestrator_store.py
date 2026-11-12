@@ -183,7 +183,7 @@ def refuse_task_attach(db, conv_id):
     if task(db, conv_id):
         raise HTTPException(409, 'task staffing is server-owned: exactly one implementer; '
                             'a detached implementer or reviewer is revived with '
-                            'restart_implementer / restart_reviewer')
+                            'captain(op="restart_implementer" or "restart_reviewer")')
 
 
 def task_not_retirable_by(db, principal, conv_id, include_children=False):

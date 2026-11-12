@@ -153,7 +153,7 @@ async def reviewer_exited(runtime, att_id):
         db._exec('UPDATE task_reviews SET reviewer_restarts=2 WHERE conv_id=?', (row['conv_id'],))
         text = (f"Task {row['conv_id']}: the reviewer stopped again during round {row['round']}"
                 + (f" ({failure})" if failure else '')
-                + '; restart it from the task line header or with restart_reviewer.')
+                + '; restart it from the task line header or with captain(op="restart_reviewer").')
         record, _wake = reports.add(db, row['root_id'], row['conv_id'], 'task server', text, notify=True)
         from .mention_relay import live_manager
         captain = live_manager(runtime, row['root_id'])

@@ -93,7 +93,7 @@ class RoleDeliveryTests(unittest.TestCase):
             captain_rider = cap["digest_rider"]()
             worker_rider = wrk["digest_rider"]()
             self.assertIn('guide(topic="captain")', captain_rider)
-            self.assertIn('docs_read(category="captaining")', captain_rider)
+            self.assertIn('guide(category="captaining")', captain_rider)
             self.assertIn('guide(topic="worker")', worker_rider)
             self.assertIn("GET /api/docs", worker_rider)
             self.assertNotIn("(help:", cap["digest_rider"]())  # not again on the next wake

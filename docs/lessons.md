@@ -2719,12 +2719,11 @@ The false assumption was that the delivery cursor says what a resumed process ha
 advances only on proof of a paste, so a paste whose proof was lost (the process died first) left messages
 "unseen" that the process's own kept OpenCode v2 session still held, and a restart pasted them again, about
 25,000 characters for thirty messages. A resume now reads the kept session's own user records
-(`partyline/adapters/bundled/opencode/seen.py`), credits and skips what it holds, and pastes at most
-`REPLAY_CHARS` of the rest, newest first, with one line naming the omitted ids and `read_messages(after_id=…)`.
-Any failure to read the session replays everything, which is the safe direction. A message counts as seen only
+(`partyline/adapters/bundled/opencode/seen.py`), credits and skips what it holds, and pastes every other message in full, oldest first, with one line naming the
+skipped ids and `read_messages(after_id=…)`. Any failure to read the session replays everything, which is the safe direction. A message counts as seen only
 when its whole digest line (speaker and full body, JSON-decoded) sits on its own lines in a record pasted after
 the last paste the cursor credits; a first cut matched first lines as substrings and hid a new "yes" or "stop"
-behind an older, longer line. A fresh instance without the kept session is replayed everything, bounded. Tests:
+behind an older, longer line. A fresh instance without the kept session is replayed everything. Tests:
 `tests/test_resume_replay.py`.
 
 ## 2026-11-12 — A reminder repeated on every delivery is not a reminder
@@ -2743,6 +2742,27 @@ The false assumption was that the origin a caller dialled is a link everyone can
 that dialled `0.0.0.0` stored a digest line with `http://0.0.0.0:…/api/media/…`, and the same text went to people
 and to other processes. Digest lines and file listings are now host-relative (`/api/media/<id>/slim`); a process
 prefixes its own `PARTYLINE_API`, and `get_media` takes the id. Tests: `tests/test_media.py`.
+
+## 2026-11-12 — A size bound on a resume paste is not safe when the cursor follows the paste
+
+The false assumption was that a resume backlog could be cut to its newest 8,000 characters because "the rest can be
+read with `read_messages`". The delivery receipt credits the cursor to the highest id of the paste, so a bound on
+messages the process had never seen moved the cursor past them: a stopped worker with fifteen assigned messages was
+pasted ten, its assignment was not among them, and nothing stayed pending. Only messages the kept session *provably*
+holds may be left out; every other message is pasted in full, oldest first, on every adapter, and the lead line
+describes only the skipped ones. The saving is smaller than the first table said (30 unseen messages cost the full
+30,698 characters) and honest. `scripts/context_budget` now reports the unseen and the seen case separately.
+Tests: `tests/test_resume_unseen.py`.
+
+## 2026-11-12 — A text that names a tool is wrong once the tool is no longer listed
+
+The false assumption was that every tool a pack, notice or error names is in the reader's `tools/list`. After the
+catalog diet the captain pack still said `restart_implementer(conv_id)`, handover notices said `accept_handover(id)`
+and the reminder said `docs_read(...)`: names a captain cannot see. Each such name now carries its route in the same
+sentence (`captain(op="...", args={...})`, `extras(op="...", args={...})`), `guide(topic="captain")` explains the two
+doors, an unknown captain op says where the valid ones are listed, and the appointment notice says `captain(op,
+args)` is now available to a process appointed lead mid-session. Test: `tests/test_tool_names_in_texts.py` walks the
+string constants of the modules that write such text.
 
 ## 2026-11-12 — A task notice has no meaning once its task is settled
 

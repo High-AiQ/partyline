@@ -111,7 +111,7 @@ def reminder_line(db, conv_id: str, last_seen_id: int | None, role: str = "lead"
     roughly every N messages, never on every wake. A minimal db — the rider
     tests' fake — has nothing to count and never rides.
     """
-    line = ('(help: MCP guide(topic="captain") · docs_read(category="captaining"))'
+    line = ('(help: MCP guide(topic="captain") · guide(category="captaining"))'
             if role == "lead" else
             '(help: MCP guide(topic="worker") · GET /api/docs)')
     try:
