@@ -8,8 +8,8 @@ speaker gets everything it hit as one private, waking notice
 
 from .mention_fallbacks import route_fallbacks
 from .mention_relay import hint_root_captain, is_foreign, relay_mentions
-from .mentions import known_mention_names, mentioned_names
-from .unreached import explain, unknown_handles, unreached_for
+from .mentions import known_mention_names, mentioned_names, quoted_names
+from .unreached import explain, people, slips, unknown_handles, unreached_for
 
 
 async def settle_mentions(
@@ -47,18 +47,36 @@ async def _settle(runtime, conv_id, message, names, unreachable, delivered, queu
         gone = {name: why for name in sorted(rest - {"all", unreached.speaker["name"].lower()}
                                    - {name.lower() for name in unavailable})
                 if (why := explain(db, conv_id, name, unreached.speaker["id"]))}
+    # A name written only as code was quoted, and a message that reached someone
+    # was handed off: neither wakes its speaker over a stray ``@word``. A notice
+    # that is going out anyway carries every unknown name, at no extra wake.
+    quoted = quoted_names(message["body"])
+    handed_off = bool(delivered or queued or elsewhere or "all" in names or names & people(db))
+    if unreached is not None and (unreached.lines or gone or unavailable):
+        handed_off = False
+    unsaid = rest - set(gone) - quoted
+    unknown: dict[str, str | None] = {}
+    if unreached is not None and not foreign and not message.get("audience_attachment_id"):
+        # Every agent hears of a handle nobody wears, not only a task's worker.
+        unknown = slips(db, conv_id, unknown_handles(
+            db, conv_id, unsaid - {unreached.speaker["name"].lower()}), handed_off)
+        unsaid = {name for name, close in unknown.items() if not close}
     reported: set[str] = set()
     if message["sender_type"] == "agent":
         reported = await hint_root_captain(
-            runtime, conv_id, message, rest - set(gone), None if foreign else unreached)
-    if unreached is not None and not foreign and not message.get("audience_attachment_id"):
-        # Every agent hears of a handle nobody wears, not only a task's worker.
-        unknown = unknown_handles(db, conv_id, rest - set(gone) - reported
-                                  - {unreached.speaker["name"].lower()})
-        if unknown:
-            unreached.add(", ".join(f"@{name}" for name in sorted(unknown)),
-                          "unknown handle — nobody here or reachable is called that; check the "
-                          "spelling (line names and task handles are not mentionable)")
+            runtime, conv_id, message, unsaid, None if foreign else unreached)
+    for name, close in unknown.items():
+        if close == name:
+            unreached.add(f"@{name}", "no live process you can reach wears that handle now; "
+                          "nothing was delivered")
+        elif close:
+            unreached.add(f"@{name}", f"unknown handle — did you mean @{close}? Nothing was "
+                          "delivered for this name")
+    plain = sorted(name for name, close in unknown.items() if not close and name not in reported)
+    if plain:
+        unreached.add(", ".join(f"@{name}" for name in plain),
+                      "unknown handle — nobody here or reachable is called that; check the "
+                      "spelling (line names and task handles are not mentionable)")
     if unreached is not None:
         for name, why in gone.items():
             unreached.add(name, why)

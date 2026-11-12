@@ -940,18 +940,37 @@ class ServerTest(unittest.TestCase):
 
     def test_detach_route_identifies_only_the_callers_own_attachment(self):
         self.add_attachment("old", "opus", "exited")
-        for principal, expected in (
-            (Principal(kind="machine", name="opus", conv_id="line", attachment_id="old"), True),
-            (Principal(kind="machine", name="other", conv_id="line", attachment_id="other"), False),
-            (Principal(kind="user", name="greg"), False),
+        server.runtime.db._exec(
+            "INSERT INTO users(email, handle, password_hash, created_at) VALUES('g@x', 'Greg', 'h', 1)")
+        own = Principal(kind="machine", name="opus", conv_id="line", attachment_id="old")
+        for principal, told_by, expected in (
+            (own, "@greg", True),
+            (Principal(kind="machine", name="other", conv_id="line", attachment_id="other"), None, False),
+            (Principal(kind="user", name="greg"), None, False),
         ):
             request = SimpleNamespace(state=SimpleNamespace(principal=principal))
             with patch("partyline.server.deny_unless_attachment"), \
                  patch("partyline.server.close_attachment", new_callable=AsyncMock) as close:
-                self.arun(server.detach(request, "old"))
+                self.arun(server.detach(request, "old", told_by))
             close.assert_awaited_once_with(
                 server.runtime, "old", self_detach=expected, source="api.detach",
                 caller=principal.attachment_id or f"{principal.kind}:{principal.user_id}")
+
+    def test_a_captain_cannot_detach_itself_unless_a_person_asked(self):
+        """The 2026-11 incident: a captain left after every question, on a 90 second timer."""
+        self.add_attachment("old", "opus", "running")
+        own = SimpleNamespace(state=SimpleNamespace(principal=Principal(
+            kind="machine", name="opus", conv_id="line", attachment_id="old")))
+        for told_by in (None, "", "nobody-by-that-name", "opus"):
+            with patch("partyline.server.deny_unless_attachment"), \
+                 patch("partyline.server.close_attachment", new_callable=AsyncMock) as close, \
+                 self.assertRaises(HTTPException) as refused:
+                self.arun(server.detach(own, "old", told_by))
+            self.assertEqual(refused.exception.status_code, 403)
+            self.assertIn("only when a person explicitly asked", refused.exception.detail)
+            self.assertIn("told_by", refused.exception.detail)
+            close.assert_not_awaited()
+        self.assertEqual(server.runtime.db.get_attachment("old")["status"], "running")
 
     def test_detach_timeout_keeps_unconfirmed_running_row_tracked(self):
         self.add_attachment("old", status="running")

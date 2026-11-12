@@ -276,7 +276,7 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
         async def handle(obj):
             if is_compaction_record("claude", obj):
                 return
-            if obj.get("isSidechain") or obj.get("type") != "assistant":
+            if obj.get("isSidechain") or obj.get("type") != "assistant" or self.harness_filler(obj):
                 return
             if not self._fresh(obj.get("timestamp")):
                 return

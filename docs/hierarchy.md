@@ -162,9 +162,20 @@ A captain may retire a child of its own tree with `DELETE /api/conversations/<ch
 when the child has no live processes, its goal is cleared, and the stricter clean
 and merged checks pass; a person may archive a dirty line with snapshot preservation.
 End-of-work rule: once every task is merged and released, or the captain is completely
-blocked waiting on a person, the captain detaches every process on its tree (implementers,
-reviewers, sub-captains and helper processes) and detaches itself last; no process stays
-attached "standing by".
+blocked waiting on a person, the captain detaches every other process on its tree
+(implementers, reviewers, sub-captains and helper processes); no worker stays attached
+"standing by". `POST /api/conversations/<id>/attachments/close` called by a captain stops
+everyone on the line except the caller.
+
+Who may detach whom: a worker cannot detach anything, itself included (`close` is a
+captain's capability). A captain detaches other processes freely. A captain detaches
+*itself* only when a person explicitly tells it to, or through a captain handover, which
+the server performs. The server refuses a captain's own `DELETE /api/attachments/<id>`
+unless it names the person who asked (`?told_by=<handle>`), and the refusal says so.
+Being idle, having finished, or having asked a person a question is not a reason: a
+captain that leaves after every question has to be resumed for every answer. A captain
+never schedules its own detach with a sleep or background timer; a timer cannot see that
+new work arrived and stops the captain in the middle of it.
 
 Before you clear a goal, detach the final workers, or retire a line, persist its
 deliverables, assets, and unfinished work in the intended durable repository or application
@@ -934,6 +945,17 @@ with its reason and the remedy:
   tell (the line's captain, or the root captain);
 - a handle nobody wears: unknown, with the root captain to mention.
 
+An unknown handle is a failed hand-off only when it plausibly was one. Agents write
+`@dataclass`, `@scope/package` and the word "@mention" in ordinary prose, and a wake
+over each of those makes the speaker apologise in public, which can trip the check
+again. So a name that appears only inside a code span or fence is never reported, and
+in a message that did reach someone (a live process, `@all`, or a person's handle) an
+unknown name is reported only when this tree has worn that handle (it is real, just
+not live where the speaker can reach) or when it is one slip away from a reachable
+handle, with the suggestion (`did you mean @worker?`). A task worker's names go through
+the same test. A message that reached nobody, or one already earning a notice for
+another reason, still lists every unknown name.
+
 The notice is a system message: routing it never produces another notice and the
 return path never counts it as a request. Bridge messages and relay copies keep
 their existing behaviour. Code: `unreached.py` (the collector and the reasons),
@@ -1473,3 +1495,5 @@ the work now or tell the person plainly what blocks them.
 At a captain turn end, Partyline warns the line and privately wakes the captain if
 structured open work remains but nothing is running or scheduled. The captain should
 restart, reopen or resume the work, or tell the person what it is blocked on. An unchanged idle verdict is reported only once.
+Only live lines count: a retired line's task and its unread reports are history. The
+alert names the first five items and counts the rest.

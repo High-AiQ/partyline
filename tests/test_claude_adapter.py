@@ -442,6 +442,20 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(posts, [("claude", "agent", "direct answer")])
 
+    async def test_the_clis_own_resume_filler_is_not_relayed_as_speech(self):
+        """A resumed captain "said" No response requested. — a line the CLI wrote, not the model."""
+        filler = {"type": "assistant", "timestamp": "fresh", "uuid": "filler", "isApiErrorMessage": False,
+                  "message": {"model": "<synthetic>", "role": "assistant",
+                              "content": [{"type": "text", "text": "No response requested."}]}}
+        failure = {**filler, "uuid": "failure", "isApiErrorMessage": True,
+                   "message": {**filler["message"],
+                               "content": [{"type": "text", "text": "API Error: overloaded"}]}}
+        posts: list[tuple[str, str, str]] = []
+
+        await self.run_fixture_records([filler, failure], posts)
+
+        self.assertEqual(posts, [("claude", "agent", "API Error: overloaded")])
+
     async def test_mixed_turn_posts_only_its_final_text_record(self):
         records = [
             record for record in self.fixture_records()

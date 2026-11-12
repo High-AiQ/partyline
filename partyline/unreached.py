@@ -17,8 +17,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+from difflib import get_close_matches
 
-from .hierarchy import ancestors, lead_attachment
+from .hierarchy import ancestors, lead_attachment, tree_conversation_ids
 from .mention_relay import LIVE, is_foreign, speaker_attachment, task_root_captain
 from .mentions import known_mention_names
 from .orchestrator_store import attachment_task
@@ -28,6 +29,8 @@ from .orchestrator_store import attachment_task
 # however many lines it crossed.
 _origin: ContextVar = ContextVar("unreached_origin", default=None)
 GONE_WORDS = {"detached": "detached", "exited": "exited"}
+# Low enough to catch a transposition ("wroker", "gerg"), which difflib scores 0.75 to 0.83.
+SLIP_CUTOFF = 0.75
 
 
 class Unreached:
@@ -95,6 +98,41 @@ def unknown_handles(db, conv_id: str, names: set[str]) -> set[str]:
     names = {name for name in names if name.rstrip(".-_") not in known}
     return {name for name in names
             if not (name.rstrip(".-_") != name and name.rstrip(".-_") in names)}
+
+
+def people(db) -> set[str]:
+    return {str(row["handle"]).lower() for row in db._exec("SELECT handle FROM users").fetchall()}
+
+
+def slips(db, conv_id: str, unknown: set[str], handed_off: bool) -> dict[str, str | None]:
+    """The unknown handles worth waking the speaker for, each with the real one it resembles.
+
+    A message that reached someone was handed off. A stray ``@word`` in it is
+    prose (a decorator, a package scope, the word "mention" itself), and a
+    notice about it wakes the speaker to apologise in public, which can trip
+    the check again. There, only a handle this tree has worn (mapped to
+    itself: it is real, just not live where the speaker can reach) or a name
+    one slip away from a reachable handle is still a failed hand-off. A
+    message that reached nobody reports every name.
+    """
+    if not unknown:
+        return {}
+    lines = tree_conversation_ids(db, conv_id)
+    rows = db._exec(
+        "SELECT DISTINCT lower(name) AS name, conv_id, status FROM attachments"
+        f" WHERE conv_id IN ({','.join('?' * len(lines))})", tuple(lines)).fetchall()
+    worn = {row["name"] for row in rows}
+    real = sorted(people(db) | {row["name"] for row in rows
+                                if row["conv_id"] == conv_id or row["status"] in LIVE})
+    found: dict[str, str | None] = {}
+    for name in sorted(unknown):
+        if name in worn:
+            found[name] = name
+            continue
+        close = get_close_matches(name, real, n=1, cutoff=SLIP_CUTOFF)
+        if close or not handed_off:
+            found[name] = close[0] if close else None
+    return found
 
 
 def gone_staff(db, name: str) -> dict | None:

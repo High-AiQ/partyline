@@ -50,6 +50,20 @@ def mentioned_names(body: str) -> set[str]:
     return names
 
 
+# A fenced block, or an inline span on one line.
+_CODE_RE = re.compile(r"```.*?(?:```|\Z)|`[^`\n]*`", re.S)
+
+
+def quoted_names(body: str) -> set[str]:
+    """Handles that appear only inside code: ``@dataclass``, or a handle quoted in backticks.
+
+    Delivery ignores this — a real handle in backticks still rings — but a
+    name nobody wears that was only ever written as code is not a failed
+    hand-off, and reporting it wakes the speaker over its own prose.
+    """
+    return mentioned_names(body) - mentioned_names(_CODE_RE.sub(" ", body))
+
+
 def known_mention_names(db, conv_id: str, names: set[str]) -> set[str]:
     """Names that have a person or process meaning from this line.
 

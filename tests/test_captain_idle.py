@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from partyline.presence import Presence
@@ -82,6 +83,50 @@ class CaptainIdleTest(TaskFixture):
         self.assertEqual(len(self.notices()), 2)
         self.assertIn('pending report', self.notices()[0]['body'])
         self.assertIn('write-set approval', self.notices()[0]['body'])
+
+    async def test_a_retired_lines_report_and_task_are_history_not_open_work(self):
+        """62 unread reports from long-closed lines were recited to the room after a restart."""
+        await self.setup_tree()
+        self.db._exec("INSERT INTO line_reports(parent_conv_id,child_conv_id,author,body,notify,created_at) "
+                      "VALUES('root',?,'worker','ready',1,1)", (self.conv_id,))
+        self.db.archive_conversation(self.conv_id)
+        await self.end()
+        self.assertEqual(self.notices(), [])
+
+    async def test_an_approval_only_a_person_can_give_is_not_stranded_work(self):
+        await self.setup_tree()
+        self.db._exec("UPDATE task_reviews SET status='done' WHERE conv_id=?", (self.conv_id,))
+        self.db._exec("INSERT INTO conversation_write_grant_requests(conv_id,id,path,requester,"
+                      "created_at,human_only) VALUES(?, 'request', '/work', 'worker', 1, 1)",
+                      (self.conv_id,))
+        self.runtime.restart_request = SimpleNamespace(
+            conversation_id='root', id='r1', requester='captain', reason='deploy', created_at=2)
+        await self.end()
+        self.assertEqual(self.notices(), [])
+        self.db._exec('UPDATE conversation_write_grant_requests SET human_only=0')
+        await self.end()  # one the captain can decide is its own open work
+        self.assertIn('write-set approval', self.notices()[0]['body'])
+        self.assertNotIn('restart', self.notices()[0]['body'])
+
+    async def test_a_long_board_is_counted_not_recited(self):
+        await self.setup_tree()
+        self.db._exec("UPDATE task_reviews SET status='done' WHERE conv_id=?", (self.conv_id,))
+        for number in range(9):
+            child = f'line{number}'
+            self.db.create_conversation(child, child)
+            self.db._exec("UPDATE conversations SET parent_id='root',captain_mode='manager_tree' "
+                          "WHERE id=?", (child,))
+            self.db._exec("INSERT INTO line_reports(parent_conv_id,child_conv_id,author,body,notify,"
+                          "created_at) VALUES('root',?,'worker','ready',1,1)", (child,))
+        await self.end()
+        public, private = self.notices()
+        self.assertEqual(public['body'].count('pending report'), 5)
+        self.assertIn('; and 4 more. Nothing is running', public['body'])
+        self.assertIn('; and 4 more. Nothing is running', private['body'])
+        self.db._exec('UPDATE line_reports SET acknowledged_at=1 WHERE id=(SELECT max(id) FROM line_reports)')
+        await self.end()  # the uncounted tail still tells one board from the next
+        self.assertEqual(len(self.notices()), 4)
+        self.assertIn('; and 3 more.', self.notices()[2]['body'])
 
     async def test_worker_activity_resets_verdict_even_if_already_finished(self):
         await self.setup_tree()

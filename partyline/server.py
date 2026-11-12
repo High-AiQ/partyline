@@ -76,7 +76,7 @@ from . import deployment
 from .db import Db
 from .frontend_build import current_frontend_build
 from .hook_routes import hook_url, hooks_router
-from .line_process_routes import close_attachment, register_line_process_routes
+from .line_process_routes import asked_self_detach, close_attachment, register_line_process_routes
 from .message_routes import message_router
 from .message_forward import forward_router
 from .reaction_routes import reaction_router
@@ -521,13 +521,12 @@ async def edit_attachment(
 
 
 @app.delete("/api/attachments/{att_id}", response_model=OkResponse)
-async def detach(request: Request, att_id: str):
+async def detach(request: Request, att_id: str, told_by: str | None = None):
     principal = request_principal(request)
     deny_unless_attachment(runtime.db, principal, att_id, "close")
     caller = principal.attachment_id or f"{principal.kind}:{principal.user_id}"
-    return await close_attachment(runtime, att_id, source="api.detach", caller=caller,
-                                  self_detach=(principal.kind == "machine"
-                                               and principal.attachment_id == att_id))
+    asked = asked_self_detach(runtime.db, principal, att_id, told_by)  # refuses a habitual one
+    return await close_attachment(runtime, att_id, source="api.detach", caller=caller, self_detach=asked)
 def _hook_url(att_id: str, bind: BindConfig | None = None, token: str = "") -> str:
     return hook_url(att_id, bind or app.state.bind, token)
 @app.get("/api/attachments/{att_id}/screen", response_model=ScreenResponse)
