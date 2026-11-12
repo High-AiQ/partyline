@@ -14,7 +14,7 @@ is now bounded by what can still matter: the project directories, the pinned ses
 and files written since spawn while searching (`ClaudeSession._may_hold_our_token`
 is the one rule for both what the search reads and what the watch holds), then only
 the claimed file and its directory (6 and 6 whatever the history, 0 after stop).
-An old file given our token with no descriptor to report it is covered by one later look after a wake that found nothing (it arms nothing). Narrowing also frees obsolete watches when the new one does not fit. Codex narrows at claim too. `tests/test_watch_descriptors.py` states the invariant
+An append to an old file is reported only to a descriptor already holding it, so the newest 64 older sessions of the attachment's own working directory are held too (a timer cannot stand in for the event), a search that finds nothing re-plans so a newly recent file is held, and one later look follows a wake that found nothing. Narrowing also frees obsolete watches when the new one does not fit. Codex narrows at claim too. `tests/test_watch_descriptors.py` states the invariant
 (a session this activation owns is never missed: pinned, re-exec'd, resumed) and
 proves the tail still follows appends, rotation and unlink/recreate.
 
