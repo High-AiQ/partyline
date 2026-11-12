@@ -13,10 +13,12 @@ life. Two facts bound that:
   a file that has just become recent is held for its next append.
 * An append to an *old* file is reported only to a descriptor already holding it, so the
   existing sessions a CLI started here can continue (the newest ``OLD_SESSIONS_HELD`` in
-  this working directory's own project directory) are held too. Beyond that set the scan
-  is authoritative on every wake, and a wake that finds nothing is followed by one later
-  look (`_await_transcript`; it arms nothing). A session outside both sets that takes our
-  token with the CLI silent on its pty is found on the next wake of any kind.
+  this working directory's own project directory) are held too. Past that set no descriptor
+  reports the append, and none is needed to find it: pasting a wake into the CLI always
+  produces terminal output, ``Adapter.changed()`` runs for every pty chunk, and each wake
+  rescans by mtime and size (skipping unchanged files). So an older session that takes our
+  token costs one rescan on the next terminal chunk, not a missed session. Holding every
+  old transcript to avoid that rescan would recreate the descriptor exhaustion.
 * Once a transcript is claimed nothing else is read, so the watch narrows to that file.
 """
 
