@@ -16,23 +16,28 @@ class RecoverySpaceError(ValueError):
 
 
 def require_space(common, path, *, registered=True, excluded=()):
-    available = shutil.disk_usage(common).free - RESERVE
+    available = None
 
     def check(required):
+        nonlocal available
+        if not required:
+            return
+        if available is None:
+            available = shutil.disk_usage(common).free - RESERVE
         if required > available:
             raise RecoverySpaceError('insufficient free space for recovery; source retained '
                                      f'(need {required + RESERVE} bytes including reserve)')
 
-    check(0)
     if not registered:
         skipped = frozenset(os.path.join(path, name) for name in excluded)
         check(Budget(seconds=float('inf')).size(path, skipped))
         return
     # Stream names, never build preview evidence or retain a per-file listing.
-    # Ignored caches need no recovery space. Existing tracked blobs make this
-    # estimate conservative; it deliberately does not guess compression ratios.
+    # Only modified/untracked content may require new blobs. Committed and
+    # staged blobs already reside in Git; ignored caches need no recovery space.
+    # A zero-content estimate also needs no reserve or disk-space check.
     required = 0
-    with subprocess.Popen(['git', 'ls-files', '--cached', '--others', '--exclude-standard',
+    with subprocess.Popen(['git', 'ls-files', '--modified', '--others', '--exclude-standard',
                            '-z', '--', *add_paths(excluded)], cwd=path,
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
         try:
