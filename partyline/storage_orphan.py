@@ -10,6 +10,7 @@ import uuid
 from .line_worktree import rev
 from .storage_recovery_space import require_space
 from .storage_raw_blobs import write_blobs
+from .storage_git_objects import reachable, normalized
 
 
 def dangling_owner(path):
@@ -80,8 +81,8 @@ def identity(path, excluded, algorithm):
     return digest.hexdigest()
 
 
-def recover_dangling(common, path, *, excluded=()):
-    """Save only content absent from the owner's object store, by raw blob hash.
+def recover_dangling(common, path, *, excluded=(), reachable_objects=None):
+    """Save content not reachable from surviving owner refs, by content hash.
 
     Never copy the checkout to the outer repo. Existing blobs may have different
     names or occur only in history; no index/HEAD remains to compare paths with.
@@ -90,6 +91,10 @@ def recover_dangling(common, path, *, excluded=()):
     if algorithm not in ('sha1', 'sha256'):
         raise ValueError('cannot determine orphan object format; retained')
     before = identity(path, excluded, algorithm)
+    durable = reachable(common) if reachable_objects is None else reachable_objects
+    files = [(name, *blob(os.path.join(path, name), algorithm)) for name in entries(path, excluded)]
+    filtered = normalized(common, path, [name for name, oid, mode in files
+                                        if oid not in durable and mode != '120000'])
     with tempfile.TemporaryDirectory(prefix='partyline-dangling-') as folder:
         env = {**os.environ, 'GIT_DIR': common, 'GIT_WORK_TREE': path,
                'GIT_INDEX_FILE': os.path.join(folder, 'index'),
@@ -111,17 +116,17 @@ def recover_dangling(common, path, *, excluded=()):
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         ) as process:
             try:
-                for name in entries(path, excluded):
-                    oid, mode = blob(os.path.join(path, name), algorithm)
+                for name, oid, mode in files:
+                    if oid in durable or filtered.get(name) in durable:
+                        continue
                     process.stdin.write((oid + '\n').encode())
                     process.stdin.flush()
                     answer = process.stdout.readline()
-                    if answer == b'blob\n':
-                        continue
-                    if answer != (oid + ' missing\n').encode():
+                    if answer not in (b'blob\n', (oid + ' missing\n').encode()):
                         raise ValueError('cannot inspect orphan object store; retained')
-                    unique_bytes += os.lstat(os.path.join(path, name)).st_size
-                    names.write(os.fsencode(name) + b'\0')
+                    if answer != b'blob\n':
+                        unique_bytes += os.lstat(os.path.join(path, name)).st_size
+                        names.write(os.fsencode(name) + b'\0')
                     index.write((mode + ' ' + oid + '\t').encode() + os.fsencode(name) + b'\0')
                 process.stdin.close()
                 if process.wait(timeout=30):
@@ -130,8 +135,9 @@ def recover_dangling(common, path, *, excluded=()):
                 if process.poll() is None:
                     process.kill()
                     process.wait()
-        if unique_bytes or os.path.getsize(listing):
-            # Only missing blobs need disk space, not the committed gigabytes.
+        if os.path.getsize(index_info):
+            # Present but unreachable blobs need a ref, not another copy.
+            # Only missing raw blobs need space; committed gigabytes need neither.
             require_space(common, path, required_bytes=unique_bytes)
             git('read-tree', '--empty')
             write_blobs(common, path, listing, env)

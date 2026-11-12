@@ -1,10 +1,51 @@
 # Lessons: the false-assumptions ledger
 
+## Object existence does not protect a pruned checkout's only copy
+
+The false assumption was that cat-file success proved durable preservation.
+Staged-only blobs and detached commits become unreachable when worktree metadata
+is pruned, and GC can delete them after cleanup removes the checkout. Compare
+against ref reachability once per owning repository per sweep; put present but
+unreachable blobs into the recovery tree without copying their bytes. Fixtures
+expire reflogs and run real GC, then restore staged and detached content from
+recovery refs. Tests: `tests/test_storage_review_round2.py`.
+
+## A per-worktree discard choice must not accept its ancestor
+
+The false assumption was that containment alone scoped Remove anyway to a
+person's choice. An arbitrary parent path could waive ignored-data protection
+for every child. Validate exact paths against candidates already kept with that
+action before allowing containment for their own nested worktrees. Tests refuse
+unlisted candidates and ancestor scopes, and remove one chosen entry while its
+sibling remains. Tests: `tests/test_storage_review_round2.py`.
+
+## Remember the tree's dependencies, not every ref in its repository
+
+The false assumption was that recording all owner refs was a useful conservative
+invalidation key. Every unrelated merge or fetch retried every kept tree, just
+before the restart that should skip it. Record directory and HEAD/index inputs
+and only the tree's own branch value, reading loose or packed refs without Git.
+A merge, simulated fetch and ref packing now cause zero size or Git inspection
+calls for an unchanged kept tree; its own branch update still causes a retry.
+Tests: `tests/test_storage_review_round2.py`.
+
+## Checkout bytes may differ from the committed representation
+
+The false assumption was that raw blob equality recognizes all committed
+content. CRLF and LFS-style clean filters have different stored representations.
+Also compare non-writing normalized hashes with reachable objects, in one bulk
+Git command. If neither representation is durable, save the original bytes raw.
+Real CRLF and portable LFS-style filter fixtures prove committed large content
+is skipped while unique CRLF/binary bytes are recovered unchanged.
+Tests: `tests/test_storage_review_round2.py`.
+
+
 ## A pruned linked checkout still has an owning object store
 
 The false assumption was that a valid nested-worktree fixture also covered a
 `.git` link whose metadata had been pruned. Validate the surviving owner, hash
-raw blobs there by content (not filename), and recover only missing blobs there.
+blobs there by content (not filename), and recover missing or unreachable content
+there. Presence alone is insufficient; a surviving ref must reach skipped blobs.
 A renamed committed megabyte fixture proves none of it enters the outer repo.
 Raw missing blobs are written without clean filters, preserving CRLF and unique
 bytes exactly; access-time updates during hashing are not content changes.

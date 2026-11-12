@@ -130,8 +130,7 @@ def clean_fences(db, report, line=None, *, retry_failed=False, recovery=None):
                     return None
             attempt(report, mirror, clean)
             if mirror.is_dir() and storage_kept.reason(db, mirror):
-                owner = repositories.get(mirror.name) if repositories else None
-                storage_decisions.remember(db, mirror, owner[1] if owner else mirror.parent)
+                storage_decisions.remember(db, mirror)
         try:
             folder.rmdir()
         except OSError:

@@ -16,7 +16,7 @@ from .storage_survey import inside
 from .task_workspaces import workspaces
 from .worktree_paths import managed_root
 from .storage_worktree_inventory import candidates, registrations
-from .worktree_storage import reclaim_ignored, repositories
+from .worktree_storage import kept_reason, reclaim_ignored, repositories
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,8 @@ def remove_worktree(db, root, path, owner=None, purging=False, *, recovery=None,
         if common:
             recovery.watch(common)
     if dangling:
-        before, algorithm = recover_dangling(root, path, **options)
+        durable = recovery.reachable(root) if recovery else None
+        before, algorithm = recover_dangling(root, path, reachable_objects=durable, **options)
         with db._runtime_serialized():
             if reason := protected(db, path, owner, purging):
                 return reason
@@ -151,7 +152,11 @@ def remove_worktree(db, root, path, owner=None, purging=False, *, recovery=None,
 
 def clean_worktrees(db, report, line=None, *, purging=False, retry_failed=False, recovery=None,
                     remove_anyway=()):
-    for root, path, owner in candidates(db, line):
+    entries = candidates(db, line)
+    remove_anyway = frozenset(path for root, path, _owner in entries
+                             if path in remove_anyway and 'ignored files outside known caches' in
+                             (storage_kept.reason(db, path) or kept_reason(db, root, path) or ''))
+    for root, path, owner in entries:
         if line and (not owner or owner['id'] != line['id']):
             continue
         if owner and not owner.get('archived_at') and line is None:
@@ -181,6 +186,6 @@ def clean_worktrees(db, report, line=None, *, purging=False, retry_failed=False,
                           'cleanup incomplete')
             storage_kept.remember(db, path, reason, suppress_retry=bool(
                 storage_kept.reason(db, path, suppressed_only=True)))
-            storage_decisions.remember(db, path, root)
+            storage_decisions.remember(db, path)
         else:
             storage_kept.forget(db, path)

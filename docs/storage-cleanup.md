@@ -3,15 +3,21 @@
 Startup and lifecycle cleanup preserve readable tracked and untracked changes in
 `refs/partyline/discarded/storage-*` in the owning repository before deleting a
 retired or orphaned checkout. A dangling linked checkout whose registration was
-pruned uses its surviving owner's object store: raw Git blob hashes recognize
-content anywhere in that store, even under another filename. Only missing blobs
-are snapshotted there; committed gigabytes are never copied into the outer repo.
+pruned compares content hashes against objects reachable from surviving owner
+refs, even under another filename. Reachability is enumerated once per owner per
+sweep. Present but unreachable blobs (such as staged-only files or detached
+commits) are anchored in a recovery tree without copying their bytes. Missing
+content is saved raw in that owner, never in the outer repo. Normalized hashes
+also recognize committed CRLF and LFS-style checkouts; unique bytes still get
+raw, unfiltered recovery.
 Independent repositories and checkouts without a surviving owner stay kept.
 
 Ignored files outside known caches keep the worktree for a person's decision.
 Settings → Storage → Clean up now lists the reason, a few ignored paths and their
-individual and combined readable sizes. Each such worktree offers **Remove anyway**, explicitly
-allowing its ignored files to be deleted. This waives only the ignored-file guard;
+individual and combined readable sizes. Each such worktree offers **Remove
+anyway**, explicitly allowing its ignored files to be deleted. The override
+accepts only an exact path previously offered as a kept entry with that action;
+it covers that entry and its own nested worktrees, never an arbitrary ancestor. This waives only the ignored-file guard;
 open lines, live processes, independent repositories and failed recovery stay
 protected. A normal Clean up now retries decisions without granting that waiver.
 
@@ -26,8 +32,10 @@ this list. Readable files in a plain orphan folder are all recovered, including
 ignored files; unreadable subtrees remain in place with a bounded reason.
 
 Kept decisions persist across starts. Automatic cleanup stats recorded directory
-mtimes and Git HEAD/index/ref metadata before any Git inspection or size walk.
-Directory or Git metadata changes invalidate a decision; Clean up now always
+mtimes, Git HEAD/index metadata and the tree's own branch value before any Git
+inspection or size walk. Loose and packed refs are compared by value: unrelated
+merges, fetches and ref packing do not invalidate kept trees. Changes to the
+tree's own inputs invalidate a decision; Clean up now always
 retries. An edit to an existing file without directory or Git metadata changes
 requires that manual retry. Partial deletion failures wait for a manual retry
 even if the tree changes, so deletions from the previous cleanup cannot create

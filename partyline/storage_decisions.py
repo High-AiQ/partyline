@@ -1,12 +1,15 @@
-"""Cheap invalidation for kept trees: directory mtimes and Git control files.
+"""Cheap invalidation for kept trees using only the decision's own inputs.
 
-A manual cleanup always retries. Automatic starts stat the recorded evidence,
-without walking or invoking Git. Changes within an existing file that leave its
-parent directory and Git state unchanged require a manual retry.
+Manual cleanup always retries. Automatic starts stat recorded tree directories
+and HEAD/index, and read the tree's own ref value (loose or packed). Unrelated
+merges, fetches and ref packing do not invalidate the decision. Content-only
+edits without directory or Git changes require a manual retry.
 """
 
 import json
 import os
+
+from .git_fence import _read_ref
 
 
 def stamp(path):
@@ -18,46 +21,58 @@ def stamp(path):
         return None
 
 
-def evidence(path, root):
-    paths = {path}
-    stores = {os.path.join(root, '.git')}
-    if os.path.isdir(os.path.join(root, 'objects')):
-        stores = {root}
+def evidence(path):
+    paths, refs = {path}, []
+
+    def git_inputs(gitdir, common=None):
+        common = common or gitdir
+        if os.path.basename(os.path.dirname(gitdir)) == 'worktrees':
+            common = os.path.dirname(os.path.dirname(gitdir))
+        paths.update(os.path.join(gitdir, name) for name in ('HEAD', 'index', 'commondir'))
+        paths.update(os.path.join(common, name) for name in ('info/exclude', 'config'))
+        try:
+            with open(os.path.join(gitdir, 'HEAD'), encoding='utf-8') as stream:
+                head = stream.read(8192).strip()
+            if head.startswith('ref: '):
+                ref = head.removeprefix('ref: ')
+                refs.append([common, ref, _read_ref(common, ref)])
+        except (OSError, UnicodeError):
+            pass
+
     for directory, dirs, files in os.walk(path):
         paths.add(directory)
         paths.update(os.path.join(directory, name) for name in ('.gitignore', '.gitattributes'))
+        link = os.path.join(directory, '.git')
+        if '.git' in dirs:
+            git_inputs(link)
         dirs[:] = [name for name in dirs if name != '.git']
         if '.git' in files:
-            link = os.path.join(directory, '.git')
             paths.add(link)
             try:
                 with open(link, encoding='utf-8') as stream:
                     target = stream.read(8192).strip().removeprefix('gitdir:').strip()
-                gitdir = os.path.realpath(os.path.join(directory, target))
-                paths.update(os.path.join(gitdir, name) for name in ('HEAD', 'index', 'commondir'))
-                if os.path.basename(os.path.dirname(gitdir)) == 'worktrees':
-                    stores.add(os.path.dirname(os.path.dirname(gitdir)))
+                git_inputs(os.path.realpath(os.path.join(directory, target)))
             except (OSError, UnicodeError):
                 pass
-    # Ref changes elsewhere can resolve merge/ownership decisions. Include
-    # loose and packed refs, without consulting Git on subsequent starts.
-    for gitdir in stores:
-        controls = ('HEAD', 'packed-refs', 'refs/heads', 'refs/remotes', 'info/exclude', 'config')
-        paths.update(os.path.join(gitdir, name) for name in controls)
-        for kind in ('heads', 'remotes'):
-            for directory, _dirs, files in os.walk(os.path.join(gitdir, 'refs', kind)):
-                paths.add(directory)
-                paths.update(os.path.join(directory, name) for name in files)
-    return json.dumps({name: stamp(name) for name in sorted(paths)})
+    if os.path.isdir(os.path.join(path, 'refs')):  # private mirror, not the owner's refs
+        git_inputs(path)
+    return json.dumps({'paths': {name: stamp(name) for name in sorted(paths)}, 'refs': refs})
 
 
-def remember(db, path, root):
+def remember(db, path):
     db._exec('INSERT INTO storage_cleanup_decisions(path,evidence) VALUES(?,?) '
              'ON CONFLICT(path) DO UPDATE SET evidence=excluded.evidence',
-             (str(path), evidence(str(path), str(root))))
+             (str(path), evidence(str(path))))
 
 
 def unchanged(db, path):
     row = db._exec('SELECT evidence FROM storage_cleanup_decisions WHERE path=?',
                    (str(path),)).fetchone()
-    return bool(row and all(stamp(name) == value for name, value in json.loads(row['evidence']).items()))
+    if not row:
+        return False
+    previous = json.loads(row['evidence'])
+    # Old evidence watched all owner refs. Reclassify it once into narrow inputs.
+    if 'paths' not in previous:
+        return False
+    return (all(stamp(name) == value for name, value in previous['paths'].items()) and
+            all(_read_ref(common, ref) == value for common, ref, value in previous['refs']))
