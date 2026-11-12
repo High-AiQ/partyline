@@ -363,7 +363,7 @@ from `/api/capabilities`. Every HTTP handler independently authorizes the caller
 | Tool | Caller | HTTP operation |
 | --- | --- | --- |
 | `create_task(name, goal, implementer, review?)` | Orchestrator root captain | POST `/api/conversations/{root}/tasks` |
-| `tasks()` | Orchestrator root captain | GET `/api/conversations/{root}/tasks`; each task includes bounded per-workspace branch visibility |
+| `tasks(include_retired?)` | Orchestrator root captain | GET `/api/conversations/{root}/tasks`: tasks on live lines, or every task with `include_retired`; unset fields are dropped and prose over 240 characters is cut so the board fits one reply; each task includes bounded per-workspace branch visibility |
 | `blocked(reason)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/blocked` |
 | `waiting(reason, seconds?)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/waiting` |
 | `request_review(sha?, what, where)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/request-review` |

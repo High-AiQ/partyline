@@ -42,9 +42,12 @@ def task(db, conv_id, visibility=False):
                    db, visibility)
 
 
-def tasks(db, root_id, visibility=False):
+def tasks(db, root_id, visibility=False, retired=True):
+    """A root's tasks, oldest first; ``retired=False`` leaves out tasks whose line is retired."""
+    live = "" if retired else ("AND EXISTS(SELECT 1 FROM conversations c "
+                               "WHERE c.id=task_reviews.conv_id AND c.archived_at IS NULL) ")
     rows = [_parsed(row, db, visibility=visibility) for row in db._exec(
-        "SELECT * FROM task_reviews WHERE root_id=? ORDER BY created_at,conv_id",
+        f"SELECT * FROM task_reviews WHERE root_id=? {live}ORDER BY created_at,conv_id",
         (root_id,)).fetchall()]
     for record in rows:
         # A new task's workspaces are its repositories (create_task says so);

@@ -39,9 +39,12 @@ def task_line(db, actor, ref):
     if not isinstance(ref, str) or task(db, ref) is not None:
         return ref
     rows = tasks(db, actor.conv_id) if actor.kind == 'machine' else all_tasks(db)
-    matches = [row['conv_id'] for row in rows if ref in (
+    named = [(row['conv_id'], db.get_conversation(row['conv_id']) or {}) for row in rows if ref in (
         row['tag'], row['implementer_handle'], row['reviewer_handle'],
         (db.get_conversation(row['conv_id']) or {}).get('name'))]
+    # A name reused after a retirement means the live task; history is reached by line id.
+    live = [conv_id for conv_id, conv in named if not conv.get('archived_at')]
+    matches = live or [conv_id for conv_id, _ in named]
     if len(matches) > 1:
         raise HTTPException(409, f'task name {ref} matches {len(matches)} tasks; use a line id')
     return matches[0] if matches else ref

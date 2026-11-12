@@ -37,9 +37,11 @@ def orchestrator_router(runtime):
         return await create_task(runtime, request_principal(request), conv_id, body)
 
     @router.get('/api/conversations/{conv_id}/tasks', response_model=list[TaskReview])
-    def listing(request: Request, conv_id: str):
+    def listing(request: Request, conv_id: str, include_retired: bool = False):
+        """The board: tasks on live lines. A long-lived root has hundreds of retired ones,
+        oldest first, and a bounded reader saw only those."""
         require_root(db, request_principal(request), conv_id)
-        return tasks(db, conv_id, visibility=True)
+        return tasks(db, conv_id, visibility=True, retired=include_retired)
 
     @router.get('/api/conversations/{conv_id}/task', response_model=TaskReview)
     def detail(request: Request, conv_id: str):

@@ -2220,3 +2220,17 @@ line a minute. The tool-list watcher is now one pushed stream per bridge, and th
 before uvicorn waits on connections (`StreamClosingServer`). Any response the server holds open needs an owner
 that closes it at shutdown. Tests: `tests/test_capability_stream.py`.
 
+## 2026-11-12 — A listing that grows with history stops showing the present
+
+The false assumption was that a root's task list is its board. `GET /api/conversations/<root>/tasks` returned every
+task the root ever had, oldest first; retirement archives the line and leaves the task row. On the root this was
+found on, that was 193 tasks and 636 KB, none of them live, and the MCP reply is cut at 20,000 characters: the
+captain's `tasks` tool showed only weeks-old retired tasks and would never have reached a live one. The route now
+lists tasks on live lines unless `include_retired=true`, the MCP tool drops unset fields and cuts long prose so a
+board fits the reply, and a task name reused after a retirement resolves to the live task. The same growth filled
+the database: each forced retirement stored a 5 to 10 MB inventory of every ignored file and rewrote it at five
+stages, on the event loop, until one audit table was 428 MB of a 509 MB file. The inventory is now stored
+compressed and packed in a thread, and old rows are packed once at startup. Anything a bounded reader consumes
+must be bounded where it is produced, and tested with a history as long as a real one. Tests:
+`tests/test_task_refs.py`, `tests/test_orchestrator_mcp.py`, `tests/test_retirement_force.py`.
+

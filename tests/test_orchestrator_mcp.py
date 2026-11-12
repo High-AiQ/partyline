@@ -31,7 +31,12 @@ class TaskToolsTest(unittest.TestCase):
         self.client.request.assert_called_with('POST', '/api/conversations/root/tasks',
                                                {'name': 'task', 'goal': 'goal', 'implementer': 'builder'})
         tools_tasks.call(self.client, 'tasks', {}, self.root)
-        self.client.request.assert_called_with('GET', '/api/conversations/root/tasks', None)
+        self.client.request.assert_called_with('GET', '/api/conversations/root/tasks')
+        tools_tasks.call(self.client, 'tasks', {'include_retired': True}, self.root)
+        self.client.request.assert_called_with(
+            'GET', '/api/conversations/root/tasks?include_retired=true')
+        with self.assertRaises(ValueError):
+            tools_tasks.call(self.client, 'tasks', {'include_retired': 'yes'}, self.root)
         tools_tasks.call(self.client, 'review_verdict', {
             'conv_id': 'task id', 'verdict': 'approve', 'findings': 'reviewed'}, self.root)
         self.client.request.assert_called_with('POST', '/api/conversations/task%20id/review-verdict',
@@ -52,6 +57,28 @@ class TaskToolsTest(unittest.TestCase):
                      'override': 'yes'}):
             with self.assertRaises(ValueError):
                 tools_tasks.call(self.client, 'review_verdict', bad, self.root)
+
+    def test_the_board_fits_the_reply_whatever_the_tasks_wrote(self):
+        from partyline.mcp.render import MAX_TEXT, render
+
+        prose = 'finding ' * 400
+        self.client.request.return_value = [
+            {'conv_id': f'line-{index}', 'tag': f'tag{index}', 'status': 'in_review', 'merged': 0,
+             'round': 2, 'sha': None, 'reviewer_id': '', 'goal': prose, 'findings': prose,
+             'previous_findings': prose, 'what': prose, 'workspaces': []}
+            for index in range(12)]
+        board = tools_tasks.call(self.client, 'tasks', {}, self.root)
+        self.assertEqual([row['tag'] for row in board], [f'tag{index}' for index in range(12)])
+        first = board[0]
+        self.assertEqual((first['status'], first['merged'], first['round']), ('in_review', 0, 2))
+        self.assertFalse({'sha', 'reviewer_id', 'workspaces'} & set(first))  # unset: not listed
+        self.assertEqual(len(first['findings']), tools_tasks.BOARD_TEXT + 1)
+        self.assertTrue(first['findings'].endswith('…'))
+        text = render(board, 'http://lan.example:8642')
+        self.assertLess(len(text), MAX_TEXT)
+        self.assertEqual(len(json.loads(text)), 12)  # whole, not cut mid-record
+        self.client.request.return_value = {'detail': 'unexpected'}
+        self.assertEqual(tools_tasks.call(self.client, 'tasks', {}, self.root), [])
 
     def test_stdio_server_discovers_and_dispatches_task_tools_live(self):
         output = io.StringIO()
