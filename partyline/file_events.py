@@ -39,8 +39,11 @@ class Changes:
         if error is not None:
             self.error = error
         for starved in list(self.retries):
-            if starved is not skip:
-                starved.retry()
+            if starved is not skip and starved.retry():
+                # Whatever changed while that watch was down was never reported. Count one
+                # notification on its behalf, so an owner that tells file events from its
+                # other wakes by this count (OpenCode v2) looks at what it missed.
+                self.version += 1
         self.version += 1
         self.event.set()
 
@@ -129,8 +132,9 @@ class FileEvents:
                 self.changes.retries.remove(self)
 
     def retry(self):
+        """True when this starved watch is registered again."""
         if self.closed or self.retrying:
-            return
+            return False
         self.retrying = True
         try:
             self.arm()
@@ -138,6 +142,7 @@ class FileEvents:
             self.failed(exc)
         finally:
             self.retrying = False
+        return not self.starved
 
     def changed(self, paths):
         if self.closed or not (self.starved or any(

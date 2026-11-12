@@ -112,6 +112,17 @@ class ExhaustionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(events.starved)
         self.assertTrue(backend.made[0].closed)
 
+    async def test_a_watch_that_comes_back_counts_one_notification_for_what_it_missed(self):
+        changes, backend = Changes(), Backend(failures=[exhausted()] * 4)
+        async with self.events(backend, changes=changes) as events:
+            changes.notify()  # still starved: the wake counts as itself only
+            self.assertEqual(changes.version, 1)
+            changes.notify()  # registered again: the wake, plus one for the blind spell
+            self.assertFalse(events.starved)
+            self.assertEqual(changes.version, 3)
+            changes.notify()  # healthy from here on
+            self.assertEqual(changes.version, 4)
+
     async def test_a_native_event_while_starved_retries_whatever_changed(self):
         backend = Backend(failures=[exhausted()] * 2)
         async with self.events(backend) as events:

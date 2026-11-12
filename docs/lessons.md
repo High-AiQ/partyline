@@ -1,5 +1,17 @@
 # Lessons: the false-assumptions ledger
 
+## A watch that comes back has missed what happened while it was down
+
+The false assumption was that re-registering a starved watch restores the owner's view.
+It restores future events only: whatever was written while the watch was down was never
+reported. Most readers read on every wake and so caught up by accident. The OpenCode v2
+watcher reads only when the notification count moved by more than its own terminal wakes,
+and the wake that restores a watch is usually terminal output, so a turn end written in
+the blind spell stayed unread until the store was next written (integration review of
+#500). `Changes.notify` now counts one extra notification when a retry registers a
+starved watch again. A recovery path owes its owner one "look again", not silence.
+Tests: `tests/test_watch_exhaustion.py`, `tests/test_opencode_v2_adapter.py`.
+
 ## Free-space guards must estimate new writes, not existing durable content
 
 The false assumption was that all non-ignored files required room for another
@@ -2547,7 +2559,7 @@ files" stopped its process, so a captain detached and work stopped. Linux never 
 watches directories and the service limit is high. The server now raises its own soft limit at startup as far as
 the host allows (`partyline/fd_limit.py`), trying the lower ceiling macOS enforces, and warns with the remedy
 when it cannot. A design that spends a per-process resource per watched object must check that resource's
-default on every platform it runs on. Still open: a Claude adapter on macOS holds a descriptor per existing
-transcript, which a large history can exhaust even at the raised limit. Tests: `tests/test_fd_limit.py`,
+default on every platform it runs on. A Claude adapter on macOS no longer holds a descriptor per existing
+transcript (2.114.2; see the lesson on a kqueue watch of every transcript). Tests: `tests/test_fd_limit.py`,
 `tests/test_launch.py`.
 
