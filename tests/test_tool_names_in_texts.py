@@ -23,7 +23,7 @@ TEXTS = (
     "mention_fallbacks.py", "orchestrator_revive.py", "orchestrator_store.py", "orchestrator_pack.py",
     "pack_blocks.py", "reattach_queue.py", "task_ghost_mentions.py", "role_briefing.py", "goal.py",
     "screen_hints.py", "screen_window_grants.py", "screen_share_notices.py", "hierarchy_routes.py",
-    "adapters/briefing.py", "role_delivery.py",
+    "adapters/briefing.py", "role_delivery.py", "handover_state.py",
 )
 ROUTES = {catalog.CAPTAIN: "captain(op", catalog.EXTRAS: "extras(op"}
 

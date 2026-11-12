@@ -116,7 +116,7 @@ SPLIT = (
     "in a scratch checkout at the SHA before the branch moves, and a failure "
     "refuses the accept. For a task line, add {{\"detach_workers\": true}} to stop its "
     "implementer and reviewer once the SHA is recorded (workers never detach themselves); "
-    "retire_child works with or without it. If the line's tip has "
+    "captain(op=\"retire_child\", args={{...}}) works with or without it. If the line's tip has "
     "moved past the SHA you reviewed, send {{\"allow_descendant\": true}}: the accept "
     "fast-forwards to that newer tip when it descends from the reviewed SHA and the notice "
     "counts the commits that went in unreviewed. GET /api/conversations/<child-id>/tip "
