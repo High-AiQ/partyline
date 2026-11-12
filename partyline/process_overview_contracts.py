@@ -37,3 +37,6 @@ class ProcessOverviewLine(BaseModel):
 
 class ProcessOverviewResponse(BaseModel):
     lines: list[ProcessOverviewLine] = Field(default_factory=list)
+    lines_total: int = 0
+    # Set while more lines follow: pass it back as offset.
+    next_offset: int | None = None

@@ -8,13 +8,15 @@ from .retirement_nested import linked_owner, surviving_owner
 from .retirement_worktree import remove_directory
 from .storage_cleanup import attachment_reason, attempt, kept
 from .storage_removal import RetainedEntries
-from . import storage_kept
+from . import storage_kept, storage_decisions
+from .storage_ignored import cache_path, ignored_paths, ignored_reason
+from .storage_orphan import dangling_owner, recover_dangling, identity, remove_dangling
 from .storage_git import merged_tips, recover, recover_plain, state
 from .storage_survey import inside
 from .task_workspaces import workspaces
 from .worktree_paths import managed_root
 from .storage_worktree_inventory import candidates, registrations
-from .worktree_storage import repositories
+from .worktree_storage import kept_reason, reclaim_ignored, repositories
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,8 @@ def in_use(db, path, owner=None):
     return None
 
 
-def remove_worktree(db, root, path, owner=None, purging=False, *, recovery=None, retry_failed=False):
+def remove_worktree(db, root, path, owner=None, purging=False, *, recovery=None,
+                    retry_failed=False, remove_anyway=()):
     """Recheck ownership and Git evidence at deletion, including nested worktrees."""
     if reason := protected(db, path, owner, purging):
         return reason
@@ -68,28 +71,41 @@ def remove_worktree(db, root, path, owner=None, purging=False, *, recovery=None,
             if done.returncode:
                 return 'cannot remove missing checkout registration'
         return None
-    if common := linked_owner(path):
-        if not inside(common, path):
-            root = common
+    linked = linked_owner(path)
+    if linked and not inside(linked, path):
+        root = linked
+    dangling = dangling_owner(path)
+    if dangling and not inside(dangling, path):
+        root = dangling
     errors = []
     nested = repositories(path, check_files=True, errors=errors)
     excluded = tuple(os.path.relpath(error.filename, path) for error in errors)
     if any(name == '.' or name.startswith('..' + os.sep) for name in excluded):
         return 'cannot inspect worktree; retained'
+    if dangling:
+        excluded += tuple(os.path.normpath(name) for name in ignored_paths(path, dangling)
+                          if cache_path(name))
     options = {'excluded': excluded} if excluded else {}
+    if ((dangling or linked) and not any(inside(path, approved) for approved in remove_anyway)
+            and (reason := ignored_reason(path, excluded=excluded, common=dangling))):
+        if not dangling:
+            reclaim_ignored(path)
+        return reason
     # Preflight the whole folder before removing any nested checkout.
     for name in nested:
         full = os.path.join(path, name)
-        common = surviving_owner(full, path)
+        common = surviving_owner(full, path) or dangling_owner(full)
+        if common and inside(common, path):
+            common = None
         if not common:
             return f'contains independent nested repository {name}; its commits may exist nowhere else'
         if reason := protected(db, full):
             return reason
     for name in nested:
         full = os.path.join(path, name)
-        common = linked_owner(full)
+        common = linked_owner(full) or dangling_owner(full)
         reason = remove_worktree(db, common, full, owner, purging, recovery=recovery,
-                                 retry_failed=retry_failed)
+                                 retry_failed=retry_failed, remove_anyway=remove_anyway)
         if reason:
             return f'{full}: {reason}'
     if not os.path.isdir(path):
@@ -98,13 +114,25 @@ def remove_worktree(db, root, path, owner=None, purging=False, *, recovery=None,
         common = rev(root, 'rev-parse', '--path-format=absolute', '--git-common-dir')
         if common:
             recovery.watch(common)
-    if os.path.lexists(os.path.join(path, '.git')):
+    if dangling:
+        durable = recovery.reachable(root) if recovery else None
+        before, algorithm = recover_dangling(root, path, reachable_objects=durable, **options)
+        with db._runtime_serialized():
+            if reason := protected(db, path, owner, purging):
+                return reason
+            if identity(path, excluded, algorithm) != before:
+                return 'orphan changed after recovery; retained'
+            remove_dangling(path, excluded=tuple(os.path.relpath(error.filename, path) for error in errors))
+    elif os.path.lexists(os.path.join(path, '.git')):
         before = recover(root, path, owner['id'] if owner else None, **options)
         with db._runtime_serialized():
             if reason := protected(db, path, owner, purging):
                 return reason
             if before != state(root, path, owner['id'] if owner else None, **options):
                 return 'worktree changed after recovery; retained'
+            if (not any(inside(path, approved) for approved in remove_anyway)
+                    and (reason := ignored_reason(path, excluded=excluded))):
+                return reason
             remove_directory(path, root, **options)
         _git('worktree', 'remove', '--force', path, cwd=root)
     else:
@@ -122,13 +150,22 @@ def remove_worktree(db, root, path, owner=None, purging=False, *, recovery=None,
     return None
 
 
-def clean_worktrees(db, report, line=None, *, purging=False, retry_failed=False, recovery=None):
-    for root, path, owner in candidates(db, line):
+def clean_worktrees(db, report, line=None, *, purging=False, retry_failed=False, recovery=None,
+                    remove_anyway=()):
+    entries = candidates(db, line)
+    remove_anyway = frozenset(path for root, path, _owner in entries
+                             if path in remove_anyway and 'ignored files outside known caches' in
+                             (storage_kept.reason(db, path) or kept_reason(db, root, path) or ''))
+    for root, path, owner in entries:
         if line and (not owner or owner['id'] != line['id']):
             continue
         if owner and not owner.get('archived_at') and line is None:
             continue
-        if not retry_failed and (reason := storage_kept.reason(db, path, suppressed_only=True)):
+        if reason := protected(db, path, owner, purging):
+            kept(report, path, reason)
+            continue
+        if not retry_failed and (reason := storage_kept.reason(db, path)) and (
+                storage_kept.reason(db, path, suppressed_only=True) or storage_decisions.unchanged(db, path)):
             kept(report, path, reason)
             continue
 
@@ -138,7 +175,7 @@ def clean_worktrees(db, report, line=None, *, purging=False, retry_failed=False,
         def clean(root=root, path=path, owner=owner):
             try:
                 return remove_worktree(db, root, path, owner, purging, recovery=recovery,
-                                       retry_failed=retry_failed)
+                                       retry_failed=retry_failed, remove_anyway=remove_anyway)
             except RetainedEntries as exc:
                 storage_kept.remember(db, path, str(exc), suppress_retry=True)
                 raise
@@ -149,5 +186,6 @@ def clean_worktrees(db, report, line=None, *, purging=False, retry_failed=False,
                           'cleanup incomplete')
             storage_kept.remember(db, path, reason, suppress_retry=bool(
                 storage_kept.reason(db, path, suppressed_only=True)))
+            storage_decisions.remember(db, path)
         else:
             storage_kept.forget(db, path)

@@ -135,7 +135,13 @@ def _remove_line(db, line_id, current):
         raise HTTPException(409, "retirement gained a child or live process")
     if current["git"] and not _removable(current["git"]):
         return False
-    teardown(db, line_id, (db.get_conversation(line_id) or {}).get("cwd") or "")
+    conv = db.get_conversation(line_id) or {}
+    from .retirement_orphan import remove_empty, remove_task
+    from .worktree_paths import managed_root
+    cwd = conv.get("cwd") or ""
+    if remove_empty(managed_root(cwd), cwd, conv_id=line_id) or remove_task(db, conv):
+        return True
+    teardown(db, line_id, cwd)
     return _remove(current["git"])
 
 

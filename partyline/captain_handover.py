@@ -97,7 +97,8 @@ def offer(db, conv, old, target, debrief, live, pending=None, now=None):
                             "debrief,state,offered_at) VALUES(?,?,?,?,?,'offered',?)",
                             (ident, conv, old, target, debrief, now))
             msg = _message(db.conn, conv, f"☏ Captain handover offer {ident} from @{previous['name']}:\n\n"
-                           f"{debrief}\n\nAccept with accept_handover({ident}).", now, target)
+                           f"{debrief}\n\nAccept with extras(op=\"accept_handover\", "
+                           f"args={{\"handover_id\": \"{ident}\"}}).", now, target)
             db.conn.commit()
             return ident, msg
         except BaseException:
@@ -187,7 +188,7 @@ def state_text(db, att_id, runtime=None):
         role = "you are handing off" if row['from_attachment_id'] == att_id else "you are the receiver"
         return (f"Captain handover {row['id']}: accepted; {role}; "
                 f"awaiting {', '.join(remaining)}. "
-                "Both participants call complete_handover with this id." + jobs)
+                "Both participants call extras(op=\"complete_handover\", args={\"handover_id\": id})." + jobs)
     return (f"Captain handover {row['id']}: offered; "
             f"{'you are handing off' if row['from_attachment_id'] == att_id else 'you are the receiver'}."
             + jobs)

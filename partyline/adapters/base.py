@@ -31,9 +31,7 @@ from partyline.adapters.jsonl_receipts import JsonlPasteReceipts
 from partyline.adapters.task_logging import log_task_deaths
 from partyline.adapters.briefing import (
     fresh_checkpoint_briefing, connection_briefing,
-    BRIEFING,
-    TOPIC_BRIEFING,
-    child_env,
+    BRIEFING, TOPIC_BRIEFING, begin_gate, child_env,
     format_digest,
     safe_rider,
 )
@@ -290,9 +288,9 @@ class Adapter(TimedCallbacks, AdapterEvents, JsonlPasteReceipts, activation.Acti
 
     # Digest cwd/rider are live state; carry the token until its transcript receipt.
     def format_digest(self, messages: list[dict]) -> str:
-        return self._with_claim(format_digest(messages, safe_rider(self.att),
-                                              str(self.att.get("cwd", "")),
-                                              api=child_env({}, self.att)["PARTYLINE_API"]))
+        gate = begin_gate(self.att, messages)  # before the rider, which may also use it
+        return self._with_claim(format_digest(messages, safe_rider(self.att), str(self.att.get("cwd", "")),
+                                              api=child_env({}, self.att)["PARTYLINE_API"], gate=gate))
 
     async def send_keys(self, text: str):
         await self._write_all(b"\x1b[200~" + text.encode() + b"\x1b[201~")

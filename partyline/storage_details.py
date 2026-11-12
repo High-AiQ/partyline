@@ -15,6 +15,7 @@ class StoragePath(BaseModel):
     path: str
     reason: str
     size_bytes: int
+    remove_anyway_allowed: bool = False
 
 
 class IdleLine(BaseModel):
@@ -41,6 +42,7 @@ class CleanupKept(BaseModel):
     path: str
     reason: str
     size_bytes: int = 0
+    remove_anyway_allowed: bool = False
 
 
 class CleanupResult(BaseModel):
@@ -73,7 +75,8 @@ def details(db, now=None):
         reason = protected(db, path, owner) or previous or (
             'contains nested repositories: ' + ', '.join(nested) if nested else
             'awaiting cleanup; changes will be saved in recovery refs')
-        kept.append(StoragePath(path=path, reason=reason, size_bytes=size))
+        kept.append(StoragePath(path=path, reason=reason, size_bytes=size,
+                                remove_anyway_allowed='ignored files outside known caches' in reason))
     for folder in folders(db):
         owner_reason = retention(db, folder)
         def failed(path, reason):

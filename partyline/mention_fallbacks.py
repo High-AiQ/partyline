@@ -25,7 +25,7 @@ from .unreached import explain
 
 logger = logging.getLogger(__name__)
 GONE = ("detached", "exited")
-RESTART = {"reviewer": "restart_reviewer", "implementer": "restart_implementer"}
+RESTART = {"reviewer": 'captain(op="restart_reviewer")', "implementer": 'captain(op="restart_implementer")'}
 
 
 async def route_fallbacks(

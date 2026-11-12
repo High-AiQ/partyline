@@ -1,6 +1,6 @@
 """Server-authorized orchestrator and task HTTP boundary."""
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from .auth_guard import request_principal
 from .contracts import ConversationEvent, ConversationResponse, ConversationsChangedEvent
@@ -37,10 +37,15 @@ def orchestrator_router(runtime):
         return await create_task(runtime, request_principal(request), conv_id, body)
 
     @router.get('/api/conversations/{conv_id}/tasks', response_model=list[TaskReview])
-    def listing(request: Request, conv_id: str, include_retired: bool = False):
+    def listing(request: Request, conv_id: str, include_retired: bool = False,
+                retired_only: bool = False, limit: int = Query(20, ge=1, le=100),
+                offset: int = Query(0, ge=0)):
         """The board: tasks on live lines. A long-lived root has hundreds of retired ones,
-        oldest first, and a bounded reader saw only those."""
+        oldest first, and a bounded reader saw only those. ``retired_only`` lists just the
+        retired ones, newest first, ``limit`` from ``offset``."""
         require_root(db, request_principal(request), conv_id)
+        if retired_only:
+            return tasks(db, conv_id, visibility=True, only_retired=(limit, offset))
         return tasks(db, conv_id, visibility=True, retired=include_retired)
 
     @router.get('/api/conversations/{conv_id}/task', response_model=TaskReview)

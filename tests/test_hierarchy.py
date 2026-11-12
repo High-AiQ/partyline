@@ -490,6 +490,7 @@ class HierarchyApiTest(unittest.TestCase):
         [notice] = [m for m in self.db.list_messages("parent")
                     if m["body"].startswith("☏ @grok is now this line's captain")]
         self.assertEqual(notice["audience_attachment_id"], "impl-att")
+        self.assertIn("captain(op, args) is now available to you", notice["body"])
         self.assertEqual([m["body"] for batch in deliveries for m in batch][-1], notice["body"])
 
     def test_appointing_a_captain_wakes_the_workers_already_on_the_line_with_their_pack(self):

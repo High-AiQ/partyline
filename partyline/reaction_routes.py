@@ -9,6 +9,7 @@ from .mention_relay import post_private
 from .reaction_contracts import ReactionEvent, ReactionRequest
 from .reaction_store import (
     message,
+    is_latest_from_author,
     remove,
     toggle,
     valid_emoji,
@@ -52,8 +53,15 @@ async def _wake_process(runtime, item: dict, principal: Principal, emoji: str) -
     return-path notices are: shown to the humans and stamped on the message,
     but never a public line addressed to the room, and never sent for a
     reaction on a human's message, which is conversation between people.
+
+    Only a person's reaction on the process's own most recent message on the line is
+    needs-action: it is the answer to what the process just said. A reaction on an
+    older message, and every reaction from another process, is informational: it is
+    stored on the message and shown in the UI and ``read_messages``, with no notice.
     """
     if principal.kind != "user" or item["sender_type"] != "agent":
+        return
+    if not is_latest_from_author(runtime.db, item):
         return
     target = _target(runtime.db, item)
     if target is None or target["status"] != "running":
@@ -70,7 +78,6 @@ async def _wake_process(runtime, item: dict, principal: Principal, emoji: str) -
         "system",
         body,
         audience=target["id"],
-        route=True,
     )
 
 

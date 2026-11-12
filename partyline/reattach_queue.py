@@ -52,7 +52,7 @@ def queue_notice(runtime, rows: list[dict], *, line: str) -> str:
     return (
         f"{count} previously attached {noun} queued to come back on their own, one at a "
         f"time: {queue_label(runtime, rows, line=line)}. Do not restart, reattach or "
-        "re-create them by hand (restart_implementer / restart_reviewer would fight the "
+        "re-create them by hand (captain(op=\"restart_implementer\" or \"restart_reviewer\") would fight the "
         f"plan); wait for the \"{FINISHED}\" notice that follows."
     ) if rows else ""
 

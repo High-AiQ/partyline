@@ -54,6 +54,11 @@ def cleanup(db, root: str, path: str, merged: bool, *, force: bool = False) -> t
             refuse_orphan(root, path)
             if not local_git(path):
                 raise ValueError("cannot inspect worktree index")
+            from .storage_ignored import ignored_reason
+            if ignored := ignored_reason(path):
+                record_kept(db, root, path, ignored)
+                reclaim_ignored(path)
+                return False, ignored
             status = _git("status", "--porcelain", cwd=path)
             if status.returncode:
                 reason = "cannot inspect Git state"
@@ -70,6 +75,8 @@ def cleanup(db, root: str, path: str, merged: bool, *, force: bool = False) -> t
                         return False, protection
                     if before != state(root, path, owner["id"] if owner else None):
                         return False, "worktree changed after recovery; retained"
+                    if ignored := ignored_reason(path):
+                        return False, ignored
                     remove_directory(path, root)
                 try:
                     _git("worktree", "remove", "--force", path, cwd=root)

@@ -71,8 +71,8 @@ def incident_text(db, row: dict, sender_name: str, handles: list[str]) -> str:
     named = ", ".join(f"@{name}" for name in handles)
     return (f"ghost mention on task «{line.get('name', '?')}» ({row['conv_id']}): "
             f"@{sender_name} mentioned {named}; {reviewer_state(db, row)}; recover with "
-            "restart_reviewer / restart_implementer, then message_task the implementer "
-            "to ask again")
+            "captain(op=\"restart_reviewer\" or \"restart_implementer\", args={conv_id}), "
+            "then message_task the implementer to ask again")
 
 
 async def report_incident(runtime, row: dict, speaker: dict, handles: list[str]) -> None:

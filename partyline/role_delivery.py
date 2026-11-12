@@ -5,10 +5,12 @@ import time
 from typing import NamedTuple
 
 from .goal import goal_rider, task_goal_rider
+from .notice_policy import digest_candidates
 from .accept_sha import handoff_rider
 from .bridge_pack import pack_for
 from .captain_docs import reminder_line
-from .compaction_events import current_turns
+from .compaction_events import compaction_count, current_turns
+from .digest_suffix import SuffixGate
 from .line_depth import depth as line_depth, has_captain, staffed_split_reason
 from .role_briefing import WORKER_REMINDER, role_instructions, worker_instructions
 from .staffing import staffing_line
@@ -105,7 +107,7 @@ def _task_goal_delivery(db, att, runtime):
         if goal != previous:
             text = goal or ('(task goal cleared)' if previous else '')
             previous = goal
-            pending = db.messages_after(current['conv_id'], current['last_seen'],
+            pending = digest_candidates(db, current['conv_id'], current['last_seen'],
                                         current['name'], current['id'])
             # Snapshot the pending batch, including the assignment/update. A
             # claim or an older receipt must not consume a newly changed goal.
@@ -126,6 +128,9 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
         part for part in (_instructions(initial, db), pack_for(db, att["id"]),
                           state_text(db, att["id"], runtime)) if part)
     original_rider = att["digest_rider"]
+    gate = att["suffix_gate"] = SuffixGate()
+    att["credited_through"] = lambda: int((db.get_attachment(att["id"]) or {}).get("last_seen") or 0)
+    att["compaction_count"] = lambda: compaction_count(db, att["id"])
     task_goal_delivery = _task_goal_delivery(db, att, runtime)
     # The startup briefing already carries the pack for both fresh and resumed
     # attachments.  A resume therefore starts at the current role just like a
@@ -181,7 +186,7 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
                                       tmp_resource_line(db, current.conv_id))
                     if part)
             if not captain_transition:
-                pointer = briefing_pointer(current.conv_id)
+                pointer = gate.keep("pointer", briefing_pointer(current.conv_id))
         elif (current.role in ("implementer", "reviewer")
               and is_task_participant(db, att["id"], current.conv_id)):
             current_goal = task_goal_rider(db, current.conv_id)

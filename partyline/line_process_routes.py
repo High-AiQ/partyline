@@ -37,9 +37,9 @@ def _revive_hint(db, att_id: str) -> str:
     if not row:
         return ""
     if row['implementer_id'] == att_id:
-        return ("; revive it with restart_implementer"
+        return ('; revive it with captain(op="restart_implementer")'
                 if row['status'] in ('implementing', 'idle', 'blocked') else "")
-    return ("; revive it with restart_reviewer"
+    return ('; revive it with captain(op="restart_reviewer")'
             if row['status'] == 'in_review' and staffed_by_preset(row) else "")
 
 

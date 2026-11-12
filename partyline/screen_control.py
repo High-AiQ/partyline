@@ -12,6 +12,7 @@ from .screen_audit import publish, record
 from .screen_connections import notice
 from .screen_control_actions import ControlAction, command, describe
 from .op_timing import pushed
+from .screen_hints import CONTROL_ACTIVE, CONTROL_NOT_GRANTED
 
 CONTROL_VERSION = 1
 CONTROL_MESSAGES = ("control_granted", "control_revoked", "action_result")
@@ -103,7 +104,7 @@ class ControlHub:
         if grant and grant.status == "active":
             if grant.holder not in (None, agent):
                 raise ValueError(f"agent control is held by {grant.holder}")
-            return {"status": "granted", "message": "Agent control is active; use screen_click etc."}
+            return {"status": "granted", "message": CONTROL_ACTIVE}
         if grant:
             raise ValueError("a control request is already waiting for the person's answer")
         self.grants[share.share_id] = grant = Grant(share.share_id, agent, agent)
@@ -204,7 +205,7 @@ class ControlHub:
         grant = self.grants.get(share.share_id)
         if not grant or grant.status != "active":
             raise ValueError(f"agent control was revoked ({grant.reason})" if grant and grant.reason
-                             else "agent control is not granted; call screen_control_request first")
+                             else CONTROL_NOT_GRANTED)
         if grant.holder not in (None, agent):
             raise ValueError(f"agent control was granted to {grant.holder}")
         if not share.frames:

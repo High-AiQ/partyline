@@ -1,12 +1,128 @@
 # Lessons: the false-assumptions ledger
 
+## Matching a message's text does not prove the message was pasted
+
+The false assumption was that a pending message whose whole digest line appears in the kept
+session's later records has been delivered. A message is not delimited in a paste: the line
+`[captain]: @worker rebase onto main` is also the opening line of an earlier, longer message
+by the same speaker, so the short one was credited as held, left out of the resume, and the
+cursor moved past it and past the next (integration review of #507, the second finding on the
+same feature after the bound that dropped unseen messages). Tightening the pattern only moves
+the ambiguity. The resume skip is switched off (`resume_replay.CREDIT_KEPT_SESSION`), so
+every pending message is replayed as before; it returns when a paste is proven by its marker
+recorded with the ids it carried. Proof of delivery must come from an identifier partyline
+wrote, never from what the content looks like. Tests: `tests/test_resume_unseen.py`.
+
+## Object existence does not protect a pruned checkout's only copy
+
+The false assumption was that cat-file success proved durable preservation.
+Staged-only blobs and detached commits become unreachable when worktree metadata
+is pruned, and GC can delete them after cleanup removes the checkout. Compare
+against ref reachability once per owning repository per sweep; put present but
+unreachable blobs into the recovery tree without copying their bytes. Fixtures
+expire reflogs and run real GC, then restore staged and detached content from
+recovery refs. Tests: `tests/test_storage_review_round2.py`.
+
+## A per-worktree discard choice must not accept its ancestor
+
+The false assumption was that containment alone scoped Remove anyway to a
+person's choice. An arbitrary parent path could waive ignored-data protection
+for every child. Validate exact paths against candidates already kept with that
+action before allowing containment for their own nested worktrees. Tests refuse
+unlisted candidates and ancestor scopes, and remove one chosen entry while its
+sibling remains. Tests: `tests/test_storage_review_round2.py`.
+
+## Remember the tree's dependencies, not every ref in its repository
+
+The false assumption was that recording all owner refs was a useful conservative
+invalidation key. Every unrelated merge or fetch retried every kept tree, just
+before the restart that should skip it. Record directory and HEAD/index inputs
+and only the tree's own branch value, reading loose or packed refs without Git.
+A merge, simulated fetch and ref packing now cause zero size or Git inspection
+calls for an unchanged kept tree; its own branch update still causes a retry.
+Tests: `tests/test_storage_review_round2.py`.
+
+## Checkout bytes may differ from the committed representation
+
+The false assumption was that raw blob equality recognizes all committed
+content. CRLF and LFS-style clean filters have different stored representations.
+Also compare non-writing normalized hashes with reachable objects, in one bulk
+Git command. If neither representation is durable, save the original bytes raw.
+Real CRLF and portable LFS-style filter fixtures prove committed large content
+is skipped while unique CRLF/binary bytes are recovered unchanged.
+Tests: `tests/test_storage_review_round2.py`.
+
+
+## A pruned linked checkout still has an owning object store
+
+The false assumption was that a valid nested-worktree fixture also covered a
+`.git` link whose metadata had been pruned. Validate the surviving owner, hash
+blobs there by content (not filename), and recover missing or unreachable content
+there. Presence alone is insufficient; a surviving ref must reach skipped blobs.
+A renamed committed megabyte fixture proves none of it enters the outer repo.
+Raw missing blobs are written without clean filters, preserving CRLF and unique
+bytes exactly; access-time updates during hashing are not content changes.
+Tests: `tests/test_storage_residuals.py`.
+
+## Excluding an ignored directory can make Git add fail
+
+The false assumption was that an exclusion pathspec could safely name any
+unreadable subtree. Git rejects exclusions naming ignored directories too.
+Stage explicit NUL-delimited readable file paths in private indexes instead;
+keep denied subtrees and report the inspection failure, not Git's ignore advice.
+Tests: `tests/test_storage_residuals.py`.
+
+## Git may still enter an excluded orphan directory
+
+The false assumption was that `git add --force -A` with exclusions would save
+the readable part of a plain folder without entering its unreadable directories.
+Enumerate safe files first, preserve those, and delete only the inspected part.
+Portable denials and real POSIX permissions prove partial cleanup happens once.
+Tests: `tests/test_storage_residuals.py`.
+
+## Ignored is not the same as disposable
+
+The false assumption was that every ignored file was a recreatable cache.
+Greg approved keeping noncache ignored data on 2026-11-12. One documented
+component-pattern constant now limits cache deletion. Report other ignored paths
+and bytes, and require a person's per-worktree Remove anyway choice to waive
+only that guard. Tests: `tests/test_storage_residuals.py`, `StorageCleanup.test.ts`.
+
+## A conservative keep must remember what could change it
+
+The false assumption was that only failed deletions deserved retry suppression.
+Independent repositories and ignored data incurred Git work and two full size
+walks at each start. Persist directory and Git metadata evidence and stat that
+on subsequent starts; retry after evidence changes or a manual request. Partial
+removals still require manual retry. Tests also reopen the temporary database and
+assert zero Git inspections and zero size calls on the unchanged second start.
+Tests: `tests/test_storage_residuals.py`, `tests/test_storage_cleanup_review.py`.
+
+## A fenced captain cannot remove the server's fence mount
+
+The false assumption was that an empty merged orphan needed manual `rm` before
+retirement. The CLI may see an undeletable empty node_modules mount while the
+server can remove it. Verify the surviving branch is merged, leave previews
+read-only, and let the server remove the empty orphan during retirement. Never
+recommend fenced shell removal as recovery. Tests: `tests/test_retirement_residuals.py`.
+
+## Repeatedly splitting a shrinking buffer copies it repeatedly
+
+The false assumption was that bounded reads also bounded parsing cost.
+`pending.split(b'\0', 1)` copied the remainder for every streamed filename.
+Split once per chunk and carry only the final incomplete name; recovery-space
+accounting still includes every complete name across chunk boundaries.
+Tests: `tests/test_storage_recovery_stream.py`.
+
+
 ## A cursor keyed by the waiting task makes a fresh task a busy loop
 
 The false assumption was that `await changes.wait()` blocks until the next change. `Changes`
 keeps one cursor per waiting task, and a task it has never seen starts at zero, so it returns
 at once whenever anything was ever notified. The memory and Docker event loops wait with
 `asyncio.create_task(events.wait())` and make a new task after each wake, so after the first
-write to `attachments` or `conversations` they never blocked again: each turn ran a
+write to `attachments`, `conversations` or `conversation_write_grants`, or the first file
+event on the Docker socket path, they never blocked again: each turn ran a
 thread-pool job (reading every live process's cgroup, querying grants under the database
 lock). On the live host that was 42% of a core on the event loop, about 9% on each of twelve
 pool threads and 29,000 context switches a second, forever, from the 2026-11-11 commits that
@@ -2580,6 +2696,87 @@ default on every platform it runs on. A Claude adapter on macOS no longer holds 
 transcript (2.114.2; see the lesson on a kqueue watch of every transcript). Tests: `tests/test_fd_limit.py`,
 `tests/test_launch.py`.
 
+
+## 2026-11-12 — A process does not need to be offered every tool it may call
+
+The false assumption was that `tools/list` should carry every tool the attachment's capabilities allow. A root
+captain was handed about fifty schemas (Blender, render checks, 3D uploads, handover, eight screen-control tools)
+and a client pays for the whole catalog on every turn, whether or not the process ever calls one. Listing and
+permission are now separate: `partyline/mcp/catalog.py` lists the everyday tools in one line each and runs the
+rest through `captain(op, args)` and `extras(op, args)`; `guide()` lists every callable tool with a line and
+`guide(topic=<tool>)` gives its full text and schema. Calling a hidden tool by its own name still works. Clients
+that never re-list keep their screen-control tools behind `extras`, because they cannot gain one when a share
+starts. A per-role table (`tests/test_mcp_role_matrix.py`) fails if any role loses a tool it could call before.
+Tests: `tests/test_mcp.py`.
+
+## 2026-11-12 — A listing that includes history grows without bound
+
+The false assumption was that a line's staffing, overview and task board stay small. Retired task lines were
+listed forever, each with its reports and findings, so a busy week made every captain call cost more than the
+last. The listings now return live lines first and a page of retired ones, with `lines_total` and a
+`next_offset` (or `retired_more`) saying how to read the rest. Tests: `tests/test_listing_bounds.py`.
+
+## 2026-11-12 — A system notice that asks nothing of the reader is not worth pasting
+
+The false assumption was that every system notice should ride the next digest of every process. "Waiting, not
+stalled", reaction echoes on old messages, "resumed" and "ready after restart" lines asked nothing of the reader and were most of the system text a process received in an hour. Each notice
+is now classified in `partyline/notice_policy.py`: a registry of the informational ones, and anything unknown
+is needs-action, so a new notice type fails safe. Only needs-action notices reach a process; every notice is
+still stored, broadcast and shown to people. A reaction is a notice only when a person reacts to the process's own
+most recent message on the line: that may be the whole answer to "shall I proceed?" and must wake it, any emoji.
+A reaction on an older message, or from another process, posts no notice and wakes nobody; the process reads it
+with `read_messages`. (A first cut dropped every non-❌ reaction and would have stalled a process waiting on a 👍.) Tests: `tests/test_notice_policy.py`, `tests/test_reactions.py`.
+
+## 2026-11-12 — "Unseen" on resume is not "never pasted"
+
+The false assumption was that the delivery cursor says what a resumed process has already read. The cursor
+advances only on proof of a paste, so a paste whose proof was lost (the process died first) left messages
+"unseen" that the process's own kept OpenCode v2 session still held, and a restart pasted them again, about
+25,000 characters for thirty messages. A resume now reads the kept session's own user records
+(`partyline/adapters/bundled/opencode/seen.py`), credits and skips what it holds, and pastes every other message in full, oldest first, with one line naming the
+skipped ids and `read_messages(after_id=…)`. Any failure to read the session replays everything, which is the safe direction. A message counts as seen only
+when its whole digest line (speaker and full body, JSON-decoded) sits on its own lines in a record pasted after
+the last paste the cursor credits; a first cut matched first lines as substrings and hid a new "yes" or "stop"
+behind an older, longer line. A fresh instance without the kept session is replayed everything. Tests:
+`tests/test_resume_replay.py`.
+
+## 2026-11-12 — A reminder repeated on every delivery is not a reminder
+
+The false assumption was that the `(cwd git: …)`, `(reminder: …)` and `(captain pack: …)` lines should ride every
+digest. They are state a process already holds; repeated, they were a few hundred characters per wake for the life
+of the process. `partyline/digest_suffix.py` sends a line when it is new, when it changed, when the digest that
+last carried it was never proven delivered, and on every eighth delivery. The briefing carries the same text for a
+process that has not yet seen one. The count belongs to the attachment's adapter, so a restart or rotation starts
+again with the full suffix, and a compaction clears it too: the summary drops the lines. Tests:
+`tests/test_digest_suffix.py`.
+
+## 2026-11-12 — `request.base_url` is not an address a reader can open
+
+The false assumption was that the origin a caller dialled is a link everyone can follow. An upload from a process
+that dialled `0.0.0.0` stored a digest line with `http://0.0.0.0:…/api/media/…`, and the same text went to people
+and to other processes. Digest lines and file listings are now host-relative (`/api/media/<id>/slim`); a process
+prefixes its own `PARTYLINE_API`, and `get_media` takes the id. Tests: `tests/test_media.py`.
+
+## 2026-11-12 — A size bound on a resume paste is not safe when the cursor follows the paste
+
+The false assumption was that a resume backlog could be cut to its newest 8,000 characters because "the rest can be
+read with `read_messages`". The delivery receipt credits the cursor to the highest id of the paste, so a bound on
+messages the process had never seen moved the cursor past them: a stopped worker with fifteen assigned messages was
+pasted ten, its assignment was not among them, and nothing stayed pending. Only messages the kept session *provably*
+holds may be left out; every other message is pasted in full, oldest first, on every adapter, and the lead line
+describes only the skipped ones. The saving is smaller than the first table said (30 unseen messages cost the full
+30,698 characters) and honest. `scripts/context_budget` now reports the unseen and the seen case separately.
+Tests: `tests/test_resume_unseen.py`.
+
+## 2026-11-12 — A text that names a tool is wrong once the tool is no longer listed
+
+The false assumption was that every tool a pack, notice or error names is in the reader's `tools/list`. After the
+catalog diet the captain pack still said `restart_implementer(conv_id)`, handover notices said `accept_handover(id)`
+and the reminder said `docs_read(...)`: names a captain cannot see. Each such name now carries its route in the same
+sentence (`captain(op="...", args={...})`, `extras(op="...", args={...})`), `guide(topic="captain")` explains the two
+doors, an unknown captain op says where the valid ones are listed, and the appointment notice says `captain(op,
+args)` is now available to a process appointed lead mid-session. Test: `tests/test_tool_names_in_texts.py` walks the
+string constants of the modules that write such text.
 
 ## 2026-11-12 — A task notice has no meaning once its task is settled
 

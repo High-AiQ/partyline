@@ -15,13 +15,13 @@ _ACTION = {
 }
 
 
-def _lead(state):
+def is_lead(state):
     return (state.get("kind") == "machine" and state.get("role") == "lead"
             and state.get("is_lead") is True)
 
 
 def permitted(state):
-    if not _lead(state):
+    if not is_lead(state):
         return ()
     actions = set(state.get("actions", []))
     return tuple(op for op in OPERATIONS if op in {"list_presets", "docs_read"}
@@ -30,8 +30,22 @@ def permitted(state):
                  or _ACTION.get(op) in actions)
 
 
+DOORS = {
+    "captain": "captain(op, args) runs any captain or task operation that is not listed on its own "
+               "(restart_implementer, restart_reviewer, set_goal, share_ref, retirement_preview, "
+               "retire_child, process_overview, docs_read, ...). op is the operation name and args "
+               "an object with that operation's arguments; the listed ops are in the captain "
+               "tool's description, and guide(topic=<op>) gives one op's schema.",
+    "extras": "extras(op, args) runs a specialist tool that is not listed (Blender, render_check, "
+              "upload_3d_model, upload_file, the handover tools, and screen control on clients that "
+              "never re-list): the op is the tool name, args its arguments; guide(topic=<op>) "
+              "gives its text and schema.",
+}
+
+
 def guide(state):
-    return {"goal_decisions": [
+    return {"doors": DOORS,
+            "goal_decisions": [
                 {"need": "New task",
                  "operation": "create_task(name, goal, implementer, review, mode=full|light|express)"},
                 {"need": "Change active task goal", "operation": "set_task_goal(conv_id, goal)"},
@@ -84,7 +98,8 @@ def call(client, name: str, args: dict, state: dict):
             raise ValueError("captain requires exactly op and args")
         op, operation_args = args.get("op"), args.get("args")
         if not isinstance(op, str) or op not in (*OPERATIONS, *tools_tasks.OPERATIONS):
-            raise ValueError("unknown captain operation")
+            raise ValueError("unknown captain operation: the valid ops are listed in the captain tool's "
+                             "description and in guide(topic=\"captain\")")
         if not isinstance(operation_args, dict):
             raise ValueError("captain args must be an object")
         if op in tools_tasks.OPERATIONS:
@@ -96,7 +111,7 @@ def call(client, name: str, args: dict, state: dict):
         op, operation_args = name, args
         if op not in OPERATIONS:
             raise ValueError("unknown captain MCP tool")
-    if not _lead(state):
+    if not is_lead(state):
         from .client import ApiError
         raise ApiError("current attachment is not a line captain")
     if op not in permitted(state):

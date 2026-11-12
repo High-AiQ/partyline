@@ -201,7 +201,7 @@ class AcceptShaTest(unittest.TestCase):
         report = staffing_report(self.db, "root")
         self.assertEqual(
             report["lines"],
-            [{"id": self.kid["id"], "name": "kid", "accepted_sha": sha}],
+            [{"id": self.kid["id"], "name": "kid", "accepted_sha": sha, "retired": False}],
         )
         seen = self.client.get("/api/conversations/root/staffing", headers=self.root_captain())
         self.assertEqual(seen.status_code, 200, seen.text)

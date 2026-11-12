@@ -118,6 +118,9 @@ def inspect_git(db, conv):
         return None  # a task folder holding only worktrees has no repository of its own
     if os.path.realpath(cwd) != cwd or os.path.realpath(root) != root:
         raise HTTPException(409, "retirement requires canonical managed worktree paths")
+    from .retirement_orphan import empty_merged
+    if empty_merged(root, cwd, conv_id=conv["id"]):
+        return None
     branch = branch_name(cwd)
     actual = git(cwd, "symbolic-ref", "-q", "HEAD").strip() if git(
         cwd, "rev-parse", "--abbrev-ref", "HEAD").strip() != "HEAD" else None
@@ -164,7 +167,7 @@ def snapshot(state, audit_id):
                                   input=input, capture_output=True, text=True, timeout=30)
             if done.returncode:
                 raise HTTPException(409, failure)
-            return done.stdout.strip()
+            return done.stdout.rstrip('\n')
 
         if os.path.isfile(state["index_path"]):
             shutil.copyfile(state["index_path"], env["GIT_INDEX_FILE"])
@@ -177,8 +180,8 @@ def snapshot(state, audit_id):
                         "-m", f"Partyline index recovery {audit_id}")
         env["GIT_INDEX_FILE"] = os.path.join(directory, "working-index")
         run("read-tree", state["mirror_tip"] or state["head"])
-        from .storage_git_state import add_paths
-        run("add", "-A", "--", *add_paths(state.get('excluded', ())))
+        from .storage_git_state import stage_working
+        stage_working(run, cwd, state.get('excluded', ()))
         tree = run("write-tree")
         sha = run("commit-tree", tree, "-p", state["mirror_tip"] or state["head"],
                   "-m", f"Partyline retirement recovery {audit_id}")

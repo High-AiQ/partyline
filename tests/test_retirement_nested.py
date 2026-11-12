@@ -195,13 +195,14 @@ class NestedRetirementGuardTest(SafetyFixture, unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertFalse(Path(child["cwd"]).exists())
 
-    def test_pruned_registration_refuses_with_manual_recovery_steps(self):
+    def test_nonempty_pruned_registration_refuses_without_fenced_removal_advice(self):
         child = self.child()
         gitdir = _git("rev-parse", "--absolute-git-dir", cwd=child["cwd"]).stdout.strip()
         shutil.rmtree(gitdir)
+        Path(child["cwd"], "only-copy").write_text("preserve before retirement")
         response = self.retire(child["id"])
         self.assertEqual(response.status_code, 409, response.text)
-        for part in (child["cwd"], "ancestor of main", "git worktree prune", "git branch -d line/mid"):
+        for part in (child["cwd"], "ancestor of main", "repairing its registration"):
             self.assertIn(part, response.text)
         self.assertTrue(Path(child["cwd"]).exists())
         self.assertEqual(self.preview(child).status_code, 409)

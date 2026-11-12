@@ -1,7 +1,6 @@
 """Keep worktree registrations until their directories have actually gone."""
 
 import os
-import shlex
 import subprocess
 import tempfile
 
@@ -13,7 +12,7 @@ from .storage_removal import remove_contents
 from .worktree_paths import branch_name, managed_root
 
 
-def refuse_orphan(root, path, branch=None):
+def refuse_orphan(root, path, branch=None, conv_id=None):
     """Refuse a managed checkout whose registration no longer proves its state."""
     if not root or not os.path.isdir(path):
         return
@@ -31,11 +30,14 @@ def refuse_orphan(root, path, branch=None):
     except (OSError, subprocess.SubprocessError):
         registered, valid = False, None
     if not registered or not valid:
+        from .retirement_orphan import empty_merged
+        if empty_merged(root, path, branch, conv_id):
+            return
         name = branch or branch_name(path)
         raise HTTPException(409, f"orphaned worktree {path}: preserve any uncommitted work and "
-                            f"verify branch {name} is an ancestor of main; then run "
-                            f"rm -rf {shlex.quote(path)}, git worktree prune, and "
-                            f"git branch -d {shlex.quote(name)} in {root}")
+                            f"verify branch {name} is an ancestor of main in {root}; "
+                            "retry retirement after repairing its registration. "
+                            "The server removes empty merged orphans itself.")
 
 
 def check_line(db, conv):
@@ -43,10 +45,10 @@ def check_line(db, conv):
 
     cwd = conv.get("cwd") or ""
     root = managed_root(cwd)
-    refuse_orphan(root, cwd)
+    refuse_orphan(root, cwd, conv_id=conv.get("id"))
     for item in workspaces(db, conv.get("id") or ""):
         if item["path"] != cwd:
-            refuse_orphan(item["repository"], item["path"], item["branch"])
+            refuse_orphan(item["repository"], item["path"], item["branch"], conv.get("id"))
 
 
 def remove_directory(path, root, *, excluded=()):

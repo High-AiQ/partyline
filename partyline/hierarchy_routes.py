@@ -150,7 +150,7 @@ def hierarchy_router(runtime) -> APIRouter:
             await post_private(
                 runtime, conv_id, "system", "system",
                 f"☏ @{att['name']} is now this line's captain — the captain pack rides this "
-                "wake; read it before acting further",
+                "wake; read it before acting further. captain(op, args) is now available to you",
                 audience=att["id"],
                 actor=principal,
             )

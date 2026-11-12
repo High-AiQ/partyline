@@ -88,7 +88,13 @@ def execute(client, op, args, state):
                               {key: args[key] for key in ("operation", "name") if key in args})
     if op == "staffing":
         conv = _target(client, state, conv, ("assign",))
-        return client.request("GET", _path(conv, "staffing"))
+        query = urlencode({f"lines_{key}": args[key] for key in ("limit", "offset") if key in args})
+        return client.request("GET", _path(conv, "staffing") + ("?" + query if query else ""))
+    if op == "process_overview":
+        conv = _target(client, state, conv, ("read",))
+        query = {"include_retired": "true" if args.get("include_retired") else "false",
+                 **{key: args[key] for key in ("limit", "offset") if key in args}}
+        return client.request("GET", _path(conv, "process-overview") + "?" + urlencode(query))
     if op == "write_set_requests":
         conv = _target(client, state, conv, ("read",))
         pending = client.request("GET", _path(conv, "write-set/request"))
@@ -133,7 +139,6 @@ def execute(client, op, args, state):
         "share_ref": ("assign", "POST", "task/share-ref"),
         "request_write_set": ("write", "POST", "write-set"),
         "request_restart": ("assign", "POST", "restart-request"),
-        "process_overview": ("read", "GET", "process-overview"),
         "ack_report": ("read_reports", "POST", f"reports/{args.get('report_id')}/ack"),
         "set_goal": ("assign", "PUT", "goal"),
         "set_gates": ("assign", "PUT", "gates"),

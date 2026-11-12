@@ -122,8 +122,9 @@ async def check(runtime, presence, captain):
     try:
         await runtime.post_message(captain['conv_id'], 'system', 'system', f'⚠ {summary}')
         await post_private(runtime, captain['conv_id'], 'system', 'system',
-                           f'↩ @{captain["name"]} {summary} Use restart_implementer, reopen_task or '
-                           'resume_work; or tell the person what you are blocked on.',
+                           f'↩ @{captain["name"]} {summary} Use captain(op="restart_implementer", '
+                           'args={conv_id}), reopen_task or resume_work; or tell the person what you are '
+                           'blocked on.',
                            audience=captain['id'], private=True)
     except Exception:
         db._exec('DELETE FROM captain_idle_verdicts WHERE attachment_id=?', (captain['id'],))

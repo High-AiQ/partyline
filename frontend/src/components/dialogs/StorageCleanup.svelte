@@ -21,11 +21,11 @@
   }
   onMount(() => void load());
 
-  async function clean(): Promise<void> {
+  async function clean(path?: string): Promise<void> {
     busy = true;
     error = "";
     try {
-      result = await storageCleanupApi.cleanup();
+      result = await storageCleanupApi.cleanup(path ? [path] : []);
       refreshed();
       await load();
     } catch (failure: unknown) {
@@ -39,7 +39,7 @@
 <SettingRow
   id="setting-storage-cleanup"
   label="Automatic cleanup"
-  description="On by default. Stopped processes shed recreatable caches. Retired and orphaned worktrees are removed after saving Git changes for recovery. Live processes and saved restarts are protected."
+  description="On by default. Stopped processes shed recreatable caches. Retired and orphaned worktrees are removed after saving Git changes for recovery. Ignored files outside known caches are kept for your decision. Live processes and saved restarts are protected."
   stacked
 >
   <button type="button" onclick={() => void clean()} disabled={busy}>
@@ -55,7 +55,15 @@
       <summary>Kept {result.skipped.length} items</summary>
       <ul>
         {#each result.skipped as item, index (index)}
-          <li class="break-words py-1">{item.path} · {humanSize(item.size_bytes)} — {item.reason}</li>
+          <li class="break-words py-1">
+            {item.path} · {humanSize(item.size_bytes)} — {item.reason}
+            {#if item.remove_anyway_allowed}
+              <button type="button" disabled={busy} onclick={() => void clean(item.path)}
+                >Remove anyway<span class="sr-only"> {item.path}</span></button
+              >
+              <span>Ignored files will be deleted.</span>
+            {/if}
+          </li>
         {/each}
       </ul>
     </details>
@@ -65,7 +73,15 @@
       <summary>Kept worktrees, mirrors and orphans ({inventory.kept.length})</summary>
       <ul>
         {#each inventory.kept as item, index (index)}
-          <li class="break-words py-1">{item.path} · {humanSize(item.size_bytes)} — {item.reason}</li>
+          <li class="break-words py-1">
+            {item.path} · {humanSize(item.size_bytes)} — {item.reason}
+            {#if item.remove_anyway_allowed}
+              <button type="button" disabled={busy} onclick={() => void clean(item.path)}
+                >Remove anyway<span class="sr-only"> {item.path}</span></button
+              >
+              <span>Ignored files will be deleted.</span>
+            {/if}
+          </li>
         {/each}
       </ul>
     </details>

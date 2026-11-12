@@ -168,8 +168,9 @@ class WindowGrants:
             text = (f"Window access granted: {entry['shared_by']} shared «{title}» "
                     f"(window={window}) on {computer}.\n"
                     f"Use screen_elements(window={window}) for a summary, then find, ls, or text to locate "
-                    "content. Use element ids with screen_element_action to act; page long results with "
-                    "offset/next_offset and refresh after page changes because ids may become stale.")
+                    "content. Use element ids with screen_element_action "
+                    "(extras(op=\"screen_element_action\", args) if unlisted) to act; page long results "
+                    "with offset/next_offset and refresh after page changes because ids may become stale.")
         await post_private(runtime, holder["conv_id"], "system", "system",
                            f"@{holder['name']} {text}", audience=holder["id"], private=True)
         if not reason:

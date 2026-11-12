@@ -58,6 +58,8 @@ def local_git(path: str) -> bool:
 
 def reclaim_ignored(path: str) -> None:
     """Remove only Git-ignored, untracked files, never enter a nested repository."""
+    from .storage_ignored import cache_path
+
     if not local_git(path):
         return  # Never classify an orphan's files using its parent repository.
     try:
@@ -66,7 +68,8 @@ def reclaim_ignored(path: str) -> None:
         if done.returncode:
             return
         for name in done.stdout.split("\0"):
-            if not name or any(name.rstrip("/") == p or name.startswith(p + "/") for p in protected):
+            if not name or not cache_path(name) or any(
+                    name.rstrip("/") == p or name.startswith(p + "/") for p in protected):
                 continue
             target = Path(path) / name
             # Git may report a repository directory as one entry. Never recurse.

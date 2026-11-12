@@ -1,4 +1,4 @@
-"""What complete_handover tells its caller: the real state of the handover, in words."""
+"""What completing a handover tells its caller: the real state of the handover, in words."""
 
 
 
@@ -32,7 +32,7 @@ def summary(runtime, current, already=False):
                    + ('is detached.' if old_state == 'detached' else 'is being detached.'))
     else:
         message = (f"Handover {current['state']}: waiting for {' and '.join(waiting)} to call "
-                   'complete_handover.')
+                   'extras(op="complete_handover", args={"handover_id": id}).')
     return {'completed': done, 'old_captain': old_state, 'awaiting': [] if done else waiting,
             'message': message}
 

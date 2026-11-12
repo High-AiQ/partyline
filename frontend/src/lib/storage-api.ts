@@ -38,6 +38,7 @@ export const StoragePathSchema = z.object({
   path: z.string(),
   reason: z.string(),
   size_bytes: z.number().int().nonnegative(),
+  remove_anyway_allowed: z.boolean().optional(),
 });
 export const MirrorRetentionSchema = z.object({
   owner_id: z.string(),
@@ -72,9 +73,10 @@ export const storageCleanupApi = {
       schema: StorageDetailsSchema,
       fallback: "could not load storage details",
     }),
-  cleanup: () =>
+  cleanup: (removeAnyway: string[] = []) =>
     request("/api/storage/cleanup", {
       method: "POST",
+      body: { remove_anyway: removeAnyway },
       schema: StorageCleanupSchema,
       fallback: "could not clean up storage",
     }),
