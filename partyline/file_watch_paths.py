@@ -20,7 +20,7 @@ def normalize(path):
     return value
 
 
-def plan(specs, add, file_vnodes=False, self_events=True):
+def plan(specs, add, file_vnodes=False, self_events=True, admit=None):
     wanted = set()
 
     def install(path):
@@ -50,10 +50,12 @@ def plan(specs, add, file_vnodes=False, self_events=True):
             return  # Native removal events already queued will re-arm the ancestor.
 
     def files(directory, pattern):
+        # ``admit`` bounds exact-file descriptors where each one costs a descriptor.
         if file_vnodes:
             for entry in entries(directory):
                 if fnmatchcase(entry.name, pattern) and entry.is_file():
-                    install(Path(entry.path))
+                    if admit is None or admit(Path(entry.path)):
+                        install(Path(entry.path))
 
     def descend(directory, parts, leaf):
         if register(directory) != directory:
@@ -81,7 +83,8 @@ def plan(specs, add, file_vnodes=False, self_events=True):
                     files(spec, '*')
             elif file_vnodes and spec.parent.is_dir():
                 for name in (spec.name, spec.name + '-wal', spec.name + '-shm', spec.name + '-journal'):
-                    files(spec.parent, name)
+                    if (spec.parent / name).is_file() and (admit is None or admit(spec.parent / name)):
+                        install(spec.parent / name)  # named, so no scan of a directory of thousands
         else:
             descend(Path(*parts[:wildcard]), parts[wildcard:-1], parts[-1])
     return wanted

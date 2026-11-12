@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""Print the descriptors file watching holds on kqueue hosts, before and after narrowing.
+
+Uses the real kqueue backend over a throwaway tree with a stand-in kernel queue, so it
+runs anywhere and touches no real CLI store, database or server.
+"""
+
+import asyncio
+from pathlib import Path
+import sys
+import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from partyline.file_events import FileEvents  # noqa: E402
+from tests import watch_descriptors as w  # noqa: E402
+
+
+async def held(kernel, *specs):
+    async with FileEvents(*specs, backend=kernel.backend):
+        return kernel.held()
+
+
+async def claude():
+    print('Claude adapter: descriptors held (kernel queues included)')
+    print('(old tail = old search + the claimed file + the tail own dir, file and queue)')
+    print(f"{'transcripts':>12} {'dirs':>5} | {'old search':>10} {'old tail':>9} |"
+          f" {'search':>7} {'tail':>5} {'stopped':>8}")
+    for transcripts, directories in ((100, 10), (500, 50), (2000, 200)):
+        with tempfile.TemporaryDirectory() as root:
+            with tempfile.TemporaryDirectory() as before, w.environment(before):
+                w.populate(before, transcripts, directories)
+                legacy = await held(w.Kernel(), str(Path(before) / '.claude/projects/*/*.jsonl'))
+            now = await w.measure(root, transcripts, directories)
+            print(f"{transcripts:>12} {directories:>5} | {legacy:>10} {legacy + 4:>9} |"
+                  f" {now['searching']:>7} {now['tailing']:>5} {now['after_stop']:>8}")
+
+
+async def codex_and_opencode():
+    with tempfile.TemporaryDirectory() as root:
+        home = Path(root)
+        for day in range(1, 7):
+            directory = home / 'sessions' / '2026' / '11' / f'{day:02d}'
+            directory.mkdir(parents=True)
+            for number in range(2):
+                (directory / f'rollout-{day}-{number}.jsonl').write_text('{}\n')
+        for suffix in ('', '-wal', '-shm'):
+            (home / f'thread_history_1.sqlite{suffix}').write_text('')
+        count = await held(w.Kernel(), str(home / 'sessions/*/*/*/rollout-*.jsonl'),
+                           str(home / 'thread_history_1.sqlite'))
+        print(f'Codex, one attachment home with 12 rollouts over 6 days: {count}')
+        store = home / 'opencode.db'
+        for suffix in ('', '-wal', '-shm'):
+            Path(f'{store}{suffix}').write_text('')
+        (home / 'opencode.log').write_text('')
+        count = await held(w.Kernel(), str(store), str(home / 'opencode.log'))
+        print(f'OpenCode v2, store with -wal/-shm plus the provider log: {count}')
+
+
+async def main():
+    await claude()
+    await codex_and_opencode()
+
+
+asyncio.run(main())
