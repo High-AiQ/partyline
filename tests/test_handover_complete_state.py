@@ -82,6 +82,32 @@ class CompleteStateTest(unittest.TestCase):
         self.assertEqual(final['old_captain'], 'detached')
         self.assertIn('is detached', final['message'])
 
+    def test_the_old_captain_confirming_after_completion_is_a_harmless_no_op(self):
+        self.db.set_attachment_status('old', 'detached', None)
+        del self.runtime.live['old']
+        first = self.complete('new')
+        self.assertTrue(first['completed'])
+        before = self.db._exec('SELECT * FROM captain_handovers WHERE id=?', (self.ident,)).fetchone()
+        count = "SELECT COUNT(*) FROM messages WHERE body LIKE '%completed by%'"
+        notices = self.db._exec(count).fetchone()[0]
+        self.runtime.broadcast.reset_mock()
+        late = self.complete('old')
+        self.assertEqual((late['state'], late['completed']), ('completed', True))
+        self.assertTrue(late['from_done'] and late['to_done'])
+        self.assertIn('Already completed', late['message'])
+        self.assertNotIn('Already completed', first['message'])
+        after = self.db._exec('SELECT * FROM captain_handovers WHERE id=?', (self.ident,)).fetchone()
+        self.assertEqual(tuple(before), tuple(after))  # same completed_at: not completed twice
+        self.assertEqual(self.db._exec(count).fetchone()[0], notices)
+        self.runtime.broadcast.assert_not_awaited()
+
+    def test_a_live_old_captain_confirming_after_completion_is_the_same_no_op(self):
+        self.complete('new')
+        self.complete('old')
+        late = self.complete('old')
+        self.assertTrue(late['completed'])
+        self.assertIn('Already completed', late['message'])
+
 
 if __name__ == '__main__':
     unittest.main()

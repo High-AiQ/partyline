@@ -3,8 +3,9 @@
 from unittest.mock import AsyncMock, patch
 
 from partyline import reports
-from partyline.orchestrator_contracts import ReviewRequestIn, VerdictIn
+from partyline.orchestrator_contracts import ReopenIn, ReviewRequestIn, VerdictIn
 from partyline.orchestrator_notices import report, tell
+from partyline.orchestrator_reopen import reopen_task
 from partyline.orchestrator_service import request_review, review_verdict
 from partyline.resume_backlog import addressed_backlog
 from partyline.runtime import ChatRuntime
@@ -118,3 +119,23 @@ class SettledTaskMail(TaskFixture):
         self.assertTrue([b for b in self.heard(row['implementer_id']) if 'Changes requested' in b])
         # Still in flight: the unproved review request is not dropped for the reviewer either.
         self.assertGreaterEqual(len([b for b in self.heard(row['reviewer_id']) if 'Review round' in b]), 2)
+
+    async def test_reopen_starts_from_the_reopen_not_from_the_backlog(self):
+        row = await self.reviewed()
+        implementer, reviewer = row['implementer_id'], row['reviewer_id']
+        self.db._exec('INSERT INTO messages(conv_id,sender,sender_type,body,created_at,'
+                      'audience_attachment_id) VALUES(?,?,?,?,?,?)',
+                      (self.conv_id, 'system', 'system', 'This task has no hand-off. Call request_review',
+                       self.row()['settled_at'] - 1, implementer))
+        seen = {ident: len(self.stale(ident)) for ident in (implementer, reviewer)}
+        await reopen_task(self.runtime, self.captain, self.conv_id, ReopenIn(goal='do the next thing'))
+        self.assertIsNone(self.row()['settled_at'])
+        await self.poke(implementer, reviewer)
+        for ident, count in seen.items():
+            self.assertEqual(len(self.stale(ident)), count, ident)
+        self.assertTrue([b for b in self.heard(implementer) if 'do the next thing' in b])
+        # The new cycle's own request still reaches the reviewer.
+        sha = self.commit('second')
+        await request_review(self.runtime, self.worker, self.conv_id,
+                             ReviewRequestIn(sha=sha, what='again', where='code'))
+        self.assertEqual(len(self.stale(reviewer)), seen[reviewer] + 1)

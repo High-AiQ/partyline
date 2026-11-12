@@ -248,7 +248,7 @@ async def complete_route(runtime, request: Request, conv: str, body):
         asyncio.create_task(_try_detach(runtime, current))
     return {'handover_id': body.handover_id, 'state': current['state'],
             'from_done': bool(current['from_done']), 'to_done': bool(current['to_done']),
-            **summary(runtime, current)}
+            **summary(runtime, current, already=bool(row) and row['state'] == 'completed')}
 
 
 async def resolve_route(runtime, request: Request, conv: str, body):

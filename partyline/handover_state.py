@@ -10,7 +10,7 @@ def old_captain_gone(runtime, row):
                            and ident not in getattr(runtime, 'live', {}))
 
 
-def summary(runtime, current):
+def summary(runtime, current, already=False):
     """Fields that say whether the handover is finished and what the old captain is doing."""
     db = runtime.db
     old = db.get_attachment(current['from_attachment_id'])
@@ -27,7 +27,8 @@ def summary(runtime, current):
     waiting = [name for name, flag in ((old_name, current['from_done']), (new_name, current['to_done']))
                if not flag]
     if done:
-        message = (f'Handover completed: {new_name} is the captain and {old_name} '
+        message = (('Already completed; this call changed nothing. ' if already else '')
+                   + f'Handover completed: {new_name} is the captain and {old_name} '
                    + ('is detached.' if old_state == 'detached' else 'is being detached.'))
     else:
         message = (f"Handover {current['state']}: waiting for {' and '.join(waiting)} to call "

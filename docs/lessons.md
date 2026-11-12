@@ -2625,3 +2625,14 @@ which macOS lacks. `complete_handover` now reports `completed`, `old_captain`, `
 captain that has left no longer blocks the new captain's confirmation; and `job_details.describe` reads `ps` and
 `lsof` on macOS and states why a command or directory is unknown. Tests: `tests/test_handover_complete_state.py`,
 `tests/test_handover_job_details.py`.
+
+## 2026-11-12 — Reopening a task must not revive what settling consumed
+
+The false assumption was that clearing `settled_at` on `reopen_task` was harmless. The stale-notice filter keyed on
+the settled state, so after a reopen the review requests and stall reminders nobody had read before approval were
+back in the worker's backlog and pasted again ahead of the reopen. `reopen_task` now records `consumed_through`, the
+highest message id from before the task settled, and `settled_mail.is_stale` drops in-flight-work notices at or
+below it whatever the status; the reopen notice and the new cycle's own requests have higher ids and still deliver.
+A late `complete_handover` from the old captain after the new captain completed the handover is answered with
+`Already completed; this call changed nothing` and changes no row. Tests: `tests/test_settled_task_mail.py`,
+`tests/test_handover_complete_state.py`.

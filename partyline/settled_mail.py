@@ -27,29 +27,29 @@ def _workers(row: dict) -> set:
     return {row['implementer_id'], row['reviewer_id']} - {None}
 
 
-def settled_row(db, conv_id: str) -> dict | None:
-    """The task row when its work is finished (approved, accepted or done), else None."""
-    row = task(db, conv_id)
-    return row if row and row['status'] in SETTLED else None
-
-
 def is_stale(row: dict, att_id: str, message: dict) -> bool:
-    """Whether ``message`` is an in-flight-work notice to a worker that was sent before settling."""
+    """Whether ``message`` is an in-flight-work notice to a worker that was sent before settling.
+
+    Settling is remembered past a reopen: ``consumed_through`` is the highest message id the
+    settled task's notices covered, so a reopened task starts from the reopen, not the backlog.
+    """
     if message.get('sender_type') != 'system' or message.get('audience_attachment_id') != att_id:
         return False
-    if att_id not in _workers(row):
+    if att_id not in _workers(row) or not WORK_NOTICE.match(str(message.get('body') or '')):
+        return False
+    if message['id'] <= (row.get('consumed_through') or 0):
+        return True
+    if row['status'] not in SETTLED:
         return False
     settled_at = row.get('settled_at')
-    if settled_at is not None and (message.get('created_at') or 0) > settled_at:
-        return False
-    return bool(WORK_NOTICE.match(str(message.get('body') or '')))
+    return not (settled_at is not None and (message.get('created_at') or 0) > settled_at)
 
 
 def drop_settled(db, att: dict, messages: list[dict], *, keep=frozenset()) -> list[dict]:
     """``messages`` without the notices a settled task's workers should no longer receive."""
     if not messages:
         return messages
-    row = settled_row(db, att['conv_id'])
-    if row is None:
+    row = task(db, att['conv_id'])
+    if row is None or (row['status'] not in SETTLED and not row.get('consumed_through')):
         return messages
     return [m for m in messages if m['id'] in keep or not is_stale(row, att['id'], m)]
