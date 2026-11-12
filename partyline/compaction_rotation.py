@@ -219,11 +219,15 @@ async def swap(runtime, presence, att: dict, armed: Armed, plan: tuple[str, str 
     from .resource_budget import cap_bytes, claim_resume, settings
 
     db, att_id = runtime.db, att["id"]
-    presence.queue.take(att_id)  # held in memory: the start's backlog delivers them, no discard notice
+    held = presence.queue.take(att_id)  # the start's backlog delivers them; no discard notice
     # The detach line is the one public notice: who was rotated, and why.
     line = f"↻ @{att['name']} rotated to a fresh instance — {armed.reason}; {how}"
-    await detach_attachment(runtime, att_id, survivors=False, expire=False,
-                            source="compaction_rotation.swap", notice=line)
+    try:
+        await detach_attachment(runtime, att_id, survivors=False, expire=False,
+                                source="compaction_rotation.swap", notice=line)
+    except BaseException:
+        presence.queue.hold(att_id, [{"id": i} for i in held])  # still the old process's wakes
+        raise
     stopped = db.get_attachment(att_id)
     # A session pinned to the attachment id would be refused (or reopened), so
     # the fresh session gets an id of its own; the pin survives later resumes.

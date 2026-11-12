@@ -15,6 +15,7 @@ from partyline import resource_budget
 from partyline.adapters.base import Adapter
 from partyline.compaction_events import bump_turn, note_hook_compaction
 from partyline.line_notes import read_notes, write_notes
+from partyline.rebrief import render_rebrief
 from tests.orchestrator_fixture import TaskFixture
 
 HANDOFF = "STATE: slice 2 of 3 done. NEXT: run the gates. SHA abc1234 in /work/tree"
@@ -280,6 +281,19 @@ class RolesTest(RotationFixture):
                          ("implementer", "builder"))
         self.assertEqual(self.row()["implementer_id"], ident)
 
+    async def test_a_full_handoff_note_survives_a_task_pack_with_a_very_long_goal(self):
+        row = await self.create()
+        ident = row["implementer_id"]
+        for size in (5000, 30000):
+            self.db._exec("UPDATE conversations SET goal=? WHERE id=?", ("G" * size, row["conv_id"]))
+            note = "S" * (4000 - 40) + " NEXT STEP: ship sha abc1234"
+            write_notes(self.db, row["conv_id"], "attachment", note, ident)
+            text = render_rebrief(self.db, self.db.get_attachment(ident), limit=rotation.BRIEFING_LIMIT,
+                                  handoff=True, reason="rotated after 2 compactions, limit 2")
+            self.assertIn(note, text, size)
+            self.assertLessEqual(len(text), rotation.BRIEFING_LIMIT)
+            self.assertIn("Task line pack", text)
+
     async def test_task_reviewer_keeps_its_role(self):
         row = await self.create()
         self.db._exec("UPDATE task_reviews SET status='in_review' WHERE conv_id=?", (self.conv_id,))
@@ -394,6 +408,17 @@ class GuardsTest(RotationFixture):
         self.assertEqual(self.row_of("worker")["status"], "running")
         self.assertEqual(rotation.armed_table(self.runtime), {})
         self.assertEqual(len(self.notices("cannot be restarted")), 1)
+
+    async def test_wakes_held_in_the_last_turn_go_out_when_the_detach_fails(self):
+        await self.reach_the_ask()
+        flush = AsyncMock(return_value=True)
+        self.presence.queue.register_deliver("worker", flush)
+        self.presence.queue.hold("worker", [{"id": 77}])
+        with patch("partyline.line_process_routes.detach_attachment",
+                   AsyncMock(side_effect=RuntimeError("busy"))):
+            await self.turn("worker")
+        self.assertEqual(self.row_of("worker")["status"], "running")
+        flush.assert_awaited_once_with([77])
 
     async def test_a_start_that_fails_after_the_stop_is_reported_and_clears_the_arm(self):
         await self.reach_the_ask()

@@ -135,12 +135,21 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "",
     from .line_notes import NUDGE
 
     bridge = pack_for(db, att["id"])
+    if handoff:  # the predecessor's whole note is reserved before anything repeated is kept
+        from .line_notes import read_notes
+
+        reserve = len(read_notes(db, conv_id, "attachment", att["id"])["notes"].strip())
+        reserve += 40 if reserve else 0
+        spare = limit - reserve - sum(len(p) for p in (header, assignment, NUDGE, bridge) if p) - 12
+        if reminder and len(reminder) > spare:  # the task pack repeats the whole goal
+            tail = "\n… (task pack truncated)"
+            reminder = reminder[:max(0, spare - len(tail))].rstrip() + tail
     fixed = [part for part in (header, assignment, reminder, NUDGE, bridge) if part]
     # Two more parts (context, notes) may join the join, so reserve their
     # separators up front: the budget must cover the "\n\n" between parts.
     remaining = max(0, limit - sum(len(part) for part in fixed)
                     - 2 * (len(fixed) + 1))
-    notes = notes_block(db, att, remaining // 2, own_first=handoff)
+    notes = notes_block(db, att, remaining if handoff else remaining // 2, own_first=handoff)
     context_budget = remaining - len(notes) - (2 if notes else 0)
     pointer = f"… (full text: GET /api/conversations/{conv_id})"
     context = ""
@@ -154,4 +163,9 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "",
         context = context[:max(0, context_budget - len(pointer) - 2)].rstrip() + "\n" + pointer
     parts = [part for part in (header, context, notes, assignment, reminder, NUDGE, bridge)
              if part]
-    return "\n\n".join(parts)
+    text = "\n\n".join(parts)
+    if handoff and len(text) > limit and reminder:  # separators and the goal pointer: take it off the pack
+        cut = len(text) - limit + 1
+        trimmed = reminder[:max(0, len(reminder) - cut)].rstrip()
+        text = text.replace(reminder, trimmed, 1)
+    return text
