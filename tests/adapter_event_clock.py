@@ -39,6 +39,7 @@ def install(adapter):
         if asyncio.sleep is not _REAL_SLEEP:
             await asyncio.sleep(step)
         await _REAL_SLEEP(0)
+        adapter._changes.notify()  # each injected event stands for a file notification
         return max(0, step)
 
     adapter._events_init()
