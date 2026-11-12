@@ -186,6 +186,7 @@ class PartylineAdapter(BaseAdapter):
             elif not self.recorded_claim(path):
                 continue
             self._rollout = path
+            self.narrow_watch(path)  # a long-lived home has a rollout per activation
             return path
         return None
 
@@ -233,7 +234,6 @@ class PartylineAdapter(BaseAdapter):
                 return
         if not path:
             return
-
         try:
             with open(path, encoding="utf-8", errors="replace") as fh:
                 cli_session = (json.loads(fh.readline()).get("payload") or {}).get("id")

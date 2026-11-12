@@ -42,6 +42,11 @@ class ClaudeSession:
             self.on_cli_session(os.path.splitext(os.path.basename(path))[0])
             self._reported_session_path = path
 
+    def _may_hold_our_token(self, path: str, mtime: float) -> bool:
+        """The one rule for which transcripts the search reads, and so is woken for."""
+        return (os.path.basename(path) == f"{pinned_session(self.att)}.jsonl"
+                or mtime >= self.spawned_at - 2)
+
     def _recorded_our_token(self, path: str) -> bool:
         """Whether this transcript recorded the token we pasted into our pty.
 
@@ -65,8 +70,7 @@ class ClaudeSession:
             return False
         unmatched = self.__dict__.setdefault("_unmatched", {})
         stamp = (stat.st_mtime_ns, stat.st_size)
-        named_ours = os.path.basename(path) == f"{pinned_session(self.att)}.jsonl"
-        stale = not named_ours and stat.st_mtime < self.spawned_at - 2
+        stale = not self._may_hold_our_token(path, stat.st_mtime)
         if stale or unmatched.get(path) == stamp:
             return False
         ours = self._token_record_is_ours(path)

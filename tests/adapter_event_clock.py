@@ -15,6 +15,9 @@ class FixtureFiles:
     def __init__(self, *args, **kwargs):
         pass
 
+    def rewatch(self, *paths, admit=None):
+        self.paths = paths
+
     async def __aenter__(self):
         return self
 

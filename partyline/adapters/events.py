@@ -1,13 +1,41 @@
 """Adapter waits are woken by native file notifications, PTY output, or exit."""
 
 import asyncio
-from functools import wraps
+from functools import partial, wraps
+import logging
 
 from partyline.file_events import Changes, FileEvents
 
 
+logger = logging.getLogger(__name__)
+
+
 class AdapterEvents:
-    file_events = FileEvents
+    _watch_events = None
+
+    def narrow_watch(self, *paths):
+        """Once a transcript is claimed, watch it (and its directory) instead of the search set."""
+        if self._watch_events is not None:
+            self._watch_events.rewatch(*paths)
+
+    def file_events(self, *paths, **kwargs):
+        """Native watches that ride out running out of descriptors, never any other error."""
+        return FileEvents(*paths, exhausted=self._watch_starved, **kwargs)
+
+    def _watch_starved(self, error):
+        """Tell the line once; the watch keeps what it has and retries on the next wake."""
+        if getattr(self, "_starved_reported", False):
+            return
+        self._starved_reported = True
+        logger.warning("file watches starved of descriptors: %s", error)
+        notice = self.post(
+            "system", "system",
+            f"{self.att.get('name', 'process')}: this host is out of file descriptors, so "
+            "some file watches could not be registered. Still attached; the watches are "
+            "retried on the next event.")
+        task = asyncio.get_running_loop().create_task(notice)
+        self.__dict__.setdefault("_starved_posts", set()).add(task)
+        task.add_done_callback(self._starved_posts.discard)
 
     def _events_init(self):
         self._changes = Changes()
@@ -43,13 +71,22 @@ class AdapterEvents:
         return asyncio.get_running_loop().time() - started
 
 
-def watch_files(paths):
-    """Register before the wrapped scan, and close notifications when it exits."""
+def watch_files(paths, admit=None):
+    """Register before the wrapped scan, and close notifications when it exits.
+
+    ``admit(self, path)`` bounds exact-file descriptors on kqueue hosts; the run may
+    ``narrow_watch`` once it knows which file it follows.
+    """
     def decorate(run):
         @wraps(run)
         async def wrapped(self, *args, **kwargs):
             roots = paths(self)
-            async with self.file_events(*roots, changes=self._changes):
-                return await run(self, *args, **kwargs)
+            options = {} if admit is None else {"admit": partial(admit, self)}
+            async with self.file_events(*roots, changes=self._changes, **options) as events:
+                self._watch_events = events
+                try:
+                    return await run(self, *args, **kwargs)
+                finally:
+                    self._watch_events = None
         return wrapped
     return decorate
