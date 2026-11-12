@@ -257,11 +257,12 @@ class PartylineAdapter(Command, SessionStore, WakeSettlement, Adapter):
                 self._after_poll()  # a deadline or terminal output: nothing new to read
             else:
                 try:
-                    found = await self._poll()
-                    # A notification can arrive before the commit it announces is visible.
-                    # no-poll (b): one later look per notification that showed nothing new
+                    await self._poll()
+                    # A notification can arrive before the commit it announces is visible,
+                    # and a read that found one commit can still be short of the next.
+                    # no-poll (b): one later look per notification; that look arms nothing
                     self._recheck_at = (self.event_time() + RECHECK_SECONDS
-                                        if stored != self._read_at and not found else None)
+                                        if stored != self._read_at else None)
                     self._read_at = stored
                 except sqlite3.Error as exc:
                     self._recheck_at = None  # a failing store is retried on the next wake only

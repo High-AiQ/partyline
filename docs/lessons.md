@@ -2351,8 +2351,8 @@ when the watcher was cancelled, which crashed the interpreter; the connection is
 watcher now keeps one connection for its life, asks `PRAGMA data_version` whether another connection committed
 before listing anything, lists row ids without bodies and fetches only rows that are not settled, in a thread;
 once a session is claimed, terminal output no longer triggers a read. Because a notification can precede the
-commit it announces becoming visible, a notification that shows nothing new earns one later look, which arms
-nothing further and is dropped if the store fails. Two smaller faults in the
+commit it announces becoming visible, and a read that found one commit can still be short of the next, every
+notification earns one later look, which arms nothing further and is dropped if the store fails. Two smaller faults in the
 same adapter: a turn started by a background job or subagent finishing (a `synthetic` row, no user row) showed no
 working badge and never ended for the return path, and a compaction first seen while it was running was never
 counted. When an event wait replaces a poll, prove the watcher is quiet when nothing happens: count its wakes

@@ -235,21 +235,35 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
         return delays
 
     async def test_terminal_output_wakes_the_watcher_without_reading_the_store(self):
-        delays = await self.watch(["output", "output", "file", "output", "exit"], [True, True])
-        self.assertEqual(self.adapter._poll.await_count, 2)  # the first read, then the file event
+        delays = await self.watch(["deadline", "output", "output", "file", "output", "exit"],
+                                  [True, False, True])
+        # The first read and its one later look, then the file event: no read per redraw.
+        self.assertEqual(self.adapter._poll.await_count, 3)
         self.assertEqual(self.adapter._after_poll.call_count, 3)  # a redraw still runs deadlines
-        self.assertEqual(delays, [None] * 5)
+        self.assertAlmostEqual(delays[0], RECHECK_SECONDS)
+        self.assertEqual(delays[1:4], [None, None, None])
 
     async def test_a_notification_that_shows_nothing_new_gets_one_later_look(self):
         """The notification can arrive before the commit it announces is visible."""
         delays = await self.watch(["file", "output", "deadline", "output", "exit"],
                                   [True, False, False])
         self.assertEqual(self.adapter._poll.await_count, 3)  # first read, the event, one later look
-        self.assertEqual(delays[0], None)
+        self.assertAlmostEqual(delays[0], RECHECK_SECONDS)  # the first read is owed one too
         self.assertAlmostEqual(delays[1], RECHECK_SECONDS)
         self.assertLess(delays[2], RECHECK_SECONDS)  # output does not push the deadline back
         # The later look found nothing either and arms nothing: no 50 ms poll.
         self.assertEqual(delays[3:], [None, None])
+
+    async def test_a_read_that_found_a_commit_still_gets_its_later_look(self):
+        """Two commits back to back: the read sees the answer and not yet the idle row.
+
+        Nothing else would look again, and the turn would show as working until the next
+        write to the store (review of #497, 97 of 100 turn ends under full sync).
+        """
+        delays = await self.watch(["file", "deadline", "output", "exit"], [True, True, True])
+        self.assertEqual(self.adapter._poll.await_count, 3)
+        self.assertAlmostEqual(delays[1], RECHECK_SECONDS)
+        self.assertEqual(delays[2:], [None, None])
 
     async def test_a_store_that_fails_at_the_later_look_is_not_retried_in_a_loop(self):
         """The deadline stayed armed after an error: 31,000 failing reads a second in review."""
@@ -284,7 +298,10 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
         self.adapter._reader = Reader()
         reading = asyncio.create_task(self.adapter._poll())
         await asyncio.to_thread(started.wait, 5)
-        self.assertFalse(self.adapter._store_lock.acquire(blocking=False))  # a close must wait
+        held = not self.adapter._store_lock.acquire(blocking=False)
+        if not held:
+            self.adapter._store_lock.release()  # fail below instead of blocking the cleanup
+        self.assertTrue(held, "a read must hold the store lock, so a close has to wait for it")
         closing = threading.Thread(target=self.adapter._close_store)
         closing.start()
         order.append("read released")
