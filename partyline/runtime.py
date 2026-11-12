@@ -20,6 +20,7 @@ from .delivery_hooks import delivery_hooks
 from .delivery_credit_accounting import confirm_reserved
 from .delivery_reservation import reserve_delivery
 from .message_routing import post_human_message, route_message
+from .notice_policy import digest_candidates
 from .reattach import ReattachCoordinator
 from .ws_push import push_event
 from .runtime_delivery_credit import DeliveryCreditMixin
@@ -132,8 +133,8 @@ class ChatRuntime(DeliveryCreditMixin):
             if current is None or current.get("runtime_owner") != runtime_owner:
                 return False
             att = current
-            pending = self.db.messages_after(
-                conv_id, att["last_seen"], att["name"], att["id"]
+            pending = digest_candidates(
+                self.db, conv_id, att["last_seen"], att["name"], att["id"]
             )
             ours = self._live_uncredited(att["id"], runtime_owner)
             pending = [m for m in pending if m["id"] not in (ours or ())]

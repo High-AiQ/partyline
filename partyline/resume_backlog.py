@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .notice_policy import digest_candidates
 from .message_queries import MESSAGE_SELECT, as_message
 from .resolved_notices import drop_resolved
 from .mentions import known_mention_names, line_addressed, mentioned_names
@@ -12,8 +13,8 @@ WORKER_PACK_NOTICE_PREFIX = "☏ workers "
 
 def addressed_backlog(runtime, att: dict, *, include_message_ids=()) -> list[dict]:
     """Return unread messages addressed to this process, plus explicit context."""
-    pending = runtime.db.messages_after(
-        att["conv_id"], att["last_seen"], att["name"], att["id"]
+    pending = digest_candidates(
+        runtime.db, att["conv_id"], att["last_seen"], att["name"], att["id"]
     )
     name = att["name"].lower()
     included = set(include_message_ids)

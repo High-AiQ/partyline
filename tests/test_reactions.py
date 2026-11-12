@@ -138,13 +138,13 @@ class ReactionRoutesTest(unittest.TestCase):
         self.runtime.live[attachment["id"]] = recorder
         message = self.db.add_message("line", "sol", "agent", "x" * 100)
         response = self.client.post(
-            f"/api/messages/{message['id']}/reactions", json={"emoji": "✅"}
+            f"/api/messages/{message['id']}/reactions", json={"emoji": "❌"}
         )
         self.assertEqual(response.status_code, 200)
-        # The target is woken at once — a reaction may be the whole answer.
+        # The target is woken at once: a ❌ disagrees, so it must be read.
         self.assertEqual(
             recorder.delivered[-1]["body"],
-            "☺ greg reacted ✅ to your «" + "x" * 80
+            "☺ greg reacted ❌ to your «" + "x" * 80
             + "…» — no reply needed unless this raises something new",
         )
         # The copy is stored addressed to that process alone: never a public
@@ -158,12 +158,20 @@ class ReactionRoutesTest(unittest.TestCase):
     def test_human_transcript_excludes_the_reaction_notice(self):
         attachment, recorder = self._live_process()
         message = self.db.add_message("line", "sol", "agent", "found the answer")
-        response = self._react(message)
+        response = self._react(message, "❌")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(recorder.delivered), 1)  # the process got its copy
         page = self.client.get("/api/conversations/line/messages").json()
         self.assertEqual([m["body"] for m in page["messages"]], ["found the answer"])
         # The reaction itself is still on the message for humans.
+        self.assertEqual(page["messages"][0]["reactions"][0]["emoji"], "❌")
+
+    def test_an_agreeing_reaction_is_neither_pasted_nor_a_wake(self):
+        attachment, recorder = self._live_process()
+        message = self.db.add_message("line", "sol", "agent", "found the answer")
+        self.assertEqual(self._react(message, "✅").status_code, 200)
+        self.assertEqual(recorder.delivered, [])
+        page = self.client.get("/api/conversations/line/messages").json()
         self.assertEqual(page["messages"][0]["reactions"][0]["emoji"], "✅")
 
     def test_human_transcript_page_after_excludes_the_reaction_notice(self):
@@ -178,11 +186,11 @@ class ReactionRoutesTest(unittest.TestCase):
     def test_process_digest_includes_the_reaction_notice(self):
         attachment, _ = self._live_process()
         message = self.db.add_message("line", "sol", "agent", "found the answer")
-        self._react(message)
+        self._react(message, "❌")
         pending = self.db.messages_after("line", message["id"], "sol", attachment["id"])
         self.assertEqual(
             [m["body"] for m in pending],
-            ["☺ greg reacted ✅ to your «found the answer» — "
+            ["☺ greg reacted ❌ to your «found the answer» — "
              "no reply needed unless this raises something new"],
         )
         other, _ = self._machine(name="kimi")
