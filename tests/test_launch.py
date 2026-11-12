@@ -13,7 +13,9 @@ from partyline import launch, server_memory, service_guard
 class LaunchTest(unittest.TestCase):
     def setUp(self):
         self.serve = Mock(return_value=0)
+        self.raised = Mock(return_value=10240)
         for patcher in (
+            patch("partyline.fd_limit.raise_open_file_limit", self.raised),
             patch.dict(sys.modules, {"partyline.server": SimpleNamespace(main=self.serve)}),
             patch.object(launch.sys, "platform", "linux"),
             patch("partyline.bind.load_dotenv"),
@@ -30,6 +32,7 @@ class LaunchTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 launch.main(["--instance-name", "literal ${path}", "--port", "8649"])
         argv = execute.call_args.args[1]
+        self.raised.assert_not_called()  # the process that only re-executes raises nothing
         self.assertIn("--scope", argv)
         self.assertIn("--expand-environment=no", argv)
         self.assertIn("MemoryMax=2147483648", argv)
@@ -42,6 +45,7 @@ class LaunchTest(unittest.TestCase):
         with patch.object(server_memory, "verify", return_value=(True, "")):
             self.assertEqual(launch.main(["--within-memory-scope", "--port", "8649"]), 0)
         self.serve.assert_called_once_with(["--port", "8649"])
+        self.raised.assert_called_once_with()  # the descriptor limit is raised before serving
 
     def test_internal_flag_does_not_bypass_verification(self):
         with patch.object(server_memory, "verify", return_value=(False, "memory.max=max")):
