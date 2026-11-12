@@ -108,7 +108,8 @@ The false assumption was that `await changes.wait()` blocks until the next chang
 keeps one cursor per waiting task, and a task it has never seen starts at zero, so it returns
 at once whenever anything was ever notified. The memory and Docker event loops wait with
 `asyncio.create_task(events.wait())` and make a new task after each wake, so after the first
-write to `attachments` or `conversations` they never blocked again: each turn ran a
+write to `attachments`, `conversations` or `conversation_write_grants`, or the first file
+event on the Docker socket path, they never blocked again: each turn ran a
 thread-pool job (reading every live process's cgroup, querying grants under the database
 lock). On the live host that was 42% of a core on the event loop, about 9% on each of twelve
 pool threads and 29,000 context switches a second, forever, from the 2026-11-11 commits that
