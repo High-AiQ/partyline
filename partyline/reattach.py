@@ -25,6 +25,7 @@ from .reattach_liveness import (mark_unlive_exited, report_live, report_reattach
 from .restart_scope import (covered_conversation_ids, planned_conversation_ids,
                             select_attachment_ids, skip_reason)
 from .resume_backlog import addressed_backlog
+from .resume_replay import for_resume
 from .role_delivery import announce_restored
 from .resource_budget import clear_stale_restart_rows
 
@@ -267,7 +268,8 @@ class ReattachCoordinator:
                     notice_ids = (restart_notice_ids[line],) if cut or captain_queue or (
                         plan["debrief"].strip() and line == conv_id
                     ) else ()
-                    pending = addressed_backlog(self.runtime, attachment, include_message_ids=notice_ids)
+                    pending = await for_resume(self.runtime, attachment, addressed_backlog(
+                        self.runtime, attachment, include_message_ids=notice_ids))
                     if not adapter_listens(ADAPTER_METADATA.get(attachment["adapter"], {})):
                         pending = []
                     resumed = await self.resume_attachment(attachment_id, pending)

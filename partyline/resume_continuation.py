@@ -23,6 +23,7 @@ from . import turn_marker
 from .continuation_delivery import deliver_continuation, staged_receipt
 from .reattach import READY_TIMEOUT_SECONDS
 from .resume_backlog import addressed_backlog
+from .resume_replay import for_resume
 from .role_delivery import announce_restored
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ async def resume_with_backlog(runtime, att_id: str, resume, *, timeout=READY_TIM
         raise HTTPException(404)
     await turn_marker.announce_if_interrupted(runtime, att)
     await announce_restored(runtime, att, restart=False)  # before the backlog, so it rides the wake
-    pending = addressed_backlog(runtime, att)
+    pending = await for_resume(runtime, att, addressed_backlog(runtime, att))
     resumed = await resume(att_id, pending)
     if pending:
         task = asyncio.create_task(_settle(runtime, resumed, att_id, pending, timeout))
