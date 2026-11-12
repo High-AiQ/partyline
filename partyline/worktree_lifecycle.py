@@ -3,12 +3,8 @@
 A worktree a line was placed in is not removed unconditionally the way purge
 removes it — archive and a captain's own retirement both need to know
 whether removing it would lose real work first. SAFE means the working tree
-is clean and every commit reachable from the worktree's HEAD — its branch,
-or a detached tip that lives on no branch — is reachable from the parent
-line's branch or the repository's default branch: nothing sits only in the
-worktree about to disappear. Anything git cannot verify reads as
-unsafe, never as SAFE by default — a repository that a git command cannot
-inspect is not evidence that nothing would be lost.
+is clean and every reachable commit is in the parent or default branch.
+Anything Git cannot verify stays unsafe.
 """
 
 from __future__ import annotations
@@ -24,6 +20,8 @@ from .hierarchy import parent_id_of
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_root
 from .worktree_paths import branch_name, managed_root
 from .retirement_worktree import remove_directory
+from .retirement_orphan import empty_merged, empty_task, remove_empty, remove_task
+from .storage_ignored import ignored_reason
 from .nested_repositories import keep_reason, nested_repositories
 from .review_worktrees import sweep_review_worktrees
 from .task_teardown import teardown
@@ -45,6 +43,10 @@ def remove_for_line(conv: dict | None, db=None) -> None:
     """Drop the worktree a purged line was placed in; its branch stays."""
     cwd = (conv or {}).get("cwd") or ""
     root = _worktree_root(cwd)
+    if root is not None and remove_empty(root, cwd, conv_id=(conv or {}).get("id")):
+        return
+    if db and remove_task(db, conv):
+        return
     if root is not None and keep_reason(cwd, lenient=True):
         return
     if db is not None and root is not None:
@@ -52,6 +54,8 @@ def remove_for_line(conv: dict | None, db=None) -> None:
     if root is None or not os.path.lexists(os.path.join(cwd, ".git")) or keep_reason(cwd):
         return
     try:
+        if ignored_reason(cwd):
+            return
         remove_directory(cwd, root)
         _git("worktree", "remove", "--force", cwd, cwd=root)
     except (OSError, subprocess.SubprocessError):
@@ -128,27 +132,26 @@ def _in_history(cwd: str, tip: str, bases: list[str]) -> bool:
 def _workspace_merged(db, conv_id: str, item: dict) -> bool:
     """Every commit on a task's branch in one clone is in that clone's own checkout or default."""
     repo = item["repository"]
+    if empty_merged(repo, item["path"], item["branch"], conv_id):
+        return True
     bases = [b for b in (_base_ref(repo), _default_branch(repo)) if b]
     tips = [t for t in (tip(item, conv_id), _base_ref(item["path"])) if t]
     return bool(bases) and bool(tips) and all(_in_history(item["path"], t, bases) for t in tips)
 
 
 def worktree_state(db, conv: dict | None) -> dict | None:
-    """The line's own worktree as ``{"clean": bool, "merged": bool}``.
+    """Return clean/merged/nested evidence, or None for an inherited directory.
 
-    ``None`` when the line has no worktree of its own (a shared or inherited
-    directory has nothing to keep). ``merged`` is False whenever git cannot
-    prove every commit reachable from the worktree's HEAD — its branch, or a
-    detached tip that lives on no branch — is reachable from the parent
-    line's branch or the repository default. An unverifiable state never
-    reads as merged, exactly as the SAFE test never reads an uninspectable
-    repository as safe.
+    Every reachable tip must be in the parent or default branch. Git failures
+    are unsafe. Empty pruned checkouts use their surviving assigned branches.
     """
     conv = conv or {}
     cwd = conv.get("cwd") or ""
     root = _worktree_root(cwd)
     if root is None:
         return None
+    if empty_merged(root, cwd, conv_id=conv.get("id")) or empty_task(db, conv):
+        return {"clean": True, "merged": True, "nested": []}
     if (spaces := workspaces(db, conv.get("id") or "")):
         return {"clean": _is_clean(cwd), "nested": nested_repositories(cwd, lenient=True),
                 "merged": all(_workspace_merged(db, conv["id"], item) for item in spaces)}
@@ -207,11 +210,8 @@ def discard_worktree(db, conv_id: str) -> bool:
 def archive_worktree_if_safe(db, conv_id: str, *, preserve: bool = True) -> tuple[bool, str | None]:
     """Remove merged worktrees, preserving dirty state outside them first.
 
-    ``preserve=False`` keeps the maintenance tick clean-only, with no snapshot or reclaim.
-    Returns ``(removed, kept_reason)``. A line with no worktree of its own
-    reports ``(False, None)`` too — SAFE and "removed" are not the same
-    thing, and a caller that only checked the reason would tell a person a
-    root line's worktree was removed when nothing was ever there to touch.
+    With preserve=False, remove only clean disposable trees. Return the removal
+    result and any reason kept; inherited directories report (False, None).
     """
     conv = db.get_conversation(conv_id)
     cwd = (conv or {}).get("cwd") or ""
@@ -220,6 +220,9 @@ def archive_worktree_if_safe(db, conv_id: str, *, preserve: bool = True) -> tupl
     from .storage_worktrees import in_use
     if protection := in_use(db, cwd, conv):
         return False, protection
+    if empty_merged(_worktree_root(cwd), cwd, conv_id=conv_id) or empty_task(db, conv):
+        remove_for_line(conv, db)
+        return not os.path.isdir(cwd), None
     if not preserve:
         reason = worktree_removal_reason(db, conv)
         if reason:

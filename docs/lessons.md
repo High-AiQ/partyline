@@ -1,5 +1,66 @@
 # Lessons: the false-assumptions ledger
 
+## A pruned linked checkout still has an owning object store
+
+The false assumption was that a valid nested-worktree fixture also covered a
+`.git` link whose metadata had been pruned. Validate the surviving owner, hash
+raw blobs there by content (not filename), and recover only missing blobs there.
+A renamed committed megabyte fixture proves none of it enters the outer repo.
+Raw missing blobs are written without clean filters, preserving CRLF and unique
+bytes exactly; access-time updates during hashing are not content changes.
+Tests: `tests/test_storage_residuals.py`.
+
+## Excluding an ignored directory can make Git add fail
+
+The false assumption was that an exclusion pathspec could safely name any
+unreadable subtree. Git rejects exclusions naming ignored directories too.
+Stage explicit NUL-delimited readable file paths in private indexes instead;
+keep denied subtrees and report the inspection failure, not Git's ignore advice.
+Tests: `tests/test_storage_residuals.py`.
+
+## Git may still enter an excluded orphan directory
+
+The false assumption was that `git add --force -A` with exclusions would save
+the readable part of a plain folder without entering its unreadable directories.
+Enumerate safe files first, preserve those, and delete only the inspected part.
+Portable denials and real POSIX permissions prove partial cleanup happens once.
+Tests: `tests/test_storage_residuals.py`.
+
+## Ignored is not the same as disposable
+
+The false assumption was that every ignored file was a recreatable cache.
+Greg approved keeping noncache ignored data on 2026-11-12. One documented
+component-pattern constant now limits cache deletion. Report other ignored paths
+and bytes, and require a person's per-worktree Remove anyway choice to waive
+only that guard. Tests: `tests/test_storage_residuals.py`, `StorageCleanup.test.ts`.
+
+## A conservative keep must remember what could change it
+
+The false assumption was that only failed deletions deserved retry suppression.
+Independent repositories and ignored data incurred Git work and two full size
+walks at each start. Persist directory and Git metadata evidence and stat that
+on subsequent starts; retry after evidence changes or a manual request. Partial
+removals still require manual retry. Tests also reopen the temporary database and
+assert zero Git inspections and zero size calls on the unchanged second start.
+Tests: `tests/test_storage_residuals.py`, `tests/test_storage_cleanup_review.py`.
+
+## A fenced captain cannot remove the server's fence mount
+
+The false assumption was that an empty merged orphan needed manual `rm` before
+retirement. The CLI may see an undeletable empty node_modules mount while the
+server can remove it. Verify the surviving branch is merged, leave previews
+read-only, and let the server remove the empty orphan during retirement. Never
+recommend fenced shell removal as recovery. Tests: `tests/test_retirement_residuals.py`.
+
+## Repeatedly splitting a shrinking buffer copies it repeatedly
+
+The false assumption was that bounded reads also bounded parsing cost.
+`pending.split(b'\0', 1)` copied the remainder for every streamed filename.
+Split once per chunk and carry only the final incomplete name; recovery-space
+accounting still includes every complete name across chunk boundaries.
+Tests: `tests/test_storage_recovery_stream.py`.
+
+
 ## A cursor keyed by the waiting task makes a fresh task a busy loop
 
 The false assumption was that `await changes.wait()` blocks until the next change. `Changes`

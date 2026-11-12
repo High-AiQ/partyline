@@ -113,3 +113,38 @@ it("keeps actionable failures separate from thousands of protected mirrors", asy
     await unmount(component);
   }
 });
+
+it("requires an explicit per-worktree choice to remove noncache ignored files", async () => {
+  const kept = [
+    {
+      path: "/repo/ignored",
+      reason: "ignored files outside known caches: 1 paths, 12 bytes; profile",
+      size_bytes: 12,
+      remove_anyway_allowed: true,
+    },
+    { path: "/repo/independent", reason: "independent repository", size_bytes: 8 },
+  ];
+  vi.spyOn(storageCleanupApi, "details").mockResolvedValue({ kept, idle_lines: [] });
+  const cleanup = vi.spyOn(storageCleanupApi, "cleanup").mockResolvedValue({
+    removed: [],
+    freed_bytes: 0,
+    skipped: kept,
+  });
+  const component = mount(StorageCleanup, { target: document.body, props: { refreshed: vi.fn() } });
+  try {
+    await settle();
+    document.querySelector("button")?.click();
+    await settle();
+    expect(cleanup).toHaveBeenLastCalledWith([]);
+    const overrides = Array.from(document.querySelectorAll("button")).filter((button) =>
+      button.textContent.includes("Remove anyway"),
+    );
+    expect(overrides).toHaveLength(2);
+    expect(document.body.textContent).toContain("Ignored files will be deleted.");
+    overrides[0]?.click();
+    await settle();
+    expect(cleanup).toHaveBeenLastCalledWith(["/repo/ignored"]);
+  } finally {
+    await unmount(component);
+  }
+});

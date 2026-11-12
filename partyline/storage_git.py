@@ -7,7 +7,7 @@ import uuid
 from .git_fence import mirror_branch_ref
 from .line_worktree import _git, rev
 from .retirement_git import snapshot
-from .storage_git_state import add_paths, index_identity, working_tree
+from .storage_git_state import index_identity, stage_working, working_tree
 from .retirement_worktree import refuse_orphan
 from .storage_recovery_space import require_space
 
@@ -19,7 +19,7 @@ def state(root, path, conv_id=None, *, excluded=()):
         done = _git(*args, cwd=path)
         if done.returncode:
             raise ValueError('cannot inspect Git state')
-        return done.stdout.strip() if '-z' not in args else done.stdout
+        return done.stdout.rstrip('\n') if '-z' not in args else done.stdout
 
     head = git('rev-parse', 'HEAD')
     branch = rev(path, 'symbolic-ref', '-q', 'HEAD')
@@ -94,15 +94,15 @@ def recover_plain(root, path, *, excluded=()):
                                   text=True, timeout=30)
             if done.returncode:
                 raise ValueError('cannot snapshot orphan folder')
-            return done.stdout.strip()
+            return done.stdout.rstrip('\n')
 
         git('read-tree', '--empty')
-        git('add', '--force', '-A', '--', *add_paths(excluded))
+        stage_working(git, path, excluded, force=True)
         tree = git('write-tree')
         if not git('ls-files', '-z'):
             return
         tip = git('commit-tree', tree, '-m', 'Partyline orphan recovery')
         git('update-ref', 'refs/partyline/discarded/storage-' + uuid.uuid4().hex + '/snapshot', tip)
-        git('add', '--force', '-A', '--', *add_paths(excluded))
+        stage_working(git, path, excluded, force=True)
         if git('write-tree') != tree:
             raise ValueError('orphan folder changed during recovery; retained')

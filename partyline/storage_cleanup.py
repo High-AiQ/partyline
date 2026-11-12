@@ -111,7 +111,7 @@ def clean_attachments(db, report, ident=None):
         attempt(report, path, clean)
 
 
-def cleanup(db, *, attachment_id=None, line=None, purging=False, retry_failed=False):
+def cleanup(db, *, attachment_id=None, line=None, purging=False, retry_failed=False, remove_anyway=()):
     """Serialize full sweeps only; lifecycle cleanup must never queue behind them."""
     full_sweep = attachment_id is None and line is None
     with _lock if full_sweep else nullcontext():
@@ -126,7 +126,8 @@ def cleanup(db, *, attachment_id=None, line=None, purging=False, retry_failed=Fa
             from .storage_worktrees import clean_worktrees
             from .storage_fences import clean_fences
             steps.append(lambda: clean_worktrees(db, report, line, purging=purging,
-                                                 retry_failed=retry_failed, recovery=recovery))
+                                                 retry_failed=retry_failed, recovery=recovery,
+                                                 remove_anyway=remove_anyway))
             if line is None or purging:
                 steps.append(lambda: clean_fences(db, report, line, retry_failed=retry_failed,
                                                  recovery=recovery))

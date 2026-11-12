@@ -274,3 +274,7 @@ MIGRATIONS = [
         BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]
 MIGRATIONS.extend(EXTENSIONS + STORAGE_CLEANUP)
+MIGRATIONS.append("""CREATE TABLE IF NOT EXISTS storage_cleanup_decisions(
+    path TEXT PRIMARY KEY,
+    evidence TEXT NOT NULL
+)""")

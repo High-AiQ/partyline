@@ -41,6 +41,9 @@ def remove_nested(db, conv_id: str, cwd: str) -> list[str]:
         if os.path.realpath(path) == os.path.realpath(cwd) or not os.path.isdir(path):
             continue
         try:
+            from .retirement_orphan import remove_empty
+            if remove_empty(item["repository"], path, item["branch"], conv_id):
+                continue
             done = _git("status", "--porcelain", cwd=path)
             if done.returncode or done.stdout.strip() or nested_repositories(path):
                 kept.append(path)

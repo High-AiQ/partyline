@@ -8,7 +8,7 @@ import uuid
 from .line_worktree import _git, repo_root, rev
 from .worktree_paths import managed_root
 from .storage_cleanup import attempt, kept, remove_path
-from . import storage_kept
+from . import storage_kept, storage_decisions
 from .storage_mirror import MirrorUnreadable, repository_view
 from .storage_recovery_space import require_space
 from .storage_fence_inventory import folders, mirrors, retention, summarize
@@ -94,7 +94,9 @@ def clean_fences(db, report, line=None, *, retry_failed=False, recovery=None):
             summarize(report['retained_mirrors'], db, folder, reason, len(entries))
             continue
         for mirror in entries:
-            if not retry_failed and (failure := storage_kept.reason(db, mirror, suppressed_only=True)):
+            if not retry_failed and (failure := storage_kept.reason(db, mirror)) and (
+                    storage_kept.reason(db, mirror, suppressed_only=True) or
+                    storage_decisions.unchanged(db, mirror)):
                 kept(report, mirror, failure)
                 continue
             if repositories is None:
@@ -127,6 +129,9 @@ def clean_fences(db, report, line=None, *, retry_failed=False, recovery=None):
                     storage_kept.forget(db, mirror)
                     return None
             attempt(report, mirror, clean)
+            if mirror.is_dir() and storage_kept.reason(db, mirror):
+                owner = repositories.get(mirror.name) if repositories else None
+                storage_decisions.remember(db, mirror, owner[1] if owner else mirror.parent)
         try:
             folder.rmdir()
         except OSError:

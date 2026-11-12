@@ -15,7 +15,7 @@ class RecoverySpaceError(ValueError):
     pass
 
 
-def require_space(common, path, *, registered=True, excluded=()):
+def require_space(common, path, *, registered=True, excluded=(), required_bytes=None):
     available = None
 
     def check(required):
@@ -28,6 +28,9 @@ def require_space(common, path, *, registered=True, excluded=()):
             raise RecoverySpaceError('insufficient free space for recovery; source retained '
                                      f'(need {required + RESERVE} bytes including reserve)')
 
+    if required_bytes is not None:
+        check(required_bytes)
+        return
     if not registered:
         skipped = frozenset(os.path.join(path, name) for name in excluded)
         check(Budget(seconds=float('inf')).size(path, skipped))
@@ -44,8 +47,9 @@ def require_space(common, path, *, registered=True, excluded=()):
             pending = b''
             while chunk := process.stdout.read(65536):
                 pending += chunk
-                while b'\0' in pending:
-                    name, pending = pending.split(b'\0', 1)
+                names = pending.split(b'\0')
+                pending = names.pop()
+                for name in names:
                     try:
                         info = os.lstat(os.path.join(path, os.fsdecode(name)))
                     except FileNotFoundError:

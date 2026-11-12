@@ -33,7 +33,7 @@ class CleanupTest(unittest.TestCase):
         git(self.root, "init", "-q", "-b", "main")
         git(self.root, "config", "user.name", "Tester")
         git(self.root, "config", "user.email", "test@example.com")
-        (self.root / ".gitignore").write_text("cache/\nnode_modules/\n*.ignored\n")
+        (self.root / ".gitignore").write_text(".pytest_cache/\nnode_modules/\n*.ignored\n")
         (self.root / "tracked").write_bytes(b"original\x00bytes")
         git(self.root, "add", ".")
         git(self.root, "commit", "-qm", "initial")
@@ -50,8 +50,8 @@ class CleanupTest(unittest.TestCase):
         return cleanup(self.db, str(self.root), str(self.path), merged, **kwargs)
 
     def ignored(self):
-        (self.path / "cache").mkdir(exist_ok=True)
-        (self.path / "cache" / "large").write_text("build")
+        (self.path / ".pytest_cache").mkdir(exist_ok=True)
+        (self.path / ".pytest_cache" / "large").write_text("build")
         (self.path / "keep").write_text("real work")
 
     def test_snapshot_restores_staged_working_binary_untracked_and_deletions(self):
@@ -80,7 +80,7 @@ class CleanupTest(unittest.TestCase):
         self.ignored()
         (self.path / "tracked").write_text("changed")
         self.assertEqual(self.run_cleanup(False), (False, "unmerged commits"))
-        self.assertFalse((self.path / "cache").exists())
+        self.assertFalse((self.path / ".pytest_cache").exists())
         self.assertTrue((self.path / "keep").exists())
         self.assertEqual((self.path / "tracked").read_text(), "changed")
 
@@ -94,7 +94,7 @@ class CleanupTest(unittest.TestCase):
         self.assertFalse(removed)
         self.assertIn("contains repositories", reason)
         self.assertTrue((clone / "important").exists())
-        self.assertFalse((self.path / "cache").exists())
+        self.assertFalse((self.path / ".pytest_cache").exists())
 
     def test_cap_keeps_worktree_and_records_reason_for_inventory(self):
         self.ignored()
@@ -102,7 +102,7 @@ class CleanupTest(unittest.TestCase):
             removed, reason = self.run_cleanup()
         self.assertFalse(removed)
         self.assertIn("cap", reason)
-        self.assertFalse((self.path / "cache").exists())
+        self.assertFalse((self.path / ".pytest_cache").exists())
         self.assertTrue((self.path / "keep").exists())
         entry = list_kept(self.db)[0]
         self.assertIn("cap", entry.kept_reason)
@@ -116,7 +116,7 @@ class CleanupTest(unittest.TestCase):
         self.ignored()
         sweep_orphaned_worktrees(self.db)
         self.assertTrue(self.path.exists())
-        self.assertFalse((self.path / "cache").exists())
+        self.assertFalse((self.path / ".pytest_cache").exists())
         self.assertEqual(list_kept(self.db)[0].owner, "none")
 
     def test_snapshot_failure_and_missing_git_keep_worktree(self):
@@ -146,7 +146,7 @@ class CleanupTest(unittest.TestCase):
         self.ignored()
         with patch("partyline.worktree_storage._git", side_effect=OSError("git gone")):
             reclaim_ignored(str(self.path))
-        self.assertTrue((self.path / "cache").exists())
+        self.assertTrue((self.path / ".pytest_cache").exists())
 
     def test_human_routes_confirmation_live_owner_and_snapshot_notice(self):
         app = FastAPI()
@@ -200,7 +200,7 @@ class CleanupTest(unittest.TestCase):
         reclaim_ignored(str(self.path))
         self.assertTrue((self.path / "tracked.ignored").exists())
         self.assertTrue((self.path / "keep").exists())
-        self.assertFalse((self.path / "cache").exists())
+        self.assertFalse((self.path / ".pytest_cache").exists())
 
     def test_conflict_snapshot_is_refused(self):
         base = git(self.path, "rev-parse", "HEAD:tracked").decode().strip()
@@ -264,7 +264,7 @@ class CleanupTest(unittest.TestCase):
         self.assertEqual(self.run_cleanup(), (False, "cannot inspect worktree index"))
         self.assertTrue((self.path / "tracked").exists())
         self.assertTrue((self.path / "keep").exists())
-        self.assertTrue((self.path / "cache" / "large").exists())
+        self.assertTrue((self.path / ".pytest_cache" / "large").exists())
 
 
     def test_inventory_and_merge_check_for_registered_task_workspace(self):

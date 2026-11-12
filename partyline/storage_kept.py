@@ -10,6 +10,7 @@ def remember(db, path, reason, *, suppress_retry=False):
 
 
 def forget(db, path):
+    db._exec('DELETE FROM storage_cleanup_decisions WHERE path=?', (str(path),))
     db._exec('DELETE FROM storage_cleanup_kept WHERE path=?', (str(path),))
 
 

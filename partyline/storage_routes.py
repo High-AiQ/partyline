@@ -27,6 +27,10 @@ CLEARABLE_LABELS = {"sessions": "CLI session homes", "tmp": "temporary files",
                     "review": "review checkouts", "scratch": "scratch worktrees"}
 
 
+class CleanupIn(BaseModel):
+    remove_anyway: list[str] = Field(default_factory=list, max_length=100)
+
+
 class ClearIn(BaseModel):
     conv_id: str | None = Field(default=None, max_length=200)
 
@@ -101,10 +105,11 @@ def clear(db, key: str) -> dict:
     return {"removed": removed, "freed_bytes": freed, "skipped": skipped}
 
 
-def clean_all(db):
-    report = cleanup(db, retry_failed=True)
+def clean_all(db, remove_anyway=()):
+    report = cleanup(db, retry_failed=True, remove_anyway=remove_anyway)
     for item in report['skipped']:
         item['size_bytes'] = survey.Budget().size(item['path'])
+        item['remove_anyway_allowed'] = 'ignored files outside known caches' in item['reason']
     return report
 
 
@@ -142,9 +147,9 @@ def storage_router(runtime, media_root) -> APIRouter:
         return await asyncio.to_thread(details, db)
 
     @router.post("/api/storage/cleanup", response_model=CleanupResult)
-    async def clean_now(request: Request):
+    async def clean_now(request: Request, body: CleanupIn | None = None):
         _human(request)
-        return await asyncio.to_thread(clean_all, db)
+        return await asyncio.to_thread(clean_all, db, body.remove_anyway if body else ())
 
     @router.post("/api/storage/{key}/clear")
     async def clear_category(request: Request, key: str, body: ClearIn | None = None):

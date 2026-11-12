@@ -107,9 +107,9 @@ class CleanupReviewTest(CleanupFixture):
         self.assertTrue((path / 'only-copy').exists(), report)
         self.assertEqual(Budget().size(objects), before)
         (path / 'only-copy').unlink()
-        (path / '.gitignore').write_text('cache/\n')
-        (path / 'cache').mkdir()
-        (path / 'cache' / 'recreatable').write_bytes(b'x' * 65536)
+        (path / '.gitignore').write_text('node_modules/\n')
+        (path / 'node_modules').mkdir()
+        (path / 'node_modules' / 'recreatable').write_bytes(b'x' * 65536)
         with patch('shutil.disk_usage', return_value=SimpleNamespace(free=RESERVE + 2048)):
             report = gc.cleanup(self.db)
         self.assertFalse(path.exists(), report)
@@ -202,14 +202,18 @@ class CleanupReviewTest(CleanupFixture):
         finally:
             reopened.close()
 
-    def test_transient_mirror_failures_are_retried_on_the_next_sweep(self):
+    def test_unchanged_mirror_failures_wait_for_manual_retry_or_metadata_change(self):
         for error in (ValueError('mirror refs changed during recovery; retained'),
                       subprocess.TimeoutExpired('git', 30)):
             mirror = self.mirror()
             with patch('partyline.storage_fences.preserve', side_effect=error):
                 report = gc.cleanup(self.db)
             self.assertTrue(mirror.exists(), report)
-            report = gc.cleanup(self.db)
+            with patch('partyline.storage_fences.preserve') as retry:
+                report = gc.cleanup(self.db)
+            retry.assert_not_called()
+            self.assertTrue(mirror.exists(), report)
+            report = clean_all(self.db)
             self.assertFalse(mirror.exists(), report)
 
     def test_kept_records_are_pruned_after_external_removal(self):
