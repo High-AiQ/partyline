@@ -294,6 +294,22 @@ class RolesTest(RotationFixture):
             self.assertLessEqual(len(text), rotation.BRIEFING_LIMIT)
             self.assertIn("Task line pack", text)
 
+    async def test_a_handoff_quoting_the_captain_pointer_is_never_edited_to_fit(self):
+        from partyline.role_delivery import briefing_pointer
+
+        pointer = briefing_pointer("root")
+        note = pointer + "\nSTATE " + "n" * (3900 - len(pointer)) + " NEXT STEP: ship abc1234"
+        write_notes(self.db, "root", "attachment", note, "captain")
+        write_notes(self.db, "root", "line", "L" * 3990, "")
+        write_notes(self.db, "root", "tree", "T" * 3990, "")
+        self.db._exec("UPDATE conversations SET goal=? WHERE id='root'", ("G" * 20000,))
+        self.db.add_message("root", "greg", "human", "@boss " + "a" * 7900)
+        text = render_rebrief(self.db, self.db.get_attachment("captain"), limit=rotation.BRIEFING_LIMIT,
+                              handoff=True, reason="rotated after 2 compactions, limit 2")
+        self.assertIn(note.strip(), text)
+        self.assertLessEqual(len(text), rotation.BRIEFING_LIMIT)
+        self.assertEqual(text.count(pointer), 2, (len(text), len(pointer)))  # the note quote and the reminder
+
     async def test_task_reviewer_keeps_its_role(self):
         row = await self.create()
         self.db._exec("UPDATE task_reviews SET status='in_review' WHERE conv_id=?", (self.conv_id,))

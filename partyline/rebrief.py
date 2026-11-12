@@ -160,12 +160,14 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "",
     if topic:
         context += ("\n\n" if context else "") + f"Standing context (the line's topic):\n{topic}"
     if context and len(context) + len(pointer) + 2 > context_budget:
-        context = context[:max(0, context_budget - len(pointer) - 2)].rstrip() + "\n" + pointer
-    parts = [part for part in (header, context, notes, assignment, reminder, NUDGE, bridge)
-             if part]
-    text = "\n\n".join(parts)
-    if handoff and len(text) > limit and reminder:  # separators and the goal pointer: take it off the pack
-        cut = len(text) - limit + 1
-        trimmed = reminder[:max(0, len(reminder) - cut)].rstrip()
-        text = text.replace(reminder, trimmed, 1)
+        room = context_budget - len(pointer) - 2  # no room even for the pointer: drop the context
+        context = context[:room].rstrip() + "\n" + pointer if room > 0 else ""
+    def join(role_reminder: str) -> str:
+        return "\n\n".join(part for part in (header, context, notes, assignment, role_reminder,
+                                             NUDGE, bridge) if part)
+
+    text = join(reminder)
+    if handoff and len(text) > limit and reminder:  # separators and the goal pointer: trim the pack
+        trimmed = reminder[:max(0, len(reminder) - (len(text) - limit))].rstrip()
+        text = join(trimmed)
     return text
