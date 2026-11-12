@@ -10,6 +10,10 @@ def text(description, maximum=2000, minimum=0):
             "minLength": minimum}
 
 
+PAGE = {"limit": {"type": "integer", "minimum": 1, "maximum": 100},
+        "offset": {"type": "integer", "minimum": 0}}
+
+
 def schema(name):
     """A short, operation-specific argument schema; no route/method fields exist."""
     line = {"conv_id": text(
@@ -18,7 +22,7 @@ def schema(name):
         "resources": obj({**line, "operation": {"type": "string",
             "enum": ["list", "declare", "remove"]}, "name": text("Resource name.", 64, 1)},
             ["conv_id", "operation"]),
-        "staffing": obj(line, ["conv_id"]),
+        "staffing": obj({**line, **PAGE}, ["conv_id"]),
         "write_set_requests": obj(line, ["conv_id"]),
         "list_presets": obj(),
         "kernel_log": obj({"boot": {"type": "string", "enum": ["previous", "current"]},
@@ -69,7 +73,7 @@ def schema(name):
             "reason": text("Required for deny.", 500)}, ["conv_id", "request_id", "decision"]),
         "request_restart": obj({**line, "reason": text("Reason for a person to review.", 2000, 1),
             "confirm_no_deploy": {"type": "boolean"}}, ["conv_id", "reason"]),
-        "process_overview": obj({**line}, ["conv_id"]),
+        "process_overview": obj({**line, **PAGE, "include_retired": {"type": "boolean"}}, ["conv_id"]),
         "ack_report": obj({**line,
             "report_id": {"type": "integer", "minimum": 1},
             "revision": {"type": "integer", "minimum": 1}}, ["conv_id", "report_id", "revision"]),

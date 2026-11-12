@@ -34,7 +34,7 @@ class TaskToolsTest(unittest.TestCase):
         self.client.request.assert_called_with('GET', '/api/conversations/root/tasks')
         tools_tasks.call(self.client, 'tasks', {'include_retired': True}, self.root)
         self.client.request.assert_called_with(
-            'GET', '/api/conversations/root/tasks?include_retired=true')
+            'GET', '/api/conversations/root/tasks?retired_only=true&limit=11&offset=0')
         with self.assertRaises(ValueError):
             tools_tasks.call(self.client, 'tasks', {'include_retired': 'yes'}, self.root)
         full = {'conv_id': 'task id', 'findings': 'finding ' * 400}

@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 
 from .auth_guard import request_principal
 from .hierarchy import descendants
@@ -94,13 +94,14 @@ def _line(runtime, conv_id: str) -> ProcessOverviewLine:
     )
 
 
-def process_overview(runtime, conv_id: str) -> ProcessOverviewResponse:
+def process_overview(runtime, conv_id: str, *, include_retired: bool = True, limit: int = 100,
+                     offset: int = 0) -> ProcessOverviewResponse:
+    """The line and its descendants; ``include_retired=False`` leaves out the lines that are gone."""
+    ids = [conv_id, *descendants(runtime.db, conv_id, include_archived=include_retired)]
+    page = ids[offset:offset + limit]
     return ProcessOverviewResponse(
-        lines=[
-            _line(runtime, line_id)
-            for line_id in [conv_id, *descendants(runtime.db, conv_id)]
-        ]
-    )
+        lines=[_line(runtime, line_id) for line_id in page], lines_total=len(ids),
+        next_offset=offset + len(page) if offset + len(page) < len(ids) else None)
 
 
 def register_process_overview_route(app: FastAPI, runtime) -> None:
@@ -108,8 +109,10 @@ def register_process_overview_route(app: FastAPI, runtime) -> None:
         "/api/conversations/{conv_id}/process-overview",
         response_model=ProcessOverviewResponse,
     )
-    async def get_process_overview(request: Request, conv_id: str):
+    async def get_process_overview(request: Request, conv_id: str, include_retired: bool = True,
+                                    limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0)):
         deny_unless(runtime.db, request_principal(request), conv_id, "read")
         from .memory_snapshot import refresh
         await refresh(runtime)
-        return await asyncio.to_thread(process_overview, runtime, conv_id)
+        return await asyncio.to_thread(process_overview, runtime, conv_id, include_retired=include_retired,
+                                       limit=limit, offset=offset)
