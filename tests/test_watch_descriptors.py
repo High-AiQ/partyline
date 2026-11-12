@@ -14,7 +14,7 @@ import unittest
 from functools import partial
 from pathlib import Path
 
-from partyline.adapters.bundled.claude.adapter import PartylineAdapter
+from partyline.adapters.bundled.claude.adapter import LATER_LOOK_SECONDS, PartylineAdapter
 from partyline.file_events import FileEvents
 from partyline.file_notify_linux import LinuxNotify
 from tests import watch_descriptors as w
@@ -164,6 +164,48 @@ class DescriptorTests(unittest.IsolatedAsyncioTestCase):
             await until(lambda: 'recreated' in posted)
             self.assertEqual(kernel.watched(), {mine, mine.parent})
             self.assertEqual(posted, ['appended', 'rotated', 'recreated'])
+
+    async def test_an_old_unpinned_session_that_takes_our_token_after_the_last_wake_is_found(self):
+        """No descriptor is held for it, and the CLI's last pty output may precede its flush."""
+        w.populate(self.root, 10, 2)
+        old = self.root / '.claude' / 'projects' / '-work-project-0' / 'old-0.jsonl'
+        adapter = w.make_adapter(w.Kernel(), self.root)
+        waits, now = [], 0.0
+        record = {'type': 'user', 'cwd': '/work', 'message': {'content': adapter._claim_token}}
+
+        async def wait(timeout=None):
+            nonlocal now
+            waits.append(timeout)
+            if len(waits) == 2:  # the later look: the flush landed while nothing was running
+                with old.open('a', encoding='utf-8') as file:
+                    file.write(json.dumps(record) + '\n')
+                os.utime(old, (w.SPAWNED_AT + 5, w.SPAWNED_AT + 5))
+            now += 0.1 if len(waits) == 1 else timeout
+            return 0.1 if len(waits) == 1 else timeout
+
+        adapter.wait_for_change, adapter.event_time = wait, lambda: now
+        with w.environment(self.root):
+            self.assertEqual(await adapter._await_transcript(), str(old))
+        self.assertEqual(waits[1], LATER_LOOK_SECONDS)  # one look, right after the wake
+
+    async def test_a_look_that_finds_nothing_arms_nothing_more(self):
+        w.populate(self.root, 3, 1)
+        adapter = w.make_adapter(w.Kernel(), self.root)
+        waits, now = [], 0.0
+        alive = iter(range(4))
+        adapter.alive = lambda: next(alive, None) is not None
+
+        async def wait(timeout=None):
+            nonlocal now
+            waits.append(timeout)
+            now += 0.1 if len(waits) == 1 else LATER_LOOK_SECONDS
+            return 0.1 if len(waits) == 1 else LATER_LOOK_SECONDS
+
+        adapter.wait_for_change, adapter.event_time = wait, lambda: now
+        with w.environment(self.root):
+            self.assertIsNone(await adapter._await_transcript())
+        self.assertEqual(waits[:3], [45.0, LATER_LOOK_SECONDS, waits[2]])
+        self.assertGreater(waits[2], LATER_LOOK_SECONDS)  # back to the long deadline
 
     @unittest.skipUnless(sys.platform == 'linux', 'native inotify')
     async def test_inotify_watches_narrow_too_and_unrelated_writes_stop_waking(self):

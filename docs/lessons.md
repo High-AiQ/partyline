@@ -14,7 +14,7 @@ is now bounded by what can still matter: the project directories, the pinned ses
 and files written since spawn while searching (`ClaudeSession._may_hold_our_token`
 is the one rule for both what the search reads and what the watch holds), then only
 the claimed file and its directory (6 and 6 whatever the history, 0 after stop).
-Codex narrows at claim too. `tests/test_watch_descriptors.py` states the invariant
+An old file given our token with no descriptor to report it is covered by one later look after a wake that found nothing (it arms nothing). Narrowing also frees obsolete watches when the new one does not fit. Codex narrows at claim too. `tests/test_watch_descriptors.py` states the invariant
 (a session this activation owns is never missed: pinned, re-exec'd, resumed) and
 proves the tail still follows appends, rotation and unlink/recreate.
 
@@ -28,7 +28,9 @@ the process's: the OpenCode v2 watcher treated it like a bad store path, posted
 hook (every adapter's `file_events`) now reports it once on the line, keeps what it
 could register, and retries on the next wake of the shared `Changes`. Only that errno
 is tolerated: a permission error, the 4096-entry cap or anything else still stops the
-owner. `tests/test_watch_exhaustion.py` covers both sides.
+owner. A pass that runs out of descriptors still learns everything wanted and releases the
+rest before running once more, so a claim at capacity makes its own room, and a healthy
+watch's event retries its starved peers. `tests/test_watch_exhaustion.py` covers both sides.
 
 ## Read-only SQLite connections can wake their own watchers
 

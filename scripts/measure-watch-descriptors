@@ -28,9 +28,10 @@ async def claude():
           f" {'search':>7} {'tail':>5} {'stopped':>8}")
     for transcripts, directories in ((100, 10), (500, 50), (2000, 200)):
         with tempfile.TemporaryDirectory() as root:
+            with tempfile.TemporaryDirectory() as before, w.environment(before):
+                w.populate(before, transcripts, directories)
+                legacy = await held(w.Kernel(), str(Path(before) / '.claude/projects/*/*.jsonl'))
             now = await w.measure(root, transcripts, directories)
-            with w.environment(root):
-                legacy = await held(w.Kernel(), str(Path(root) / '.claude/projects/*/*.jsonl'))
             print(f"{transcripts:>12} {directories:>5} | {legacy:>10} {legacy + 4:>9} |"
                   f" {now['searching']:>7} {now['tailing']:>5} {now['after_stop']:>8}")
 

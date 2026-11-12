@@ -35,11 +35,12 @@ class Changes:
         self.cursors = weakref.WeakKeyDictionary()
         self.retries = []  # watches that ran out of descriptors: any wake is a reason to retry
 
-    def notify(self, error=None, retry=True):
+    def notify(self, error=None, skip=None):
         if error is not None:
             self.error = error
-        for starved in list(self.retries) if retry else ():
-            starved.retry()
+        for starved in list(self.retries):
+            if starved is not skip:
+                starved.retry()
         self.version += 1
         self.event.set()
 
@@ -77,10 +78,33 @@ class FileEvents:
         self.watcher, self.starved, self.retrying, self.closed = None, False, False, False
 
     def refresh(self):
-        self.watcher.retain(plan(self.paths, self.watcher.add,
-                                 getattr(self.watcher, 'file_vnodes', False),
-                                 getattr(self.watcher, 'directory_self_events', True),
-                                 self.admit))
+        """Register what is wanted and release the rest, even when descriptors run out.
+
+        A registration that fails for want of a descriptor does not end the pass: the walk
+        goes on to learn everything that is wanted, the obsolete watches are released (which
+        is what makes room, as when a claim narrows the watch), and the pass runs once more.
+        """
+        for _ in range(2):
+            ran_out = self.pass_over()
+            if not ran_out:
+                return
+        raise ran_out[0]
+
+    def pass_over(self):
+        ran_out = []
+
+        def add(path):
+            if not ran_out:
+                try:
+                    self.watcher.add(path)
+                except OSError as error:
+                    if not descriptors_exhausted(error):
+                        raise
+                    ran_out.append(error)
+
+        self.watcher.retain(plan(self.paths, add, getattr(self.watcher, 'file_vnodes', False),
+                                 getattr(self.watcher, 'directory_self_events', True), self.admit))
+        return ran_out
 
     def rewatch(self, *paths, admit=None):
         """Replace what is watched; descriptors for everything else are released now."""
@@ -121,7 +145,7 @@ class FileEvents:
             return
         try:
             self.arm()
-            self.changes.notify(retry=False)
+            self.changes.notify(skip=self)
         except Exception as exc:
             self.failed(exc)
 

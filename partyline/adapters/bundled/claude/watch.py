@@ -10,8 +10,10 @@ life. Two facts bound that:
   since spawn). The watch admits exactly those files and every project directory, so
   a new file (a re-exec's randomly named session, a first pinned write) is reported
   by its directory and gets its own descriptor then. The scan itself is authoritative
-  on every wake, so the one hole is an old, differently named file appended silently,
-  which the pty output of the CLI that wrote it wakes the scan for anyway.
+  on every wake, so the one hole is an old, differently named file given our token
+  with no descriptor to report it. A wake that finds nothing is followed by one later
+  look (`_await_transcript`; it arms nothing), which covers a flush landing after the
+  CLI's last pty output; a CLI silent for longer than that is found on its next wake.
 * Once a transcript is claimed nothing else is read, so the watch narrows to that file.
 """
 
