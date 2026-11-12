@@ -62,17 +62,18 @@ def clean_attachments(db, report, ident=None):
                 continue
 
             def clean(home=home):
-                reason = attachment_reason(db, home.name)
-                if reason:
-                    return reason
-                # Reclassify after sizing: a restored line must keep its session.
-                att = db.get_attachment(home.name)
-                conv = db.get_conversation(att['conv_id']) if att else None
-                resumable = bool(att and att.get('cli_session') and not (conv or {}).get('archived_at'))
-                target = home / 'cache' if resumable else home
-                if target.exists():
-                    remove_path(target)
-                return 'it can still be resumed (cache cleared)' if resumable else None
+                with db._runtime_serialized():
+                    reason = attachment_reason(db, home.name)
+                    if reason:
+                        return reason
+                    # Reclassify after sizing: a restored line must keep its session.
+                    att = db.get_attachment(home.name)
+                    conv = db.get_conversation(att['conv_id']) if att else None
+                    resumable = bool(att and att.get('cli_session') and not (conv or {}).get('archived_at'))
+                    target = home / 'cache' if resumable else home
+                    if target.exists():
+                        remove_path(target)
+                    return 'it can still be resumed (cache cleared)' if resumable else None
 
             # Count a retained home's cache separately, so freed bytes stay accurate.
             before = survey.Budget(seconds=float('inf')).size(home)
@@ -82,7 +83,9 @@ def clean_attachments(db, report, ident=None):
     base = connection_directory(db.path)
     if base.is_symlink() or not base.is_dir():
         return
-    for path in sorted(base.iterdir()):
+    paths = ([base / (ident + suffix) for suffix in ('.json', CONFIG_SUFFIX)]
+             if ident else sorted(base.iterdir()))
+    for path in paths:
         suffix = CONFIG_SUFFIX if path.name.endswith(CONFIG_SUFFIX) else '.json'
         if not path.name.endswith(suffix) or path.is_symlink() or not path.is_file():
             continue
@@ -91,24 +94,29 @@ def clean_attachments(db, report, ident=None):
             continue
 
         def clean(path=path, owner=owner):
-            reason = attachment_reason(db, owner)
-            if reason:
-                return reason
-            remove_path(path)
-            return None
+            with db._runtime_serialized():
+                reason = attachment_reason(db, owner)
+                if reason:
+                    return reason
+                remove_path(path)
+                return None
 
         attempt(report, path, clean)
 
 
-def cleanup(db, *, attachment_id=None, line=None):
-    """Serialize events with ownership changes; no timer or filesystem polling."""
-    with _lock, db._runtime_serialized():
+def cleanup(db, *, attachment_id=None, line=None, purging=False):
+    """Serialize cleaners; keep inventory and preservation outside ownership locks."""
+    with _lock:
         report = result()
-        steps = [lambda: clean_attachments(db, report, attachment_id)]
+        ids = ([attachment_id] if attachment_id else
+               [att['id'] for att in db.list_attachments(line['id'])] if line else [None])
+        steps = [lambda ident=ident: clean_attachments(db, report, ident) for ident in ids]
         if attachment_id is None:
             from .storage_worktrees import clean_worktrees
             from .storage_fences import clean_fences
-            steps += [lambda: clean_worktrees(db, report, line), lambda: clean_fences(db, report, line)]
+            steps.append(lambda: clean_worktrees(db, report, line, purging=purging))
+            if line is None or purging:
+                steps.append(lambda: clean_fences(db, report, line))
         for step in steps:
             try:
                 step()

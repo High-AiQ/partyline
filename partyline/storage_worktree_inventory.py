@@ -26,10 +26,20 @@ def registrations(root):
     return result
 
 
+def line_candidates(db, line):
+    found = {}
+    cwd = line.get('cwd') or ''
+    if root := managed_root(cwd):
+        found[os.path.normpath(cwd)] = os.path.realpath(root)
+    for item in workspaces(db, line['id']):
+        found[os.path.normpath(item['path'])] = os.path.realpath(item['repository'])
+    return [(root, path, line) for path, root in sorted(found.items())]
+
+
 def candidates(db, line=None):
-    lines = db.list_conversations() + db.list_conversations(archived=True)
     if line:
-        lines.append(line)
+        return line_candidates(db, line)
+    lines = db.list_conversations() + db.list_conversations(archived=True)
     roots, owners, found = set(), {}, {}
     cwds = {row['cwd'] for row in db._exec('SELECT cwd FROM attachments WHERE cwd IS NOT NULL').fetchall()}
     for conv in lines:

@@ -221,7 +221,8 @@ working changes and ignored build files so they can be reopened, without
 snapshotting or reclamation.
 
 The automatic storage pass revisits retired and orphaned paths, including unmerged
-history and worktrees this first pass kept. It saves working files, staged files,
+history and worktrees this first pass kept. Clean, merged checkouts are removed
+without adding recovery refs. It saves working files, staged files,
 and available HEAD/branch/mirror tips with the forced-retirement snapshot machinery
 under `refs/partyline/discarded/storage-<id>/` in each real owning repository, checks
 the evidence again, then removes the checkout. Nested linked worktrees receive

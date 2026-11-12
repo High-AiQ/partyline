@@ -304,6 +304,20 @@ class WorktreeLifecycleTest(unittest.TestCase):
         self.assertEqual(purged.status_code, 200, purged.text)
         self.assertFalse(os.path.exists(mid["cwd"]))
 
+    def test_archiving_one_line_does_not_sweep_another_retired_line(self):
+        repo = self._repo()
+        self._root_on(repo)
+        target = self.child("root", "target", self.machine("root-lead"))
+        unrelated = self.child("root", "unrelated", self.machine("root-lead"))
+        self.db.archive_conversation(unrelated["id"])
+        path = os.path.join(unrelated["cwd"], "only-copy.txt")
+        with open(path, "w") as stream:
+            stream.write("unrelated work")
+        response = self.client.delete(f"/api/conversations/{target['id']}")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(os.path.isfile(path))
+        self.assertFalse(os.path.isdir(target["cwd"]))
+
     # -- startup sweep ---------------------------------------------------------
 
     def test_startup_sweep_removes_clean_orphans_and_keeps_dirty_ones(self):

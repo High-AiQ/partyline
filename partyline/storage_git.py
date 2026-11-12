@@ -34,8 +34,23 @@ def state(root, path, conv_id=None):
             'mirror_tip': mirror, 'index_path': index, 'files': files, 'index': index_files}
 
 
-def recover(root, path, conv_id=None):
+def merged_tips(root, tips):
+    from .worktree_lifecycle import _default_branch
+
+    base = _default_branch(root)
+    tips = list(dict.fromkeys(tip for tip in tips if tip))
+    if not base or not tips:
+        return False
+    done = _git('rev-list', *tips, '--not', base, cwd=root)
+    return done.returncode == 0 and not done.stdout.strip()
+
+
+def recover(root, path, conv_id=None, *, merged=None):
     before = state(root, path, conv_id)
+    clean_merged = merged if merged is not None else merged_tips(
+        root, [before['head'], before['branch_tip'], before['mirror_tip']])
+    if not before['files'] and clean_merged:
+        return before
     refs = snapshot(before, 'storage-' + uuid.uuid4().hex)
     if before != state(root, path, conv_id):
         raise ValueError('worktree changed while saving recovery refs; retained')
@@ -73,6 +88,8 @@ def recover_plain(root, path):
         git('read-tree', '--empty')
         git('add', '--force', '-A', '--', '.')
         tree = git('write-tree')
+        if not git('ls-files', '-z'):
+            return
         tip = git('commit-tree', tree, '-m', 'Partyline orphan recovery')
         git('update-ref', 'refs/partyline/discarded/storage-' + uuid.uuid4().hex + '/snapshot', tip)
         git('add', '--force', '-A', '--', '.')

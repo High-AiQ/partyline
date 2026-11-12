@@ -7,7 +7,7 @@ recovery plan before the service stops.
 
 | DO | DO NOT |
 | --- | --- |
-| Before planning from a stale clean checkout, the captain refreshes its attached checkout with `git pull --ff-only`; after merge, the captain fast-forwards it, verifies `git rev-parse HEAD`, syncs with the extras the server uses (`uv sync --locked --extra voice --extra voice-gpu` on this GPU voice host; `--extra voice` for CPU voice), then requests a restart; use HTTPS with `git -c credential.helper='!gh auth git-credential'` if fenced SSH is unavailable | Ask the person to pull; skip a dirty-checkout ask; reset, stash, or discard in a person's checkout |
+| Before planning from a stale clean checkout, the captain refreshes its attached checkout with `git pull --ff-only`; after merge, the captain fast-forwards it, verifies `git rev-parse HEAD`, syncs with the extras the server uses (`uv sync --locked --extra voice --extra voice-gpu` for GPU voice; `--extra voice` for CPU voice), then requests a restart; use HTTPS with `git -c credential.helper='!gh auth git-credential'` if fenced SSH is unavailable | Ask the person to pull; skip a dirty-checkout ask; reset, stash, or discard in a person's checkout |
 | Read `checkout_path` and `git_head` from `/api/version` to know which checkout the service serves | Assume the checkout you pulled is the one the service runs from |
 | File a restart request; have a person approve it or use explicitly delegated local operator approval | Restart without saving the fleet-wide recovery plan |
 | Trust the automatic mid-turn mark and private continue notice to resume interrupted work | Delay approval waiting for every participant to go idle first |

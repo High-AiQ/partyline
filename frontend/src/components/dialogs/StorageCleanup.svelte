@@ -52,7 +52,7 @@
     <details class="text-[12px] text-cream-dim">
       <summary>Kept {result.skipped.length} items</summary>
       <ul>
-        {#each result.skipped as item (item.path)}
+        {#each result.skipped as item, index (index)}
           <li class="break-words py-1">{item.path} · {humanSize(item.size_bytes)} — {item.reason}</li>
         {/each}
       </ul>
@@ -62,7 +62,7 @@
     <details class="text-[12px] text-cream-dim">
       <summary>Kept worktrees and orphans ({inventory.kept.length})</summary>
       <ul>
-        {#each inventory.kept as item (item.path)}
+        {#each inventory.kept as item, index (index)}
           <li class="break-words py-1">{item.path} · {humanSize(item.size_bytes)} — {item.reason}</li>
         {/each}
       </ul>

@@ -168,19 +168,19 @@ async def post_interruption_notices(runtime, *,
     return bool(bodies)
 
 
-async def engage_startup(runtime) -> None:
-    """The guarded startup housekeeping (findings 5.13, 5.14 item 6, 5.15).
-
-    Posts the unplanned-stop notices, settles the stale rows, reaps the
-    legacy temp locations, and reaps the previous tmpfs root once after the
-    disk-backed switch. Every step is guarded: a failure logs and continues,
-    and the blocking walks run in threads off the event loop.
-    """
+async def prepare_startup(runtime) -> None:
+    """Settle pre-boot state before any reattachment or request can claim a row."""
     try:
         await post_interruption_notices(runtime)
     except Exception:
         logger.exception("startup interruption notice failed; continuing")
     runtime.db.mark_stale_attachments()
+
+
+async def engage_startup(runtime, *, prepared=False) -> None:
+    """Run one-shot housekeeping in a tracked background task after pre-boot state settles."""
+    if not prepared:
+        await prepare_startup(runtime)
     try:
         await asyncio.to_thread(sweep_orphaned_worktrees, runtime.db)
     except Exception:

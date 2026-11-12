@@ -7,18 +7,25 @@ import subprocess
 import uuid
 
 from . import git_fence
-from .line_worktree import _git, rev
+from .line_worktree import _git, repo_root, rev
 from .storage_cleanup import attachment_reason, attempt, remove_path
 from .storage_survey import known_repositories, planned_ids
 
 
 def owners(db, line=None):
-    roots = set(known_repositories(db))
-    roots.update(row['repository'] for row in db._exec('SELECT repository FROM task_workspaces').fetchall())
-    if line and line.get('cwd'):
+    if line:
+        from .task_workspaces import workspaces
         from .worktree_paths import managed_root
-        if root := managed_root(line['cwd']):
+        roots = {item['repository'] for item in workspaces(db, line['id'])}
+        if root := managed_root(line.get('cwd') or ''):
             roots.add(root)
+        for att in db.list_attachments(line['id']):
+            if root := repo_root(att.get('cwd')):
+                roots.add(root)
+    else:
+        roots = set(known_repositories(db))
+        roots.update(row['repository'] for row in
+                     db._exec('SELECT repository FROM task_workspaces').fetchall())
     result = {}
     for root in roots:
         common = rev(root, 'rev-parse', '--path-format=absolute', '--git-common-dir')
@@ -79,10 +86,11 @@ def clean_fences(db, report, line=None):
     if not base.is_dir() or base.is_symlink():
         return
     repositories = owners(db, line)
+    allowed = {line['id'], *(att['id'] for att in db.list_attachments(line['id']))} if line else None
     for folder in sorted(base.iterdir()):
         if not folder.is_dir() or folder.is_symlink():
             continue
-        if line and folder.name != line['id']:
+        if allowed is not None and folder.name not in allowed:
             continue
         # Current mirrors are keyed by line; also protect legacy attachment-keyed homes.
         attachment = db.get_attachment(folder.name)
@@ -102,12 +110,16 @@ def clean_fences(db, report, line=None):
                     return 'owning repository is unavailable; mirror refs retained'
                 root, common = repositories[mirror.name]
                 preserve(mirror, root, common)
-                if reason := attachment_reason(db, folder.name):
-                    return reason
-                if any(attachment_reason(db, ident) for ident in ids):
-                    return 'line has a live or restart-planned attachment'
-                remove_path(mirror)
-                return None
+                with db._runtime_serialized():
+                    if reason := attachment_reason(db, folder.name):
+                        return reason
+                    if db.get_conversation(folder.name) and not line:
+                        return 'line still exists'
+                    ids = {att['id'] for att in db.list_attachments(folder.name)}
+                    if any(attachment_reason(db, ident) for ident in ids):
+                        return 'line has a live or restart-planned attachment'
+                    remove_path(mirror)
+                    return None
             attempt(report, mirror, clean)
         try:
             folder.rmdir()

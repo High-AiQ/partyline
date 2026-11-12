@@ -38,3 +38,27 @@ it("cleans in one click and reports kept paths, reasons and idle lines", async (
     await unmount(component);
   }
 });
+
+it("renders duplicate kept paths from aliased roots", async () => {
+  const duplicate = { path: "/repo/same", reason: "kept for recovery", size_bytes: 1000 };
+  vi.spyOn(storageCleanupApi, "details").mockResolvedValue({
+    kept: [duplicate, duplicate],
+    idle_lines: [],
+  });
+  vi.spyOn(storageCleanupApi, "cleanup").mockResolvedValue({
+    removed: [],
+    freed_bytes: 0,
+    skipped: [duplicate, duplicate],
+  });
+  const component = mount(StorageCleanup, { target: document.body, props: { refreshed: vi.fn() } });
+  try {
+    await settle();
+    expect(document.querySelectorAll("li")).toHaveLength(2);
+    document.querySelector("button")?.click();
+    await settle();
+    expect(document.querySelectorAll("li")).toHaveLength(4);
+    expect(document.body.textContent).toContain("Kept 2 items");
+  } finally {
+    await unmount(component);
+  }
+});

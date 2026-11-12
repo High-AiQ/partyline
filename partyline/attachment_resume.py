@@ -216,49 +216,6 @@ async def _resume_adapter_locked(
         startup_messages = []
     runtime_owner = str(uuid.uuid4())
     att["runtime_owner"] = runtime_owner
-    att["api_token"] = rotate_api_token(runtime.db, att_id)
-    att["hook_url"] = hook_url(att_id, runtime_owner)
-    att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
-    load_write_grants(runtime.db, att)
-    await asyncio.to_thread(fence_workspaces.load, runtime.db, att)
-    att["global_prose"] = runtime.db.get_setting("global_prose")
-    att["db_paths"] = database_paths(runtime.db)
-    provision_connection(runtime.db.path, att)
-    att["digest_rider"] = lambda: ""
-    bind_connection_hint(att)
-    bind_role_delivery(runtime.db, att, runtime)
-    history = await asyncio.to_thread(delivered_history, runtime.db, att)
-    att["delivered_bodies"] = history.bodies
-    att["delivered_transcript_records"] = history.transcript_records
-    att["legacy_relayed_bodies"] = history.legacy_relayed_bodies
-    att["mark_transcript_delivery"] = lambda fingerprint, body: mark_transcript_delivery(
-        runtime.db, att, runtime_owner, fingerprint, body
-    )
-    att["post_resume_record"] = presence.posting(
-        conv["id"], att_id,
-        runtime.post_callback(att_id, conv["id"], runtime_owner, route=False),
-    )
-    att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
-    att["on_process_exit"] = exit_callback(runtime, att)
-    adapter = make_adapter(
-        att["adapter"],
-        att,
-        presence.posting(
-            conv["id"],
-            att_id,
-            runtime.post_callback(att_id, conv["id"], runtime_owner),
-        ),
-        presence.statusing(
-            conv["id"],
-            att_id,
-            runtime.status_callback(att_id, conv["id"], runtime_owner),
-            name=att.get("name", ""),
-        ),
-        on_cli_session=lambda session: runtime.db.set_cli_session(
-            att_id, session, runtime_owner
-        ),
-    )
-    startup_staged = await asyncio.to_thread(adapter.stage_startup_delivery, startup_messages or [])
     att["memory_limit"] = att.get("memory_limit") or format_limit(
         settings(runtime.db)["default_process_memory_bytes"]
     )
@@ -273,10 +230,53 @@ async def _resume_adapter_locked(
         runtime.db, att_id, runtime_owner, lease, grandfathered=grandfathered
     ):
         raise HTTPException(409, claim_refusal_detail(runtime, att))
-    if startup_messages:
-        runtime._live_uncredited(att_id, runtime_owner)
-        runtime._record_unproved(att, adapter, startup_messages)
     try:
+        att["api_token"] = rotate_api_token(runtime.db, att_id)
+        att["hook_url"] = hook_url(att_id, runtime_owner)
+        att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
+        load_write_grants(runtime.db, att)
+        await asyncio.to_thread(fence_workspaces.load, runtime.db, att)
+        att["global_prose"] = runtime.db.get_setting("global_prose")
+        att["db_paths"] = database_paths(runtime.db)
+        await asyncio.to_thread(provision_connection, runtime.db.path, att)
+        att["digest_rider"] = lambda: ""
+        bind_connection_hint(att)
+        bind_role_delivery(runtime.db, att, runtime)
+        history = await asyncio.to_thread(delivered_history, runtime.db, att)
+        att["delivered_bodies"] = history.bodies
+        att["delivered_transcript_records"] = history.transcript_records
+        att["legacy_relayed_bodies"] = history.legacy_relayed_bodies
+        att["mark_transcript_delivery"] = lambda fingerprint, body: mark_transcript_delivery(
+            runtime.db, att, runtime_owner, fingerprint, body
+        )
+        att["post_resume_record"] = presence.posting(
+            conv["id"], att_id,
+            runtime.post_callback(att_id, conv["id"], runtime_owner, route=False),
+        )
+        att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
+        att["on_process_exit"] = exit_callback(runtime, att)
+        adapter = make_adapter(
+            att["adapter"],
+            att,
+            presence.posting(
+                conv["id"],
+                att_id,
+                runtime.post_callback(att_id, conv["id"], runtime_owner),
+            ),
+            presence.statusing(
+                conv["id"],
+                att_id,
+                runtime.status_callback(att_id, conv["id"], runtime_owner),
+                name=att.get("name", ""),
+            ),
+            on_cli_session=lambda session: runtime.db.set_cli_session(
+                att_id, session, runtime_owner
+            ),
+        )
+        startup_staged = await asyncio.to_thread(adapter.stage_startup_delivery, startup_messages or [])
+        if startup_messages:
+            runtime._live_uncredited(att_id, runtime_owner)
+            runtime._record_unproved(att, adapter, startup_messages)
         await adapter.start()
     except FenceUnavailable as exc:
         await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)

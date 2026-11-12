@@ -3,7 +3,7 @@
 Settings → **Storage** shows what Partyline keeps on disk and clears what it can recreate.
 People only: processes get 403 on all storage routes. Sizes are measured when the section opens or
 is refreshed, in a thread, under a 10 s budget; a category that ran out of time shows `≈`
-(`approximate: true`). Automatic cleanup runs once at startup and on lifecycle events; there is no timer.
+(`approximate: true`). Automatic cleanup runs once in the background after startup and on lifecycle events; there is no timer.
 
 | Category | Clearable when |
 | --- | --- |
@@ -28,7 +28,7 @@ restart plan keep their files, including caches and worktrees.
 
 Retirement, purge, and startup housekeeping revisit retired worktrees and orphans
 under `.partyline-worktrees`, including registered checkouts and unregistered
-folders without a line row. Git changes are saved first in the real repository's
+folders without a line row. Dirty or unmerged Git changes are saved first in the real repository's
 `refs/partyline/discarded/storage-<id>/` refs: `snapshot` contains working files,
 `index` the staged state, and `head`, `branch`, and `mirror` preserve available
 commit tips. For example, `git show <snapshot-ref>:path/to/file` reads a recovered
@@ -42,9 +42,13 @@ Nested linked worktrees are recovered in their surviving owning repositories and
 removed through the existing registered-worktree removal path. Independent nested
 clones are kept: their unique commits may exist nowhere else. A failure logs and
 continues with other candidates. Walks, Git commands, and removal run in threads;
-every candidate is rechecked immediately before deletion. Attachment ownership
-transitions share the cleanup lock, so a resume cannot start in a directory being
-removed.
+every candidate is rechecked immediately before deletion. Size walks and recovery snapshots run outside the shared runtime ownership lock.
+Only each candidate's final recheck and removal take that lock, so other processes
+can receive messages and start while the sweep prepares the next candidate.
+Retirement and archive events clean only their own lines; startup housekeeping
+runs in the background so serving requests and reattachment can begin immediately.
+A resume claims its starting state before publishing connection files and staging
+its initial delivery. Clean, merged checkouts need no additional recovery refs.
 
 Fence mirrors are keyed by **line ID** (`sessions/fence/<line>/git-<repository hash>`).
 For purged lines and orphans, cleanup inspects all loose and packed refs and anchors

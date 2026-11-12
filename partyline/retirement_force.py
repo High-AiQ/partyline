@@ -229,7 +229,8 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
                 "recovery_refs": recovery, "preserved_paths": preserved_paths})
         await asyncio.to_thread(reap_legacy_temp, db)
         from .storage_cleanup import automatic
-        await automatic(db)
+        for line_id in completed:
+            await automatic(db, line=db.get_conversation(line_id))
         await _audit(db, audit_id, principal, target, "completed", decision, recovery)
         notice_line = principal.conv_id or target
         await post_system_notice(runtime, notice_line,

@@ -11,6 +11,39 @@ commit. A Linux regression exercises real FileEvents with a separate WAL writer;
 Hermes already keeps its reader open and produced no notifications in the same
 control. Close threaded readers under the same lock as reads.
 
+## Cleanup inventory must not hold the fleet's ownership lock
+
+The false assumption was that placing a sweep in a thread kept it from delaying
+unrelated processes. Holding the shared runtime lock through walks, snapshots and
+fetches still blocks every delivery and activation. Measure and preserve outside
+that lock; serialize only each candidate's final recheck and deletion. Lifecycle
+hooks target their own line, and startup runs the full sweep as a background task
+after stale rows settle. Regressions probe the lock during walks and snapshots,
+verify the final deletion is locked, and let reattachment finish while housekeeping
+is held on a controlled event.
+
+## Resume must claim ownership before publishing connection files
+
+The false assumption was that newly provisioned coordinates proved an attachment
+was starting. Until claim_resume changes the row, cleanup correctly sees it as
+stopped and can remove both connection and MCP files. Claim first, then provision
+and stage startup delivery; preparation failures return the row to exited. A
+regression runs cleanup during provisioning and verifies both files survive startup.
+
+## Clean merged worktrees do not need recovery refs
+
+The false assumption was that snapshotting every removed worktree was harmless.
+It accumulates permanent recovery refs for content already in the repository's
+merged history. Inspect and recheck those checkouts without creating recovery
+refs; keep snapshots for dirty or unmerged state. Regressions cover both automatic
+and existing cleanup paths, including a missing but merged registration.
+
+## Storage paths are not unique row keys
+
+The false assumption was that every reported storage path appeared once. Aliased
+roots or repeated kept reports can produce duplicates. Render the reports without
+path uniqueness as a requirement; a component regression supplies duplicate paths.
+
 ## Retained storage needs another lifecycle event
 
 The false assumption was that keeping a directory during retirement was enough:

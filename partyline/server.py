@@ -91,7 +91,7 @@ from .review_worktrees import register_review_routes
 from .approval_bubble import register_approval_routes
 from .tmp_reap_routes import register_tmp_reap_routes
 from .scratch_worktrees import register_scratch_routes
-from .startup_state import engage_startup
+from .startup_state import engage_startup, prepare_startup
 from . import op_timing
 from .line_gates import register_gates_routes
 from .prereview import register_prereview_route
@@ -176,7 +176,8 @@ async def lifespan(app):
     app.state.fence_status = fence_probe.status(probe_result)
     # Findings 5.13/5.14/5.15 startup housekeeping: notices, stale rows,
     # legacy temp reaping, previous tmpfs root — each step guarded inside.
-    await engage_startup(runtime)
+    await prepare_startup(runtime)
+    app.state.startup_housekeeping_task = asyncio.create_task(engage_startup(runtime, prepared=True))
     from .captain_handover_completion import maintenance, maintenance_once
     await maintenance_once(runtime)
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
@@ -185,7 +186,7 @@ async def lifespan(app):
     from .browser_snapshots import resource_updates
     from . import docker_events
     tasks = [asyncio.create_task(resource_updates(runtime)), asyncio.create_task(docker_events.run(runtime)),
-             automatic_task, asyncio.create_task(expire_offers(runtime)),
+             app.state.startup_housekeeping_task, automatic_task, asyncio.create_task(expire_offers(runtime)),
              asyncio.create_task(maintenance(runtime)), asyncio.create_task(run_memory_events(runtime)),
              asyncio.create_task(run_task_maintenance(runtime)),
              asyncio.create_task(run_resource_leases(runtime))]

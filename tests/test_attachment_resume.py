@@ -515,3 +515,30 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 409)
         self.assertIn("already live", raised.exception.detail)
         self.assertIn("one", raised.exception.detail)
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    async def test_cleanup_during_resume_provisioning_keeps_connection_and_mcp_files(self, *_mocks):
+        from pathlib import Path
+        from partyline.agent_connection import provision_connection
+        from partyline.storage_cleanup import cleanup
+
+        observed = []
+
+        def provision(db_path, att):
+            observed.append(self.db.get_attachment(att['id'])['status'])
+            provision_connection(db_path, att)
+            cleanup(self.db, attachment_id=att['id'])
+            for suffix in ('.json', '.mcp.json'):
+                self.assertTrue(Path(db_path + '.agent-connections', att['id'] + suffix).is_file())
+
+        with patch('partyline.attachment_resume.provision_connection', side_effect=provision):
+            await resume_adapter('one', None, **self.resume_arguments())
+        self.assertEqual(observed, ['starting'])
+
+    @patch("partyline.attachment_resume.provision_connection", side_effect=OSError('disk full'))
+    async def test_resume_preparation_failure_releases_the_starting_claim(self, _provision):
+        with self.assertRaises(HTTPException) as raised:
+            await resume_adapter('one', None, **self.resume_arguments())
+        self.assertEqual(raised.exception.status_code, 500)
+        self.assertEqual(self.db.get_attachment('one')['status'], 'exited')
