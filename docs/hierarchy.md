@@ -771,6 +771,13 @@ failure: the accept is refused with 409 and
 `(gates passed)`. On a host with no write fence the request answers 501 —
 gate commands are never run unfenced inside the server.
 
+## Detaching a task's workers on accept
+
+A task line's workers never detach themselves, and an approved, accepted task's idle implementer and
+reviewer keep costing context. `accept` with `{"sha": "...", "detach_workers": true}` records the SHA,
+marks the task done, then stops both workers; the response lists them in `detached_workers`. Without the
+flag nothing is detached, and `retire_child` (or `DELETE /api/attachments/<id>`) works either way.
+
 ## The goal
 
 | Need | Operation |

@@ -96,11 +96,26 @@ def tail(others: list[dict]) -> str:
     return ''.join(f"; {item['repository']} {item['sha'][:12]}" for item in others)
 
 
-async def settle_task(runtime, conv_id: str, task_row: dict | None) -> None:
-    """An accepted task is finished: done, settled now, no block or stall left."""
+async def settle_task(runtime, conv_id: str, task_row: dict | None,
+                      detach_workers: bool = False) -> list[str]:
+    """An accepted task is finished: done, settled now, no block or stall left.
+
+    With ``detach_workers`` its implementer and reviewer are stopped too, after the SHA is
+    recorded; the ids of those that were live come back. Nothing detaches itself otherwise.
+    """
     if not task_row:
-        return
+        return []
     runtime.db._exec(
         "UPDATE task_reviews SET status='done',settled_at=COALESCE(settled_at,?),blocked_at=NULL,"
         'stall_stage=0,stall_notice_id=NULL WHERE conv_id=?', (time.time(), conv_id))
     await runtime.broadcast_all(ConversationsChangedEvent())
+    if not detach_workers:
+        return []
+    from .line_process_routes import detach_attachment
+    stopped = []
+    for ident in (task_row['implementer_id'], task_row['reviewer_id']):
+        att = runtime.db.get_attachment(ident) if ident else None
+        if att and att['status'] in ('starting', 'running'):
+            await detach_attachment(runtime, ident, survivors=False)
+            stopped.append(ident)
+    return stopped

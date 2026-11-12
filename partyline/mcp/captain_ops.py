@@ -213,8 +213,8 @@ def _body(op, args):
     if op == "appoint_lead":
         return {"attachment_id": args["attachment_id"] or None}
     if op == "accept":
-        return {key: args[key] for key in ("sha", "allow_descendant", "findings", "run_gates")
-                if key in args}
+        keys = ("sha", "allow_descendant", "findings", "run_gates", "detach_workers")
+        return {key: args[key] for key in keys if key in args}
     if op == "review_worktree":
         return {key: args[key] for key in ("sha", "repository") if key in args}
     if op == "share_ref":
