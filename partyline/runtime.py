@@ -21,6 +21,7 @@ from .delivery_credit_accounting import confirm_reserved
 from .delivery_reservation import reserve_delivery
 from .message_routing import post_human_message, route_message
 from .reattach import ReattachCoordinator
+from .settled_mail import drop_settled
 from .ws_push import push_event
 from .runtime_delivery_credit import DeliveryCreditMixin
 from .task_privacy import hidden_from_people
@@ -136,7 +137,7 @@ class ChatRuntime(DeliveryCreditMixin):
                 conv_id, att["last_seen"], att["name"], att["id"]
             )
             ours = self._live_uncredited(att["id"], runtime_owner)
-            pending = [m for m in pending if m["id"] not in (ours or ())]
+            pending = drop_settled(self.db, att, [m for m in pending if m["id"] not in (ours or ())])
             if not pending:
                 return not bool(ours)
             pasted = await adapter.deliver(pending)

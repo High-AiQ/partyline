@@ -35,9 +35,9 @@ async def report(runtime, row):
         db._exec('UPDATE task_reviews SET report_id=? WHERE conv_id=?', (record['id'], row['conv_id']))
     else:
         record = reports.get(db, row['report_id'])
-        if record['notified_at'] is not None:
-            return
-        # Retry only the existing report, including after an acknowledgement.
+        if record['notified_at'] is not None or record['acknowledged_at'] is not None:
+            return  # woken once, or already read and acknowledged: nothing left to ring
+        # Retry only the existing report whose wake never went out.
         with db.lock:
             wake = reports._claim_wake(db.conn, record['id'], time.time())
             db.conn.commit()

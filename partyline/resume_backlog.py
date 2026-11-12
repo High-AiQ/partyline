@@ -5,6 +5,7 @@ from __future__ import annotations
 from .message_queries import MESSAGE_SELECT, as_message
 from .resolved_notices import drop_resolved
 from .mentions import known_mention_names, line_addressed, mentioned_names
+from .settled_mail import drop_settled
 from .solo_line import implied_addressee
 
 WORKER_PACK_NOTICE_PREFIX = "☏ workers "
@@ -57,6 +58,7 @@ def addressed_backlog(runtime, att: dict, *, include_message_ids=()) -> list[dic
             and addressed_human_message(runtime, att, latest)
         ):
             selected.append(latest)
+    selected = drop_settled(runtime.db, att, selected, keep=included)
     kept = drop_resolved(runtime, att, list(selected), keep=included | {m["id"] for m in queued})
     return sorted({message["id"]: message for message in kept}.values(), key=lambda m: m["id"])
 

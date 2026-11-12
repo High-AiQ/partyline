@@ -2580,3 +2580,17 @@ default on every platform it runs on. A Claude adapter on macOS no longer holds 
 transcript (2.114.2; see the lesson on a kqueue watch of every transcript). Tests: `tests/test_fd_limit.py`,
 `tests/test_launch.py`.
 
+
+## 2026-11-12 — A task notice has no meaning once its task is settled
+
+The false assumption was that a worker is never handed a review request, stall reminder or restart note after the
+work it asks for has ended, because the notice was delivered once. The delivery cursor does not always move: an
+unproved paste, a held wake flush and a resumed session's backlog all re-read everything past `last_seen`. After
+`review_verdict` approved a task, every later wake of the reviewer (the captain's accept, a report wake, an
+unreached notice) pasted the same "Review round 1" brief again, three times in one batch on macOS, until the
+captain detached the workers. A report whose wake never went out was also retried "including after an
+acknowledgement", so `request_review` or `report` on an acknowledged report could ring the captain again.
+Delivery now drops, at delivery time, the task server's in-flight-work notices to a worker of an approved or done
+task that were sent before it settled (`partyline/settled_mail.py`, used by `deliver_pending`, the held-wake flush
+and the resume backlog), and an acknowledged report is never claimed for a wake again. A changes-requested task
+still delivers. Tests: `tests/test_settled_task_mail.py`.
