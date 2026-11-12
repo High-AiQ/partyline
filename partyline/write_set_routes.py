@@ -72,7 +72,8 @@ def requested_paths(db, conv_id: str, body: WriteSetIn) -> list[str]:
     if failures:
         if body.paths:
             items = "; ".join(f"{path}: {detail}" for path, detail in failures)
-            raise HTTPException(400, f"none of these paths were filed: {items}; correct them and retry")
+            raise HTTPException(400, f"none of these paths were filed: {items}; correct them and retry, "
+                                     "filing every path you will need in the same request")
         raise HTTPException(400, failures[0][1])
     return list(dict.fromkeys(validated))
 
@@ -142,7 +143,8 @@ def write_set_router(runtime, resume=None) -> APIRouter:
                 named = ", ".join(f"`{path}`" for path in raw_paths) or "(no path named)"
                 raise HTTPException(
                     403, f"none of these paths were filed: {named}; only a person or a captain "
-                         "above this line may request write scope")
+                         "above this line may request write scope — ask for every path you will need "
+                         "in one request")
         if is_human(principal):
             # Same rule as a process filing: the path must be grantable, so a
             # person cannot record a grant the fence would drop at spawn (2.18).

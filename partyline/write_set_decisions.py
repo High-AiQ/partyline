@@ -9,19 +9,18 @@ line already holds.
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import docker_relay, docker_workloads, fence_paths, fence_workspaces
+from . import docker_relay, docker_workloads
 from .approval_bubble import broadcast_approval_change
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 from .mention_relay import post_private
 from .system_notice import post_system_notice
-from .hierarchy import ancestors, lead_attachment
+from .hierarchy import ancestors
 from .write_set_requests import (
     PendingWriteSetGrant,
     WriteSetGrantRequest,
@@ -32,6 +31,7 @@ from .write_set_requests import (
 from .contracts import WriteSetGrantRequestEvent
 from .write_set_routes import add_write_grant
 from .write_set_resume import resume_granted_scopes
+from .write_set_routing import machine_grant_error
 
 
 class ApproveIn(BaseModel):
@@ -44,41 +44,9 @@ class WriteSetDenyIn(BaseModel):
 
 def _machine_decision_error(db, principal, conv_id: str,
                             request: WriteSetGrantRequest) -> str | None:
-    """403 text when an ancestor captain may not decide this request (5.9).
-
-    The captain must be the live lead of a strict ancestor of the line, must
-    not be the requester, and the requested path must resolve inside a write
-    grant the captain's own line holds or a writable entry of its own fence
-    write set (checkout, Git carve-outs, `.review/`, `.scratch/`). Anything
-    wider is a person's call.
-    """
-    if docker_relay.is_docker_socket(request.path):
-        return "docker access is root-equivalent; a person decides"
-    if not principal.is_lead:
-        return "outside your grants; a person decides"
-    if principal.conv_id not in ancestors(db, conv_id):
-        return "outside your grants; a person decides"
-    lead = lead_attachment(db, principal.conv_id)
-    if (lead is None or lead["id"] != principal.attachment_id
-            or lead["status"] not in ("starting", "running")):
-        return "outside your grants; a person decides"
-    if (request.requester_attachment_id
-            and request.requester_attachment_id == principal.attachment_id):
-        return "outside your grants; a person decides"
-    wanted = os.path.realpath(request.path)
-    rows = db._exec(
-        "SELECT path FROM conversation_write_grants WHERE conv_id=?",
-        (principal.conv_id,)).fetchall()
-    for row in rows:
-        base = os.path.realpath(row["path"])
-        if wanted == base or wanted.startswith(base + "/"):
-            return None
-    fence_workspaces.load(db, lead)
-    for src, _dst, read_only in fence_paths.write_set(lead, create=False):
-        base = os.path.realpath(src)
-        if not read_only and (wanted == base or wanted.startswith(base + "/")):
-            return None
-    return "outside your grants; a person decides"
+    """403 text when an ancestor captain may not decide this request (5.9)."""
+    return machine_grant_error(db, principal, request.path, ancestors(db, conv_id),
+                               request.requester_attachment_id)
 
 
 def make_announcer(runtime):

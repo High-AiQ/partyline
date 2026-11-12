@@ -27,6 +27,11 @@ class TaskIn(BaseModel):
                     'explorations, assets, one-off investigations); the implementer ends with '
                     'deliver(what, where). Fixed at creation.')
     memory_limit: str | None = Field(default=None, pattern=r'^[1-9][0-9]{0,5}[KMG]$')
+    write_set: list[str] = Field(
+        default_factory=list, max_length=32,
+        description='Absolute paths to pre-grant to the task line before its implementer starts, so it '
+                    'never stalls to ask: the same validation and authority as approving a write-set '
+                    'request (inside your own grants or checkout; a person decides anything wider).')
 
 
 class RepositoryShaIn(BaseModel):

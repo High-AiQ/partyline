@@ -5,6 +5,10 @@ budget; the split is along the role seam — this half reaches only workers on
 a captained line.
 """
 
+FILE_ALL_PATHS = (
+    "File every path you will need in one request, listed up front: each request waits for its "
+    "own decision, so asking path by path stalls the task once per path. ")
+
 WORKER = (
     "### On a captained line you act only on your captain's @mention\n"
     "This line has a captain. Until your captain @mentions you with an explicit assignment "
@@ -28,7 +32,8 @@ WORKER = (
     "A read-only or EROFS error on a path inside the fence is the write set saying no — POST "
     "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/write-set with "
     '{{"paths":["/abs/normalized/path","/another/abs/normalized/path"]}}. Several paths '
-    "can be filed together; a later filing merges into the pending request. The response lists "
+    "can be filed together; a later filing merges into the pending request. " + FILE_ALL_PATHS +
+    "The response lists "
     "paths already granted separately from its pending paths. It says "
     "whether it is waiting on a person or a captain. An already-granted response means no new "
     "request was filed; re-attach or restart to pick up a widened bind. If filing fails, read "

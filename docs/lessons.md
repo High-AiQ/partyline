@@ -2594,3 +2594,13 @@ Delivery now drops, at delivery time, the task server's in-flight-work notices t
 task that were sent before it settled (`partyline/settled_mail.py`, used by `deliver_pending`, the held-wake flush
 and the resume backlog), and an acknowledged report is never claimed for a wake again. A changes-requested task
 still delivers. Tests: `tests/test_settled_task_mail.py`.
+
+## 2026-11-12 — A worker asks for scope as it trips over it
+
+The false assumption was that merging later filings into the pending request (7a0ffbc3) was enough. A worker
+that learns it needs a path only when the fence refuses a write still files one path, waits for a person, resumes,
+and trips over the next one: a task needing six paths stalled six times even though six paths are one decision.
+The worker pack, the task pack, the attach briefing and the 400/403 refusals now tell it to file every path it
+will need in one request, and `create_task(write_set=[...])` lets the captain pre-grant them before the implementer
+starts, through the same validation (`validate_grantable`) and authority (`machine_grant_error`, shared with
+deciding a request) as an approval. Tests: `tests/test_write_set_requests.py`, `tests/test_task_write_set.py`.

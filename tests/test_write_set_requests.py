@@ -431,6 +431,43 @@ class WriteSetRequestTest(unittest.TestCase):
                          [self.target, second])
         self.assertEqual(self.resumed, ["cap", "wrk"])
 
+    def test_six_paths_cost_one_approval_filed_together_or_one_by_one(self):
+        paths = []
+        for index in range(6):
+            path = os.path.join(self.target, f"dir{index}")
+            os.makedirs(path)
+            paths.append(path)
+        together = self.client.post("/api/conversations/line/write-set",
+                                    json={"paths": paths}, headers=self.worker)
+        self.assertEqual(together.status_code, 200, together.text)
+        self.assertEqual(together.json()["paths"], paths)
+        # Filing them one at a time merges into the same pending request, never a 409.
+        for path in paths:
+            again = self.client.post("/api/conversations/line/write-set",
+                                     json={"path": path}, headers=self.worker)
+            self.assertEqual(again.status_code, 200, again.text)
+            self.assertEqual(again.json()["id"], together.json()["id"])
+        rows = self.db._exec("SELECT id FROM conversation_write_grant_requests").fetchall()
+        self.assertEqual(len(rows), 1)
+        with patch("partyline.write_set_decisions.resume_line_attachments", self._resume_line):
+            approved = self.client.post(
+                f"/api/conversations/line/write-set/request/{together.json()['id']}/approve",
+                headers=self.human)
+        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual([row["path"] for row in approved.json()["granted"]], paths)
+        self.assertEqual(self.resumed, ["cap", "wrk"])  # one resume, not six
+
+    def test_refusals_tell_the_worker_to_file_every_path_at_once(self):
+        bad = self.client.post("/api/conversations/line/write-set",
+                               json={"paths": ["relative"]}, headers=self.worker)
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("every path you will need in the same request", bad.text)
+        self.db.create_conversation("stranger", "Stranger", captain_mode="manager_tree")
+        denied = self.client.post("/api/conversations/stranger/write-set",
+                                  json={"paths": [self.target]}, headers=self.worker)
+        self.assertEqual(denied.status_code, 403)
+        self.assertIn("every path you will need in one request", denied.text)
+
     def test_merged_request_uses_the_retained_requester_for_decider_eligibility(self):
         self.db.create_conversation("child", "Child", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='child'")

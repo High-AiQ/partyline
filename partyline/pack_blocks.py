@@ -37,7 +37,8 @@ ASK_FIRST = (
     "Every process runs fenced; if an attach is refused with write fence unavailable, "
     "the remedy in the banner is a person-side install, not a flag. A read-only or EROFS "
     "write inside the fence is the write set saying no: POST {root}/write-set with "
-    '{{"path":"/abs/normalized/path"}} to file a request and wait for a person — never work '
+    '{{"paths":["/abs/normalized/path"]}} to file one request for every path you will need and '
+    'wait for a person — never work '
     "around the fence (a temp npm cache is the kind of workaround that belongs in a write-set "
     "request instead).\n"
     "Commits or pushes to shared branches, deploys, paid calls beyond a stated budget, "
