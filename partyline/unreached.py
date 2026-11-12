@@ -63,9 +63,17 @@ class Unreached:
 
     async def send(self, runtime) -> None:
         memory = getattr(getattr(runtime, "returns", None), "told", {})
-        told = memory.get(self.speaker["id"], (None, ()))[1]
+        notice, told = memory.get(self.speaker["id"], (None, ()))
         if all(line in told for line in self.lines):
-            return  # nothing, or only what the notice it is answering already said
+            # Nothing, or only what the notice it is answering already said. A line this
+            # message did not repeat is forgotten: the handle was reached, or not named,
+            # so the same failure later is news again.
+            repeated = tuple(line for line in told if line in self.lines)
+            if repeated:
+                memory[self.speaker["id"]] = (notice, repeated)
+            else:
+                memory.pop(self.speaker["id"], None)
+            return
         from .orchestrator_notices import tell  # it imports mention_relay
 
         listed = "\n".join(f"• {line}" for line in self.lines)

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from partyline.unreached import explain
 from tests.orchestrator_fixture import TaskFixture
-from tests.test_return_path import Tree
+from tests.test_return_path import Recorder, Tree
 
 MARK = "did not reach everyone"
 
@@ -148,6 +148,25 @@ class AgentSpeakerTest(Tree):
         await self.say("worker", "@gone @builder then")  # a handle the notice did not carry
         self.assertEqual(len(self.told("worker")), 2)
         self.assertIn("builder is on line", self.told("worker")[1]["body"])
+
+    async def test_a_handle_reached_in_between_is_reported_when_it_is_gone_again(self):
+        """The memory must not outlive a hand-off that worked: found in review of #496."""
+        await self.say("worker", "@gone hello")
+        self.assertEqual(len(self.told("worker")), 1)
+
+        self.db.set_attachment_status("gone", "running", "x")
+        revived = Recorder("x")
+        revived.att.update(id="gone", name="gone")
+        self.runtime.live["gone"] = self.presence.watch(
+            revived, "parent", "gone", "receipt", *self.runtime.held_wake_hooks("parent", "gone", "gone"))
+        await self.say("worker", "@gone are you back")  # this one is delivered
+        self.assertEqual(len(revived.delivered), 1)
+        self.assertNotIn("worker", self.runtime.returns.told)
+        self.db.set_attachment_status("gone", "detached", "x")
+        self.runtime.live.pop("gone")
+
+        await self.say("worker", "@gone the branch is ready, please merge it")
+        self.assertEqual(len(self.told("worker")), 2)
 
     async def test_a_new_wake_makes_the_same_slip_news_again(self):
         await self.say("worker", "@gone hello")
