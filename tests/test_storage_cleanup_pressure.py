@@ -25,7 +25,7 @@ class CleanupPressureTest(CleanupFixture):
     def test_large_committed_only_worktree_is_removed_near_zero_free_space(self):
         path = self.child('committed-full-disk')
         with (path / 'committed').open('wb') as stream:
-            for _ in range(40):
+            for _ in range(4):  # any committed size would need room if it were charged
                 stream.write(b'x' * (1024 * 1024))
         git(path, 'add', 'committed')
         git(path, 'commit', '-qm', 'already durable')

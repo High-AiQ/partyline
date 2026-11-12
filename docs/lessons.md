@@ -20,7 +20,7 @@ merged checkouts on full disks and charged already committed blobs again. Stream
 only modified and untracked paths; staged and committed blobs are already in
 Git. Deleted paths contribute no new content. When the estimate is zero, skip
 both the free-space check and its reserve, including for empty plain folders.
-Regressions remove a clean merged checkout, a checkout with 40 MiB of committed
+Regressions remove a clean merged checkout, a checkout with 4 MiB of committed
 content, and a deletion-only orphan with 2,100 paths at one byte reported free.
 Nonempty parent rmdir failures also stay separate from denied-entry counts;
 a parent that became nonempty still prevents moving the checkout away.
