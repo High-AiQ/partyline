@@ -245,10 +245,15 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
         failure = [c.args[2] for c in self.post.await_args_list if "monitoring failed" in c.args[2]]
         self.assertEqual(len(failure), 1)
 
-    async def watch(self, wakes, polls):
+    async def watch(self, wakes, polls, backend=None):
         """Drive the watcher loop with named wakes; return the delays it asked to wait."""
         self.claim()
         self.adapter._resolve_store = Mock(return_value=self.store)
+        if backend is not None:
+            from partyline.adapters.events import AdapterEvents
+
+            self.adapter.file_events = lambda *paths, **kw: AdapterEvents.file_events(
+                self.adapter, *paths, backend=backend, **kw)
         self.adapter._poll = AsyncMock(side_effect=polls)
         self.adapter._after_poll = Mock()
         wakes, delays, alive, now = iter(wakes), [], True, 0.0
@@ -278,6 +283,19 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.adapter._after_poll.call_count, 3)  # a redraw still runs deadlines
         self.assertAlmostEqual(delays[0], RECHECK_SECONDS)
         self.assertEqual(delays[1:4], [None, None, None])
+
+    async def test_a_watch_that_comes_back_reads_what_was_written_while_it_was_down(self):
+        """A turn end written while the watch was starved would otherwise wait for the next
+        write to the store: the wake that restores the watch is terminal output, which
+        alone never reads (integration review of #500)."""
+        from tests.test_watch_exhaustion import Backend
+
+        # Refused on entry and again when the claim wakes the watcher, so the first read
+        # happens with the watch still down.
+        backend = Backend(creation=[OSError(errno.EMFILE, "Too many open files")] * 2)
+        await self.watch(["output", "output", "exit"], [True, True, True], backend)
+        self.assertEqual(len(backend.made), 1)  # the first output re-created the watch
+        self.assertEqual(self.adapter._poll.await_count, 2)  # the first read, then the catch-up
 
     async def test_a_notification_that_shows_nothing_new_gets_one_later_look(self):
         """The notification can arrive before the commit it announces is visible."""

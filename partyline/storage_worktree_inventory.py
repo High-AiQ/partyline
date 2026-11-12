@@ -67,7 +67,7 @@ def candidates(db, line=None):
         except (OSError, subprocess.SubprocessError):
             logger.exception('cannot enumerate worktrees in %s; continuing', root)
     result = []
-    for path, root in sorted(found.items()):
+    for path, root in sorted(found.items(), key=lambda item: (-item[0].count(os.sep), item[0])):
         owner = owners.get(os.path.realpath(path))
         if owner is None:
             owner = next((conv for cwd, conv in owners.items() if managed_root(cwd)

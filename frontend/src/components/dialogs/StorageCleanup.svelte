@@ -9,6 +9,8 @@
   let result = $state<StorageCleanup | null>(null);
   let busy = $state(false);
   let error = $state("");
+  const protectedMirrors = $derived(result?.retained_mirrors ?? inventory.retained_mirrors ?? []);
+  const protectedCount = $derived(protectedMirrors.reduce((total, item) => total + item.count, 0));
 
   async function load(): Promise<void> {
     try {
@@ -45,7 +47,7 @@
   </button>
   <div class="line-status" class:error={Boolean(error)} aria-live="polite">
     {#if error}{error}{:else if result}
-      Freed {humanSize(result.freed_bytes)} · removed {result.removed.length} items.
+      Net freed {humanSize(result.freed_bytes)} · removed {result.removed.length} items.
     {/if}
   </div>
   {#if result?.skipped.length}
@@ -60,10 +62,20 @@
   {/if}
   {#if inventory.kept.length}
     <details class="text-[12px] text-cream-dim">
-      <summary>Kept worktrees and orphans ({inventory.kept.length})</summary>
+      <summary>Kept worktrees, mirrors and orphans ({inventory.kept.length})</summary>
       <ul>
         {#each inventory.kept as item, index (index)}
           <li class="break-words py-1">{item.path} · {humanSize(item.size_bytes)} — {item.reason}</li>
+        {/each}
+      </ul>
+    </details>
+  {/if}
+  {#if protectedMirrors.length}
+    <details class="text-[12px] text-cream-dim">
+      <summary>Protected mirrors ({protectedCount})</summary>
+      <ul>
+        {#each protectedMirrors as item, index (index)}
+          <li class="break-words py-1">{item.name} · {item.count} mirrors — {item.reason}</li>
         {/each}
       </ul>
     </details>

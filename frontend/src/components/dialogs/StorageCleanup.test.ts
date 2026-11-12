@@ -32,7 +32,7 @@ it("cleans in one click and reports kept paths, reasons and idle lines", async (
     await settle();
     expect(clean).toHaveBeenCalledTimes(1);
     expect(refreshed).toHaveBeenCalledTimes(1);
-    expect(document.body.textContent).toContain("Freed 3.0 KB");
+    expect(document.body.textContent).toContain("Net freed 3.0 KB");
     expect(document.body.textContent).toContain("/repo/clone · 2.0 KB — independent nested repository");
   } finally {
     await unmount(component);
@@ -58,6 +58,57 @@ it("renders duplicate kept paths from aliased roots", async () => {
     await settle();
     expect(document.querySelectorAll("li")).toHaveLength(4);
     expect(document.body.textContent).toContain("Kept 2 items");
+  } finally {
+    await unmount(component);
+  }
+});
+
+it("lists mirror and permission reasons in inventory and cleanup results", async () => {
+  const kept = [
+    { path: "/sessions/fence/old/git-123", reason: "cannot inspect mirror refs", size_bytes: 4000 },
+    { path: "/repo/retired", reason: "/repo/retired/__pycache__: permission denied", size_bytes: 2000 },
+  ];
+  vi.spyOn(storageCleanupApi, "details").mockResolvedValue({ kept, idle_lines: [] });
+  vi.spyOn(storageCleanupApi, "cleanup").mockResolvedValue({ removed: [], freed_bytes: 0, skipped: kept });
+  const component = mount(StorageCleanup, { target: document.body, props: { refreshed: vi.fn() } });
+  try {
+    await settle();
+    expect(document.body.textContent).toContain("Kept worktrees, mirrors and orphans (2)");
+    document.querySelector("button")?.click();
+    await settle();
+    for (const item of kept) {
+      expect(document.body.textContent.split(item.reason)).toHaveLength(3);
+    }
+  } finally {
+    await unmount(component);
+  }
+});
+
+it("keeps actionable failures separate from thousands of protected mirrors", async () => {
+  const kept = [{ path: "/fence/broken/git-123", reason: "cannot inspect mirror refs", size_bytes: 100 }];
+  const summaries = [{ owner_id: "root", name: "Root", count: 3000, reason: "line still exists" }];
+  vi.spyOn(storageCleanupApi, "details").mockResolvedValue({
+    kept,
+    idle_lines: [],
+    retained_mirrors: summaries,
+  });
+  vi.spyOn(storageCleanupApi, "cleanup").mockResolvedValue({
+    removed: [],
+    freed_bytes: 0,
+    skipped: kept,
+    retained_mirrors: summaries,
+  });
+  const component = mount(StorageCleanup, { target: document.body, props: { refreshed: vi.fn() } });
+  try {
+    await settle();
+    expect(document.querySelectorAll("li")).toHaveLength(2);
+    document.querySelector("button")?.click();
+    await settle();
+    expect(document.querySelectorAll("li")).toHaveLength(3);
+    expect(document.body.textContent).toContain("Kept 1 items");
+    expect(document.body.textContent).toContain("Protected mirrors (3000)");
+    expect(document.body.textContent).toContain("Root · 3000 mirrors — line still exists");
+    expect(document.body.textContent).toContain("Net freed 0 B");
   } finally {
     await unmount(component);
   }

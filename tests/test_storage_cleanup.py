@@ -290,9 +290,14 @@ class CleanupTest(CleanupFixture):
         mirror = self.sessions / 'fence' / 'purged' / mirror_name
         mirror.parent.mkdir(parents=True)
         git(self.repo, 'clone', '--bare', '--no-hardlinks', self.repo, str(mirror))
-        tree = git(mirror, 'rev-parse', 'HEAD^{tree}')
+        payload = mirror / 'private-content'
+        payload.write_text('a blob found only in the mirror')
+        blob = git(mirror, 'hash-object', '-w', str(payload))
+        tree = subprocess.run(['git', 'mktree'], cwd=mirror, capture_output=True, text=True,
+                              input=f'100644 blob {blob}\tprivate-file\n', check=True).stdout.strip()
         unique = git(mirror, 'commit-tree', tree, '-p', 'HEAD', '-m', 'mirror-only commit')
         git(mirror, 'update-ref', 'refs/heads/only-mirror', unique)
+        (mirror / 'HEAD').unlink()  # Historical overlays were not standalone Git directories.
         self.assertNotEqual(subprocess.run(['git', 'cat-file', '-e', unique], cwd=self.repo,
                                           capture_output=True).returncode, 0)
         report = gc.cleanup(self.db)
@@ -301,6 +306,8 @@ class CleanupTest(CleanupFixture):
                    'refs/partyline/discarded').splitlines()
         recovery = next(row.split(' ', 1)[1] for row in refs if row.startswith(unique + ' '))
         self.assertEqual(git(self.repo, 'log', '-1', '--format=%s', recovery), 'mirror-only commit')
+        self.assertEqual(git(self.repo, 'show', recovery + ':private-file'),
+                         'a blob found only in the mirror')
 
     def test_unpublished_extra_mirror_ref_is_anchored(self):
         from partyline.storage_fences import owners

@@ -1,6 +1,11 @@
 """Intentional >1 s tests; never use this list to permit a real sleep."""
 
 SLOW_TEST_ALLOWLIST = {
+    "tests.test_storage_cleanup_gaps.CleanupGapsTest."
+    "test_3000_retained_mirrors_do_not_spawn_git_per_attachment":
+        "Real 3,000 mirror directories and attachment rows benchmark metadata classification; no waits.",
+    "tests.test_storage_cleanup_gaps.CleanupGapsTest.test_large_orphan_recovery_has_all_files_and_deletions":
+        "Real Git snapshots 2,100 deletions and 2,100 new files, past the 2,000-path preview limit.",
     "tests.test_db_concurrency.ConcurrentAccessTest.test_every_concurrent_insert_is_counted_once":
         "Real thread scheduling and 1,000 concurrent SQLite writes are the behavior under test.",
     "tests.test_db_concurrency.ConcurrentAccessTest.test_reads_stay_intact_while_other_threads_write":

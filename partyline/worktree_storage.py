@@ -20,11 +20,13 @@ logger = logging.getLogger(__name__)
 SNAPSHOT_CAP = 64 * 1024 * 1024
 
 
-def repositories(path: str, *, check_files: bool = False) -> list[str]:
+def repositories(path: str, *, check_files: bool = False, errors=None) -> list[str]:
     found = []
 
     def fail(error):
-        raise error  # An unreadable directory is not proof that it holds no repo.
+        if errors is None:
+            raise error  # An unreadable directory is not proof that it holds no repo.
+        errors.append(error)  # Cleanup must retain these subtrees, even if permissions change.
 
     for directory, dirs, files in os.walk(path, followlinks=False, onerror=fail):
         if directory != path and os.path.lexists(os.path.join(directory, ".git")):

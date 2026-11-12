@@ -177,7 +177,8 @@ def snapshot(state, audit_id):
                         "-m", f"Partyline index recovery {audit_id}")
         env["GIT_INDEX_FILE"] = os.path.join(directory, "working-index")
         run("read-tree", state["mirror_tip"] or state["head"])
-        run("add", "-A", "--", ".")
+        from .storage_git_state import add_paths
+        run("add", "-A", "--", *add_paths(state.get('excluded', ())))
         tree = run("write-tree")
         sha = run("commit-tree", tree, "-p", state["mirror_tip"] or state["head"],
                   "-m", f"Partyline retirement recovery {audit_id}")

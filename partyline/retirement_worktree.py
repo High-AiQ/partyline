@@ -2,7 +2,6 @@
 
 import os
 import shlex
-import shutil
 import subprocess
 import tempfile
 
@@ -10,6 +9,7 @@ from fastapi import HTTPException
 
 from .line_worktree import _git, rev
 from .retirement_nested import linked_owner
+from .storage_removal import remove_contents
 from .worktree_paths import branch_name, managed_root
 
 
@@ -49,7 +49,7 @@ def check_line(db, conv):
             refuse_orphan(item["repository"], item["path"], item["branch"])
 
 
-def remove_directory(path, root):
+def remove_directory(path, root, *, excluded=()):
     """Remove contents while the checkout remains registered, then move the empty shell."""
     if os.path.realpath(path) != path or os.path.realpath(root) != root:
         raise OSError("worktree paths must be canonical")
@@ -59,13 +59,7 @@ def remove_directory(path, root):
         raise OSError("worktree registration is missing or belongs to another repository")
     if not os.path.isfile(link) or os.path.islink(link):
         raise OSError("worktree Git link is missing or invalid")
-    for entry in os.scandir(path):
-        if entry.name == ".git":
-            continue
-        if entry.is_dir(follow_symlinks=False):
-            shutil.rmtree(entry.path)
-        else:
-            os.unlink(entry.path)
+    remove_contents(path, excluded=excluded, keep_git=True)
     # The rename is atomic: before it the checkout and its Git link are in
     # place; after it the original directory is gone, so pruning is safe. The
     # moved shell contains only the link and can be discarded independently.

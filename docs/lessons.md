@@ -1,5 +1,136 @@
 # Lessons: the false-assumptions ledger
 
+## A watch that comes back has missed what happened while it was down
+
+The false assumption was that re-registering a starved watch restores the owner's view.
+It restores future events only: whatever was written while the watch was down was never
+reported. Most readers read on every wake and so caught up by accident. The OpenCode v2
+watcher reads only when the notification count moved by more than its own terminal wakes,
+and the wake that restores a watch is usually terminal output, so a turn end written in
+the blind spell stayed unread until the store was next written (integration review of
+#500). `Changes.notify` now counts one extra notification when a retry registers a
+starved watch again. A recovery path owes its owner one "look again", not silence.
+Tests: `tests/test_watch_exhaustion.py`, `tests/test_opencode_v2_adapter.py`.
+
+## Free-space guards must estimate new writes, not existing durable content
+
+The false assumption was that all non-ignored files required room for another
+copy, and every cleanup needed a fixed recovery reserve. That stranded clean,
+merged checkouts on full disks and charged already committed blobs again. Stream
+only modified and untracked paths; staged and committed blobs are already in
+Git. Deleted paths contribute no new content. When the estimate is zero, skip
+both the free-space check and its reserve, including for empty plain folders.
+Regressions remove a clean merged checkout, a checkout with 4 MiB of committed
+content, and a deletion-only orphan with 2,100 paths at one byte reported free.
+Nonempty parent rmdir failures also stay separate from denied-entry counts;
+a parent that became nonempty still prevents moving the checkout away.
+
+## Partial cleanup is not a fresh retirement on every startup
+
+The false assumption was that a retained checkout could safely be snapshotted
+again on every sweep. Permission failures left tracked deletions, producing more
+recovery refs for damage caused by the previous cleanup itself. Record partial
+removals in the database and suppress automatic retries until Clean up now.
+Actual POSIX permission and portable denial fixtures verify stable recovery refs
+across two sweeps and successful removal after repair. Transient mirror timeouts
+and changed refs remain retryable; removed paths' records are pruned.
+
+## Copy helpers can erase the evidence needed for retry decisions
+
+The false assumption was that a ref-copy PermissionError would reach retry
+classification unchanged. copytree wraps nested failures in shutil.Error and
+loses their errno. Copy ref files with native read errors intact, refuse symbolic
+ref directories conservatively, and verify unreadable refs with actual POSIX
+permissions. Otherwise a mirror that cannot be read is retried on every start.
+
+## Diagnostic evidence must be bounded even when deletion is best effort
+
+The false assumption was that reporting every failed unlink was useful. Six
+hundred denied cache files generated more than 100 KB of repeated paths across
+logs, retained metadata and Settings. Retention now reports a failure count,
+directory count, three directory examples and five file examples, capped at
+2,400 characters. Expected partial removals log a warning without a traceback.
+A many-denial fixture checks the complete report and Settings reason.
+
+## Protected storage summaries must not bury cleanup failures
+
+The false assumption was that one row per protected mirror made the inventory
+more informative. Thousands of ordinary line-owned mirrors hid actionable
+failures, and manual cleanup sized every one. Keep protected mirrors in counts
+grouped by line and reason, separate from retained failure paths. Fixtures verify
+one group for 3,000 mirrors, zero Git subprocesses for them, and no byte walks of
+protected mirrors in Settings or Clean up now.
+
+## Moving content into recovery is not the same as freeing it
+
+The false assumption was that deleting a checkout reclaimed all of its bytes.
+Recovery of incompressible untracked content may grow the surviving object store
+by at least that much. Watch each surviving Git directory before any recovery
+write and deduct its measured growth, including refs and registration metadata,
+from reclaimed source bytes. Fixtures compare actual source and Git-directory sizes. Before creating objects, check
+available space using a conservative estimate plus a 16 MiB reserve; stream Git
+names rather than accumulating preview evidence, and exclude ignored caches.
+Low-space fixtures retain the source without creating recovery objects. The UI
+labels the resulting nonnegative quantity as net freed bytes.
+
+## A nested managed path does not identify its Git repository
+
+The false assumption was that everything below a managed worktree belongs to
+its outer repository. A second repository's linked products checkout was then
+refused as an orphan of the first repository. Cleanup now resolves the registered
+linked owner through retirement_nested, checks that owner survives outside the
+retiring folder, and recursively recovers/removes inner worktrees first. Fixtures
+cover dirty, unmerged second and third repositories under a missing line, while
+independent nested clones remain untouched.
+
+## Preview evidence limits are not recovery limits
+
+The false assumption was that cleanup needed the retirement preview's per-file
+listing. Its 2,000-file ceiling stranded large orphans, even deletion-only ones.
+Cleanup now compares Git trees built with private indexes plus index content
+identity, and preserves working/index/HEAD tips in recovery refs. Interactive
+preview limits still apply. A 4,200-path fixture reads all 2,100 new files from the
+snapshot and deleted originals from its parent; a staged-only fixture protects
+index contents even when working files match HEAD.
+
+## One denied entry must not strand removable siblings
+
+The false assumption was that rmtree either succeeds or leaves useful progress.
+It stopped at container-owned cache entries, leaving later siblings behind.
+Recovery now excludes explicitly uninspectable subtrees, and deletion always
+retains those subtrees even if permissions change before removal. Other readable
+content is recovered before best-effort removal; failures retain the checkout's
+Git link/registration and report offending paths. Fixtures deny both unlink and
+scandir without relying on the test user's privileges. Partial reclaimed bytes
+are counted, and a denied entry does not stop subsequent candidates.
+
+## A refs overlay is not necessarily a standalone Git directory
+
+The false assumption was that every fence mirror accepted --git-dir directly.
+The current refresh_mirror writes refs/logs/packed-refs without HEAD or objects: Git
+rejects the missing HEAD even when GIT_OBJECT_DIRECTORY supplies the surviving
+store (exit 128 without HEAD, exit 0 with it in the same overlay).
+Cleanup reads a temporary repository view with synthetic HEAD, copied refs and
+explicit object alternates, then imports mirror-only objects through that view.
+The source overlay remains intact until verification. Fixtures cover a real
+legacy overlay, private objects, invalid packed refs and warning-only broken
+loose refs. Structural read failures retain their reason in the database and
+pause automatic retries; state-change and timeout failures remain retryable.
+The person's Clean up now action retries paths after repair.
+
+## Ownership metadata must precede Git discovery
+
+The false assumption was that inventorying owning repositories was cheap before
+checking mirror ownership. Each legacy attachment repeated repo_root even when
+its line already required keeping the mirror. Cleanup now classifies those homes
+first, discovers repositories lazily, and coalesces managed checkout paths before discovery. A mixed inventory
+regression includes an eligible orphan among retained managed checkouts, so
+lazy discovery cannot accidentally reintroduce per-attachment Git calls. On the
+same isolated 3,000-mirror fixture, the old code took 3.773 seconds and 3,003 Git
+subprocesses; the grouped zero-Git run took 1.343 seconds. The regression
+asserts zero subprocesses, not a machine-dependent wall-clock threshold. Settings
+and cleanup results list retained mirrors and their reasons without Git probes.
+
 ## A kqueue watch of "every transcript" is not free
 
 The false assumption was that watching every file a pattern matches costs only
@@ -2428,7 +2559,7 @@ files" stopped its process, so a captain detached and work stopped. Linux never 
 watches directories and the service limit is high. The server now raises its own soft limit at startup as far as
 the host allows (`partyline/fd_limit.py`), trying the lower ceiling macOS enforces, and warns with the remedy
 when it cannot. A design that spends a per-process resource per watched object must check that resource's
-default on every platform it runs on. Still open: a Claude adapter on macOS holds a descriptor per existing
-transcript, which a large history can exhaust even at the raised limit. Tests: `tests/test_fd_limit.py`,
+default on every platform it runs on. A Claude adapter on macOS no longer holds a descriptor per existing
+transcript (2.114.2; see the lesson on a kqueue watch of every transcript). Tests: `tests/test_fd_limit.py`,
 `tests/test_launch.py`.
 

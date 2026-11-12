@@ -4,49 +4,59 @@ from contextlib import nullcontext
 import logging
 import os
 from pathlib import Path
-import shutil
 import threading
 
 from . import storage_survey as survey
 from .agent_connection import connection_directory
 from .mcp_attach import CONFIG_SUFFIX
+from .storage_removal import RetainedEntries, remove_contents
+from .storage_recovery_accounting import RecoveryAccounting
+from .storage_recovery_space import RecoverySpaceError
+from . import storage_kept
 
 logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 
 
 def result():
-    return {"removed": [], "freed_bytes": 0, "skipped": []}
+    return {"removed": [], "freed_bytes": 0, "skipped": [], "retained_mirrors": []}
 
 
 def kept(report, path, reason):
-    report["skipped"].append({"path": str(path), "reason": str(reason)})
+    report["skipped"].append({"path": str(path), "reason": str(reason)[:2400]})
 
 
 def attempt(report, path, action):
     """One failed candidate never prevents reclaiming the next one."""
+    size = 0
     try:
         size = survey.Budget(seconds=float('inf')).size(path)
         reason = action()
         if reason:
             kept(report, path, reason)
-        elif not os.path.lexists(path):
+        if not os.path.lexists(path):
             report["removed"].append(str(path))
-            report["freed_bytes"] += size
+    except (RetainedEntries, RecoverySpaceError) as exc:
+        logger.warning('storage cleanup kept %s: %s', path, exc)
+        kept(report, path, exc)
     except Exception as exc:
         logger.exception("storage cleanup failed for %s; continuing", path)
         kept(report, path, getattr(exc, 'detail', None) or str(exc))
+    finally:
+        remaining = survey.Budget(seconds=float('inf')).size(path) if os.path.lexists(path) else 0
+        report['freed_bytes'] += max(0, size - remaining)
 
 
 def attachment_reason(db, ident):
     return survey._in_use(db, ident, survey.planned_ids(db))
 
 
-def remove_path(path):
+def remove_path(path, *, excluded=()):
     if Path(path).is_symlink():
         raise ValueError("symbolic link retained")
     if Path(path).is_dir():
-        shutil.rmtree(path)
+        remove_contents(path, excluded=excluded)
+        Path(path).rmdir()
     else:
         Path(path).unlink(missing_ok=True)
 
@@ -76,11 +86,7 @@ def clean_attachments(db, report, ident=None):
                         remove_path(target)
                     return 'it can still be resumed (cache cleared)' if resumable else None
 
-            # Count a retained home's cache separately, so freed bytes stay accurate.
-            before = survey.Budget(seconds=float('inf')).size(home)
             attempt(report, home, clean)
-            if home.exists():
-                report['freed_bytes'] += max(0, before - survey.Budget(seconds=float('inf')).size(home))
     base = connection_directory(db.path)
     if base.is_symlink() or not base.is_dir():
         return
@@ -105,24 +111,33 @@ def clean_attachments(db, report, ident=None):
         attempt(report, path, clean)
 
 
-def cleanup(db, *, attachment_id=None, line=None, purging=False):
+def cleanup(db, *, attachment_id=None, line=None, purging=False, retry_failed=False):
     """Serialize full sweeps only; lifecycle cleanup must never queue behind them."""
-    with _lock if attachment_id is None and line is None else nullcontext():
+    full_sweep = attachment_id is None and line is None
+    with _lock if full_sweep else nullcontext():
         report = result()
+        recovery = RecoveryAccounting()
+        if full_sweep:
+            storage_kept.prune(db)
         ids = ([attachment_id] if attachment_id else
                [att['id'] for att in db.list_attachments(line['id'])] if line else [None])
         steps = [lambda ident=ident: clean_attachments(db, report, ident) for ident in ids]
         if attachment_id is None:
             from .storage_worktrees import clean_worktrees
             from .storage_fences import clean_fences
-            steps.append(lambda: clean_worktrees(db, report, line, purging=purging))
+            steps.append(lambda: clean_worktrees(db, report, line, purging=purging,
+                                                 retry_failed=retry_failed, recovery=recovery))
             if line is None or purging:
-                steps.append(lambda: clean_fences(db, report, line))
+                steps.append(lambda: clean_fences(db, report, line, retry_failed=retry_failed,
+                                                 recovery=recovery))
         for step in steps:
             try:
                 step()
             except Exception:
                 logger.exception('storage cleanup step failed; continuing')
+        report['freed_bytes'] = max(0, report['freed_bytes'] - recovery.growth())
+        if full_sweep:
+            storage_kept.prune(db)
         return report
 
 
