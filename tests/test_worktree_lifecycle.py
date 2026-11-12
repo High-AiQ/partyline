@@ -299,7 +299,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
              "--allow-empty", "-m", "unmerged", cwd=mid["cwd"])
         archived = self.client.delete(f"/api/conversations/{mid['id']}")
         self.assertEqual(archived.status_code, 200, archived.text)
-        self.assertTrue(os.path.isdir(mid["cwd"]))  # kept: dirty
+        self.assertFalse(os.path.isdir(mid["cwd"]))  # retired: recovery refs precede removal
         purged = self.client.delete(f"/api/conversations/{mid['id']}/purge")
         self.assertEqual(purged.status_code, 200, purged.text)
         self.assertFalse(os.path.exists(mid["cwd"]))

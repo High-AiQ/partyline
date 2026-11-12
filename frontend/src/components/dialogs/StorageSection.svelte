@@ -1,6 +1,7 @@
 <script lang="ts">
   /** What Partyline keeps on disk, with a Clear button for the data it can recreate. */
   import { onMount } from "svelte";
+  import StorageCleanup from "./StorageCleanup.svelte";
   import StorageClearDialog from "./StorageClearDialog.svelte";
   import SettingRow from "../settings/SettingRow.svelte";
   import { ApiError } from "../../lib/api";
@@ -25,6 +26,8 @@
   }
   onMount(() => void load());
 </script>
+
+<StorageCleanup refreshed={() => void load()} />
 
 <SettingRow
   id="setting-storage"

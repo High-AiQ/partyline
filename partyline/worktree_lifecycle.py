@@ -53,7 +53,7 @@ def remove_for_line(conv: dict | None, db=None) -> None:
         return
     try:
         remove_directory(cwd, root)
-        _git("worktree", "prune", cwd=root)
+        _git("worktree", "remove", "--force", cwd, cwd=root)
     except (OSError, subprocess.SubprocessError):
         pass
 
@@ -188,6 +188,9 @@ def discard_worktree(db, conv_id: str) -> bool:
     exist only in the worktree, and a discard must never destroy them.
     """
     conv = db.get_conversation(conv_id) or {}
+    from .storage_worktrees import in_use
+    if in_use(db, conv.get("cwd") or "", conv):
+        return False
     state = worktree_state(db, conv)
     if state is None or not state["merged"]:
         return False
@@ -214,6 +217,9 @@ def archive_worktree_if_safe(db, conv_id: str, *, preserve: bool = True) -> tupl
     cwd = (conv or {}).get("cwd") or ""
     if _worktree_root(cwd) is None:
         return False, None
+    from .storage_worktrees import in_use
+    if protection := in_use(db, cwd, conv):
+        return False, protection
     if not preserve:
         reason = worktree_removal_reason(db, conv)
         if reason:

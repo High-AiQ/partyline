@@ -37,7 +37,8 @@ from .git_fence_root import refresh as refresh_root_mirror
 from .git_fence_packed import merged_packed_refs
 
 # Mirror state lives beside the other per-attachment session state.
-FENCE_ROOT = os.path.expanduser("~/.partyline/sessions/fence")
+FENCE_ROOT = os.path.join(os.environ.get("PARTYLINE_SESSIONS_ROOT",
+                                      os.path.expanduser("~/.partyline/sessions")), "fence")
 SHARED_PREFIX = "refs/partyline/shared/"
 
 

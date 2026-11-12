@@ -15,7 +15,6 @@ from .line_process_selection import live_attachments, mid_turn_blocker as mid_tu
 from .memory_requests import expire_memory_requests
 from .line_process_contracts import CloseProcessesResponse
 from .machine_scope import deny_unless
-from .mcp_attach import remove_config
 from .resource_leases import release_attachment_leases
 from .attachment_tmp import reap_tmp_dir
 from .attachment_stop_audit import actor
@@ -178,7 +177,8 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hin
         ))
         release_attachment_leases(runtime.db, att_id)
         await expire_memory_requests(runtime, att_id) if expire else None
-        remove_config(runtime.db.path, att_id)
+        from .storage_cleanup import automatic
+        await automatic(runtime.db, attachment_id=att_id)
         if adapter is not None and runtime.live.get(att_id) is adapter:
             runtime.live.pop(att_id, None)
         runtime.memory_usage.pop(att_id, None)

@@ -197,6 +197,8 @@ class ChatRuntime(DeliveryCreditMixin):
                     self.live.pop(att_id, None)
             if status in ("exited", "detached"):
                 await close_for_attachment(self, att_id, f"ambassador {status}")
+                from .storage_cleanup import automatic
+                await automatic(self.db, attachment_id=att_id)
             await self.broadcast_attachment(conv_id, att_id)
 
         return on_status

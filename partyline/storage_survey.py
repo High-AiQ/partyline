@@ -18,7 +18,7 @@ from pathlib import Path
 from . import attachment_tmp
 from .line_worktree import _git, repo_root, rev
 
-SESSIONS_ROOT = os.path.expanduser("~/.partyline/sessions")
+SESSIONS_ROOT = os.environ.get("PARTYLINE_SESSIONS_ROOT", os.path.expanduser("~/.partyline/sessions"))
 SESSION_HOME_KINDS = ("codex", "pi")  # id-keyed homes; fence mirrors and logs are not ours to clear
 LIVE = ("starting", "running")
 BUDGET_SECONDS = 10.0

@@ -157,7 +157,10 @@ line it was posted to; a captain briefed with a document does not need it copied
 
 Archiving a line removes its worktree when all commits are merged into the parent
 or default branch and its changes are either absent or durably snapshotted (below).
-When it must stay, the branch stays too and `worktree_kept_reason` explains why.
+Automatic storage cleanup then revisits any retired worktree kept by this SAFE pass.
+It saves uncommitted and unmerged Git work to `refs/partyline/discarded/storage-<id>/`
+in the owning repository before removal. Independent nested clones, protected restart
+plans and failed recovery keep the path with a reason; see [storage](storage.md).
 A captain may retire a child of its own tree with `DELETE /api/conversations/<child-id>`
 when the child has no live processes, its goal is cleared, and the stricter clean
 and merged checks pass; a person may archive a dirty line with snapshot preservation.
@@ -195,8 +198,10 @@ not merged — those commits exist only in the worktree and a discard must never
 blocker. When you have accepted a child's branch and its captain is done, retire the child:
 its worktree goes with it. On startup the server sweeps `.partyline-worktrees` in every
 repository it knows about and removes any worktree whose line no longer exists in the
-database, using the same merge, snapshot and nested-repository guards. A worktree
-belonging to a live or archived line is never swept.
+database, saving recovery refs before removal and retaining independent nested clones.
+The same event-driven pass revisits retired lines and runs from Settings → Storage →
+Clean up now; it never automatically retires idle open lines. A worktree
+belonging to an open line is never swept.
 
 Operational hierarchy rules ignore archived children, while purge ordering and restore traversal
 continue to include them.
@@ -210,17 +215,21 @@ Each snapshot has a 64 MiB cap and contains binary patches for staged and workin
 changes, a tar of untracked non-ignored files, and a manifest naming the original
 HEAD and restore steps. The original index is never modified. The retirement
 response's `worktree_snapshot` and a system notice on the archived line give the
-snapshot directory. Snapshots are retained until a person removes them. Automatic
-maintenance removes only clean, merged tasks. Unarchived dirty tasks keep their
+snapshot directory. Snapshots are retained until a person removes them. The optional
+orchestrator maintenance removes only clean, merged tasks. Unarchived dirty tasks keep their
 working changes and ignored build files so they can be reopened, without
 snapshotting or reclamation.
 
-Unmerged commits, nested repositories (including those in ignored dependencies),
-uninspectable Git state, unsupported special files, and snapshots exceeding the
-cap keep the worktree. Kept worktrees immediately shed ignored, untracked files;
-tracked and non-ignored untracked content stays, and nested repositories are
-never entered or deleted. The startup orphan sweep uses the same preservation
-policy, including the merge check, and records snapshots for merged dirty orphans.
+The automatic storage pass revisits retired and orphaned paths, including unmerged
+history and worktrees this first pass kept. It saves working files, staged files,
+and available HEAD/branch/mirror tips with the forced-retirement snapshot machinery
+under `refs/partyline/discarded/storage-<id>/` in each real owning repository, checks
+the evidence again, then removes the checkout. Nested linked worktrees receive
+recovery refs in their surviving owners before registered removal. Independent
+nested clones, live/restart-planned attachments, uninspectable Git state, unsupported
+files, failed recovery, and changing evidence keep the path with a reported reason.
+See [storage](storage.md) for recovery commands, the one-click action and idle-line
+inventory. Startup runs this same pass once; nothing schedules periodic sweeps.
 
 Human credentials can `GET /api/worktrees` for paths, byte sizes, kept reasons,
 and owning line names/IDs with `live`, `archived`, or `none` ownership. The listing
@@ -228,13 +237,13 @@ includes live managed worktrees for visibility; cleanup refuses them until the
 line is archived. `POST /api/worktrees/cleanup` takes `{"path":"<listed path>"}`
 and retries safe snapshot/removal or ignored-file reclamation. For a
 worktree, `{"path":"<listed path>","force":true,"confirmation":"<listed path>"}`
-explicitly discards uncommitted changes instead of saving them. Confirmation must
+preserves uncommitted changes in Git recovery refs before forced removal. Confirmation must
 repeat the exact full path. Force anchors HEAD (including an unmerged detached tip)
 in `refs/partyline/preserved-worktrees/` in the original repository before removal;
 the response's `preserved_refs` names the recovery refs. Task mirror tips are also
 preserved in their original repositories. Force never waives nested-repository
-protection. These management endpoints are human-only; this release exposes the
-API without a frontend management view.
+protection. These management endpoints are human-only. Settings → Storage provides
+Clean up now for all safe cleanup and lists kept paths with their size and reason.
 
 
 ### Root decisions about obsolete descendants

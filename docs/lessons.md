@@ -11,6 +11,40 @@ commit. A Linux regression exercises real FileEvents with a separate WAL writer;
 Hermes already keeps its reader open and produced no notifications in the same
 control. Close threaded readers under the same lock as reads.
 
+## Retained storage needs another lifecycle event
+
+The false assumption was that keeping a directory during retirement was enough:
+retired lines and old orphans were never revisited, and resumable CLI homes kept
+large recreatable caches forever. Stops now reclaim caches without losing session
+transcripts, and retirement, purge, startup and a one-click storage action revisit
+leftovers. A fixture includes hundreds of retired lines and homes; protected live
+and restart-planned attachments retain every file.
+
+## Forced removal must preserve working files as well as commit tips
+
+The false assumption was that anchoring HEAD before forced worktree removal also
+saved its dirty files. Both the automatic path and existing removal helper now use
+the forced-retirement Git snapshot machinery before deletion. A regression reads
+the staged and working file contents from recovery refs while the original folder
+still exists, then proves the folder is removed. Nested linked checkouts receive
+recovery refs in their surviving owners; independent clones stay with a reason.
+
+## Recovery refs must survive without their mirror objects
+
+The false assumption was that copying a ref, or fetching with the mirror's object
+alternates still visible to the destination, proved recovery. The surviving clone
+must own the objects too: otherwise Git can decide it already has a mirror-only
+object and lose it when the mirror is removed. A regression creates a commit only
+inside a bare mirror, removes that mirror, and reads the commit through its new
+recovery ref in the real repository. Missing worktree registrations also preserve
+detached HEADs before removal; cleanup deregisters only the checkout it removed,
+rather than globally pruning other checkouts before their HEADs are preserved.
+
+## Deployment sync must retain the server's extras
+
+The false assumption was that a locked dependency sync preserved installed optional
+voice dependencies. Plain sync removes them. Restart and agent instructions now
+require the extras used by that server, matching the existing voice documentation.
 
 ## Pressure events are not continuous memory gauges
 

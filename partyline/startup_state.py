@@ -181,7 +181,10 @@ async def engage_startup(runtime) -> None:
     except Exception:
         logger.exception("startup interruption notice failed; continuing")
     runtime.db.mark_stale_attachments()
-    await asyncio.to_thread(sweep_orphaned_worktrees, runtime.db)
+    try:
+        await asyncio.to_thread(sweep_orphaned_worktrees, runtime.db)
+    except Exception:
+        logger.exception("worktree sweep failed; continuing")
     try:
         await asyncio.to_thread(reap_legacy_temp, runtime.db)
     except Exception:
@@ -205,6 +208,17 @@ async def engage_startup(runtime) -> None:
 
 def sweep_orphaned_worktrees(db):
     """Delegate to the worktree sweeper without importing the server here."""
-    from .worktree_lifecycle import sweep_orphaned_worktrees as sweep
+    from .storage_cleanup import cleanup
 
-    return sweep(db)
+    report = cleanup(db)
+    # Preserve the existing auxiliary startup sweep alongside line storage cleanup.
+    from .storage_survey import known_repositories
+    from .review_worktrees import sweep_review_worktrees
+    from .scratch_worktrees import sweep_scratch_worktrees
+    for root in known_repositories(db):
+        for sweep in (sweep_review_worktrees, sweep_scratch_worktrees):
+            try:
+                sweep(db, root)
+            except Exception:
+                logger.exception("auxiliary worktree sweep failed for %s; continuing", root)
+    return report

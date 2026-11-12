@@ -33,3 +33,41 @@ export const storageApi = {
       fallback: "could not clear storage",
     }),
 };
+
+export const StoragePathSchema = z.object({
+  path: z.string(),
+  reason: z.string(),
+  size_bytes: z.number().int().nonnegative(),
+});
+export const StorageDetailsSchema = z.object({
+  kept: z.array(StoragePathSchema),
+  idle_lines: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      idle_since: z.number(),
+      size_bytes: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type StorageDetails = z.infer<typeof StorageDetailsSchema>;
+export const StorageCleanupSchema = z.object({
+  removed: z.array(z.string()),
+  freed_bytes: z.number().int().nonnegative(),
+  skipped: z.array(StoragePathSchema),
+});
+export type StorageCleanup = z.infer<typeof StorageCleanupSchema>;
+
+export const storageCleanupApi = {
+  details: () =>
+    request("/api/storage/details", {
+      schema: StorageDetailsSchema,
+      fallback: "could not load storage details",
+    }),
+  cleanup: () =>
+    request("/api/storage/cleanup", {
+      method: "POST",
+      schema: StorageCleanupSchema,
+      fallback: "could not clean up storage",
+    }),
+};
