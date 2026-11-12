@@ -26,6 +26,7 @@ class WriteAheadTests(unittest.TestCase):
         self.assertEqual(self.pragma(db, "journal_mode"), "wal")
         self.assertEqual(self.pragma(db, "synchronous"), 1)
         self.assertEqual(self.pragma(db, "wal_autocheckpoint"), db_wal.BACKSTOP_PAGES)
+        self.assertEqual(self.pragma(db, "journal_size_limit"), db_wal.BACKSTOP_PAGES * 4096)
 
     def test_an_existing_rollback_database_with_empty_sidecars_is_converted_in_place(self):
         # The live shape before this change: delete mode, and the empty -wal and -shm

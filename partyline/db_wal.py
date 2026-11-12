@@ -98,5 +98,7 @@ def connect(path) -> sqlite3.Connection:
         return connection
     connection.execute("PRAGMA synchronous=NORMAL")
     connection.execute(f"PRAGMA wal_autocheckpoint={BACKSTOP_PAGES}")
+    # After a burst the log file is cut back to this once it has been checkpointed.
+    connection.execute(f"PRAGMA journal_size_limit={BACKSTOP_PAGES * 4096}")
     connection.checkpointer = Checkpointer(str(path))
     return connection
