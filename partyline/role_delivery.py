@@ -5,6 +5,7 @@ import time
 from typing import NamedTuple
 
 from .goal import goal_rider, task_goal_rider
+from .notice_policy import digest_candidates
 from .accept_sha import handoff_rider
 from .bridge_pack import pack_for
 from .captain_docs import reminder_line
@@ -105,7 +106,7 @@ def _task_goal_delivery(db, att, runtime):
         if goal != previous:
             text = goal or ('(task goal cleared)' if previous else '')
             previous = goal
-            pending = db.messages_after(current['conv_id'], current['last_seen'],
+            pending = digest_candidates(db, current['conv_id'], current['last_seen'],
                                         current['name'], current['id'])
             # Snapshot the pending batch, including the assignment/update. A
             # claim or an older receipt must not consume a newly changed goal.

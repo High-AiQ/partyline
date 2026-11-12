@@ -110,10 +110,13 @@ def _load():
 def notices(world) -> dict:
     """System notices pasted into the implementer over one fixture hour of eight wakes."""
     try:
-        from partyline.notice_policy import digest_candidates as select
-    except ImportError:
-        def select(db, att):
-            return db.messages_after(att["conv_id"], att["last_seen"], att["name"], att["id"])
+        from partyline.notice_policy import digest_candidates as pick
+    except ImportError:  # before the notice policy existed: every unseen message was pasted
+        def pick(db, conv_id, after_id, name, att_id):
+            return db.messages_after(conv_id, after_id, name, att_id)
+
+    def select(db, att):
+        return pick(db, att["conv_id"], att["last_seen"], att["name"], att["id"])
     data = _load()
     row = attachment(world, "impl-task1", "claude")
     events = sorted(data["events"], key=lambda e: e["minute"])

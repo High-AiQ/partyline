@@ -70,7 +70,8 @@ async def _wake_process(runtime, item: dict, principal: Principal, emoji: str) -
         "system",
         body,
         audience=target["id"],
-        route=True,
+        # Only ❌ is pasted into the process (notice_policy), so only ❌ is worth a wake.
+        route=emoji == "❌",
     )
 
 
