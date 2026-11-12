@@ -17,7 +17,8 @@ LIVE_JOIN = (
     "AND (a.adapter != 'raw' OR a.counts_toward_total=1) "
 )
 ACTIVE_CONVERSATIONS = LIVE_JOIN + (
-    "WHERE c.archived_at IS NULL GROUP BY c.id ORDER BY c.created_at DESC"
+    # rowid breaks a tie: two lines made within one clock tick (15 ms on Windows) list newest first.
+    "WHERE c.archived_at IS NULL GROUP BY c.id ORDER BY c.created_at DESC, c.rowid DESC"
 )
 ARCHIVED_CONVERSATIONS = LIVE_JOIN + (
     "WHERE c.archived_at IS NOT NULL GROUP BY c.id ORDER BY c.archived_at DESC"
