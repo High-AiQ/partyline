@@ -76,6 +76,9 @@ async def for_resume(runtime, att: dict, pending: list[dict]) -> list[dict]:
         from partyline.adapters.bundled.opencode.seen import seen_ids
 
         credited = credited_tail(runtime, att)
-        seen = await asyncio.to_thread(seen_ids, att, pending, None, credited)
+        if int(att.get("last_seen") or 0) and not credited:
+            seen = set()  # a cursor with no findable anchor vouches for nothing: replay it all
+        else:
+            seen = await asyncio.to_thread(seen_ids, att, pending, None, credited)
         pending = _drop_seen(runtime, att, pending, seen)
     return bound(att, pending)

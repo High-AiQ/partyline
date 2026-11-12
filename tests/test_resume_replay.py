@@ -138,6 +138,18 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual([m["id"] for m in replay], [second["id"]])
         self.assertEqual(self.db.get_attachment("me")["last_seen"], first["id"])
 
+    def test_a_cursor_with_no_findable_credited_message_vouches_for_nothing(self):
+        old = self.db.add_message("line", "cap", "agent", "[greg]: yes")  # not addressed to "me"
+        self.db._exec("UPDATE messages SET audience_attachment_id='someone-else' WHERE id=?", (old["id"],))
+        self.db._exec("UPDATE attachments SET last_seen=? WHERE id='me'", (old["id"],))
+        att = {**self.db.get_attachment("me")}
+        new = {**messages(1)[0], "id": old["id"] + 1, "sender": "greg", "body": "yes"}
+        self.session(["[greg]: yes"])  # an old identical line sits in the session
+        with patch("partyline.adapters.bundled.opencode.seen.store_path", lambda _att: self.store):
+            replay = asyncio.run(for_resume(self.runtime, att, [new]))
+        self.assertEqual([m["id"] for m in replay], [new["id"]])
+        self.assertEqual(self.db.get_attachment("me")["last_seen"], old["id"])
+
     def test_a_fresh_instance_without_the_kept_session_gets_the_full_bounded_replay(self):
         pending = messages(30)
         # The previous instance's session still exists in the store; the new one has no claim on it.
