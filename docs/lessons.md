@@ -2636,3 +2636,15 @@ below it whatever the status; the reopen notice and the new cycle's own requests
 A late `complete_handover` from the old captain after the new captain completed the handover is answered with
 `Already completed; this call changed nothing` and changes no row. Tests: `tests/test_settled_task_mail.py`,
 `tests/test_handover_complete_state.py`.
+
+## 2026-11-12 — Settling stamps what existed, but a restart writes new notices afterwards
+
+The false assumption was that every notice that could be replayed to a settled task's worker predates the
+settling. A restart files its "continue" note when the worker comes back, after `settled_at`, so a timestamp rule let
+the reviewer be told to continue an approved review; the first assignment ("Implement this task") was missing from
+the notice list; and an acknowledged report wake was only dropped on resume, not on the live and held paths.
+`settled_mail` now treats restart and revival notes (`CONTINUATION`) as void for as long as the task is settled,
+whenever they were written, adds the assignment to the in-flight notices, and drops wakes for acknowledged reports
+at every delivery choke point. `reopen_task` consumes everything up to the reopen (`consumed_through`), so only the
+reopen and later mail reach the worker. A test that samples a child's `/proc` must wait for a readiness line from
+the child, not for `Popen` to return. Tests: `tests/test_settled_task_mail.py`, `tests/test_handover_job_details.py`.

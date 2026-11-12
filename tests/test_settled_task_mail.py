@@ -10,9 +10,11 @@ from partyline.orchestrator_service import request_review, review_verdict
 from partyline.resume_backlog import addressed_backlog
 from partyline.runtime import ChatRuntime
 from partyline.task_accept import settle_task
+from partyline.turn_marker import announce_if_interrupted
 from tests.orchestrator_fixture import TaskFixture
 
-STALE = ('Review round', 'no hand-off', 'Changes requested', 'continue the task')
+STALE = ('Review round', 'no hand-off', 'Changes requested', 'continue the task',
+         'Implement this task', 'restarted in the middle')
 
 
 class SettledTaskMail(TaskFixture):
@@ -99,8 +101,10 @@ class SettledTaskMail(TaskFixture):
                       'audience_attachment_id) VALUES(?,?,?,?,?,?)',
                       (self.conv_id, 'system', 'system', 'This task has no hand-off. Call request_review',
                        self.row()['settled_at'] - 1, row['implementer_id']))
+        before = len(self.stale(row['implementer_id']))
         await self.poke(row['implementer_id'])
-        self.assertEqual(self.stale(row['implementer_id']), [])
+        self.assertEqual(len(self.stale(row['implementer_id'])), before)
+        self.assertFalse([b for b in self.heard(row['implementer_id']) if 'no hand-off' in b])
 
     async def test_acknowledged_report_is_never_woken_again(self):
         await self.reviewed()
@@ -139,3 +143,76 @@ class SettledTaskMail(TaskFixture):
         await request_review(self.runtime, self.worker, self.conv_id,
                              ReviewRequestIn(sha=sha, what='again', where='code'))
         self.assertEqual(len(self.stale(reviewer)), seen[reviewer] + 1)
+
+    async def interrupted(self, ident):
+        self.db._exec('UPDATE attachments SET turn_open=1 WHERE id=?', (ident,))
+        self.assertTrue(await announce_if_interrupted(self.runtime, self.db.get_attachment(ident)))
+
+    async def test_initial_assignment_is_not_replayed_after_approval(self):
+        row = await self.reviewed()
+        implementer = row['implementer_id']
+        self.assertTrue([b for b in self.heard(implementer) if 'Implement this task' in b]
+                        or not self.batches.get(implementer))
+        before = len([b for b in self.heard(implementer) if 'Implement this task' in b])
+        await self.poke(implementer)
+        await self.poke(implementer)
+        self.assertEqual(len([b for b in self.heard(implementer) if 'Implement this task' in b]), before)
+
+    async def test_restart_continuation_after_approval_is_not_delivered(self):
+        row = await self.reviewed()
+        reviewer = row['reviewer_id']
+        await self.interrupted(reviewer)  # a restart notice filed after the task settled
+        self.db._exec('UPDATE attachments SET last_seen=0 WHERE id=?', (reviewer,))
+        att = self.db.get_attachment(reviewer)
+        bodies = [m['body'] for m in addressed_backlog(self.runtime, att)]
+        self.assertFalse([b for b in bodies if 'restarted in the middle' in b])
+        await self.poke(reviewer)
+        self.assertEqual([b for b in self.heard(reviewer) if 'restarted in the middle' in b], [])
+
+    async def test_a_continuation_filed_while_settled_does_not_return_with_the_reopen(self):
+        row = await self.reviewed()
+        reviewer = row['reviewer_id']
+        await self.interrupted(reviewer)
+        await reopen_task(self.runtime, self.captain, self.conv_id, ReopenIn(goal='more'))
+        await self.poke(reviewer)
+        self.assertEqual([b for b in self.heard(reviewer) if 'restarted in the middle' in b], [])
+
+    async def test_a_restart_continuation_of_an_open_task_still_delivers(self):
+        await self.create('inspector')
+        implementer = self.row()['implementer_id']
+        await self.interrupted(implementer)
+        await self.poke(implementer)
+        self.assertTrue([b for b in self.heard(implementer) if 'restarted in the middle' in b])
+
+    async def test_acknowledged_report_wake_is_dropped_at_delivery(self):
+        seen = []
+
+        async def deliver(messages):
+            seen.append([m['body'] for m in messages])
+            return False
+        self.runtime.live['captain'].deliver = deliver
+        await self.reviewed()
+        wakes = lambda: [b for batch in seen for b in batch if 'needs attention: report' in b]  # noqa: E731
+        self.assertEqual(len(wakes()), 1)
+        record = reports.get(self.db, self.row()['report_id'])
+        reports.acknowledge(self.db, record['id'], 'root', record['revision'])
+        await tell(self.runtime, 'captain', 'unrelated word for the captain')
+        self.assertEqual(len(wakes()), 1)
+        self.assertTrue([b for b in seen[-1] if 'unrelated word' in b])
+
+    async def test_held_flush_drops_the_assignment_and_acknowledged_report_wakes(self):
+        row = await self.reviewed()
+        record = reports.get(self.db, self.row()['report_id'])
+        reports.acknowledge(self.db, record['id'], 'root', record['revision'])
+        def find(conv, text):
+            return self.db.messages_by_ids(conv, [self.db._exec(
+                'SELECT MAX(id) FROM messages WHERE conv_id=? AND body LIKE ?',
+                (conv, f'%{text}%')).fetchone()[0]])[0]
+        assignment = find(self.conv_id, 'Implement this task')
+        wake = find(self.row()['root_id'], 'needs attention: report')
+        for ident, message in ((row['implementer_id'], assignment), ('captain', wake)):
+            att = self.db.get_attachment(ident)
+            flush = self.runtime.held_wake_hooks(att['conv_id'], att['id'], att['name'])[0]
+            before = sum(len(batch) for batch in self.batches.get(ident, []))
+            self.assertTrue(await flush([message['id']]))
+            self.assertEqual(sum(len(batch) for batch in self.batches.get(ident, [])), before, ident)

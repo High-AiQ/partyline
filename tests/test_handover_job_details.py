@@ -18,12 +18,17 @@ def job(**fields):
 class JobDetailsTest(unittest.TestCase):
     @unittest.skipUnless(sys.platform.startswith('linux'), 'reads /proc')
     def test_a_real_child_reports_its_command_and_directory(self):
+        code = 'import time; print("ready", flush=True); time.sleep(60)'
         with tempfile.TemporaryDirectory() as folder:
-            proc = subprocess.Popen(['sleep', '30'], cwd=folder)
+            proc = subprocess.Popen([sys.executable, '-c', code], cwd=folder,
+                                    stdout=subprocess.PIPE, text=True)
             self.addCleanup(proc.wait)
+            self.addCleanup(proc.stdout.close)
             self.addCleanup(proc.kill)
+            self.assertEqual(proc.stdout.readline().strip(), 'ready')  # running, not mid-exec
             command, cwd, why = job_details.describe(proc.pid)
-        self.assertEqual(command, 'sleep 30')
+        self.assertTrue(command.startswith(sys.executable), command)
+        self.assertIn('ready', command)
         self.assertEqual(os.path.realpath(cwd), os.path.realpath(folder))
         self.assertEqual(why, '')
 
