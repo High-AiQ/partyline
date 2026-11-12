@@ -14,11 +14,14 @@ class StoreWake:
     def read(self, observed, changed, *, error=False):
         event = observed != self.read_at
         self.read_at = observed
-        if error or changed:
+        if error:
             self.deadline = None
         elif event:
-            # no-poll (b): one later look per notification that preceded a commit.
+            # A read that found one commit can still be short of the next one.
+            # no-poll (b): one later look per notification; that look arms nothing.
             self.deadline = self.adapter.event_time() + 0.05
+        elif changed:
+            self.deadline = None
         elif self.deadline is not None and self.adapter.event_time() >= self.deadline:
             self.deadline = None
 

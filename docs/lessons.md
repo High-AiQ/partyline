@@ -2356,9 +2356,9 @@ notification earns one later look, which arms nothing further and is dropped if 
 same adapter: a turn started by a background job or subagent finishing (a `synthetic` row, no user row) showed no
 working badge and never ended for the return path, and a compaction first seen while it was running was never
 counted. When an event wait replaces a poll, prove the watcher is quiet when nothing happens: count its wakes
-against a store nobody is writing. The Codex thread-history reader has the same fault (8,661 reads a second in
-review) and OpenCode v1 opens a connection per read too; Hermes has not been checked. They are scheduled
-separately. Tests: `tests/test_opencode_v2_adapter.py`.
+against a store nobody is writing. The Codex thread-history reader had the same fault (8,661 reads a second in
+review) and so did OpenCode v1; both are fixed in the same release ("Read-only SQLite connections can wake their
+own watchers"). Hermes already kept one connection. Tests: `tests/test_opencode_v2_adapter.py`.
 
 ## 2026-11-12 — A form that does not know a field must not reset it
 
@@ -2376,4 +2376,13 @@ attachment either collides with the old transcript or reopens it, which defeats 
 stores a new `session_pin` on the attachment and every launch, resume and transcript lookup uses
 `pinned_session(att)`, which falls back to the attachment id for attachments never rotated. Tests:
 `tests/test_compaction_rotation.py`.
+
+## 2026-11-12 — "Resumable" is the adapter's answer, not one column's
+
+The false assumption was that a session home with no recorded session id holds nothing a resume needs. pi pins
+its session to the attachment and keeps the transcript in the home, recording no id, and its resume route
+accepts that. The rule was harmless while it sat behind a manual, confirmed Clear; made automatic at every
+process stop, it deleted the only copy of a session that could still be resumed. Found by the integration review
+of the batch, not by the task's own three rounds: nothing on the machine that built it has a pi home. A rule that
+was safe behind a confirmation needs re-reading when it becomes automatic. Tests: `tests/test_storage_cleanup.py`.
 
