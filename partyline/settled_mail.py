@@ -20,7 +20,8 @@ SETTLED = ('approved', 'done')
 # orchestrator_stall, orchestrator_service, orchestrator_goal and orchestrator_staff).
 WORK_NOTICE = re.compile(
     r"^(?:@\S+\s+)?(?:Implement this task:|Review round \d+|This (?:express )?task has no hand-off|"
-    r"Changes requested; round|Task goal updated|Captain @\S+ overrode the review)")
+    r"Changes requested; round|Task goal updated|Captain @\S+ overrode the review|"
+    r"New work on this task, reopened|Review SHA changed from)")
 # Restart and revival notes are filed when a worker comes back, so they can postdate settling:
 # while the task is settled they mean nothing, whenever they were written (turn_marker, revive).
 CONTINUATION = re.compile(
@@ -61,3 +62,9 @@ def drop_settled(db, att: dict, messages: list[dict], *, keep=frozenset()) -> li
     if row is None or (row['status'] not in SETTLED and not row.get('consumed_through')):
         return messages
     return [m for m in messages if m['id'] in keep or not is_stale(row, att['id'], m)]
+
+
+def settled_worker(db, att: dict) -> bool:
+    """Whether ``att`` is a worker of a task that is approved or done."""
+    row = task(db, att['conv_id'])
+    return bool(row and row['status'] in SETTLED and att['id'] in _workers(row))

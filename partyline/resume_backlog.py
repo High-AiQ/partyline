@@ -5,7 +5,7 @@ from __future__ import annotations
 from .message_queries import MESSAGE_SELECT, as_message
 from .resolved_notices import drop_resolved
 from .mentions import known_mention_names, line_addressed, mentioned_names
-from .settled_mail import drop_settled
+from .settled_mail import drop_settled, settled_worker
 from .solo_line import implied_addressee
 
 WORKER_PACK_NOTICE_PREFIX = "☏ workers "
@@ -17,7 +17,9 @@ def addressed_backlog(runtime, att: dict, *, include_message_ids=()) -> list[dic
         att["conv_id"], att["last_seen"], att["name"], att["id"]
     )
     name = att["name"].lower()
-    included = set(include_message_ids)
+    # The restart debrief is generic context ("continue the work"): a settled task's worker has
+    # none left, so it is not forced into the backlog of one.
+    included = set() if settled_worker(runtime.db, att) else set(include_message_ids)
     attachments = runtime.db.list_attachments(att["conv_id"])
     solo = len(attachments) == 1 and attachments[0]["id"] == att["id"]
 

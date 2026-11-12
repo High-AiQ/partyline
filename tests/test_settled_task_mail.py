@@ -216,3 +216,68 @@ class SettledTaskMail(TaskFixture):
             before = sum(len(batch) for batch in self.batches.get(ident, []))
             self.assertTrue(await flush([message['id']]))
             self.assertEqual(sum(len(batch) for batch in self.batches.get(ident, [])), before, ident)
+
+    async def cycle(self, goal):
+        """Reopen the approved task, review a new commit and approve it again."""
+        await reopen_task(self.runtime, self.captain, self.conv_id, ReopenIn(goal=goal))
+        sha = self.commit(goal)
+        await request_review(self.runtime, self.worker, self.conv_id,
+                             ReviewRequestIn(sha=sha, what=goal, where='code'))
+        await review_verdict(self.runtime, self.reviewer, self.conv_id,
+                             VerdictIn(verdict='approve', findings='fine', sha=sha))
+
+    async def test_a_reopened_assignment_is_not_replayed_after_the_next_approval(self):
+        row = await self.reviewed()
+        implementer = row['implementer_id']
+
+        def reopens(goal):
+            return len([b for b in self.heard(implementer) if 'New work on this task' in b and goal in b])
+        await self.cycle('second feature')
+        await self.poke(implementer)
+        await self.poke(implementer)
+        self.assertEqual(reopens('second feature'), 1)  # delivered when it was reopened, never again
+        await self.cycle('third feature')
+        await self.poke(implementer)
+        self.assertEqual((reopens('second feature'), reopens('third feature')), (1, 1))
+
+    async def test_the_real_restart_coordinator_does_not_wake_an_approved_reviewer(self):
+        from partyline.reattach import ReattachCoordinator, ResumedAttachment
+        from tests.test_reattach import ReadyAdapter
+        row = await self.reviewed()
+        reviewer = row['reviewer_id']
+        self.runtime.live.pop(reviewer, None)
+        self.db._exec("UPDATE attachments SET status='exited',turn_open=1 WHERE id=?", (reviewer,))
+        plan = self.db.save_restart_plan('root', [reviewer], '')
+        resumed = {}
+
+        async def resume(ident, pending):
+            resumed['pending'] = [m['body'] for m in pending]
+            adapter = ReadyAdapter([], 'reviewer')
+            self.runtime.live[ident] = adapter
+            return ResumedAttachment(adapter, False)
+        await ReattachCoordinator(self.runtime, resume).run(plan, None)
+        woken = [b for b in resumed['pending']
+                 if 'Continuation debrief' in b or 'restarted in the middle' in b or 'Review round' in b]
+        self.assertEqual(woken, [])
+
+    async def test_the_real_restart_coordinator_still_wakes_an_open_review(self):
+        from partyline.reattach import ReattachCoordinator, ResumedAttachment
+        from tests.test_reattach import ReadyAdapter
+        await self.create('inspector')
+        sha = self.commit()
+        row = await request_review(self.runtime, self.worker, self.conv_id,
+                                   ReviewRequestIn(sha=sha, what='fix', where='code'))
+        reviewer = row['reviewer_id']
+        self.runtime.live.pop(reviewer, None)
+        self.db._exec("UPDATE attachments SET status='exited',turn_open=1 WHERE id=?", (reviewer,))
+        plan = self.db.save_restart_plan('root', [reviewer], '')
+        resumed = {}
+
+        async def resume(ident, pending):
+            resumed['pending'] = [m['body'] for m in pending]
+            adapter = ReadyAdapter([], 'reviewer')
+            self.runtime.live[ident] = adapter
+            return ResumedAttachment(adapter, False)
+        await ReattachCoordinator(self.runtime, resume).run(plan, None)
+        self.assertTrue([b for b in resumed['pending'] if 'Continuation debrief' in b])
+        self.assertTrue([b for b in resumed['pending'] if 'restarted in the middle' in b])

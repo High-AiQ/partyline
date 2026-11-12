@@ -2648,3 +2648,14 @@ whenever they were written, adds the assignment to the in-flight notices, and dr
 at every delivery choke point. `reopen_task` consumes everything up to the reopen (`consumed_through`), so only the
 reopen and later mail reach the worker. A test that samples a child's `/proc` must wait for a readiness line from
 the child, not for `Popen` to return. Tests: `tests/test_settled_task_mail.py`, `tests/test_handover_job_details.py`.
+
+## 2026-11-12 — The restart debrief is a second route to the same wake
+
+The false assumption was that filtering the notices filed for a worker covers a restart. The reattach coordinator
+also posts one public "Continuation debrief: Continue the work that was interrupted" note and forces it into the
+backlog of every process it resumes, bypassing the audience rules; an approved reviewer was told to continue by a
+real restart. `addressed_backlog` now ignores those forced ids for a worker of an approved or done task. The notice
+list also missed the reopen assignment ("New work on this task, reopened") and "Review SHA changed", so a second
+approval replayed the first reopen. Every `tell(...)` to a worker in `orchestrator_*` was listed this time. Tests
+run the real `ReattachCoordinator`, not just `announce_if_interrupted`, and repeat the reopen cycle:
+`tests/test_settled_task_mail.py`.
