@@ -14,7 +14,7 @@ from partyline.turn_marker import announce_if_interrupted
 from tests.orchestrator_fixture import TaskFixture
 
 STALE = ('Review round', 'no hand-off', 'Changes requested', 'continue the task',
-         'Implement this task', 'restarted in the middle')
+         'Implement this task', 'restarted in the middle', 'spawn refused', 'Continuation debrief')
 
 
 class SettledTaskMail(TaskFixture):
@@ -252,13 +252,23 @@ class SettledTaskMail(TaskFixture):
 
         async def resume(ident, pending):
             resumed['pending'] = [m['body'] for m in pending]
+            att = self.db.get_attachment(ident)
             adapter = ReadyAdapter([], 'reviewer')
+            adapter.att = {'runtime_owner': att['runtime_owner']}
+            self.db.set_attachment_status(ident, 'running', att['runtime_owner'])
             self.runtime.live[ident] = adapter
+            resumed['adapter'] = adapter
             return ResumedAttachment(adapter, False)
         await ReattachCoordinator(self.runtime, resume).run(plan, None)
         woken = [b for b in resumed['pending']
                  if 'Continuation debrief' in b or 'restarted in the middle' in b or 'Review round' in b]
         self.assertEqual(woken, [])
+        # The next live wake must not carry the persisted restart debrief either.
+        await tell(self.runtime, reviewer, 'unrelated word after the restart')
+        pasted = [m['body'] for batch in resumed['adapter'].deliveries for m in batch]
+        self.assertTrue([b for b in pasted if 'unrelated word after the restart' in b], pasted)
+        self.assertEqual([b for b in pasted if 'Continuation debrief' in b or 'restarted in the middle' in b],
+                         [])
 
     async def test_the_real_restart_coordinator_still_wakes_an_open_review(self):
         from partyline.reattach import ReattachCoordinator, ResumedAttachment
@@ -281,3 +291,32 @@ class SettledTaskMail(TaskFixture):
         await ReattachCoordinator(self.runtime, resume).run(plan, None)
         self.assertTrue([b for b in resumed['pending'] if 'Continuation debrief' in b])
         self.assertTrue([b for b in resumed['pending'] if 'restarted in the middle' in b])
+
+    async def test_a_recovered_admission_failure_is_not_replayed_after_approval(self):
+        from fastapi import HTTPException
+        from partyline import orchestrator_service
+        await self.create('inspector')
+        sha = self.commit()
+        real = orchestrator_service.ensure_reviewer
+        calls = []
+
+        async def flaky(runtime, row):
+            calls.append(1)
+            if len(calls) == 1:
+                raise HTTPException(503, 'capacity full')
+            return await real(runtime, row)
+        with patch.object(orchestrator_service, 'ensure_reviewer', flaky):
+            with self.assertRaises(HTTPException):
+                await request_review(self.runtime, self.worker, self.conv_id,
+                                     ReviewRequestIn(sha=sha, what='fix', where='code'))
+            row = await request_review(self.runtime, self.worker, self.conv_id,
+                                       ReviewRequestIn(sha=sha, what='fix', where='code'))
+        reviewer = self.principal(row['reviewer_id'])
+        await review_verdict(self.runtime, reviewer, self.conv_id,
+                             VerdictIn(verdict='approve', findings='fine', sha=sha))
+        implementer = row['implementer_id']
+        refused = lambda: [b for b in self.heard(implementer) if 'spawn refused' in b]  # noqa: E731
+        before = len(refused())
+        await self.poke(implementer)
+        await self.poke(implementer)
+        self.assertEqual(len(refused()), before)

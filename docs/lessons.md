@@ -2659,3 +2659,15 @@ list also missed the reopen assignment ("New work on this task, reopened") and "
 approval replayed the first reopen. Every `tell(...)` to a worker in `orchestrator_*` was listed this time. Tests
 run the real `ReattachCoordinator`, not just `announce_if_interrupted`, and repeat the reopen cycle:
 `tests/test_settled_task_mail.py`.
+
+## 2026-11-12 — Listing the notices that go stale is whack-a-mole; classify by who they are for
+
+The false assumption was that a list of task-server phrases covers the mail a settled task's worker should no longer
+read. Each review round found one more phrase (restart note, assignment, reopen note, admission refusal), and the
+public reattach banner reached the next live wake because the startup filter only guarded the startup paste.
+`settled_mail.is_stale` now voids every private system notice addressed to a worker of an approved or done task
+that was filed before the settling (and, after a reopen, at or below `consumed_through`), whatever its words; only
+mail filed after the settling and a short list of restart notes (`CONTINUATION`, including the public reattach
+banner) are treated by time or kind. A write-set or memory notice that arrived between settling and a reopen is
+consumed with the rest; the reopened worker files again. Tests: `tests/test_settled_task_mail.py` (real
+`ReattachCoordinator` followed by a live wake; failed admission, recovery, approval).
