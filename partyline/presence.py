@@ -8,14 +8,12 @@ files — the room could not tell thinking from dead.
 A process cannot post its own liveness: that would be forgeable (`docs/lessons.md`).
 Speech never ends a turn; only the harness or process exit does.
 
-Those receipts come in pairs: ``began`` when the CLI starts a turn, ``ended``
-when it finishes. Pairing makes them robust to a CLI that folds two digests
-into one turn — one pair, not two — so the badge neither wedges on nor
-flickers between turns. A harness that reports them arms only on ``began``:
-a swallowed paste never started a turn, and arming on the write is the
-stuck "working…" a silent paste produces. A harness with no such receipt
-still arms on the pasted wake and never self-clears; a guess about when a
-turn ended is a new way to be wrong.
+Those receipts come in pairs: ``began`` when the CLI starts a turn, ``ended`` when it finishes.
+Pairing makes them robust to a CLI that folds two digests into one turn — one pair, not two — so
+the badge neither wedges on nor flickers between turns. A harness that reports them arms only on
+``began``: a swallowed paste never started a turn, and arming on the write is the stuck
+"working…" a silent paste produces. A harness with no such receipt still arms on the pasted wake
+and never self-clears; a guess about when a turn ended is a new way to be wrong.
 
 The turn boundary is also where the return path (`turn_return.py`) decides whether it answered.
 """
@@ -33,6 +31,7 @@ from .presence_queue import DeliveryQueue
 from .presence_delivery import credit_at_turn_end
 from .speech_echo import is_api_echo
 from .turn_return import ReturnPath
+from .compaction_rotation import turn_ended
 from .goal_stall import GoalStallGuard
 from .orchestrator_revive import on_status as reviewer_gone
 
@@ -40,10 +39,9 @@ WORKING = "working"
 SPEAKING = "speaking"
 IDLE = "idle"
 
-# Adapters whose harness reports turn ends from its own transcript; everything
-# else is ``none`` and arms on delivery, never self-clearing. ``quiet`` is
-# reserved on the wire for a guessed ending and deliberately has no emitter:
-# silence after an ack is the very bug this module exists to remove.
+# Adapters whose harness reports turn ends from its own transcript; everything else is
+# ``none`` and arms on delivery, never self-clearing. ``quiet`` is reserved on the wire for
+# a guessed ending and has no emitter: silence after an ack is the very bug removed here.
 RECEIPT = "receipt"
 NONE = "none"
 
@@ -201,6 +199,8 @@ class Presence:
             await self.finished(conv_id, att_id)
             await self.runtime.broadcast_attachment(conv_id, att_id)
             await self.returns.turn_ended(att_id)
+            if await turn_ended(self.runtime, self, att_id, open_turn.owner):
+                return  # being replaced: its held wakes go to the fresh instance
             await self.queue.flush(att_id, turn_ended=True)
             await self.goal_stall.check_tree(conv_id)
 

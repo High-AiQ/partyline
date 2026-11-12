@@ -71,7 +71,8 @@ async def _stop_confirmed(adapter, stop_error) -> bool:
 
 async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hint: bool = False,
                             expire: bool = True, self_detach: bool = False,
-                            source: str | None = None, caller: str | None = None) -> dict:
+                            source: str | None = None, caller: str | None = None,
+                            notice: str | None = None) -> dict:
     """Run the one-jack detach transaction used by both REST commands."""
     if source is None:
         frame = sys._getframe(1)
@@ -148,7 +149,8 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hin
         try:
             message = await asyncio.wait_for(
                 runtime.db.detach_attachment_with_message_async(
-                    att_id, runtime_owner, f"@{att['name']} detached{revive}", self_detach=self_detach,
+                    att_id, runtime_owner, notice or f"@{att['name']} detached{revive}",
+                    self_detach=self_detach,
                 ),
                 timeout=DETACH_DB_TIMEOUT,
             )

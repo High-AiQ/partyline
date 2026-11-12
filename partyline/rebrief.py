@@ -49,12 +49,14 @@ def latest_assignment(db, att: dict, scan: int = 300,
     return None
 
 
-def notes_block(db, att: dict, budget: int) -> str:
+def notes_block(db, att: dict, budget: int, own_first: bool = False) -> str:
     """The notebook scopes, tree first, within ``budget`` characters.
 
     Dropped whole-oldest-first when over budget: the process's own notes are
-    the last thing a fresh context needs and the most likely to be long, but
-    the tree's contracts and the line's charge are shorter and come first.
+    the last thing a compacted context needs and the most likely to be long,
+    but the tree's contracts and the line's charge are shorter and come
+    first. A fresh instance is the opposite case — its predecessor's hand-off
+    note is the whole point — so ``own_first`` puts that note ahead of them.
     """
     from .line_notes import read_notes, tree_root
 
@@ -64,6 +66,8 @@ def notes_block(db, att: dict, budget: int) -> str:
         ("Line notes (goal, acceptance, decisions):", "line", conv_id, ""),
         ("Your own notes:", "attachment", conv_id, att["id"]),
     )
+    if own_first:
+        scopes = scopes[::-1]
     parts: list[str] = []
     for label, scope, store, att_id in scopes:
         text = read_notes(db, store, scope, att_id)["notes"].strip()
@@ -77,7 +81,8 @@ def notes_block(db, att: dict, budget: int) -> str:
     return block
 
 
-def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "") -> str:
+def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "",
+                   handoff: bool = False) -> str:
     """The re-briefing text: header, goal, notes, latest assignment, reminder.
 
     The header names why the context is fresh: a compaction by default, or —
@@ -92,7 +97,8 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "") 
 
     Assembled by priority, not by importance-of-place: the header, the
     assignment and the role reminder are built first and always survive; the
-    notes get half of what is left; the goal and the topic share the rest and
+    notes get half of what is left (a ``handoff`` rotation puts the process's
+    own note first and says to continue from it); the goal and the topic share the rest and
     are truncated with a pointer to the full text. The topic alone may now be
     20,000 characters, so an end-truncate would otherwise eat exactly the
     sections the notes budget exists to protect.
@@ -103,6 +109,9 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "") 
     if reason:
         header = (f"You are a fresh instance replacing the previous @{att['name']}: "
                   f"{reason}. This re-briefing is partyline's record of your charge.")
+        if handoff:
+            header += (" Your predecessor's hand-off note is the first section below: "
+                       "continue from its next step.")
     else:
         header = (f"You are @{att['name']} on «{conv.get('name') or conv_id}». Your context "
                   "was just compacted — this re-briefing is partyline's record of your charge.")
@@ -131,7 +140,7 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "") 
     # separators up front: the budget must cover the "\n\n" between parts.
     remaining = max(0, limit - sum(len(part) for part in fixed)
                     - 2 * (len(fixed) + 1))
-    notes = notes_block(db, att, remaining // 2)
+    notes = notes_block(db, att, remaining // 2, own_first=handoff)
     context_budget = remaining - len(notes) - (2 if notes else 0)
     pointer = f"… (full text: GET /api/conversations/{conv_id})"
     context = ""

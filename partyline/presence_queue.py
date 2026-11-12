@@ -47,6 +47,12 @@ class DeliveryQueue:
             ids.update(persisted())
         return sorted(ids)
 
+    def take(self, att_id: str) -> list[int]:
+        """Take every held id without a notice: the process is being replaced, not lost."""
+        ids = self.held_ids(att_id)
+        self._held.pop(att_id, None)
+        return ids
+
     def held_count(self, att_id: str) -> int:
         return len(self.held_ids(att_id))
 

@@ -3,7 +3,8 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from .auth_guard import request_principal
-from .settings_contracts import GlobalProseIn, GlobalProseResponse
+from .compaction_limit import SETTING as MAX_COMPACTIONS, global_limit
+from .settings_contracts import GlobalProseIn, GlobalProseResponse, MaxCompactionsIn
 from .orchestrator_contracts import AutoCleanIn
 
 
@@ -29,6 +30,17 @@ def settings_router(runtime) -> APIRouter:
     def put_auto_clean(request: Request, body: AutoCleanIn):
         _require_human(request)
         runtime.db.set_setting("auto_clean_task_history", "true" if body.enabled else "false")
+        return body
+
+    @router.get("/api/settings/max_compactions", response_model=MaxCompactionsIn)
+    def get_max_compactions(request: Request):
+        _require_human(request)
+        return {"value": global_limit(runtime.db)}
+
+    @router.put("/api/settings/max_compactions", response_model=MaxCompactionsIn)
+    def put_max_compactions(request: Request, body: MaxCompactionsIn):
+        _require_human(request)
+        runtime.db.set_setting(MAX_COMPACTIONS, str(body.value))
         return body
 
     def _require_human(request: Request) -> None:

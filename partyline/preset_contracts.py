@@ -18,6 +18,9 @@ class PresetIn(BaseModel):
     # §2.13: an explicit auto-compact threshold in tokens, the CLIs' own
     # native unit. 0 means unset, so the CLI's tuned default applies.
     auto_compact_tokens: int = Field(default=0, ge=0)
+    # Compactions a process of this preset may have before it is rotated to a
+    # fresh instance. Unset inherits the instance setting; 0 turns it off here.
+    max_compactions: int | None = Field(default=None, ge=0, le=20)
 
 
 class PresetResponse(BaseModel):
@@ -32,6 +35,7 @@ class PresetResponse(BaseModel):
     implements: bool = True
     max_instances: int = 0
     auto_compact_tokens: int = 0
+    max_compactions: int | None = None
 
 
 class StaffingTraits(BaseModel):

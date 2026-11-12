@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import time
 
+from .compaction_limit import limit_for
+from .compaction_rotation import arm
 from .contracts import MessageEvent, MessageResponse
 from .mention_relay import live_manager, post_private
 
@@ -138,14 +140,20 @@ async def note_hook_compaction(runtime, att: dict, trigger: str) -> dict:
         await runtime.broadcast(
             conv_id, MessageEvent(message=MessageResponse.model_validate(message)))
     rung = False
+    limit = limit_for(db, att)
+    if limit and count >= limit:
+        arm(runtime, att, f"{count} compactions, limit {limit}", count, limit)
     if trigger == "auto":
         window = db._exec(
             "SELECT COUNT(*) AS n FROM compaction_events WHERE attachment_id=? "
             "AND runtime_owner=? AND trigger='auto' AND turn>?",
             (ident, owner, turn - THRASH_WINDOW_TURNS)).fetchone()
         if window["n"] == THRASH_AUTOS:
+            if limit:  # rotation replaces it at turn end; the captain need not act
+                arm(runtime, att, f"thrashing: {THRASH_AUTOS} auto compactions within "
+                    f"{THRASH_WINDOW_TURNS} turns", count, limit)
             captain = live_manager(runtime, conv_id)
-            if captain is not None:
+            if captain is not None and not limit:
                 rung = True
                 await post_private(
                     runtime, conv_id, "system", "system",

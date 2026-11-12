@@ -16,6 +16,7 @@ from partyline.adapters.events import watch_files
 
 from partyline.adapters import Adapter
 from partyline.adapters.compaction import is_compaction_record
+from partyline.adapters.session_pin import pinned_session
 
 SESSION_ROOT = os.path.expanduser("~/.partyline/sessions/pi")
 
@@ -35,7 +36,7 @@ class PartylineAdapter(Adapter):
         if "--session-id" not in cmd:
             # Reusing the id on a resume reopens the same session, so the
             # process comes back with its full context.
-            cmd += ["--session-id", self.att["id"]]
+            cmd += ["--session-id", pinned_session(self.att)]
         return cmd
 
     @watch_files(lambda self: [self.session_dir()])

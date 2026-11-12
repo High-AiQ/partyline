@@ -132,6 +132,14 @@ export const SETTINGS: readonly SettingInfo[] = [
     description: "Archive approved or done tasks after merge and remove their worktrees",
     keywords: "orchestrator review cleanup",
   },
+  {
+    id: "setting-max-compactions",
+    section: "processes",
+    label: "Maximum compactions per process",
+    description:
+      "After this many compactions a process is replaced by a fresh instance briefed from its hand-off note; 0 turns it off",
+    keywords: "compact rotate fresh restart context handoff",
+  },
   ...(
     [
       ["max-live-processes", "Maximum live processes", "How many processes may run at once"],

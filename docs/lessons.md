@@ -2281,3 +2281,21 @@ counted. When an event wait replaces a poll, prove the watcher is quiet when not
 against a store nobody is writing. The Codex thread-history reader has the same fault (8,661 reads a second in
 review) and OpenCode v1 opens a connection per read too; Hermes has not been checked. They are scheduled
 separately. Tests: `tests/test_opencode_v2_adapter.py`.
+
+## 2026-11-12 — A form that does not know a field must not reset it
+
+The false assumption was that a preset save carries the whole preset. The Settings preset form sends only the
+fields it knows, and `PUT /api/presets/<id>` wrote the defaults for the rest, so editing a title silently reset
+`max_instances` and `auto_compact_tokens` to 0. Adding the compaction override made it visible. A save now keeps
+the stored value of any knob the client did not send (`model_fields_set`), while an explicit value, including an
+explicit `null` or `0`, still wins. Tests: `tests/test_compaction_limit.py`.
+
+## 2026-11-12 — A fresh session on an old attachment must not reuse the attachment's session id
+
+The false assumption was that a new CLI session for an attachment can always take the attachment id as its
+session id. Claude, pi and grok pin their session to that id, so starting a second session on the same
+attachment either collides with the old transcript or reopens it, which defeats a fresh start. A rotation now
+stores a new `session_pin` on the attachment and every launch, resume and transcript lookup uses
+`pinned_session(att)`, which falls back to the attachment id for attachments never rotated. Tests:
+`tests/test_compaction_rotation.py`.
+

@@ -17,7 +17,9 @@ export const PresetSchema = z
     command: z.string(),
     created_at: z.number(),
   })
-  .extend(PresetTraitFieldsSchema.shape);
+  .extend(PresetTraitFieldsSchema.shape)
+  // Compactions before a process of this preset is rotated; null inherits the instance setting.
+  .extend({ max_compactions: z.number().int().nullable().optional() });
 export type Preset = z.infer<typeof PresetSchema>;
 
 export const StaffingTraitsSchema = z.object({

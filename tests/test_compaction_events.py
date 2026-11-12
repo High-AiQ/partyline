@@ -112,6 +112,7 @@ class CompactionEventsTest(unittest.TestCase):
         self.assertEqual(compaction_count(self.db, "haiku"), 2)
 
     def test_three_auto_compactions_within_five_turns_ring_the_captain_once(self):
+        self.db.set_setting("max_compactions_per_process", "0")  # no rotation: the ring is the remedy
         self.turn()
         self.compact("auto")  # turn 1: 1 in window
         self.turn()
@@ -197,6 +198,7 @@ class CompactionEventsTest(unittest.TestCase):
         self.assertEqual(notices, ["⚠ @haiku compacted (auto, 1st time)"])
 
     def test_a_restart_resets_the_thrash_window_but_not_the_badge(self):
+        self.db.set_setting("max_compactions_per_process", "0")  # no rotation: the ring is the remedy
         self.turn()
         self.compact("auto")
         self.turn()

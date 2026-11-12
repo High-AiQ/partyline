@@ -4,12 +4,13 @@ import glob
 import json
 import os
 
+from partyline.adapters.session_pin import pinned_session
 from partyline.adapters.transcript_scan import scan_lines
 
 
 def pinned_transcript_glob(att: dict) -> str:
     home = os.path.expanduser(os.environ.get('CLAUDE_CONFIG_DIR', '~/.claude'))
-    return os.path.join(home, 'projects', '*', f"{glob.escape(att['id'])}.jsonl")
+    return os.path.join(home, 'projects', '*', f"{glob.escape(pinned_session(att))}.jsonl")
 
 
 class ClaudeSession:
@@ -64,7 +65,7 @@ class ClaudeSession:
             return False
         unmatched = self.__dict__.setdefault("_unmatched", {})
         stamp = (stat.st_mtime_ns, stat.st_size)
-        named_ours = os.path.basename(path) == f"{self.att['id']}.jsonl"
+        named_ours = os.path.basename(path) == f"{pinned_session(self.att)}.jsonl"
         stale = not named_ours and stat.st_mtime < self.spawned_at - 2
         if stale or unmatched.get(path) == stamp:
             return False

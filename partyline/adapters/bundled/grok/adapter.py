@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 from partyline.adapters.events import watch_files
+from partyline.adapters.session_pin import pinned_session
 
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.grok.resume import (
@@ -64,7 +65,7 @@ class PartylineAdapter(Adapter):
         # Grok pins a fresh session to this attachment, without another source
         # of identity that could diverge from the stored attachment record.
         stored_session = str(self.att.get("cli_session") or "").strip()
-        self._session_id = stored_session if self.resume else self.att["id"]
+        self._session_id = stored_session if self.resume else pinned_session(self.att)
         self._accounted: int | None = None if self.resume else 0
         history = self.att.get("delivered_bodies")
         self._delivered_bodies = list(history) if history is not None else None

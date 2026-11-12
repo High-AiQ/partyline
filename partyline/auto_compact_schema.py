@@ -14,3 +14,13 @@ MIGRATIONS = [
     # rather than a per-install default nobody can see.
     "ALTER TABLE presets ADD COLUMN auto_compact_tokens INTEGER NOT NULL DEFAULT 0",
 ]
+MIGRATIONS += [
+    # The compaction limit. NULL inherits the instance setting; 0 turns
+    # rotation off for this preset.
+    "ALTER TABLE presets ADD COLUMN max_compactions INTEGER",
+    # A rotation starts a new CLI session on the SAME attachment row. CLIs that
+    # pin a session to the attachment id would refuse that id a second time (or
+    # quietly reopen the old context), so the row remembers the id its current
+    # session was pinned to. NULL means the attachment's own id.
+    "ALTER TABLE attachments ADD COLUMN session_pin TEXT",
+]

@@ -364,6 +364,8 @@ These entries extend both inventory sets above. Registration handlers are in
 | POST | `/api/conversations/{conv_id}/task/reviewer` | `reviewer` | H, or root captain | yes | tool: `restart_reviewer`; revives a dead reviewer of a task in review |
 | GET | `/api/settings/auto_clean_task_history` | `get_auto_clean` | H only | no | excluded: global history-retention setting |
 | PUT | `/api/settings/auto_clean_task_history` | `put_auto_clean` | H only | no | excluded: human opt-in to task history cleanup |
+| GET | `/api/settings/max_compactions` | `get_max_compactions` | H only | no | excluded: global compaction-limit setting |
+| PUT | `/api/settings/max_compactions` | `put_max_compactions` | H only | no | excluded: people set how many compactions a process may have before it is rotated |
 
 Existing archive/retire operations refuse machine requests for task lines, including
 root-captain `force_discard` and recursive retirement containing task descendants.

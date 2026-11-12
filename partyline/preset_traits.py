@@ -35,20 +35,26 @@ def write_preset(db, preset_id, title, name, adapter, command, traits=None,
     max_instances = int((traits or {}).get("max_instances") or max_instances)
     auto_compact_tokens = int(
         (traits or {}).get("auto_compact_tokens") or auto_compact_tokens)
+    # None inherits the instance's compaction limit, and an explicit 0 turns
+    # rotation off for this preset, so "or" would erase the one value that
+    # means something.
+    max_compactions = (traits or {}).get("max_compactions")
     ts = time.time()
     db._exec(
         "INSERT INTO presets(id,title,name,adapter,command,created_at,"
-        "reads_images,can_manage,implements,max_instances,auto_compact_tokens)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?)"
+        "reads_images,can_manage,implements,max_instances,auto_compact_tokens,"
+        "max_compactions) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(id) DO UPDATE SET title=excluded.title, name=excluded.name,"
         " adapter=excluded.adapter, command=excluded.command,"
         " reads_images=excluded.reads_images, can_manage=excluded.can_manage,"
         " implements=excluded.implements, max_instances=excluded.max_instances,"
-        " auto_compact_tokens=excluded.auto_compact_tokens",
+        " auto_compact_tokens=excluded.auto_compact_tokens,"
+        " max_compactions=excluded.max_compactions",
         (
             preset_id, title, name, adapter, command, ts,
             int(flags["reads_images"]), int(flags["can_manage"]),
             int(flags["implements"]), int(max_instances), int(auto_compact_tokens),
+            None if max_compactions is None else int(max_compactions),
         ),
     )
     return coerce_preset(db.get_preset(preset_id))

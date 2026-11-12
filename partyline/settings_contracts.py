@@ -9,3 +9,9 @@ class GlobalProseIn(BaseModel):
 
 class GlobalProseResponse(BaseModel):
     value: str | None
+
+
+class MaxCompactionsIn(BaseModel):
+    """0 turns rotation off; the ceiling keeps a typo from meaning 'never'."""
+
+    value: int = Field(ge=0, le=20)

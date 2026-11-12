@@ -5,6 +5,7 @@
   import PresetCard from "../../dialogs/PresetCard.svelte";
   import ImportAdaptersDialog from "../../dialogs/ImportAdaptersDialog.svelte";
   import TaskHistorySetting from "../../dialogs/TaskHistorySetting.svelte";
+  import MaxCompactionsSetting from "../../dialogs/MaxCompactionsSetting.svelte";
   import { adapterLabel } from "../../../lib/attachments";
   import { dialogs } from "../../../state/dialogs.svelte.js";
   import { session } from "../../../state/session.svelte.js";
@@ -44,4 +45,5 @@
     {/snippet}
   </SettingRow>
   <TaskHistorySetting />
+  <MaxCompactionsSetting />
 </SettingsSection>

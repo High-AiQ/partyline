@@ -210,6 +210,7 @@ class ReplaceAttachmentTest(unittest.TestCase):
                                self.directory.name, "haiku-owner")
         self.db._exec("UPDATE attachments SET status='running' WHERE id='haiku'")
         att = self.db.get_attachment("haiku")
+        self.db.set_setting("max_compactions_per_process", "0")  # a rotation would replace the ring
         with patch.dict(ADAPTER_METADATA,
                         {"claude": {"capabilities": {"compaction_hooks": True}}}):
             for _ in range(3):

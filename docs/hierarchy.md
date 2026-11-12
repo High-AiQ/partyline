@@ -648,6 +648,36 @@ line) and the thrash rule: the third `auto` compaction within five hook
 turns rings the line's live captain once. Adapters without a capability
 report nothing.
 
+## The compaction limit: rotating a process to a fresh instance
+
+Every compaction is a lossy summary of the last, so a process is allowed only a few. The
+**maximum compactions per process** setting (Settings → Processes; `GET`/`PUT
+/api/settings/max_compactions`, people only; default 2, `0` turns it off) bounds how many
+compactions one activation may have. A preset may carry its own `max_compactions`: blank
+inherits the instance setting, `0` turns the limit off for that preset only.
+
+When a compaction brings the activation to the limit, or the thrash rule fires, the process is
+*armed*. Nothing happens mid-turn. At the end of that turn, the harness receipt sends one private
+notice asking for a hand-off note (notes tool, attachment scope: state, decisions, next step, paths
+and SHAs, at most 4,000 characters). At the end of the turn that read the notice, or of any later
+turn, the process is stopped and a **new CLI session starts on the same attachment**: same
+handle, preset, line, lead flag, task role, bridge, notes and delivery cursor, a new runtime
+owner and session. Its first briefing is the normal role briefing plus the goal, the hand-off note
+(first, so the cap never cuts it), and the latest message that assigned it work; it is told to
+continue, not wait. A process that ignores the notice is rotated at its next turn end with its last
+note, and the line gets one notice saying who was rotated and why. Wakes queued meanwhile reach
+the fresh instance. A restart request, a captain handover, or a server stop in flight defers the
+rotation to a later turn end, so a captain keeps captainship and its pack. The only deadline is a
+short one-shot grace after the receipt, so the transcript tail can post the turn's last words.
+Wakes held during the last turn go to the fresh instance, and are flushed to the old one if the
+rotation is abandoned. The rotation runs on the turn-end receipt, so it applies to adapters that
+declare `turn_end = "receipt"` (all bundled adapters that report compactions do); an adapter without
+one never ends a turn the server can see and is never rotated. Claude, pi and grok pin their session
+to the attachment id, so a rotation gives the attachment a fresh `session_pin`; the others start a new
+session on their own.
+Every compaction re-briefing also asks the process to refresh its attachment note, so a rotation
+never depends on a degraded process's final turn.
+
 ## The line notebook
 
 What must survive a compaction lives in the line notebook:
