@@ -11,6 +11,17 @@ commit. A Linux regression exercises real FileEvents with a separate WAL writer;
 Hermes already keeps its reader open and produced no notifications in the same
 control. Close threaded readers under the same lock as reads.
 
+## Lifecycle cleanup must not queue behind the full sweep
+
+The false assumption was that narrowing the runtime lock was sufficient while
+all cleaners still shared a sweep lock. Awaited detach and exit cleanup then queued
+behind startup's entire inventory and recovery pass, parking executor threads and
+delaying shutdown and broadcasts. Serialize only full sweeps. Attachment and line
+cleanup bypass that lock and rely on per-candidate rechecks for safe concurrent
+removal. A regression blocks a full sweep, limits the executor to two workers, and
+finishes detach, twenty exit callbacks and line cleanup before releasing the sweep.
+The lock probe fails immediately on regression rather than hanging the test.
+
 ## Cleanup inventory must not hold the fleet's ownership lock
 
 The false assumption was that placing a sweep in a thread kept it from delaying

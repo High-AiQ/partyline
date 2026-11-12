@@ -1,5 +1,6 @@
 """Event-driven storage reclamation. All callers run this work in a thread."""
 
+from contextlib import nullcontext
 import logging
 import os
 from pathlib import Path
@@ -105,8 +106,8 @@ def clean_attachments(db, report, ident=None):
 
 
 def cleanup(db, *, attachment_id=None, line=None, purging=False):
-    """Serialize cleaners; keep inventory and preservation outside ownership locks."""
-    with _lock:
+    """Serialize full sweeps only; lifecycle cleanup must never queue behind them."""
+    with _lock if attachment_id is None and line is None else nullcontext():
         report = result()
         ids = ([attachment_id] if attachment_id else
                [att['id'] for att in db.list_attachments(line['id'])] if line else [None])

@@ -45,6 +45,9 @@ continues with other candidates. Walks, Git commands, and removal run in threads
 every candidate is rechecked immediately before deletion. Size walks and recovery snapshots run outside the shared runtime ownership lock.
 Only each candidate's final recheck and removal take that lock, so other processes
 can receive messages and start while the sweep prepares the next candidate.
+Only full sweeps serialize with one another. Attachment and line cleanup bypass
+that sweep lock, so detach, exit broadcasts and retirement do not wait behind a
+startup or manual sweep. Per-candidate ownership checks protect concurrent removal.
 Retirement and archive events clean only their own lines; startup housekeeping
 runs in the background so serving requests and reattachment can begin immediately.
 A resume claims its starting state before publishing connection files and staging
