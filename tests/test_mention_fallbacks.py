@@ -98,7 +98,7 @@ class MentionFallbackTest(TaskFixture):
         revive.assert_not_awaited()
         notices = self.bodies(self.conv_id, sender_type='system')
         self.assertIn(f'⚠ @{impl} is detached; it will read this when revived — '
-                      'the root captain revives it with restart_implementer', notices)
+                      'the root captain revives it with captain(op="restart_implementer")', notices)
         self.assertFalse([n for n in notices if 'nothing was delivered' in n])
 
     async def test_detached_reviewer_while_implementing_gets_the_notice_only(self):
