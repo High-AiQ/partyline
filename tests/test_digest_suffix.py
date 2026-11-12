@@ -53,8 +53,8 @@ class GatePerAttachmentTest(unittest.TestCase):
                 gate.begin(msg(ident), ident - 1, att["compaction_count"]())
                 body = format_digest(msg(ident), "", "/x", gate=gate)
             self.assertEqual(body, "[cap]: go")
-            self.db._exec("INSERT INTO compaction_events"
-                          "(attachment_id, runtime_owner, trigger, turn, created_at) VALUES('one','o','auto',1,1)")
+            self.db._exec("INSERT INTO compaction_events(attachment_id, runtime_owner, trigger,"
+                          " turn, created_at) VALUES('one','o','auto',1,1)")
             gate.begin(msg(3), 2, att["compaction_count"]())
             after = format_digest(msg(3), "", "/x", gate=gate)
         self.assertIn("(cwd git: abc clean)", after)
