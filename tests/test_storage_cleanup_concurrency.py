@@ -140,7 +140,11 @@ class CleanupConcurrencyTest(CleanupFixture):
             lifetime = asyncio.create_task(serve())
             try:
                 await started.wait()
-                self.assertTrue(serving.is_set(), 'lifespan must yield before housekeeping completes')
+                # Housekeeping stays blocked until `release`; the lifespan still has its own
+                # awaits to finish before it yields, so wait for the yield itself. The
+                # deadline is reached only if startup waits on housekeeping.
+                await asyncio.wait_for(serving.wait(), 10)
+                self.assertFalse(release.is_set())
                 self.assertFalse(server.app.state.startup_housekeeping_task.done())
                 await server.app.state.automatic_reattach_task
                 automatic.assert_awaited_once()

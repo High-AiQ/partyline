@@ -2381,8 +2381,8 @@ stores a new `session_pin` on the attachment and every launch, resume and transc
 
 The false assumption was that a session home with no recorded session id holds nothing a resume needs. pi pins
 its session to the attachment and keeps the transcript in the home, recording no id, and its resume route
-accepts that. The rule was harmless while it sat behind a manual, confirmed Clear; made automatic at every
-process stop, it deleted the only copy of a session that could still be resumed. Found by the integration review
+accepts that. Behind a manual, confirmed Clear the rule cost a session only to a person who confirmed it; made
+automatic at every process stop, it deleted the only copy of a session that could still be resumed. Found by the integration review
 of the batch, not by the task's own three rounds: nothing on the machine that built it has a pi home. A rule that
 was safe behind a confirmation needs re-reading when it becomes automatic. Tests: `tests/test_storage_cleanup.py`.
 
