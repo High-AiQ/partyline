@@ -1,5 +1,17 @@
 # Lessons: the false-assumptions ledger
 
+## Read-only SQLite connections can wake their own watchers
+
+The false assumption was that a read-only connection cannot generate a write
+notification. Closing a connection to a live WAL closes its WAL and shared-memory
+files, which Linux reports to the watcher; reopening it on every wake made the
+reader run continuously. Keep the reader open until its tail ends, check
+`data_version` before listing, and allow one delayed look when an event beats its
+commit. A Linux regression exercises real FileEvents with a separate WAL writer;
+Hermes already keeps its reader open and produced no notifications in the same
+control. Close threaded readers under the same lock as reads.
+
+
 ## Pressure events are not continuous memory gauges
 
 The false assumption was that a pressure notification reports every crossing of

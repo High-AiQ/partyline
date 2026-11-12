@@ -32,6 +32,7 @@ import sqlite3
 from pathlib import Path
 
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
+from partyline.adapters.store_wake import StoreWake
 
 STORE_NAME = "thread_history_1.sqlite"
 
@@ -41,7 +42,7 @@ def store_path(home: str) -> Path:
 
 
 def connect(home: str) -> sqlite3.Connection:
-    """Short-lived read-only connection; the CLI owns this database."""
+    """Open the CLI-owned database read-only for the lifetime of the tail."""
     return sqlite3.connect(f"{store_path(home).as_uri()}?mode=ro", uri=True)
 
 
@@ -65,13 +66,18 @@ def parse_item(item_type: str, raw: str) -> dict | None:
     return item if isinstance(item, dict) else None
 
 
-def fetch_items(conn, thread_id: str, after_ms: int) -> list[tuple[str, str, int, str]]:
-    return conn.execute(
-        "SELECT item_id, item_type, created_at_ms, item_json FROM thread_items "
-        "WHERE thread_id = ? AND created_at_ms >= ? "
-        "ORDER BY created_at_ms, item_id",
-        (thread_id, after_ms),
-    ).fetchall()
+def fetch_items(conn, thread_id: str, after_ms: int, seen=()) -> list[tuple[str, str, int, str]]:
+    ids = [row[0] for row in conn.execute(
+        "SELECT item_id FROM thread_items WHERE thread_id = ? AND created_at_ms >= ?",
+        (thread_id, after_ms)) if row[0] not in seen]
+    rows = []
+    for start in range(0, len(ids), 400):
+        chunk = ids[start:start + 400]
+        rows.extend(conn.execute(
+            "SELECT item_id, item_type, created_at_ms, item_json FROM thread_items "
+            f"WHERE thread_id = ? AND created_at_ms >= ? AND item_id IN ({','.join('?' * len(chunk))})",
+            (thread_id, after_ms, *chunk)).fetchall())
+    return sorted(rows, key=lambda row: (row[2], row[0]))
 
 
 def fetch_turns(conn, thread_id: str) -> list[tuple[str, str, int | None]]:
@@ -114,6 +120,11 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
     to the rollout tail. Returns True once a store has been claimed — even
     if the process then exits — so a resume is never double-tailed.
     """
+    with contextlib.ExitStack() as stack:
+        return await _tail_open(adapter, home, thread_id, timeout, stack)
+
+
+async def _tail_open(adapter, home, thread_id, timeout, stack):
     after_ms = int((adapter.spawned_at - 5) * 1000)
     seen_items: set[str] = set()
     seen_turns: dict[str, str] = {}
@@ -121,6 +132,9 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
     deadline = adapter.event_time() + timeout
     waited = 0.0
     opened = False
+    conn = None
+    version = None
+    wake = StoreWake(adapter)
     while adapter.alive():
         path = store_path(home)
         if not path.exists():
@@ -129,13 +143,25 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
             await adapter.wait_for_change(max(0, deadline - adapter.event_time()))
             waited = timeout - max(0, deadline - adapter.event_time())
             continue
+        observed = wake.observed()
         try:
-            with contextlib.closing(connect(home)) as conn:
-                rows = fetch_items(conn, thread_id, after_ms)
+            if conn is None:
+                conn = stack.enter_context(contextlib.closing(connect(home)))
+            current = conn.execute("PRAGMA data_version").fetchone()[0]
+            changed = current != version
+            if changed:
+                rows = fetch_items(conn, thread_id, after_ms, seen_items)
                 turns = fetch_turns(conn, thread_id)
+                version = current
+            else:
+                rows, turns = [], []
         except sqlite3.Error:
+            wake.read(observed, False, error=True)
             await adapter.wait_for_change()
             continue
+        found = bool(rows) or any(seen_turns.get(ident) != status
+                                  for ident, status, _ in turns)
+        wake.read(observed, found)
         opening = not opened
         if opening:
             opened = True
@@ -173,5 +199,5 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
             adapter.mark_ready()
         for body in speech:
             await adapter.post(adapter.att["name"], "agent", body)
-        await adapter.wait_for_change()
+        await adapter.wait_for_change(wake.delay())
     return opened
