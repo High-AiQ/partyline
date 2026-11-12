@@ -15,6 +15,7 @@ from functools import partial
 from pathlib import Path
 
 from partyline.adapters.bundled.claude.adapter import LATER_LOOK_SECONDS, PartylineAdapter
+from partyline.adapters.bundled.claude.watch import OLD_SESSIONS_HELD
 from partyline.file_events import FileEvents
 from partyline.file_notify_linux import LinuxNotify
 from tests import watch_descriptors as w
@@ -187,6 +188,49 @@ class DescriptorTests(unittest.IsolatedAsyncioTestCase):
         with w.environment(self.root):
             self.assertEqual(await adapter._await_transcript(), str(old))
         self.assertEqual(waits[1], LATER_LOOK_SECONDS)  # one look, right after the wake
+
+    async def test_an_existing_session_of_this_directory_is_held_so_a_late_token_is_seen(self):
+        """No timing assumption: a descriptor reports the append whenever it happens."""
+        w.populate(self.root, 10, 2)
+        own = self.root / '.claude' / 'projects' / '-work'  # where Claude files /work's sessions
+        own.mkdir(parents=True)
+        names = [f'existing-{n}.jsonl' for n in range(OLD_SESSIONS_HELD + 5)]
+        for number, name in enumerate(names):
+            (own / name).write_text(json.dumps({'type': 'mode'}) + '\n', encoding='utf-8')
+            os.utime(own / name, (w.LONG_AGO + number, w.LONG_AGO + number))
+        kernel = w.Kernel()
+        async with w.Run(kernel, self.root) as run:
+            held = {p.name for p in kernel.watched() if p.parent == own}
+            self.assertEqual(held, set(names[-OLD_SESSIONS_HELD:]))  # the newest, not all
+            self.assertFalse([p for p in kernel.watched() if p.name.startswith('old-')])
+            adapter = run.adapter
+            quiet = own / names[-1]  # the CLI continues an old, unpinned session
+            record = {'type': 'user', 'cwd': '/work', 'message': {'content': adapter._claim_token}}
+            with quiet.open('a', encoding='utf-8') as file:
+                file.write(json.dumps(record) + '\n')
+            os.utime(quiet, (w.SPAWNED_AT + 90, w.SPAWNED_AT + 90))
+            kernel.fire(quiet)  # the only event there will ever be
+            await w.settle()
+            self.assertEqual(adapter._transcript, str(quiet))
+            self.assertEqual(kernel.watched(), {quiet, own})
+
+    async def test_a_file_that_became_recent_without_our_token_is_held_for_its_next_append(self):
+        w.populate(self.root, 6, 2)
+        old = self.root / '.claude' / 'projects' / '-work-project-1' / 'old-1.jsonl'
+        kernel = w.Kernel()
+        async with w.Run(kernel, self.root) as run:
+            self.assertNotIn(old, kernel.watched())
+            os.utime(old, (w.SPAWNED_AT + 5, w.SPAWNED_AT + 5))  # someone wrote it; no wake
+            run.adapter.changed()  # a later wake finds no token, and re-plans
+            await w.settle()
+            self.assertIn(old, kernel.watched())
+            record = {'type': 'user', 'cwd': '/work',
+                      'message': {'content': run.adapter._claim_token}}
+            with old.open('a', encoding='utf-8') as file:
+                file.write(json.dumps(record) + '\n')
+            kernel.fire(old)
+            await w.settle()
+            self.assertEqual(run.adapter._transcript, str(old))
 
     async def test_a_look_that_finds_nothing_arms_nothing_more(self):
         w.populate(self.root, 3, 1)

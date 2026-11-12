@@ -180,6 +180,7 @@ class PartylineAdapter(ClaudeWatch, ClaudeSession, BaseAdapter):
             self._transcript = pinned
             self.narrow_watch(pinned)
             return pinned
+        self._watch_what_matters_now()
         return None
 
     async def _await_transcript(self) -> str | None:
