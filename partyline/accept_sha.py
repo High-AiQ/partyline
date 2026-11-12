@@ -269,7 +269,7 @@ def register_accept_route(app, runtime) -> None:
         _refresh_children_views_quietly(db, conv_id, done["branch"])
         record_accept(db, conv_id, done["sha"], principal.name, body.findings)
         task_accept.record_others(db, conv_id, others, principal.name)
-        await task_accept.settle_task(runtime, conv_id, task_row)
+        detached = await task_accept.settle_task(runtime, conv_id, task_row, body.detach_workers)
         state = "already at" if not done["moved"] else "moved to"
         tail = " — the hand-off is the SHA on the line's branch"
         if done["reviewed_sha"]:
@@ -294,7 +294,7 @@ def register_accept_route(app, runtime) -> None:
             conv_id=conv_id, branch=done["branch"], sha=done["sha"], moved=done["moved"],
             reviewed_sha=done["reviewed_sha"], tree_sync=TreeSyncOut(**sync),
             gates=[GateResult(**result) for result in (gate_results or [])],
-            repositories=[AcceptedRepository(**item) for item in others],
+            repositories=[AcceptedRepository(**item) for item in others], detached_workers=detached,
         )
 
 

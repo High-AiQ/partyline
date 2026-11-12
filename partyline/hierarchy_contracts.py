@@ -62,6 +62,9 @@ class AcceptIn(BaseModel):
     # 5.6: run the line's declared gates in a fenced scratch checkout at the
     # SHA before the branch moves; a failure refuses the accept with 409.
     run_gates: bool = False
+    # A task's accepted work is finished: also stop its implementer and reviewer, so idle
+    # workers stop costing context. Off by default; retire_child works either way.
+    detach_workers: bool = False
 
 
 class TreeSyncOut(BaseModel):
@@ -98,6 +101,8 @@ class AcceptResponse(BaseModel):
     gates: list[GateResult] = Field(default_factory=list)
     # Other repositories a task review covered: their reviewed commits, verified.
     repositories: list[AcceptedRepository] = Field(default_factory=list)
+    # Workers stopped by detach_workers (attachment ids); empty when not asked.
+    detached_workers: list[str] = Field(default_factory=list)
 
 
 class PrereviewIn(BaseModel):

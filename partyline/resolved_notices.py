@@ -64,3 +64,14 @@ def drop_resolved(runtime, att: dict, messages: list[dict], *, keep=frozenset())
         else:
             kept.append(message)
     return kept
+
+
+def drop_acknowledged_reports(db, messages: list[dict], *, keep=frozenset()) -> list[dict]:
+    """``messages`` without wakes for reports a person or captain has already acknowledged."""
+    wakes = _report_ids(messages)
+    if not wakes:
+        return messages
+    done = {report for report in set(wakes.values())
+            if (row := db._exec("SELECT acknowledged_at FROM line_reports WHERE id=?",
+                                (report,)).fetchone()) is not None and row["acknowledged_at"] is not None}
+    return [m for m in messages if m["id"] in keep or wakes.get(m["id"]) not in done]

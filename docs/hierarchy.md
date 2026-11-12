@@ -771,6 +771,13 @@ failure: the accept is refused with 409 and
 `(gates passed)`. On a host with no write fence the request answers 501 —
 gate commands are never run unfenced inside the server.
 
+## Detaching a task's workers on accept
+
+A task line's workers never detach themselves, and an approved, accepted task's idle implementer and
+reviewer keep costing context. `accept` with `{"sha": "...", "detach_workers": true}` records the SHA,
+marks the task done, then stops both workers; the response lists them in `detached_workers`. Without the
+flag nothing is detached, and `retire_child` (or `DELETE /api/attachments/<id>`) works either way.
+
 ## The goal
 
 | Need | Operation |
@@ -1240,7 +1247,7 @@ Preset role traits govern agent staffing: implementers need **Fast implementer**
 sub-captains and reviewers need **Can manage a line**. Choose a free Fast implementer
 for implementation. A person may attach, resume, replace or appoint a process directly
 without those role traits; agents cannot staff presets with neither role trait. Helper processes (raw
-adapters outside the worker count, such as the idle-check and rotate-captain helpers) hold no staffed role:
+adapters, counted in the worker total or not, such as the idle-check and rotate-captain helpers) hold no staffed role:
 they need no role trait, and a captain can restart one with delete, edit command and resume. An agent
 resuming any other process that is not a task worker, captain or helper still needs Fast implementer. When attaching a sub-captain, select the captain role; the server appoints it on a
 vacant line. **Reads images** is advisory; prefer it for image and screenshot work. Existing
@@ -1468,7 +1475,11 @@ the new captain receives the captain pack. Both participants call
 `complete_handover(handover_id)`, in either order. Once both confirm, completion
 and a detach intent are recorded atomically; the server stops the old captain
 through the normal detach path and retries unfinished detaches after restart.
-A one-sided confirmation never detaches the old captain. After 30 minutes the
+The reply names the real state: `completed`, `old_captain` (`attached`, `gone`, `detaching` or
+`detached`), who is still `awaiting`, and a `message` in words; a half-confirmed reply is
+`from_done`/`to_done` true for one side only, so read `completed` first. If the old captain has
+already left (detached, exited or removed) its confirmation can never come, so the new captain's
+confirmation completes the handover. A one-sided confirmation never detaches the old captain. After 30 minutes the
 line receives one notice naming who has not confirmed. A person can resolve a
 stale handover with `POST /api/conversations/{conv_id}/handover/resolve` and
 `{"handover_id":"…"}`; this releases the pending slot without detaching the old
@@ -1480,8 +1491,10 @@ available memory-scope members. MCP commands come from the attachment's config;
 jobs started by those services still count. Process inventory runs in a worker
 thread before the database transaction. Rider/briefing text uses a five-second
 cache, refreshed off-loop; inspection failures appear as unavailable state text.
-Offer and accepted state text show each job's pid, short command, cwd, and observed
-cwd/open files under the outgoing attachment's temp directory. A live job makes
+Offer and accepted state text show each job's pid, command, cwd, and observed
+cwd/open files under the outgoing attachment's temp directory. Linux reads `/proc`, macOS asks `ps`
+and `lsof`, Windows asks CIM and has no working directory; a field that cannot be read says
+`command unknown` or `cwd=unknown` with the reason, never a bare `?`. A live job makes
 completion return 409 before recording that confirmation or creating a detach intent.
 Finish or kill each job, or explicitly call
 `complete_handover(handover_id, live_jobs="transfer")`. Each confirmation with live

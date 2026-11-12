@@ -74,8 +74,11 @@ def require_captain_assignment(db, conv_id, ident, before, *, person=False):
 
 
 def is_helper(att):
-    """Raw processes outside the worker count (idle-check, rotate-captain) hold no staffed role."""
-    return att['adapter'] == 'raw' and not att.get('counts_toward_total')
+    """Raw processes (idle-check, rotate-captain) hold no staffed role, counted or not.
+
+    Counting toward the worker total is memory accounting: the captain that may delete a raw
+    process and re-point its command may resume it too, trait or no trait."""
+    return att['adapter'] == 'raw'
 
 
 def require_resume(db, ident, *, person=False):

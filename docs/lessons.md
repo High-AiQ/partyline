@@ -2580,3 +2580,94 @@ default on every platform it runs on. A Claude adapter on macOS no longer holds 
 transcript (2.114.2; see the lesson on a kqueue watch of every transcript). Tests: `tests/test_fd_limit.py`,
 `tests/test_launch.py`.
 
+
+## 2026-11-12 — A task notice has no meaning once its task is settled
+
+The false assumption was that a worker is never handed a review request, stall reminder or restart note after the
+work it asks for has ended, because the notice was delivered once. The delivery cursor does not always move: an
+unproved paste, a held wake flush and a resumed session's backlog all re-read everything past `last_seen`. After
+`review_verdict` approved a task, every later wake of the reviewer (the captain's accept, a report wake, an
+unreached notice) pasted the same "Review round 1" brief again, three times in one batch on macOS, until the
+captain detached the workers. A report whose wake never went out was also retried "including after an
+acknowledgement", so `request_review` or `report` on an acknowledged report could ring the captain again.
+Delivery now drops, at delivery time, the task server's in-flight-work notices to a worker of an approved or done
+task that were sent before it settled (`partyline/settled_mail.py`, used by `deliver_pending`, the held-wake flush
+and the resume backlog), and an acknowledged report is never claimed for a wake again. A changes-requested task
+still delivers. Tests: `tests/test_settled_task_mail.py`.
+
+## 2026-11-12 — A worker asks for scope as it trips over it
+
+The false assumption was that merging later filings into the pending request (7a0ffbc3) was enough. A worker
+that learns it needs a path only when the fence refuses a write still files one path, waits for a person, resumes,
+and trips over the next one: a task needing six paths stalled six times even though six paths are one decision.
+The worker pack, the task pack, the attach briefing and the 400/403 refusals now tell it to file every path it
+will need in one request, and `create_task(write_set=[...])` lets the captain pre-grant them before the implementer
+starts, through the same validation (`validate_grantable`) and authority (`machine_grant_error`, shared with
+deciding a request) as an approval. Tests: `tests/test_write_set_requests.py`, `tests/test_task_write_set.py`.
+
+## 2026-11-12 — A raw helper in the worker count is still not a staffed role
+
+The false assumption was that a raw process counted in the worker total is a staffed worker, so an agent resuming
+it needs a preset trait. `counts_toward_total` only decides memory admission. On a captain handover the new
+captain deleted the idle-check helper, edited its command and resumed it, and the resume answered 403 "preset
+'raw-idle-check' cannot be staffed as implementer"; a person had to resume it after every rotation, although the
+same captain was allowed to delete and re-point it, which is the stronger act. Every raw process that is not a task
+worker, captain or successor is now a helper whatever its count (`preset_roles.is_helper`); the deprecated heartbeat
+is untouched. Tests: `tests/test_helper_resume_roles.py`.
+
+## 2026-11-12 — A handover reply is not "both sides confirmed" until the server says so
+
+The false assumptions were that the other captain's confirmation always arrives and that `?` is an answer. A
+caller that confirmed first read `from_done:false` in its own reply and had no way to tell a pending handover from
+a finished one; when the old captain was detached before it confirmed, the flag never flipped and the handover
+waited out its 30 minute timeout. Live jobs were listed as `pid 70882 ... ?; cwd=?` because only `/proc` was read,
+which macOS lacks. `complete_handover` now reports `completed`, `old_captain`, `awaiting` and a sentence; an old
+captain that has left no longer blocks the new captain's confirmation; and `job_details.describe` reads `ps` and
+`lsof` on macOS and states why a command or directory is unknown. Tests: `tests/test_handover_complete_state.py`,
+`tests/test_handover_job_details.py`.
+
+## 2026-11-12 — Reopening a task must not revive what settling consumed
+
+The false assumption was that clearing `settled_at` on `reopen_task` was harmless. The stale-notice filter keyed on
+the settled state, so after a reopen the review requests and stall reminders nobody had read before approval were
+back in the worker's backlog and pasted again ahead of the reopen. `reopen_task` now records `consumed_through`, the
+highest message id from before the task settled, and `settled_mail.is_stale` drops in-flight-work notices at or
+below it whatever the status; the reopen notice and the new cycle's own requests have higher ids and still deliver.
+A late `complete_handover` from the old captain after the new captain completed the handover is answered with
+`Already completed; this call changed nothing` and changes no row. Tests: `tests/test_settled_task_mail.py`,
+`tests/test_handover_complete_state.py`.
+
+## 2026-11-12 — Settling stamps what existed, but a restart writes new notices afterwards
+
+The false assumption was that every notice that could be replayed to a settled task's worker predates the
+settling. A restart files its "continue" note when the worker comes back, after `settled_at`, so a timestamp rule let
+the reviewer be told to continue an approved review; the first assignment ("Implement this task") was missing from
+the notice list; and an acknowledged report wake was only dropped on resume, not on the live and held paths.
+`settled_mail` now treats restart and revival notes (`CONTINUATION`) as void for as long as the task is settled,
+whenever they were written, adds the assignment to the in-flight notices, and drops wakes for acknowledged reports
+at every delivery choke point. `reopen_task` consumes everything up to the reopen (`consumed_through`), so only the
+reopen and later mail reach the worker. A test that samples a child's `/proc` must wait for a readiness line from
+the child, not for `Popen` to return. Tests: `tests/test_settled_task_mail.py`, `tests/test_handover_job_details.py`.
+
+## 2026-11-12 — The restart debrief is a second route to the same wake
+
+The false assumption was that filtering the notices filed for a worker covers a restart. The reattach coordinator
+also posts one public "Continuation debrief: Continue the work that was interrupted" note and forces it into the
+backlog of every process it resumes, bypassing the audience rules; an approved reviewer was told to continue by a
+real restart. `addressed_backlog` now ignores those forced ids for a worker of an approved or done task. The notice
+list also missed the reopen assignment ("New work on this task, reopened") and "Review SHA changed", so a second
+approval replayed the first reopen. Every `tell(...)` to a worker in `orchestrator_*` was listed this time. Tests
+run the real `ReattachCoordinator`, not just `announce_if_interrupted`, and repeat the reopen cycle:
+`tests/test_settled_task_mail.py`.
+
+## 2026-11-12 — Listing the notices that go stale is whack-a-mole; classify by who they are for
+
+The false assumption was that a list of task-server phrases covers the mail a settled task's worker should no longer
+read. Each review round found one more phrase (restart note, assignment, reopen note, admission refusal), and the
+public reattach banner reached the next live wake because the startup filter only guarded the startup paste.
+`settled_mail.is_stale` now voids every private system notice addressed to a worker of an approved or done task
+that was filed before the settling (and, after a reopen, at or below `consumed_through`), whatever its words; only
+mail filed after the settling and a short list of restart notes (`CONTINUATION`, including the public reattach
+banner) are treated by time or kind. A write-set or memory notice that arrived between settling and a reopen is
+consumed with the rest; the reopened worker files again. Tests: `tests/test_settled_task_mail.py` (real
+`ReattachCoordinator` followed by a live wake; failed admission, recovery, approval).

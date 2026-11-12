@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .delivery_reservation import reserve_delivery
 from .delivery_credit_accounting import confirm_reserved
+from .settled_mail import drop_settled
 
 
 def delivery_hooks(runtime, conv_id: str, att_id: str):
@@ -34,7 +35,7 @@ def delivery_hooks(runtime, conv_id: str, att_id: str):
             runtime.db.clear_queued_delivery_ids(att_id, message_ids)
             if not deliverable_ids:
                 return True
-            messages = runtime.db.messages_by_ids(conv_id, deliverable_ids)
+            messages = drop_settled(runtime.db, att, runtime.db.messages_by_ids(conv_id, deliverable_ids))
             if messages and await live.deliver(messages) is False:
                 # A queue flush is still an unproved paste. Keep suppression
                 # until its transcript receipt, including after the hello turn.

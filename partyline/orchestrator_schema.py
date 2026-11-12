@@ -67,6 +67,8 @@ MIGRATIONS += [
     "ALTER TABLE task_reviews ADD COLUMN blocked_at REAL",
     "ALTER TABLE task_reviews ADD COLUMN settled_at REAL",
     "ALTER TABLE task_reviews ADD COLUMN reopen_noticed INTEGER NOT NULL DEFAULT 0",
+    # Highest message id whose in-flight-work notices a reopen has consumed (settled_mail).
+    "ALTER TABLE task_reviews ADD COLUMN consumed_through INTEGER NOT NULL DEFAULT 0",
     "UPDATE task_reviews SET settled_at=CAST(strftime('%s','now') AS REAL) "
     "WHERE status IN ('approved','done') AND settled_at IS NULL",
     # Task processes are named impl-<tag>/review-<tag>; the preset they run is recorded apart

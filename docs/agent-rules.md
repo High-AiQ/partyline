@@ -160,7 +160,7 @@ detail: `docs/write-fence.md`.
 | Replace a CLI sandbox that cannot nest (codex's bwrap) with `fence_args`, only while fenced | Run two sandboxes at once, or leave a CLI's sandbox as the only one on an unfenced host |
 
 Write-set requests accept `{"path":"/absolute/path"}` or `{"paths":["/absolute/path", ...]}`.
-Several paths are one decision, and a later request merges into the pending request. Read the
+Several paths are one decision, and a later request merges into the pending request; file every path the work will need in the first one, or have the captain pre-grant them with `create_task(write_set=[...])`. Read the
 API response: `already_granted` means no banner was opened; re-attach or restart the worker to
 pick up a widened bind. A refusal names the paths that were not filed and the corrective action.
 If no root captain in the chain can grant every path, the request is person-decided from filing

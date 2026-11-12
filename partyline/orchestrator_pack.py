@@ -3,6 +3,7 @@
 from .mention_relay import task_root_captain
 from .orchestrator_store import task
 from .task_workspaces import workspaces
+from .worker_pack import FILE_ALL_PATHS
 
 
 def _root_sentence(db, conv_id, root_id):
@@ -45,6 +46,9 @@ EXPRESS = (
 RESOURCES = (
     'Before starting a job needing a captain-declared resource, call acquire_resource(name, note). '
     'If queued, wait for the private grant; release_resource(name) when done. Leases are advisory. ')
+FENCE = (
+    'If the write fence blocks a path (read-only or EROFS), POST /api/conversations/<your task line id>'
+    '/write-set with {"paths":[...]}. ' + FILE_ALL_PATHS)
 UPKEEP = (
     'If blocked, call blocked(reason); the server notifies the root. '
     'While a long command runs, call waiting(reason, seconds); the server will not call you '
@@ -61,7 +65,7 @@ def _express_pack(db, conv_id, role, row):
         f"You are the {role}. Your task line id is {conv_id}; its root line id is {row['root_id']}. "
         f"{_handles(row, role)}"
         f"{_root_sentence(db, conv_id, row['root_id'])}"
-        f'{EXPRESS}{RESOURCES}{UPKEEP}'
+        f'{EXPRESS}{RESOURCES}{FENCE}{UPKEEP}'
         'New work on a done task arrives only through the root captain\'s reopen_task. '
         'Never archive or retire this task line. Processes detach after work ships. '
         f"Task goal: {row['goal']}\n"
@@ -90,7 +94,7 @@ def task_pack(db, conv_id, role):
         f"{_handles(row, role)}"
         f"{_root_sentence(db, conv_id, row['root_id'])}"
         f"{_workspace_sentence(db, conv_id, role)}"
-        f'{RESOURCES}'
+        f'{RESOURCES}{FENCE}'
         'The implementer follows the assigned goal and calls request_review(sha, what, where). '
         'request_review is the hand-off: the server staffs the reviewer and notifies it — '
         'never @mention review-<tag>/impl-<tag> handles, your task, or its line name, '

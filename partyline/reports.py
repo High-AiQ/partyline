@@ -125,7 +125,7 @@ def _claim_wake(conn, report_id: int, now: float) -> bool:
     """Take the one outstanding wake for this row, if it is free to take."""
     changed = conn.execute(
         "UPDATE line_reports SET notifying_at=? WHERE id=? AND notified_at IS NULL"
-        " AND (notifying_at IS NULL OR notifying_at <= ?)",
+        " AND acknowledged_at IS NULL AND (notifying_at IS NULL OR notifying_at <= ?)",
         (now, report_id, now - NOTIFY_CLAIM_SECONDS),
     )
     return changed.rowcount == 1

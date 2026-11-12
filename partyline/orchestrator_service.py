@@ -12,6 +12,7 @@ from .child_create import create_child
 from .contracts import ConversationsChangedEvent
 from .hierarchy_contracts import TaskChildIn
 from .task_workspaces import anchor, workspaces
+from . import task_write_set
 from .review_worktrees import ReviewError
 from .review_install_sandbox import DependencyError
 from .task_review_checkout import move_task_review_worktrees
@@ -49,6 +50,7 @@ async def _create_task(runtime, actor, root_id, body):
         policy = 'none'
     else:
         policy = validate_policy(db, body.review or root['default_review_policy'])
+    granted = task_write_set.check(db, actor, root_id, body.write_set) if body.write_set else []
     existing_line = db._exec(
         'SELECT id FROM conversations WHERE parent_id=? AND name=? AND archived_at IS NULL',
         (root_id, body.name.strip())).fetchone()
@@ -88,6 +90,8 @@ async def _create_task(runtime, actor, root_id, body):
                 raise  # placement never completed; no task was reserved
             creation_error = str(getattr(exc, 'detail', exc))
             logger.exception('task creation announcement failed for %s', conv_id)
+    if granted:
+        await task_write_set.grant(runtime, actor, conv_id, granted)
     spawn_failed = False
     try:
         existing = db.get_attachment(ident)
