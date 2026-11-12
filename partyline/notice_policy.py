@@ -3,8 +3,8 @@
 A system notice is *needs-action* when the process that would read it may have to do, stop,
 decide or learn something it cannot know otherwise, and *informational* when it only records
 what already happened: a restart that finished, a wait that was declared, a worktree the
-process itself asked for, a person's passing reaction. People read every notice in the line
-and the UI; this rule only decides what is pasted into a process's turn, where each line
+process itself asked for. (A reaction on an older message posts no notice at all.) People read
+every notice in the line and the UI; this rule only decides what is pasted into a process's turn, where each line
 costs tokens on every later turn.
 
 Unknown notices are needs-action. A new system notice is delivered until someone reads it
@@ -20,9 +20,6 @@ import re
 # to that process; only the entries marked here may be dropped from such a copy.
 INFORMATIONAL = (
     ("wait declared", r"^⏳ waiting, not stalled: ", False),
-    # ❌ is the one reaction that disagrees; the rest only agree or watch, and the reacted
-    # message shows them to a process that reads it (read_messages).
-    ("reaction", r"^☺ \S+ reacted (?!❌)\S+ to your «", False),
     ("process resumed or restarted", r"^@\S+ (resumed with full context|restarted fresh) · session ", True),
     ("process ready after restart", r"^☏ @\S+ is ready after restart; advancing to the next process$", True),
     ("process already live", r"^☏ @\S+ is already live on line '.*'; treating it as ready", True),

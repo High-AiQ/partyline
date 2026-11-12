@@ -92,6 +92,21 @@ class ReplayTest(unittest.TestCase):
             self.assertEqual([m["id"] for m in asyncio.run(for_resume(self.runtime, self.att, pending))],
                              [1, 2])
 
+    def test_a_fresh_instance_without_the_kept_session_gets_the_full_bounded_replay(self):
+        pending = messages(30)
+        # The previous instance's session still exists in the store; the new one has no claim on it.
+        self.session([f"[cap]: {m['body']}" for m in pending], session="ses")
+        for cleared in (None, ""):
+            with self.subTest(cli_session=cleared):
+                att = {**self.att, "cli_session": cleared}
+                with patch("partyline.adapters.bundled.opencode.seen.store_path",
+                           lambda _att: self.store):
+                    replay = asyncio.run(for_resume(self.runtime, att, pending))
+                self.assertEqual(replay, bound(att, pending))
+                self.assertEqual(replay[-1]["id"], 30)
+                self.assertIn("read_messages(after_id=", replay[0]["body"])
+                self.assertEqual(self.db.get_attachment("me")["last_seen"], 0)
+
     def test_another_adapter_is_only_bounded(self):
         att = {**self.att, "adapter": "codex"}
         pending = messages(3)
