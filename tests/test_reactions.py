@@ -138,13 +138,13 @@ class ReactionRoutesTest(unittest.TestCase):
         self.runtime.live[attachment["id"]] = recorder
         message = self.db.add_message("line", "sol", "agent", "x" * 100)
         response = self.client.post(
-            f"/api/messages/{message['id']}/reactions", json={"emoji": "❌"}
+            f"/api/messages/{message['id']}/reactions", json={"emoji": "✅"}
         )
         self.assertEqual(response.status_code, 200)
-        # The target is woken at once: a ❌ disagrees, so it must be read.
+        # The target is woken at once: its latest message was just answered.
         self.assertEqual(
             recorder.delivered[-1]["body"],
-            "☺ greg reacted ❌ to your «" + "x" * 80
+            "☺ greg reacted ✅ to your «" + "x" * 80
             + "…» — no reply needed unless this raises something new",
         )
         # The copy is stored addressed to that process alone: never a public
@@ -158,21 +158,66 @@ class ReactionRoutesTest(unittest.TestCase):
     def test_human_transcript_excludes_the_reaction_notice(self):
         attachment, recorder = self._live_process()
         message = self.db.add_message("line", "sol", "agent", "found the answer")
-        response = self._react(message, "❌")
+        response = self._react(message)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(recorder.delivered), 1)  # the process got its copy
         page = self.client.get("/api/conversations/line/messages").json()
         self.assertEqual([m["body"] for m in page["messages"]], ["found the answer"])
         # The reaction itself is still on the message for humans.
+        self.assertEqual(page["messages"][0]["reactions"][0]["emoji"], "✅")
+
+    def test_any_emoji_on_the_latest_message_wakes_the_process(self):
+        for emoji in ("👍", "❌"):
+            with self.subTest(emoji=emoji):
+                attachment, recorder = self._live_process(name=f"p{ord(emoji[0])}")
+                message = self.db.add_message("line", attachment["name"], "agent", "shall I?")
+                self.assertEqual(self._react(message, emoji).status_code, 200)
+                self.assertIn(f"reacted {emoji} to your «shall I?»", recorder.delivered[-1]["body"])
+
+    def test_a_reaction_on_an_older_message_is_stored_but_neither_pasted_nor_a_wake(self):
+        attachment, recorder = self._live_process()
+        older = self.db.add_message("line", "sol", "agent", "first")
+        self.db.add_message("line", "sol", "agent", "second")
+        self.assertEqual(self._react(older, "❌").status_code, 200)
+        self.assertEqual(recorder.delivered, [])
+        self.assertEqual([m for m in self._stored_lines() if m["sender_type"] == "system"], [])
+        page = self.client.get("/api/conversations/line/messages").json()
         self.assertEqual(page["messages"][0]["reactions"][0]["emoji"], "❌")
 
-    def test_an_agreeing_reaction_is_neither_pasted_nor_a_wake(self):
+    def test_posting_again_after_the_reacted_message_makes_the_reaction_informational(self):
         attachment, recorder = self._live_process()
-        message = self.db.add_message("line", "sol", "agent", "found the answer")
-        self.assertEqual(self._react(message, "✅").status_code, 200)
+        message = self.db.add_message("line", "sol", "agent", "shall I?")
+        self.assertEqual(self._react(message).status_code, 200)
+        self.assertEqual(len(recorder.delivered), 1)
+        self.db.add_message("line", "sol", "agent", "going ahead")
+        self.assertEqual(self._react(message, "👍").status_code, 200)
+        self.assertEqual(len(recorder.delivered), 1)
+
+    def test_with_two_processes_only_the_reacted_authors_latest_message_wakes_it(self):
+        sol, sol_rec = self._live_process("sol")
+        kimi, kimi_rec = self._live_process("kimi")
+        def woken():  # reaction notices only: each process also hears the other's message
+            return tuple(sum(m["body"].startswith("☺ greg reacted") for m in rec.delivered)
+                         for rec in (sol_rec, kimi_rec))
+
+        first = self.db.add_message("line", "sol", "agent", "sol says")
+        second = self.db.add_message("line", "kimi", "agent", "kimi says")
+        self.assertEqual(self._react(second).status_code, 200)
+        self.assertEqual(woken(), (0, 1))
+        self.assertEqual(self._react(first, "👍").status_code, 200)
+        self.assertEqual(woken(), (1, 1))
+        self.db.add_message("line", "sol", "agent", "sol again")
+        self.assertEqual(self._react(first, "🎉").status_code, 200)
+        self.assertEqual(woken(), (1, 1))
+
+    def test_a_reaction_from_another_process_is_never_a_wake(self):
+        attachment, recorder = self._live_process()
+        _, token = self._machine(name="kimi")
+        message = self.db.add_message("line", "sol", "agent", "latest")
+        response = self.client.post(f"/api/messages/{message['id']}/reactions", json={"emoji": "✅"},
+                                    headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(recorder.delivered, [])
-        page = self.client.get("/api/conversations/line/messages").json()
-        self.assertEqual(page["messages"][0]["reactions"][0]["emoji"], "✅")
 
     def test_human_transcript_page_after_excludes_the_reaction_notice(self):
         attachment, _ = self._live_process()
@@ -186,11 +231,11 @@ class ReactionRoutesTest(unittest.TestCase):
     def test_process_digest_includes_the_reaction_notice(self):
         attachment, _ = self._live_process()
         message = self.db.add_message("line", "sol", "agent", "found the answer")
-        self._react(message, "❌")
+        self._react(message)
         pending = self.db.messages_after("line", message["id"], "sol", attachment["id"])
         self.assertEqual(
             [m["body"] for m in pending],
-            ["☺ greg reacted ❌ to your «found the answer» — "
+            ["☺ greg reacted ✅ to your «found the answer» — "
              "no reply needed unless this raises something new"],
         )
         other, _ = self._machine(name="kimi")

@@ -57,15 +57,15 @@ class NoticePolicyTest(unittest.TestCase):
                          "needs-action")
         self.assertEqual(classify({"sender_type": "human", "body": "⏳ waiting, not stalled: x"}),
                          "needs-action")
-        self.assertEqual(classify({"sender_type": "agent", "body": "☺ a reacted 👍 to your «x»"}),
+        self.assertEqual(classify({"sender_type": "agent", "body": "⏳ waiting, not stalled: x"}),
                          "needs-action")
 
-    def test_a_negative_reaction_is_still_pasted(self):
-        body = "☺ greg reacted ❌ to your «done» — no reply needed unless this raises something new"
-        self.assertEqual(classify({"sender_type": "system", "body": body,
-                                   "audience_attachment_id": "me"}), "needs-action")
-        self.assertTrue(is_reaction_notice({"sender_type": "system", "body": body,
-                                            "audience_attachment_id": "me"}))
+    def test_a_reaction_notice_exists_only_for_the_latest_message_so_it_is_pasted(self):
+        for emoji in ("👍", "❌"):
+            body = f"☺ greg reacted {emoji} to your «done» — no reply needed unless this raises something new"
+            row = {"sender_type": "system", "body": body, "audience_attachment_id": "me"}
+            self.assertEqual(classify(row), "needs-action")
+            self.assertTrue(is_reaction_notice(row))
 
     def test_a_private_copy_of_a_public_notice_is_not_dropped(self):
         replaced = "↻ @impl replaced with a fresh instance (by @cap): rot — assign now"
@@ -73,9 +73,9 @@ class NoticePolicyTest(unittest.TestCase):
         self.assertEqual(classify({"sender_type": "system", "body": replaced,
                                    "audience_attachment_id": "me"}), "needs-action")
 
-    def test_resume_keeps_the_addressed_instruction_and_drops_the_addressed_echo(self):
+    def test_resume_keeps_the_addressed_instruction_and_drops_the_addressed_wait_echo(self):
         self.post({"sender": "system", "to": HOUR["agent"], "body":
-                   "☺ greg reacted 👍 to your «x» — no reply needed unless this raises something new"})
+                   "⏳ waiting, not stalled: impl is waiting on «x» until 10:49; a hand-off is not due yet."})
         self.post({"sender": "system", "to": HOUR["agent"], "body": "⚠ @impl-11ed30 is thrashing: act"})
         runtime = type("R", (), {"db": self.db})()
         att = self.db.get_attachment("me")

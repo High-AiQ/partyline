@@ -74,36 +74,12 @@
    "class": "informational"
   },
   {
-   "minute": 12,
-   "sender": "system",
-   "body": "☺ greg reacted 👍 to your «Acknowledged. Measuring first with a script that prints characters and approximate tokens…» — no reply needed unless this raises something new",
-   "to": "impl-11ed30",
-   "kind": "reaction",
-   "class": "informational"
-  },
-  {
-   "minute": 31,
-   "sender": "system",
-   "body": "☺ greg reacted ✅ to your «Acknowledged. Measuring first with a script that prints characters and approximate tokens…» — no reply needed unless this raises something new",
-   "to": "impl-11ed30",
-   "kind": "reaction",
-   "class": "informational"
-  },
-  {
-   "minute": 44,
-   "sender": "system",
-   "body": "☺ greg reacted 👀 to your «Acknowledged. Measuring first with a script that prints characters and approximate tokens…» — no reply needed unless this raises something new",
-   "to": "impl-11ed30",
-   "kind": "reaction",
-   "class": "informational"
-  },
-  {
    "minute": 52,
    "sender": "system",
-   "body": "☺ greg reacted 👍 to your «Acknowledged. Measuring first with a script that prints characters and approximate tokens…» — no reply needed unless this raises something new",
+   "body": "☺ greg reacted 👍 to your «The six fixes are committed on `line/context-diet`; review is requested on `5b616c61`.» — no reply needed unless this raises something new",
    "to": "impl-11ed30",
    "kind": "reaction",
-   "class": "informational"
+   "class": "needs-action"
   },
   {
    "minute": 5,

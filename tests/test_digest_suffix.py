@@ -1,10 +1,14 @@
 """The repeating suffix lines ride when new, changed or unproven, and every Nth time."""
 
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
 from partyline.adapters.briefing import DIGEST_FOOTER, format_digest
+from partyline.db import Db
 from partyline.digest_suffix import EVERY, SuffixGate, begin_gate
+from partyline.role_delivery import RoleState, bind_role_delivery
 
 
 def msg(ident):
@@ -15,6 +19,40 @@ def digest(gate, ident, credited, git="(cwd git: abc clean)"):
     gate.begin(msg(ident), credited)
     with patch("partyline.adapters.briefing.cwd_git_digest", lambda _cwd: git):
         return format_digest(msg(ident), "", "/x", gate=gate)
+
+
+class GatePerAttachmentTest(unittest.TestCase):
+    """The count lives on the attachment's in-memory dict: a restart or rotation starts again."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.db = Db(os.path.join(directory.name, "x.db"))
+        self.addCleanup(self.db.close)
+
+    def bind(self, att_id):
+        att = {"id": att_id, "digest_rider": lambda: ""}
+        role = RoleState("worker", "root", None, ("read",))
+        with patch("partyline.role_delivery.current_role", return_value=role):
+            bind_role_delivery(self.db, att)
+        return att
+
+    def test_each_attachment_counts_its_own_deliveries(self):
+        one, two = self.bind("one"), self.bind("two")
+        self.assertIsNot(one["suffix_gate"], two["suffix_gate"])
+        digest(one["suffix_gate"], 1, 0)
+        digest(one["suffix_gate"], 2, 1)
+        self.assertEqual((one["suffix_gate"].deliveries, two["suffix_gate"].deliveries), (2, 0))
+        self.assertIn(DIGEST_FOOTER, digest(two["suffix_gate"], 1, 0))
+
+    def test_a_restart_or_rotated_session_binds_a_new_gate_with_the_full_suffix(self):
+        before = self.bind("one")
+        digest(before["suffix_gate"], 1, 0)
+        self.assertEqual(digest(before["suffix_gate"], 2, 1), "[cap]: go")
+        after = self.bind("one")  # the adapter is rebuilt: same attachment, new process
+        self.assertIsNot(after["suffix_gate"], before["suffix_gate"])
+        self.assertEqual(after["suffix_gate"].deliveries, 0)
+        self.assertIn(DIGEST_FOOTER, digest(after["suffix_gate"], 3, 2))
 
 
 class SuffixGateTest(unittest.TestCase):

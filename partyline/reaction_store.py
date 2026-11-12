@@ -22,6 +22,16 @@ def message(db, message_id: int) -> dict | None:
     return as_message(row) if row else None
 
 
+def is_latest_from_author(db, item: dict) -> bool:
+    """Whether ``item`` is the newest message its (process) author has said on the line."""
+    row = db._exec(
+        "SELECT MAX(id) FROM messages WHERE conv_id=? AND sender_type='agent' "
+        "AND lower(sender)=lower(?)",
+        (item["conv_id"], item["sender"]),
+    ).fetchone()
+    return bool(row) and row[0] == item["id"]
+
+
 def _reactor_type(principal: Principal | None) -> ReactionType | None:
     if principal is None:
         return None
