@@ -2246,3 +2246,26 @@ same slip news again; a message that merely does not repeat it does not (review 
 two-message turn). For every notice that wakes a process, ask what
 the process will say next and whether those words re-trigger it. Tests: `tests/test_unreached_notice.py`.
 
+## 2026-11-12 — A watcher that reads the file it watches can wake itself
+
+The false assumption was that reading is silent. The OpenCode v2 watcher opened a read-only SQLite connection for
+every read of OpenCode's store and closed it afterwards. Closing a write-ahead database closes its `-wal` and
+`-shm` files even for a reader, and that close is a file notification on the very names being watched, so every
+read caused the next one. The watcher never waited: 237 reads a second measured in review, each on the event
+loop, a full core whether the process was working or idle, with the store's size and mtime unchanged throughout. The
+service sat near 6% CPU before an OpenCode process attached and at about 100% afterwards, and ordinary requests
+showed up as 500 ms "slow operation" lines. A first fix blamed terminal redraws, made each read cheaper and left
+the loop spinning faster (2,885 reads a second); the review found the real cause by counting notifications with
+nothing writing. A second fix shared the one connection with a worker thread and closed it on the loop thread
+when the watcher was cancelled, which crashed the interpreter; the connection is now used and closed under a lock. The
+watcher now keeps one connection for its life, asks `PRAGMA data_version` whether another connection committed
+before listing anything, lists row ids without bodies and fetches only rows that are not settled, in a thread;
+once a session is claimed, terminal output no longer triggers a read. Because a notification can precede the
+commit it announces becoming visible, a notification that shows nothing new earns one later look, which arms
+nothing further and is dropped if the store fails. Two smaller faults in the
+same adapter: a turn started by a background job or subagent finishing (a `synthetic` row, no user row) showed no
+working badge and never ended for the return path, and a compaction first seen while it was running was never
+counted. When an event wait replaces a poll, prove the watcher is quiet when nothing happens: count its wakes
+against a store nobody is writing. The Codex thread-history reader has the same fault (8,661 reads a second in
+review) and OpenCode v1 opens a connection per read too; Hermes has not been checked. They are scheduled
+separately. Tests: `tests/test_opencode_v2_adapter.py`.
