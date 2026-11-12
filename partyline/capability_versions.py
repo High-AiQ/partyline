@@ -17,6 +17,7 @@ class CapabilityVersions:
         self._lock = threading.Lock()
         self._versions = {}
         self._waiters = {}
+        self._closed = False
         self._tables = {"attachments", "conversations", "conversation_write_grants",
                         "task_reviews", "screen_window_grants"}
         if db is not None:
@@ -60,27 +61,40 @@ class CapabilityVersions:
             for attachment_id in self._versions:
                 self._versions[attachment_id] += 1
             waiters = [waiter for entries in self._waiters.values() for waiter in entries]
+        self._wake(waiters)
+
+    @staticmethod
+    def _wake(waiters):
         for loop, event in waiters:
             try:
                 loop.call_soon_threadsafe(event.set)
             except RuntimeError:
                 pass  # The request's event loop has already closed.
 
-    async def wait_for_change(self, attachment_id, since, timeout):
+    def close(self):
+        """Shutdown: end every open stream, so no request outlives the listener."""
+        with self._lock:
+            self._closed = True
+            waiters = [waiter for entries in self._waiters.values() for waiter in entries]
+        self._wake(waiters)
+
+    async def wait_for_change(self, attachment_id, since):
+        """The revision once it differs from ``since``; None once the server is stopping.
+
+        Nothing bounds the wait: a change or shutdown is the only thing that ends it.
+        """
         loop = asyncio.get_running_loop()
         event = asyncio.Event()
         waiter = (loop, event)
         with self._lock:
+            if self._closed:
+                return None
             current = f"{self.epoch}:{self._versions.setdefault(attachment_id, 0)}"
             if since != current:
                 return current
             self._waiters.setdefault(attachment_id, set()).add(waiter)
         try:
-            try:
-                await asyncio.wait_for(event.wait(), timeout)
-            except TimeoutError:
-                pass
-            return self.current(attachment_id)
+            await event.wait()
         finally:
             with self._lock:
                 entries = self._waiters.get(attachment_id)
@@ -88,3 +102,10 @@ class CapabilityVersions:
                     entries.discard(waiter)
                     if not entries:
                         self._waiters.pop(attachment_id, None)
+        return None if self._closed else self.current(attachment_id)
+
+    async def changes(self, attachment_id):
+        """The current revision at once, then each later one, until shutdown."""
+        since = None
+        while (since := await self.wait_for_change(attachment_id, since)) is not None:
+            yield since

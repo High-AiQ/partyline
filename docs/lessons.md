@@ -2196,3 +2196,27 @@ the captain three times in a row over its own apologies. Unknown names in code, 
 someone, are no longer reported unless they resemble a real handle. A check that reads accumulated state or free
 text needs a regression built from that state and that text, not from a clean fixture. Tests:
 `tests/test_captain_idle.py`, `tests/test_unreached_notice.py`.
+
+## 2026-11-12 — "Small, synchronous" database writes were the event loop's longest stalls
+
+The false assumption was that a one-row write is fast because the statement is. In SQLite's default
+rollback-journal mode every commit syncs the journal, the database and their directory, and every commit here ran
+on the event loop. On an idle disk that is under a millisecond; beside a test run or a build it reached 3.6 and
+7.4 seconds in the journal, with the stack in `commit` each time. A harness receipt gives up after five seconds,
+so those stalls surfaced as "turn receipt never arrived" and a turn that never closed. The database is now
+write-ahead with `synchronous=NORMAL`, and its checkpoints, the only remaining syncs, run on a worker thread
+woken by write volume (`partyline/db_wal.py`). The second-largest source was Claude transcript discovery: while
+one attachment waited for its session, every write to any Claude session on the machine re-read up to a megabyte
+of each of 472 transcripts, on the loop. It now reads only sessions written since the process started and changed
+since they were last read. Measure a blocking call where it runs, under the load it will meet, not on a quiet
+machine. Tests: `tests/test_db_wal.py`, `tests/test_claude_adapter.py`.
+
+## 2026-11-12 — A request that waits holds the restart that is waiting for it
+
+The false assumption was that a long poll is free while idle. Each MCP bridge kept one 55-second request open;
+uvicorn stops listening first and then waits for every open request, so each restart with live processes sat
+13 to 45 seconds refusing connections before shutdown began, and the request timer logged a "slow operation"
+line a minute. The tool-list watcher is now one pushed stream per bridge, and the server ends its open streams
+before uvicorn waits on connections (`StreamClosingServer`). Any response the server holds open needs an owner
+that closes it at shutdown. Tests: `tests/test_capability_stream.py`.
+

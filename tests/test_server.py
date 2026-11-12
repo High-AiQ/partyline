@@ -304,8 +304,9 @@ class BindConfigTest(unittest.TestCase):
         captured = {}
 
         class FakeServer:
-            def __init__(self, config):
+            def __init__(self, config, close_streams):
                 captured["config"] = config
+                captured["close_streams"] = close_streams
 
             def run(self):
                 captured["ran"] = True
@@ -314,7 +315,7 @@ class BindConfigTest(unittest.TestCase):
         old_name = getattr(server.app.state, "instance_name", None)
         try:
             with patch.object(server, "load_dotenv"), patch.object(
-                server.uvicorn, "Server", FakeServer
+                server, "StreamClosingServer", FakeServer
             ):
                 server.main([
                     "--host", "example.test", "--port", "9000",
@@ -328,6 +329,8 @@ class BindConfigTest(unittest.TestCase):
             )
             self.assertEqual(server.app.state.instance_name, "Test instance")
             self.assertTrue(captured["ran"])
+            # Shutdown ends the open capability streams before uvicorn waits on connections.
+            self.assertEqual(captured["close_streams"], server.runtime.capability_versions.close)
         finally:
             server.app.state.bind = old_bind
             server.app.state.instance_name = old_name

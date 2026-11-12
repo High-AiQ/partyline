@@ -144,10 +144,11 @@ are in its Decisions section (1 to 14):
 - Named tools are a convenience on clients that re-list. Measured clients behave as recorded in
   section 10: Claude Code and OpenCode V2 re-list (retained runs against the fixture), and Codex
   does not.
-- Screen catalog refresh uses `/api/capability-version`, a long poll that waits on in-memory per-
-  attachment revisions without querying the database. Relevant SQL mutations and screen/control state
-  changes wake it; the bridge fetches `/api/capabilities` only after a revision changes. A 55-second
-  timeout bounds idle requests to about one per minute, and transient transport failures retry with
+- Screen catalog refresh uses `/api/capability-stream`: one request the server holds open and pushes
+  a line down whenever the in-memory per-attachment revision changes, without querying the database.
+  Relevant SQL mutations and screen/control state changes push it; the bridge fetches
+  `/api/capabilities` only after a pushed revision differs. Nothing times the stream out. A stopping
+  server ends it before it waits on connections, and the bridge reconnects after a break with
   capped backoff. Claude Code and OpenCode V2 get screen tools only for live grants. Codex keeps the
   legacy catalog because it does not re-list on `list_changed`; its calls are checked against live grants.
 

@@ -77,30 +77,32 @@ class MCPServer:
         self._capability_version = state.get("capability_version", self._capability_version)
         return True
 
-    def _watch_step(self, version):
+    def _follow_stream(self):
+        """Apply each pushed revision; True once the stream delivered at least one."""
+        delivered = False
         try:
-            current = self.client.capability_version(version, timeout=65)
-            if current != version and not self._refresh_signature():
-                return version, False
-            return current, True
+            for version in self.client.capability_stream():
+                # A refresh records the revision its capabilities were read at.
+                if version != self._capability_version and not self._refresh_signature():
+                    return False
+                delivered = True
         except Exception:
-            logger.warning("MCP capability watcher request failed; it will retry", exc_info=True)
-            return version, False
+            if not self._poll_stop.is_set():
+                logger.warning("MCP capability stream failed; it will reconnect", exc_info=True)
+            return False
+        return delivered
 
     def _poll_capabilities(self):
+        """Hold one pushed stream open; reconnect only after it breaks."""
         delay = 0.5
         while not self._poll_stop.is_set():
             self._watch_ready.wait()
-            if self._poll_stop.is_set():
+            if self._poll_stop.is_set() or self._revoked:
                 return
-            version, recovered = self._watch_step(self._capability_version)
-            if recovered:
-                self._capability_version = version
-                delay = 0.5
-            elif self._poll_stop.wait(delay):
+            # no-poll (e): bounded reconnect backoff after a broken stream; a served one resets it
+            delay = 0.5 if self._follow_stream() else min(delay * 2, 10)
+            if self._revoked or self._poll_stop.wait(delay):
                 return
-            else:
-                delay = min(delay * 2, 10)
 
     def handle(self, message: dict):
         if not isinstance(message, dict):

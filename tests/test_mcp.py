@@ -794,63 +794,9 @@ class RenderAndServerTests(unittest.TestCase):
         self.assertTrue(state["screen_control"])
         self.assertTrue(state["screen_windows"])
 
-    def test_capability_watcher_retries_transport_failure_and_notifies(self):
-        client = FakeClient(actions=("read", "write"))
-        client.state.update(dynamic_screen_tools=True, screen_read=False,
-                            screen_control=False, screen_windows=False)
-        calls = []
-
-        def capability_version(since, timeout):
-            calls.append((since, timeout))
-            if len(calls) == 1:
-                raise ConnectionRefusedError("temporary outage")
-            client.state["screen_read"] = True
-            return "epoch:2"
-
-        client.capability_version = capability_version
-
-        class StopAfterRetry:
-            checks = 0
-
-            def is_set(self):
-                self.checks += 1
-                return self.checks >= 5
-
-            def wait(self, _delay):
-                return False
-
-        output = io.StringIO()
-        server = MCPServer(client, output)
-        server._state_signature = server._signature(client.state)
-        server._capability_version = "epoch:1"
-        server._dynamic_screen_tools = True
-        server._watch_ready.set()
-        server._poll_stop = StopAfterRetry()
-        server._poll_capabilities()
-        self.assertEqual([call[0] for call in calls], ["epoch:1", "epoch:1"])
-        self.assertEqual(output.getvalue().count("notifications/tools/list_changed"), 1)
-        server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
-        names = {tool["name"] for tool in json.loads(output.getvalue().splitlines()[-1])
-                 ["result"]["tools"]}
-        self.assertIn("screen_frame", names)
-
-    def test_capability_version_event_wakes_waiter_and_tracks_sql_changes(self):
+    def test_capability_version_tracks_sql_changes(self):
         import sqlite3
         from partyline.capability_versions import CapabilityVersions
-
-        async def run():
-            import asyncio
-
-            versions = CapabilityVersions()
-            since = versions.current("att-1")
-            waiting = asyncio.create_task(versions.wait_for_change("att-1", since, timeout=60))
-            await asyncio.sleep(0)
-            versions.bump_all()
-            changed = await waiting
-            self.assertNotEqual(since, changed)
-
-        import asyncio
-        asyncio.run(run())
 
         versions = CapabilityVersions()
         before = versions.current("att-2")

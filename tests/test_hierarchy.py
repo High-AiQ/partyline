@@ -467,9 +467,9 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(body["role"], "lead")
         self.assertIn("create_child", body["actions"])
         self.assertIsInstance(body["capability_version"], str)
+        # The long poll is gone, not kept beside the stream (tests/test_capability_stream.py).
         version = self.client.get("/api/capability-version?since=unknown", headers=self.lead)
-        self.assertEqual(version.status_code, 200)
-        self.assertIsInstance(version.json()["version"], str)
+        self.assertEqual(version.status_code, 404)
         worker = self.activate_impl()
         impl = self.client.get("/api/capabilities", headers=worker)
         self.assertEqual(impl.status_code, 200)

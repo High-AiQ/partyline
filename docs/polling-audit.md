@@ -74,8 +74,9 @@ or explicit process-exit/stop notification without a timer.
   failure recovery. Healthy resources are never checked on a timer.
   Recognizer retry-fetches are explicitly (a), per Greg's follow-up ruling.
 
-`MCPServer._watch_step` uses an event-driven server request; its HTTP timeout
-only renews an idle streaming request. It does not scan state on a timer.
+The MCP bridge follows `/api/capability-stream`, a response the server holds open
+and pushes each revision down (2026-11-12). It replaced a 55-second long poll that
+asked again about once a minute per bridge and held every restart until it timed out.
 Single `poll()` calls used to answer an event-driven liveness question are
 not process spin-waits. `scripts/uishot.py:255–262` is screenshot development
 tooling, not a production script. No production shell polling was found.
