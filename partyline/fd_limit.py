@@ -35,11 +35,14 @@ def raise_open_file_limit(resource=None) -> int | None:
             break
         try:
             resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
-            return target
+            soft = target
+            break
         except (ValueError, OSError):
             continue
     if soft < ENOUGH:
+        # A raise that the host capped low is as short of descriptors as no raise at all.
         logger.warning(
-            "the open-file limit stays at %d; with several attached processes partyline can "
-            "run out of descriptors. Raise it before starting partyline: ulimit -n 10240", soft)
+            "the open-file limit is %d; with several attached processes partyline can run out "
+            "of descriptors. Raise the hard limit for the account or service that starts "
+            "partyline (for a shell: ulimit -n 10240)", soft)
     return soft

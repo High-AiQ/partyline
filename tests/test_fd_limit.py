@@ -52,6 +52,25 @@ class OpenFileLimitTests(unittest.TestCase):
             self.assertEqual(fd_limit.raise_open_file_limit(resource), 256)
         self.assertEqual(resource.attempts, [65536, 10240, 4096])
         self.assertIn("ulimit -n 10240", logs.output[0])
+        self.assertIn("is 256", logs.output[0])
+
+    def test_a_raise_the_host_caps_low_still_warns(self):
+        resource = FakeResource(256, 300)
+        with self.assertLogs("partyline.fd_limit", "WARNING") as logs:
+            self.assertEqual(fd_limit.raise_open_file_limit(resource), 300)
+        self.assertIn("is 300", logs.output[0])
+
+    def test_a_refusal_reported_as_an_os_error_falls_back_too(self):
+        class Refusing(FakeResource):
+            def setrlimit(self, which, limits):
+                self.attempts.append(limits[0])
+                if limits[0] > 10240:
+                    raise OSError(22, "Invalid argument")
+                self.limits = limits
+
+        resource = Refusing(256, FakeResource.RLIM_INFINITY)
+        self.assertEqual(fd_limit.raise_open_file_limit(resource), 10240)
+        self.assertEqual(resource.attempts, [65536, 10240])
 
     def test_a_platform_without_the_resource_module_has_nothing_to_raise(self):
         with patch.dict(sys.modules, {"resource": None}):

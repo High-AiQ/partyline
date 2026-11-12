@@ -8,17 +8,19 @@ import shlex
 import sys
 import weakref
 
-from partyline.adapters.events import watch_files
-
 from partyline.adapters.base import Adapter as BaseAdapter
+from partyline.adapters.events import watch_files
 from partyline.adapters.bundled.claude.session import ClaudeSession
+from partyline.adapters.bundled.claude.watch import ClaudeWatch, projects_glob
 from partyline.adapters.compaction import compaction_hooks_declared, is_compaction_record
 from partyline.adapters.session_seed import seed_claude_home
 from partyline.adapters.session_pin import pinned_session
 from partyline.mcp_attach import claude_command
 
+LATER_LOOK_SECONDS = 1.0
 
-class PartylineAdapter(ClaudeSession, BaseAdapter):
+
+class PartylineAdapter(ClaudeWatch, ClaudeSession, BaseAdapter):
     kind = "claude"
     jsonl_paste_receipts = True
 
@@ -144,7 +146,7 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
         rather than being skipped by it.
         """
         pinned = next(iter(glob.glob(self.transcript_glob())), "")
-        sweep = glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl"))
+        sweep = glob.glob(projects_glob())
         seen = set()
         for path in ([pinned] if pinned else []) + sweep:
             if path in seen:
@@ -164,6 +166,7 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
             if self._recorded_our_token(path):
                 self._CLAIMED[path] = self
                 self._transcript = path
+                self.narrow_watch(path)
                 # The token in the file is this activation's proof; speech
                 # may flow. The pinned fallback below cannot prove, so it
                 # leaves the gate closed until a wake records the token.
@@ -175,7 +178,9 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
                 and self._written_since_spawn(pinned)):
             self._CLAIMED[pinned] = self
             self._transcript = pinned
+            self.narrow_watch(pinned)
             return pinned
+        self._watch_what_matters_now()
         return None
 
     async def _await_transcript(self) -> str | None:
@@ -189,7 +194,7 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
         process is alive. Silence is never a verdict.
         """
         started = self.event_time()
-        waited, warned = 0.0, False
+        waited, warned, looked = 0.0, False, True
         while self.alive():
             waited = self.event_time() - started
             if path := self._find_transcript():
@@ -210,11 +215,16 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
                     f"If this persists, run the CLI manually once in "
                     f"{self.att['cwd']}, then re-attach.",
                 )
-            await self.wait_for_change(None if warned else max(0, 45.0 - waited))
+            # An old session file we hold no descriptor for can take our token after the last
+            # pty wake. no-poll (b): one later look per notification; that look arms nothing.
+            deadline = None if warned else max(0, 45.0 - waited)
+            if not looked:
+                deadline = LATER_LOOK_SECONDS if deadline is None else min(deadline, LATER_LOOK_SECONDS)
+            elapsed = await self.wait_for_change(deadline)
+            looked = not looked and elapsed >= LATER_LOOK_SECONDS
         return None
 
-    @watch_files(lambda self: [self.transcript_glob(),
-                               os.path.expanduser("~/.claude/projects/*/*.jsonl")])
+    @watch_files(lambda self: [self.transcript_glob(), projects_glob()], admit=ClaudeWatch._admit)
     async def _run(self):
         await asyncio.sleep(5.0)
         if not self.alive():
