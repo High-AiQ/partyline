@@ -1,5 +1,22 @@
 # Lessons: the false-assumptions ledger
 
+## A cursor keyed by the waiting task makes a fresh task a busy loop
+
+The false assumption was that `await changes.wait()` blocks until the next change. `Changes`
+keeps one cursor per waiting task, and a task it has never seen starts at zero, so it returns
+at once whenever anything was ever notified. The memory and Docker event loops wait with
+`asyncio.create_task(events.wait())` and make a new task after each wake, so after the first
+write to `attachments` or `conversations` they never blocked again: each turn ran a
+thread-pool job (reading every live process's cgroup, querying grants under the database
+lock). On the live host that was 42% of a core on the event loop, about 9% on each of twelve
+pool threads and 29,000 context switches a second, forever, from the 2026-11-11 commits that
+replaced polling with events. The tests used hand-written signals instead of the real
+subscription, so they could not see it. A database subscription and a file watch now own
+their cursor (`Subscription.wait`, `FileEvents.wait`), whichever task waits. An event
+primitive must be tested through the calling pattern its consumers use, and "no timers"
+does not prove "no spinning": count the work done after one event and then silence.
+Tests: `tests/test_wait_cursors.py`.
+
 ## A watch that comes back has missed what happened while it was down
 
 The false assumption was that re-registering a starved watch restores the owner's view.

@@ -71,15 +71,17 @@ class EventTests(unittest.IsolatedAsyncioTestCase):
                     self.assertFalse(waiter.done())
                     db.create_conversation('line', 'Line')
                     await waiter
-                    # Consume on the task that will next wait.
-                    await events.wait()
                     before = events.changes.version
                     with events.processing():
                         db._exec("UPDATE conversations SET name='Changed' WHERE id='line'")
+                    # The cursor is the subscription's: a wait in a new task does not start
+                    # behind the change the last one consumed, and self-work is no change.
                     waiter = asyncio.create_task(events.wait())
-                    await waiter  # its own first generation, already delivered
                     await turn()
+                    self.assertFalse(waiter.done())
                     self.assertEqual(events.changes.version, before)
+                    waiter.cancel()
+                    await asyncio.gather(waiter, return_exceptions=True)
                 self.assertEqual(db.events.listeners, set())
             finally:
                 db.close()

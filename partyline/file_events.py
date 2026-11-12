@@ -167,7 +167,8 @@ class FileEvents:
         return self
 
     async def wait(self, owner=None):
-        await self.changes.wait(owner)
+        """Wait for the next change; without an owner the cursor is this watch's own."""
+        await self.changes.wait(owner or self)
 
     async def __aexit__(self, *args):
         self.closed = True
