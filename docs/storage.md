@@ -17,3 +17,14 @@ is refreshed, in a thread, under a 10 s budget; a category that ran out of time 
 at that moment (the listing is not trusted), returns `{removed, freed_bytes, skipped}` with a
 reason per kept path, and posts one system notice on the root line naming the person.
 The UI asks for confirmation, listing the count, size and first paths, before it calls clear.
+
+## The database file
+
+The server opens its SQLite database in write-ahead mode with `synchronous=NORMAL`
+(`partyline/db_wal.py`). A commit appends to `<db>-wal` and does not sync; a worker thread
+checkpoints the log into the main file after every few hundred writes, so no sync runs on the
+event loop. A process crash loses nothing. A power loss leaves the database consistent but can
+drop the last few commits. `<db>-wal` and `<db>-shm` belong to the database: copy all three, or
+stop the server first, when backing it up. The mode is recorded in the file, so an older build
+opens it unchanged.
+

@@ -23,6 +23,8 @@ class DatabaseEvents:
         self.lock = threading.Lock()
         self.listeners = set()
         self.callbacks = set()
+        if wrote := getattr(connection, 'wrote', None):
+            self.callbacks.add(wrote)  # the write-ahead log is checkpointed by write volume
         connection.set_trace_callback(self.trace)
 
     def trace(self, statement):
