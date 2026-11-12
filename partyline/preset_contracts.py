@@ -71,6 +71,7 @@ class StaffingLine(BaseModel):
     id: str
     name: str
     accepted_sha: str
+    retired: bool = False
 
 
 class StaffingQueued(BaseModel):
@@ -84,4 +85,7 @@ class StaffingResponse(BaseModel):
     presets: list[StaffingPreset] = Field(default_factory=list)
     processes: list[StaffingProcess] = Field(default_factory=list)
     lines: list[StaffingLine] = Field(default_factory=list)
+    lines_total: int = 0
+    # Set while more accepted lines follow: pass it back as lines_offset.
+    lines_next_offset: int | None = None
     reattaching: list[StaffingQueued] = Field(default_factory=list)

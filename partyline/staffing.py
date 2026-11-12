@@ -13,7 +13,11 @@ from .resource_leases import describe_leases
 LIVE = ("starting", "running")
 
 
-def staffing_report(db, conv_id: str, *, runtime=None) -> dict:
+LINES_LIMIT = 10
+
+
+def staffing_report(db, conv_id: str, *, runtime=None, lines_limit: int = LINES_LIMIT,
+                    lines_offset: int = 0) -> dict:
     presets = [row for row in (coerce_preset(p) for p in db.list_presets()) if row]
     catalog = [
         {
@@ -39,6 +43,7 @@ def staffing_report(db, conv_id: str, *, runtime=None) -> dict:
                 "id": line_id,
                 "name": conv["name"],
                 "accepted_sha": conv["accepted_sha"],
+                "retired": bool(conv.get("archived_at")),
             })
         for att in db.list_attachments(line_id):
             if att["status"] not in LIVE or not counts(att) or att["id"] in queued:
@@ -59,11 +64,17 @@ def staffing_report(db, conv_id: str, *, runtime=None) -> dict:
                 },
                 "traits": None if matched is None else coerce_traits(matched),
             })
+    # Live lines first: a long-lived root has hundreds of retired ones, and a captain acts on the rest.
+    lines.sort(key=lambda row: row["retired"])
+    page = lines[lines_offset:lines_offset + lines_limit]
+    more = lines_offset + len(page) < len(lines)
     return {
         "presets_in_use": matched_any,
         "presets": catalog,
         "processes": processes,
-        "lines": lines,
+        "lines": page,
+        "lines_total": len(lines),
+        "lines_next_offset": lines_offset + len(page) if more else None,
         # Not gone: a restart plan is bringing these back one at a time.
         "reattaching": [
             {"line_id": att["conv_id"], "handle": att["name"], "adapter": att["adapter"]}

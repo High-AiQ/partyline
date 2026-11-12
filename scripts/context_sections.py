@@ -149,7 +149,7 @@ def notices(world) -> dict:
 
 def listings(world) -> dict:
     """What a captain's listing calls return on a tree with 14 retired task lines."""
-    from partyline.mcp.tools_tasks import _board
+    from partyline.mcp.tools_tasks import RETIRED_PAGE, _board
     from partyline.orchestrator_store import tasks
     from partyline.process_overview import process_overview
     from partyline.staffing import staffing_line, staffing_report
@@ -157,8 +157,11 @@ def listings(world) -> dict:
     runtime = SimpleNamespace(db=world.db, live={}, memory_usage={}, presence=None)
     out = {"staffing rider (every captain wake)": len(staffing_line(world.db, "root"))}
     out["staffing op"] = len(json.dumps(staffing_report(world.db, "root"), default=str))
-    out["process_overview op"] = len(process_overview(runtime, "root").model_dump_json())
-    live, everything = tasks(world.db, "root", retired=False), tasks(world.db, "root")
+    overview = process_overview(runtime, "root", include_retired=False)  # what the MCP op asks for
+    out["process_overview op"] = len(overview.model_dump_json())
+    live = tasks(world.db, "root", retired=False)
     out["tasks board (live lines)"] = len(json.dumps(_board(live), default=str))
-    out["tasks board (include_retired)"] = len(json.dumps(_board(everything), default=str))
+    page = tasks(world.db, "root", only_retired=(RETIRED_PAGE + 1, 0))[:RETIRED_PAGE]  # first page
+    board = _board(live) + _board(page, retired=True)
+    out["tasks board (include_retired)"] = len(json.dumps(board, default=str))
     return out

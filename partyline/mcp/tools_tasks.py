@@ -60,21 +60,32 @@ _DESCRIBE = {
 
 
 BOARD_TEXT = 240
+RETIRED_PAGE = 10
 _PROSE = ('goal', 'what', 'location', 'findings', 'previous_findings', 'wait_reason')
 
 
-def _board(rows):
+# Bookkeeping a captain never acts on: ids the handles already name, and counters at rest.
+_INTERNAL = ('root_id', 'implementer_id', 'reviewer_id', 'initial_status', 'status_pre_idle')
+_COUNTERS = ('stall_stage', 'reviewer_restarts', 'reopen_noticed', 'repin_required')
+RETIRED_TEXT = 80
+
+
+def _board(rows, retired=False):
     """A listing a captain can read whole: unset fields dropped, long prose cut short.
 
     A full record runs to kilobytes and the reply is bounded, so a few tasks' findings
-    used to push every later task off the end of the listing.
+    used to push every later task off the end of the listing. A retired task keeps its
+    outcome and a short goal; `tasks(conv_id=...)` still returns any task in full.
     """
     board = []
     for row in rows if isinstance(rows, list) else []:
-        item = {key: value for key, value in row.items() if value not in (None, '', [])}
+        item = {key: value for key, value in row.items()
+                if value not in (None, '', []) and key not in _INTERNAL
+                and not (key in _COUNTERS and value == 0)}
         for key in _PROSE:
-            if isinstance(item.get(key), str) and len(item[key]) > BOARD_TEXT:
-                item[key] = item[key][:BOARD_TEXT] + '…'
+            limit = RETIRED_TEXT if retired else BOARD_TEXT
+            if isinstance(item.get(key), str) and len(item[key]) > limit:
+                item[key] = item[key][:limit] + '…'
         board.append(item)
     return board
 
@@ -113,6 +124,10 @@ def tool_list(state):
                 'Also list tasks whose line is retired, oldest first. Default false: the live board.')}
             schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1, 'description': (
                 'A task line id: return that one task with no field shortened.')}
+            schema['properties']['limit'] = {'type': 'integer', 'minimum': 1, 'maximum': 100, 'description': (
+                f'With include_retired: retired tasks per page, newest first; default {RETIRED_PAGE}.')}
+            schema['properties']['offset'] = {'type': 'integer', 'minimum': 0, 'description': (
+                'With include_retired: skip this many retired tasks (the board says what to pass).')}
             description = ("The board: every task on a live line, with status, handles and workspaces. "
                            "Workspaces show real and mirror tips; the mirror tip is where the worker's "
                            f"commits live until accept. Text over {BOARD_TEXT} characters is cut short; "
@@ -132,7 +147,15 @@ def call(client, name, args, state):
     if name == 'tasks' and 'conv_id' in args:
         return client.request('GET', f"/api/conversations/{quote(conv, safe='')}/task")
     if name == 'tasks':
-        tail += '?include_retired=true' if body.get('include_retired') else ''
-        return _board(client.request('GET', f"/api/conversations/{quote(conv, safe='')}/{tail}"))
+        base = f"/api/conversations/{quote(conv, safe='')}/tasks"
+        board = _board(client.request('GET', base))
+        if not body.get('include_retired'):
+            return board
+        limit, offset = body.get('limit', RETIRED_PAGE), body.get('offset', 0)
+        old = _board(client.request('GET', f'{base}?retired_only=true&limit={limit + 1}&offset={offset}'),
+                     retired=True)
+        if len(old) > limit:
+            old = [*old[:limit], {'retired_more': f'tasks(include_retired=true, offset={offset + limit})'}]
+        return board + old
     return client.request(method, f"/api/conversations/{quote(conv, safe='')}/{tail}",
                           body if method == 'POST' else None)
