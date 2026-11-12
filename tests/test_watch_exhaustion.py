@@ -29,6 +29,8 @@ class Backend:
 
 
 class Watcher:
+    file_vnodes = True
+
     def __init__(self, failures):
         self.failures, self.watches, self.closed = failures, set(), False
 
@@ -42,6 +44,26 @@ class Watcher:
 
     async def close(self):
         self.closed = True
+
+
+class Capped(Backend):
+    """A host that has room for ``room`` watches at once."""
+
+    def __init__(self, room):
+        super().__init__()
+        self.room = room
+
+    def __call__(self, loop, changed, failed):
+        watcher = super().__call__(loop, changed, failed)
+        add = watcher.add
+
+        def limited(path):
+            if len(watcher.watches) >= self.room and path not in watcher.watches:
+                raise exhausted()
+            add(path)
+
+        watcher.add = limited
+        return watcher
 
 
 class ExhaustionTests(unittest.IsolatedAsyncioTestCase):
@@ -64,11 +86,11 @@ class ExhaustionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_without_the_hook_exhaustion_still_stops_the_owner(self):
         with self.assertRaises(OSError):
-            async with self.events(Backend(failures=[exhausted()]), hook=False):
+            async with self.events(Backend(failures=[exhausted()] * 2), hook=False):
                 self.fail('entered')
 
     async def test_a_registration_that_runs_out_is_told_once_and_retried_on_the_next_wake(self):
-        changes, backend = Changes(), Backend(failures=[exhausted(), exhausted()])
+        changes, backend = Changes(), Backend(failures=[exhausted()] * 4)  # two passes a wake
         async with self.events(backend, changes=changes) as events:
             self.assertTrue(events.starved)
             self.assertEqual(len(self.told), 1)
@@ -91,7 +113,7 @@ class ExhaustionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(backend.made[0].closed)
 
     async def test_a_native_event_while_starved_retries_whatever_changed(self):
-        backend = Backend(failures=[exhausted()])
+        backend = Backend(failures=[exhausted()] * 2)
         async with self.events(backend) as events:
             events.changed({Path('/elsewhere')})
             self.assertFalse(events.starved)
@@ -109,6 +131,45 @@ class ExhaustionTests(unittest.IsolatedAsyncioTestCase):
                     events.changed({self.root / 'db'})
                     with self.assertRaises(type(error)):
                         await changes.wait()
+
+    async def test_a_healthy_peers_event_retries_the_starved_one(self):
+        changes = Changes()
+        starved = self.events(Backend(creation=[exhausted()]), changes=changes)
+        healthy = self.events(Backend(), changes=changes)
+        async with starved, healthy:
+            self.assertTrue(starved.starved)
+            healthy.changed({self.root / 'db'})  # a native event on the healthy watch
+            self.assertFalse(starved.starved)
+            self.assertIsNotNone(starved.watcher)
+
+    async def test_a_claim_that_cannot_fit_still_releases_what_it_obsoletes(self):
+        """Narrowing at capacity: the new file does not fit until the old watches go."""
+        for name in ('a', 'b', 'c'):
+            (self.root / name).mkdir()
+        mine = self.root / 'a' / 'mine.jsonl'
+        mine.write_text('{}')
+        backend = Capped(4)
+        events = FileEvents(self.root / '*' / '*.jsonl', backend=backend,
+                            exhausted=self.told.append, admit=lambda path: False)
+        async with events:
+            self.assertEqual(backend.made[0].watches,
+                             {self.root, self.root / 'a', self.root / 'b', self.root / 'c'})
+            events.rewatch(mine)
+            self.assertFalse(events.starved)
+            self.assertEqual(backend.made[0].watches, {self.root / 'a', mine})
+        self.assertEqual(self.told, [])
+
+    async def test_a_claim_that_never_fits_keeps_nothing_it_does_not_need(self):
+        (self.root / 'a').mkdir()
+        mine = self.root / 'a' / 'mine.jsonl'
+        mine.write_text('{}')
+        backend = Capped(1)
+        async with FileEvents(self.root / 'a' / '*.jsonl', backend=backend,
+                              exhausted=self.told.append, admit=lambda path: False) as events:
+            events.rewatch(mine)
+            self.assertTrue(events.starved)
+            self.assertEqual(len(self.told), 1)
+            self.assertLessEqual(len(backend.made[0].watches), 1)
 
     async def test_closing_a_starved_watch_forgets_it(self):
         changes = Changes()

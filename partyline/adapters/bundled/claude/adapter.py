@@ -17,6 +17,8 @@ from partyline.adapters.session_seed import seed_claude_home
 from partyline.adapters.session_pin import pinned_session
 from partyline.mcp_attach import claude_command
 
+LATER_LOOK_SECONDS = 1.0
+
 
 class PartylineAdapter(ClaudeWatch, ClaudeSession, BaseAdapter):
     kind = "claude"
@@ -191,7 +193,7 @@ class PartylineAdapter(ClaudeWatch, ClaudeSession, BaseAdapter):
         process is alive. Silence is never a verdict.
         """
         started = self.event_time()
-        waited, warned = 0.0, False
+        waited, warned, looked = 0.0, False, True
         while self.alive():
             waited = self.event_time() - started
             if path := self._find_transcript():
@@ -212,7 +214,13 @@ class PartylineAdapter(ClaudeWatch, ClaudeSession, BaseAdapter):
                     f"If this persists, run the CLI manually once in "
                     f"{self.att['cwd']}, then re-attach.",
                 )
-            await self.wait_for_change(None if warned else max(0, 45.0 - waited))
+            # An old session file we hold no descriptor for can take our token after the last
+            # pty wake. no-poll (b): one later look per notification; that look arms nothing.
+            deadline = None if warned else max(0, 45.0 - waited)
+            if not looked:
+                deadline = LATER_LOOK_SECONDS if deadline is None else min(deadline, LATER_LOOK_SECONDS)
+            elapsed = await self.wait_for_change(deadline)
+            looked = not looked and elapsed >= LATER_LOOK_SECONDS
         return None
 
     @watch_files(lambda self: [self.transcript_glob(), projects_glob()], admit=ClaudeWatch._admit)
