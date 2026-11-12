@@ -1475,7 +1475,11 @@ the new captain receives the captain pack. Both participants call
 `complete_handover(handover_id)`, in either order. Once both confirm, completion
 and a detach intent are recorded atomically; the server stops the old captain
 through the normal detach path and retries unfinished detaches after restart.
-A one-sided confirmation never detaches the old captain. After 30 minutes the
+The reply names the real state: `completed`, `old_captain` (`attached`, `gone`, `detaching` or
+`detached`), who is still `awaiting`, and a `message` in words; a half-confirmed reply is
+`from_done`/`to_done` true for one side only, so read `completed` first. If the old captain has
+already left (detached, exited or removed) its confirmation can never come, so the new captain's
+confirmation completes the handover. A one-sided confirmation never detaches the old captain. After 30 minutes the
 line receives one notice naming who has not confirmed. A person can resolve a
 stale handover with `POST /api/conversations/{conv_id}/handover/resolve` and
 `{"handover_id":"…"}`; this releases the pending slot without detaching the old
@@ -1487,8 +1491,10 @@ available memory-scope members. MCP commands come from the attachment's config;
 jobs started by those services still count. Process inventory runs in a worker
 thread before the database transaction. Rider/briefing text uses a five-second
 cache, refreshed off-loop; inspection failures appear as unavailable state text.
-Offer and accepted state text show each job's pid, short command, cwd, and observed
-cwd/open files under the outgoing attachment's temp directory. A live job makes
+Offer and accepted state text show each job's pid, command, cwd, and observed
+cwd/open files under the outgoing attachment's temp directory. Linux reads `/proc`, macOS asks `ps`
+and `lsof`, Windows asks CIM and has no working directory; a field that cannot be read says
+`command unknown` or `cwd=unknown` with the reason, never a bare `?`. A live job makes
 completion return 409 before recording that confirmation or creating a detach intent.
 Finish or kill each job, or explicitly call
 `complete_handover(handover_id, live_jobs="transfer")`. Each confirmation with live

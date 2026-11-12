@@ -2614,3 +2614,14 @@ captain deleted the idle-check helper, edited its command and resumed it, and th
 same captain was allowed to delete and re-point it, which is the stronger act. Every raw process that is not a task
 worker, captain or successor is now a helper whatever its count (`preset_roles.is_helper`); the deprecated heartbeat
 is untouched. Tests: `tests/test_helper_resume_roles.py`.
+
+## 2026-11-12 — A handover reply is not "both sides confirmed" until the server says so
+
+The false assumptions were that the other captain's confirmation always arrives and that `?` is an answer. A
+caller that confirmed first read `from_done:false` in its own reply and had no way to tell a pending handover from
+a finished one; when the old captain was detached before it confirmed, the flag never flipped and the handover
+waited out its 30 minute timeout. Live jobs were listed as `pid 70882 ... ?; cwd=?` because only `/proc` was read,
+which macOS lacks. `complete_handover` now reports `completed`, `old_captain`, `awaiting` and a sentence; an old
+captain that has left no longer blocks the new captain's confirmation; and `job_details.describe` reads `ps` and
+`lsof` on macOS and states why a command or directory is unknown. Tests: `tests/test_handover_complete_state.py`,
+`tests/test_handover_job_details.py`.

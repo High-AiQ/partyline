@@ -25,7 +25,7 @@ def _insert_notice(conn, conv_id, body, now):
                            body=body, created_at=now))
 
 
-def confirm(db, conv, att_id, ident, now=None, *, jobs=(), live_jobs=None):
+def confirm(db, conv, att_id, ident, now=None, *, jobs=(), live_jobs=None, old_gone=False):
     """Record the caller's confirmation and atomically create a detach intent."""
     now = time.time() if now is None else now
     with db.lock:
@@ -48,6 +48,8 @@ def confirm(db, conv, att_id, ident, now=None, *, jobs=(), live_jobs=None):
                     '\nFinish or kill each job, or explicitly acknowledge with live_jobs="transfer".')
             column = 'from_done' if att_id == row['from_attachment_id'] else 'to_done'
             db.conn.execute(f'UPDATE captain_handovers SET {column}=1 WHERE id=?', (ident,))
+            if old_gone and column == 'to_done':  # an old captain that left cannot confirm
+                db.conn.execute('UPDATE captain_handovers SET from_done=1 WHERE id=?', (ident,))
             current = db.conn.execute('SELECT * FROM captain_handovers WHERE id=?', (ident,)).fetchone()
             notice = None
             if current['from_done'] and current['to_done']:
@@ -222,13 +224,16 @@ async def complete_route(runtime, request: Request, conv: str, body):
                            'WHERE id=? AND conv_id=?', (body.handover_id, conv)).fetchone()
     ids = [actor.attachment_id] + ([row['from_attachment_id'], row['to_attachment_id']] if row else [])
     jobs = []
+    from .handover_state import old_captain_gone, summary
+    gone = bool(row) and old_captain_gone(runtime, row)
     if (row and row['state'] == 'accepted'
             and actor.attachment_id in (row['from_attachment_id'], row['to_attachment_id'])):
         from .handover_jobs import inspect_completion
-        jobs = await asyncio.to_thread(inspect_completion, runtime, row['from_attachment_id'])
+        jobs = [] if gone else await asyncio.to_thread(
+            inspect_completion, runtime, row['from_attachment_id'])
     current, notice = await _locks(runtime, ids, lambda: confirm(runtime.db, conv, actor.attachment_id,
                                                                  body.handover_id, jobs=jobs,
-                                                                 live_jobs=body.live_jobs))
+                                                                 live_jobs=body.live_jobs, old_gone=gone))
     if notice:
         if jobs:
             from .tmp_retention import remember
@@ -242,7 +247,8 @@ async def complete_route(runtime, request: Request, conv: str, body):
     if current['state'] == 'completed' and current['detach_finished_at'] is None:
         asyncio.create_task(_try_detach(runtime, current))
     return {'handover_id': body.handover_id, 'state': current['state'],
-            'from_done': bool(current['from_done']), 'to_done': bool(current['to_done'])}
+            'from_done': bool(current['from_done']), 'to_done': bool(current['to_done']),
+            **summary(runtime, current)}
 
 
 async def resolve_route(runtime, request: Request, conv: str, body):

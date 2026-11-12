@@ -6,7 +6,8 @@ from pathlib import Path
 from .attachment_tmp import attachment_tmp_dir
 from .process_memory import process_snapshot
 from .tmp_processes import references
-from .top_processes import argv, namespace_pid, render
+from .job_details import describe
+from .top_processes import argv, namespace_pid
 from .tmp_owners import members
 from .handover_mcp import commands, matches
 
@@ -37,15 +38,19 @@ def live_jobs(runtime, att_id):
         if matches(argv(member), configured):
             continue
         cwd, files, _ = references(member, attachment_tmp_dir(att_id))
-        jobs.append({'pid': namespace_pid(member), 'host_pid': member,
-                     'command': render(argv(member)), 'cwd': cwd, 'files': files})
+        command, found_cwd, why = describe(member)
+        jobs.append({'pid': namespace_pid(member), 'host_pid': member, 'command': command,
+                     'cwd': found_cwd or (cwd if cwd != '?' else None), 'files': files,
+                     'unknown': why})
     return jobs
 
 
 def jobs_text(jobs):
     return ('\nLive jobs of the old captain:\n' + '\n'.join(
-        f"pid {job['pid']} (host {job['host_pid']}): {job['command']}; cwd={job['cwd']}; "
-        f"tmp files={', '.join(job['files']) or 'none observed'}" for job in jobs)) if jobs else ''
+        f"pid {job['pid']} (host {job['host_pid']}): {job['command'] or 'command unknown'}; "
+        f"cwd={job['cwd'] or 'unknown'}; tmp files={', '.join(job['files']) or 'none observed'}"
+        + (f"; unknown because {job['unknown']}" if job.get('unknown') else '')
+        for job in jobs)) if jobs else ''
 
 
 def _cli_processes(parents, pid, adapter):
