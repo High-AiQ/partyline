@@ -48,6 +48,31 @@ class AgentSpeakerTest(Tree):
             [notice] = self.told(who)
             self.assertIn("@nobody-here: unknown handle", notice["body"])
 
+    async def test_a_stray_word_in_a_handed_off_message_wakes_nobody(self):
+        """A captain's report said "an AI whose @mention reaches nobody" and was woken over it,
+        apologised in public quoting the word, and was woken again."""
+        self.db._exec("INSERT INTO users(email, handle, password_hash, created_at)"
+                      " VALUES('g@x', 'greg', 'h', 1)")
+        for who, body in (("lead", "Fixed: an AI whose @mention reaches nobody is told.\n\n@greg"),
+                          ("lead", "@worker use @dataclass and @pytest.fixture here"),
+                          ("worker", "@lead done; @property was the fix")):
+            await self.say(who, body)
+
+            self.assertEqual(self.told(who), [], body)
+
+    async def test_a_handle_quoted_as_code_is_not_a_failed_hand_off(self):
+        await self.say("lead", "Skip names like `@nobody-here`.\n```\n@app.get('/x')\n```")
+
+        self.assertEqual(self.told("lead"), [])
+        self.assertEqual(self.public("parent"), [])
+
+    async def test_a_slip_of_a_real_handle_is_still_told_even_when_someone_was_reached(self):
+        await self.say("lead", "@workr build it; @sub review it after")
+
+        [notice] = self.told("lead")
+        self.assertIn("@workr: unknown handle — did you mean @worker?", notice["body"])
+        self.assertNotIn("@sub", notice["body"])
+
     async def test_one_message_crossing_two_lines_wakes_its_speaker_once(self):
         for att_id in ("sub", "builder"):
             self.db.set_attachment_status(att_id, "starting", "own")

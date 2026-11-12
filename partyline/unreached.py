@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+from difflib import get_close_matches
 
 from .hierarchy import ancestors, lead_attachment
 from .mention_relay import LIVE, is_foreign, speaker_attachment, task_root_captain
@@ -95,6 +96,32 @@ def unknown_handles(db, conv_id: str, names: set[str]) -> set[str]:
     names = {name for name in names if name.rstrip(".-_") not in known}
     return {name for name in names
             if not (name.rstrip(".-_") != name and name.rstrip(".-_") in names)}
+
+
+def people(db) -> set[str]:
+    return {str(row["handle"]).lower() for row in db._exec("SELECT handle FROM users").fetchall()}
+
+
+def slips(db, conv_id: str, unknown: set[str], handed_off: bool) -> dict[str, str | None]:
+    """The unknown handles worth waking the speaker for, each with the real one it resembles.
+
+    A message that reached someone was handed off. A stray ``@word`` in it is
+    prose (a decorator, a package scope, the word "mention" itself), and a
+    notice about it wakes the speaker to apologise in public, which can trip
+    the check again. Only a name one slip away from a real handle is still a
+    failed hand-off there. A message that reached nobody reports every name.
+    """
+    if not unknown:
+        return {}
+    real = people(db) | {row["name"] for row in db._exec(
+        "SELECT DISTINCT lower(name) AS name FROM attachments"
+        " WHERE conv_id=? OR status IN ('starting','running')", (conv_id,)).fetchall()}
+    found: dict[str, str | None] = {}
+    for name in sorted(unknown):
+        close = get_close_matches(name, sorted(real), n=1, cutoff=0.85)
+        if close or not handed_off:
+            found[name] = close[0] if close else None
+    return found
 
 
 def gone_staff(db, name: str) -> dict | None:
