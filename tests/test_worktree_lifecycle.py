@@ -70,7 +70,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
         self.addCleanup(setattr, server, "_start_attachment", server._start_attachment)
         server.runtime = self.runtime
         server._start_attachment = fake_start
-        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
+        self.db.create_conversation("root", "Root", captain_mode="orchestrator")
         self.db.add_attachment("root-lead", "root", "terra", "fake", ["fake"], self.directory.name)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='root-lead'")
         user = auth_store.create_user(
@@ -111,7 +111,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
         repo = self._repo()
         self._root_on(repo)
         placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
-            captain_mode="manager_tree")["id"])
+            captain_mode="orchestrator")["id"])
         self.assertIsNone(worktree_removal_reason(self.db, self.db.get_conversation("kid")))
         self.assertEqual(archive_worktree_if_safe(self.db, "kid"), (True, None))
         self.assertFalse(os.path.exists(placed["cwd"]))
@@ -121,7 +121,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
         repo = self._repo()
         self._root_on(repo)
         placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
-            captain_mode="manager_tree")["id"])
+            captain_mode="orchestrator")["id"])
         _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
              "--allow-empty", "-m", "unmerged work", cwd=placed["cwd"])
         reason = worktree_removal_reason(self.db, self.db.get_conversation("kid"))
@@ -133,7 +133,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
         repo = self._repo()
         self._root_on(repo)
         placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
-            captain_mode="manager_tree")["id"])
+            captain_mode="orchestrator")["id"])
         with open(os.path.join(placed["cwd"], "scratch.txt"), "w") as fh:
             fh.write("wip")
         reason = worktree_removal_reason(self.db, self.db.get_conversation("kid"))
@@ -145,7 +145,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
         repo = self._repo()
         self._root_on(repo)
         place_child(self.db, "root", self.db.create_conversation("kid", "kid",
-            captain_mode="manager_tree")["id"])
+            captain_mode="orchestrator")["id"])
         original = worktree_lifecycle._git
 
         def flaky(*args, cwd):
@@ -171,7 +171,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
         _git("remote", "set-head", "origin", "-a", cwd=repo)  # what a real clone sets
         self._root_on(repo)
         placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
-            captain_mode="manager_tree")["id"])
+            captain_mode="orchestrator")["id"])
         _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
              "--allow-empty", "-m", "kid work", cwd=placed["cwd"])
         _git("push", "-q", "origin", "line/kid:main", cwd=placed["cwd"])
@@ -184,7 +184,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
 
     def test_a_line_with_no_worktree_of_its_own_is_trivially_safe(self):
         # An inherited, non-git, or shared directory has nothing to keep.
-        self.db.create_conversation("shares", "shares", captain_mode="manager_tree")
+        self.db.create_conversation("shares", "shares", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='root', cwd=? WHERE id='shares'",
                       (self.directory.name,))
         self.assertIsNone(worktree_removal_reason(self.db, self.db.get_conversation("shares")))
@@ -324,12 +324,12 @@ class WorktreeLifecycleTest(unittest.TestCase):
         repo = self._repo()
         self._root_on(repo)
         kid = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
-            captain_mode="manager_tree")["id"])
+            captain_mode="orchestrator")["id"])
         ghost = place_child(self.db, "root", self.db.create_conversation("ghost", "ghost",
-            captain_mode="manager_tree")["id"])
+            captain_mode="orchestrator")["id"])
         dirty_ghost = place_child(
             self.db, "root", self.db.create_conversation("dirty-ghost", "dirty ghost",
-                captain_mode="manager_tree")["id"])
+                captain_mode="orchestrator")["id"])
         with open(os.path.join(dirty_ghost["cwd"], "scratch.txt"), "w") as fh:
             fh.write("wip")
         # These rows are gone — by hand-editing or a purge interrupted before
@@ -346,7 +346,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
         repo = self._repo()
         self._root_on(repo)
         placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
-            captain_mode="manager_tree")["id"])
+            captain_mode="orchestrator")["id"])
         self.db.archive_conversation("kid")
 
         sweep_orphaned_worktrees(self.db)
@@ -360,7 +360,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
         repo = self._repo()
         self._root_on(repo)
         ghost = place_child(self.db, "root", self.db.create_conversation("ghost", "ghost",
-            captain_mode="manager_tree")["id"])
+            captain_mode="orchestrator")["id"])
         self.db._exec("DELETE FROM conversations WHERE id='ghost'")
 
         sweep_orphaned_worktrees(self.db)

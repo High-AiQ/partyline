@@ -12,16 +12,21 @@
   import { SvelteSet } from "svelte/reactivity";
   import TaskStatusChip from "./TaskStatusChip.svelte";
   import TaskModeIcon from "./TaskModeIcon.svelte";
+  import ChapterMark from "./ChapterMark.svelte";
   import LineMenu from "./LineMenu.svelte";
-  import { lineTree, readExpandedLines, storeExpandedLines } from "../../lib/line-tree";
+  import { lineTree, readExpandedLines, starredLineTree, storeExpandedLines } from "../../lib/line-tree";
+  import type { TreeRow } from "../../lib/line-tree";
   import { toggleSelection } from "../../lib/bulk-select";
   import { tooltip } from "../../lib/tooltip";
+  import { chapterMarker } from "../../lib/chapters";
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte";
+  import { toggleConversationStar } from "../../state/conversation-star";
 
   interface Props {
     onrename: (conversation: Conversation) => void;
     onmanagement: (conversation: Conversation) => void;
+    onchapter?: (conversation: Conversation) => void;
     oncloseprocesses: (conversation: Conversation) => void;
     ondelete: (conversation: Conversation) => void;
     onarchivemany?: (conversations: Conversation[], done: () => void) => void;
@@ -30,13 +35,41 @@
   interface MenuState {
     anchor: HTMLButtonElement;
     conversation: Conversation;
+    rowKey: string;
   }
 
-  let { onrename, onmanagement, oncloseprocesses, ondelete, onarchivemany }: Props = $props();
+  interface GroupedRow extends TreeRow<Conversation> {
+    group: "starred" | "main";
+    key: string;
+    groupIndex: number;
+  }
+
+  let { onrename, onmanagement, onchapter, oncloseprocesses, ondelete, onarchivemany }: Props = $props();
 
   const indicators = $derived(screenStatus.indicators);
   let expanded = $state<Set<string>>(readExpandedLines());
-  const rows = $derived(lineTree(room.conversations, expanded, room.conversation?.id));
+  const starredIds = $derived(
+    new Set(room.conversations.filter((line) => line.starred && !line.archived_at).map((line) => line.id)),
+  );
+  const mainRows = $derived(lineTree(room.conversations, expanded, room.conversation?.id));
+  const shortcutRows = $derived(
+    starredLineTree(room.conversations, expanded, room.conversation?.id, starredIds),
+  );
+  const rows = $derived.by((): GroupedRow[] => [
+    ...shortcutRows.map((row, groupIndex) => ({
+      ...row,
+      group: "starred" as const,
+      key: `starred:${row.line.id}`,
+      groupIndex,
+    })),
+    ...mainRows.map((row, groupIndex) => ({
+      ...row,
+      group: "main" as const,
+      key: `main:${row.line.id}`,
+      groupIndex,
+    })),
+  ]);
+  const visibleRows = $derived(rows.filter((row) => row.visible));
 
   function toggleTree(id: string): void {
     const next = new SvelteSet(expanded);
@@ -59,11 +92,11 @@
   /** `{anchor, conversation}` while a menu is open, else null. */
   let menu = $state<MenuState | null>(null);
 
-  function toggle(event: MouseEvent, conversation: Conversation): void {
+  function toggle(event: MouseEvent, conversation: Conversation, rowKey: string): void {
     event.stopPropagation();
     if (!(event.currentTarget instanceof HTMLButtonElement)) return;
     const anchor = event.currentTarget;
-    menu = menu?.anchor === anchor ? null : { anchor, conversation };
+    menu = menu?.anchor === anchor ? null : { anchor, conversation, rowKey };
   }
 </script>
 
@@ -97,8 +130,24 @@
 {/if}
 
 <nav id="convs" class="min-h-0 flex-1 overflow-y-auto py-2.5" aria-label="lines">
-  {#each rows.filter((row) => row.visible) as { line: conversation, depth, descendants, liveDescendants, expanded: isExpanded, forced } (conversation.id)}
-    {@const open = menu?.conversation.id === conversation.id}
+  {#each visibleRows as row (row.key)}
+    {@const conversation = row.line}
+    {@const depth = row.depth}
+    {@const descendants = row.descendants}
+    {@const liveDescendants = row.liveDescendants}
+    {@const isExpanded = row.expanded}
+    {@const forced = row.forced}
+    {#if row.groupIndex === 0 && row.group === "starred"}
+      <h2 class="px-5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-cream-faint">
+        Starred
+      </h2>
+    {:else if row.groupIndex === 0 && row.group === "main" && shortcutRows.length > 0}
+      <h2 class="px-5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-cream-faint">
+        Lines
+      </h2>
+    {/if}
+    {@const open = menu?.rowKey === row.key}
+    {@const chain = chapterMarker(conversation, room.conversations)}
     <div class="conv-row group relative flex items-stretch" class:menu-open={open}>
       <button
         class="conv relative flex min-w-0 w-full flex-1 cursor-pointer items-center gap-2 border-0 p-[9px] pl-5 text-left text-[13.5px] [font-family:inherit] {room
@@ -138,7 +187,7 @@
               indicators={indicators.filter((item) => item.conv_id === conversation.id)}
             /><span class="min-w-0 flex-1 truncate" use:tooltip={{ label: conversation.name }}
               >{conversation.name}</span
-            ></span
+            >{#if chain.label ?? chain.continuedIn}<ChapterMark {chain} />{/if}</span
           >
           <TaskStatusChip status={conversation.task_status} round={conversation.task_round} />
         </span>
@@ -148,7 +197,7 @@
           type="button"
           class="tree-toggle absolute top-1/2 right-11 -translate-y-1/2 bg-ink-2 px-1 text-xs text-cream-faint hover:text-cream"
           aria-label={forced
-            ? `Sublines of ${conversation.name} expanded to show the selected line`
+            ? `Sublines of ${conversation.name} expanded to keep a nested line visible`
             : `${isExpanded ? "Collapse" : "Expand"} sublines of ${conversation.name}`}
           disabled={forced}
           aria-expanded={isExpanded}
@@ -167,10 +216,25 @@
           >
         {/if}
       {/if}
-      {#if !selecting}
-        <div
-          class="conv-actions absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-[.menu-open]:opacity-100 group-[.menu-open]:pointer-events-auto"
+      <div
+        class="conv-actions absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-[.menu-open]:opacity-100 group-[.menu-open]:pointer-events-auto"
+        class:opacity-100={conversation.starred}
+        class:pointer-events-auto={conversation.starred}
+      >
+        <button
+          type="button"
+          class="conv-star size-8 rounded-sm bg-ink-2 p-0 text-[16px] leading-none {conversation.starred
+            ? 'text-copper-hot'
+            : 'text-cream-faint hover:bg-ink-3 hover:text-copper-hot'}"
+          use:tooltip={{ label: conversation.starred ? "unstar line" : "star line" }}
+          aria-label="{conversation.starred ? 'Unstar' : 'Star'} {conversation.name}"
+          aria-pressed={conversation.starred ?? false}
+          onclick={(event) => {
+            event.stopPropagation();
+            void toggleConversationStar(room, conversation.id);
+          }}>{conversation.starred ? "★" : "☆"}</button
         >
+        {#if !selecting}
           <button
             class="conv-more size-8 bg-ink-2 p-0 text-[15px] leading-none text-cream-faint hover:bg-copper hover:text-ink aria-expanded:bg-copper aria-expanded:text-ink"
             type="button"
@@ -178,11 +242,11 @@
             aria-label="line actions for {conversation.name}"
             aria-expanded={open}
             onclick={(event) => {
-              toggle(event, conversation);
+              toggle(event, conversation, row.key);
             }}>⋯</button
           >
-        </div>
-      {/if}
+        {/if}
+      </div>
     </div>
   {/each}
 </nav>
@@ -194,6 +258,7 @@
     close={() => (menu = null)}
     {onrename}
     {onmanagement}
+    {onchapter}
     {oncloseprocesses}
     {ondelete}
   />

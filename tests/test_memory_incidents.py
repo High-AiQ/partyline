@@ -24,7 +24,7 @@ class IncidentTest(unittest.IsolatedAsyncioTestCase):
         self.runtime = ChatRuntime(self.db)
         self.runtime.broadcast = AsyncMock()
         for line, parent in [('root', None), ('child', 'root'), ('sibling', 'root')]:
-            self.db.create_conversation(line, line, captain_mode="manager_tree")
+            self.db.create_conversation(line, line, captain_mode="orchestrator")
             self.db._exec('UPDATE conversations SET parent_id=? WHERE id=?', (parent, line))
         self.worker = self.attach('worker', 'child')
         self.captain = self.attach('captain', 'child', lead=True)
@@ -149,7 +149,7 @@ class MemoryRoutesTest(unittest.TestCase):
         self.runtime = ChatRuntime(self.db)
         self.runtime.broadcast = AsyncMock()
         for line in ('line', 'unrelated'):
-            self.db.create_conversation(line, line, captain_mode="manager_tree")
+            self.db.create_conversation(line, line, captain_mode="orchestrator")
         self.att = self.db.add_attachment('worker', 'line', 'worker', 'raw', ['cat'], self.tmp.name, 'owner')
         self.db.set_attachment_status('worker', 'exited', 'owner')
         self.actor = Principal(kind='user', name='operator', user_id=1)

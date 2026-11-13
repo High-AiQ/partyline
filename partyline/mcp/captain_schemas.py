@@ -19,6 +19,11 @@ def schema(name):
     line = {"conv_id": text(
         "Authorized target line: its id, or a task's tag, impl-/review- handle or line name.", 120)}
     specs = {
+        "review_env": obj({"operation": {"type": "string", "enum": ["list", "set", "delete"]},
+            "repository": text("Origin URL or absolute repository path.", 2048),
+            "subpath": text("Repository subpath; defaults to dot.", 1024),
+            "setup": text("Setup command; empty uses the lockfile default.", 4096),
+            "test": text("Test command.", 4096)}, ["operation"]),
         "resources": obj({**line, "operation": {"type": "string",
             "enum": ["list", "declare", "remove"]}, "name": text("Resource name.", 64, 1)},
             ["conv_id", "operation"]),
@@ -45,6 +50,8 @@ def schema(name):
             "goal": text("Child goal.", 3000), "topic": text("Child context.", 20000),
             "base": {"type": "string", "enum": ["checkout", "upstream"]},
             "repository": text("Optional repository path.", 4096)}, ["conv_id", "name"]),
+        "new_chapter": obj({**line, "name": text(
+            "Name for the continuing line; defaults to '<name> · ch N'.", 120)}, ["conv_id"]),
         "appoint_lead": obj({**line, "attachment_id": text(
             "Lead attachment id or handle on that line; empty clears lead.", 80)},
             ["conv_id", "attachment_id"]),
@@ -95,8 +102,10 @@ def schema(name):
 
 
 OPERATIONS = tuple(schema_name for schema_name in (
-    "resources", "staffing", "write_set_requests", "list_presets", "attach_worker", "detach_worker",
-    "create_child", "appoint_lead", "retire_child", "retirement_preview", "accept", "review_worktree",
+    "review_env", "resources", "staffing", "write_set_requests", "list_presets",
+    "attach_worker", "detach_worker",
+    "create_child", "new_chapter", "appoint_lead", "retire_child", "retirement_preview", "accept",
+    "review_worktree",
     "share_ref", "request_write_set",
     "decide_write_set", "request_restart", "process_overview", "ack_report", "set_goal",
     "set_gates", "docs_read", "reports", "kernel_log"))

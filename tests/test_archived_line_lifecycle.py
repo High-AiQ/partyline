@@ -46,7 +46,7 @@ class ArchivedLineLifecycleTest(unittest.TestCase):
             try:
                 server.runtime = ChatRuntime(Db(database.name))
                 conversation = server.runtime.db.create_conversation("archived", "Old line",
-                    captain_mode="manager_tree")
+                    captain_mode="orchestrator")
                 server.runtime.db.archive_conversation(conversation["id"])
                 user = auth_store.create_user(
                     server.runtime.db, "terra@example.com", "terra",
@@ -99,7 +99,7 @@ class PurgeAllArchivedTest(unittest.TestCase):
                 auth_tokens.signing_secret(self.db), user["id"]
             )
         }
-        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
+        self.db.create_conversation("root", "Root", captain_mode="orchestrator")
         self.db.add_attachment("agent-att", "root", "agent", "fake", ["fake"], self.directory.name)
         self.machine = {
             "Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "agent-att")
@@ -118,7 +118,7 @@ class PurgeAllArchivedTest(unittest.TestCase):
     def test_purges_archived_children_of_live_parent(self):
         for index in range(10):
             child_id = f"kid-{index}"
-            self.db.create_conversation(child_id, f"Kid {index}", captain_mode="manager_tree")
+            self.db.create_conversation(child_id, f"Kid {index}", captain_mode="orchestrator")
             self.db._exec(
                 "UPDATE conversations SET parent_id='root' WHERE id=?", (child_id,)
             )
@@ -133,10 +133,10 @@ class PurgeAllArchivedTest(unittest.TestCase):
             self.assertIsNone(self.db.get_conversation(f"kid-{index}"))
 
     def test_ordering(self):
-        self.db.create_conversation("tree_root", "Tree Root", captain_mode="manager_tree")
-        self.db.create_conversation("tree_child", "Tree Child", captain_mode="manager_tree")
+        self.db.create_conversation("tree_root", "Tree Root", captain_mode="orchestrator")
+        self.db.create_conversation("tree_child", "Tree Child", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='tree_root' WHERE id='tree_child'")
-        self.db.create_conversation("tree_grandchild", "Tree Grandchild", captain_mode="manager_tree")
+        self.db.create_conversation("tree_grandchild", "Tree Grandchild", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='tree_child' WHERE id='tree_grandchild'")
 
         self.db.archive_conversation("tree_grandchild")
@@ -156,9 +156,9 @@ class PurgeAllArchivedTest(unittest.TestCase):
         # root is active (not archived)
         # kid is archived, parent = root
         # grandkid is archived, parent = kid
-        self.db.create_conversation("kid", "Kid", captain_mode="manager_tree")
+        self.db.create_conversation("kid", "Kid", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='kid'")
-        self.db.create_conversation("grandkid", "Grandkid", captain_mode="manager_tree")
+        self.db.create_conversation("grandkid", "Grandkid", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='kid' WHERE id='grandkid'")
         self.db.archive_conversation("grandkid")
         self.db.archive_conversation("kid")
@@ -172,14 +172,14 @@ class PurgeAllArchivedTest(unittest.TestCase):
         self.assertIsNone(self.db.get_conversation("grandkid"))
 
     def test_archived_parent_with_restored_child(self):
-        self.db.create_conversation("parent_line", "Parent", captain_mode="manager_tree")
-        self.db.create_conversation("child_line", "Child", captain_mode="manager_tree")
+        self.db.create_conversation("parent_line", "Parent", captain_mode="orchestrator")
+        self.db.create_conversation("child_line", "Child", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='parent_line' WHERE id='child_line'")
         self.db.archive_conversation("child_line")
         self.db.archive_conversation("parent_line")
         self.db.restore_conversation("child_line")
 
-        self.db.create_conversation("unrelated", "Unrelated", captain_mode="manager_tree")
+        self.db.create_conversation("unrelated", "Unrelated", captain_mode="orchestrator")
         self.db.archive_conversation("unrelated")
 
         res = self.client.delete("/api/conversations/archived", headers=self.human)
@@ -199,10 +199,10 @@ class PurgeAllArchivedTest(unittest.TestCase):
         self.assertIsNone(self.db.get_conversation("unrelated"))
 
     def test_skip_propagates_to_archived_ancestor(self):
-        self.db.create_conversation("gp", "Grandparent", captain_mode="manager_tree")
-        self.db.create_conversation("p", "Parent", captain_mode="manager_tree")
+        self.db.create_conversation("gp", "Grandparent", captain_mode="orchestrator")
+        self.db.create_conversation("p", "Parent", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='gp' WHERE id='p'")
-        self.db.create_conversation("c", "Child", captain_mode="manager_tree")
+        self.db.create_conversation("c", "Child", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='p' WHERE id='c'")
 
         self.db.archive_conversation("c")

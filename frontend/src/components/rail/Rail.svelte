@@ -9,6 +9,7 @@
   import { dialogs } from "../../state/dialogs.svelte";
   import { describeBuild } from "../../lib/build";
   import ManagementDialog from "../dialogs/ManagementDialog.svelte";
+  import NewChapterDialog from "../dialogs/NewChapterDialog.svelte";
   import RenameLineDialog from "../dialogs/RenameLineDialog.svelte";
   import DeleteLineDialog from "../dialogs/DeleteLineDialog.svelte";
   import BulkArchiveDialog from "../dialogs/BulkArchiveDialog.svelte";
@@ -38,6 +39,10 @@
 
   function renameLine(conversation: Conversation): void {
     dialogs.open(RenameLineDialog, { conversation });
+  }
+
+  function newChapter(conversation: Conversation): void {
+    dialogs.open(NewChapterDialog, { conversation });
   }
 
   function deleteLine(conversation: Conversation): void {
@@ -81,6 +86,7 @@
   <ConversationList
     onmanagement={manageLine}
     onrename={renameLine}
+    onchapter={newChapter}
     oncloseprocesses={closeProcesses}
     ondelete={deleteLine}
     onarchivemany={archiveMany}

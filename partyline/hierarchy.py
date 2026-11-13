@@ -130,7 +130,8 @@ def create_child_conversation(db: Db, parent_id: str, child_id: str, name: str, 
     if would_cycle(db, child_id, parent_id):
         raise HierarchyError(400, "that parent would cycle the line tree")
     db._exec(
-        "INSERT INTO conversations(id,name,created_at,parent_id,goal,topic) VALUES(?,?,?,?,?,?)",
+        "INSERT INTO conversations(id,name,created_at,parent_id,goal,topic,captain_mode) "
+        "VALUES(?,?,?,?,?,?,'orchestrator')",
         (child_id, name, time.time(), parent_id, goal, topic),
     )
     return db.get_conversation(child_id)
@@ -176,7 +177,7 @@ def _set_parent(db: Db, conv_id: str, parent_id: str | None) -> dict:
             )
     if parent_id:
         # Child rows carry the schema placeholder; their root determines the style.
-        db._exec("UPDATE conversations SET parent_id=?, captain_mode='manager_tree' WHERE id=?",
+        db._exec("UPDATE conversations SET parent_id=? WHERE id=?",
                  (parent_id, conv_id))
     else:
         db._exec("UPDATE conversations SET parent_id=NULL WHERE id=?", (conv_id,))

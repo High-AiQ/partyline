@@ -96,13 +96,11 @@ describe("management dialog captain control", () => {
     });
     try {
       await vi.waitFor(() => {
-        expect(document.querySelector("#captainStyle")).not.toBeNull();
+        expect(document.querySelector("#defaultReviewPolicy")).not.toBeNull();
+        expect(document.querySelector("#captainStyle")).toBeNull();
       });
       expect(document.body.textContent).not.toContain("save captain style");
-      const choices: [string, string][] = [
-        ["#captainStyle", "manager_tree"],
-        ["#captain", "att-1"],
-      ];
+      const choices: [string, string][] = [["#captain", "att-1"]];
       for (const [id, value] of choices) {
         const field = document.querySelector(id);
         if (!(field instanceof HTMLSelectElement)) throw new Error(`missing ${id}`);
@@ -112,7 +110,7 @@ describe("management dialog captain control", () => {
       document.querySelector<HTMLButtonElement>("#appointCaptain")?.click();
       await vi.waitFor(() => {
         expect(appoint).toHaveBeenCalledWith("child", "att-1", {
-          captain_mode: "manager_tree",
+          captain_mode: "orchestrator",
           default_review_policy: "captain",
         });
       });

@@ -13,6 +13,7 @@ from .attachment_commands import validated_attachment_command
 from .auth_guard import request_principal
 from .auth_store import handle_taken
 from .conversation_archive import register_archive_route
+from .conversation_stars import add_star_flags, register_star_routes
 from .hierarchy import tree_live_name_conflict
 from .line_worktree import describe, ensure_placed, line_cwd, outside_worktree_note
 from .conversation_contracts import PurgeAllResponse
@@ -58,9 +59,11 @@ def register_conversation_routes(
 ) -> None:
     @app.get("/api/conversations", response_model=list[ConversationResponse])
     async def conversations(request: Request, archived: bool = False):
-        db = _server().runtime.db
+        db = runtime.db
         rows = db.list_conversations(archived=archived)
-        allowed = visible_conversation_ids(db, request_principal(request))
+        principal = request_principal(request)
+        rows = add_star_flags(db, rows, principal.user_id)
+        allowed = visible_conversation_ids(db, principal)
         if allowed is None:
             return rows
         return [row for row in rows if row["id"] in allowed]
@@ -137,6 +140,7 @@ def register_conversation_routes(
     # Retired to conversation_archive.py (2.8, ?clear_goal=true) — re-exported
     # below under the same name so server.py and its tests keep one import.
     archive_conversation = register_archive_route(app, presence)
+    register_star_routes(app, runtime)
 
     @app.post("/api/conversations/{conv_id}/restore", response_model=ConversationResponse)
     async def restore_conversation(request: Request, conv_id: str):
@@ -282,6 +286,9 @@ def register_conversation_routes(
                 actor=principal)
         from .preset_roles import start_staffed
         return await start_staffed(runtime, att, s._start_attachment, role, principal, auto_lead)
+
+    from .chapter_routes import register_chapter_routes
+    register_chapter_routes(app, _server)
 
     globals().update({
         "conversations": conversations, "create_conversation": create_conversation,

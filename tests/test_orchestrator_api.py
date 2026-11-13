@@ -37,11 +37,10 @@ class ApiTest(TaskFixture):
         self.db.create_conversation('another', 'Another')
         self.assertEqual(self.db.get_conversation('root')['captain_mode'], 'manager_tree')
         route = '/api/conversations/root/captain-style'
-        for mode in ('orchestrator', 'manager_tree'):
-            response = self.client.put(route, json={'captain_mode': mode})
-            self.assertEqual(response.status_code, 200, response.text)
-            self.assertEqual(response.json()['captain_mode'], mode)
-            self.assertEqual(self.db.get_conversation('root')['captain_mode'], mode)
+        self.assertIn('approval IS acceptance', _instructions(current_role(self.db, 'new-captain'), self.db))
+        self.assertEqual(self.client.put(route, json={'captain_mode': 'manager_tree'}).status_code, 422)
+        response = self.client.put(route, json={'captain_mode': 'orchestrator'})
+        self.assertEqual(response.status_code, 200, response.text)
 
     async def test_style_and_setting_human_only_root_only_default_captain(self):
         route = '/api/conversations/root/captain-style'
@@ -62,7 +61,7 @@ class ApiTest(TaskFixture):
         self.actor = self.human
         self.assertEqual(self.client.put('/api/conversations/' + row['conv_id'] + '/captain-style',
                                          json={'captain_mode': 'orchestrator'}).status_code, 409)
-        self.assertEqual(self.client.put(route, json={'captain_mode': 'manager_tree'}).status_code, 409)
+        self.assertEqual(self.client.put(route, json={'captain_mode': 'manager_tree'}).status_code, 422)
         self.assertEqual(self.client.put(route, json={'captain_mode': 'orchestrator',
                                                       'default_review_policy': 'missing'}).status_code, 400)
 
@@ -136,17 +135,6 @@ class ApiTest(TaskFixture):
                 self.assertEqual(response.status_code, 403, response.text)
         self.assertIsNone(self.db.get_conversation(row['conv_id'])['archived_at'])
 
-    async def test_style_unlocks_once_every_child_is_archived(self):
-        row = await self.create()
-        route = '/api/conversations/root/captain-style'
-        body = {'captain_mode': 'manager_tree', 'default_review_policy': 'captain'}
-        self.actor = self.human
-        self.assertEqual(self.client.put(route, json=body).status_code, 409)
-        self.db._exec("UPDATE conversations SET archived_at=1 WHERE id=?", (row['conv_id'],))
-        response = self.client.put(route, json=body)
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()['captain_mode'], 'manager_tree')
-
     async def test_orchestrator_pack_spreads_implementers_and_the_rider_lists_free_workers(self):
         from partyline.pack_blocks import ORCHESTRATOR
         from partyline.staffing import staffing_line
@@ -170,11 +158,24 @@ class ApiTest(TaskFixture):
         response = self.client.post(f'/api/conversations/{conv}/children', json={'name': 'nested'})
         self.assertEqual(response.status_code, 409)
         response = self.client.post('/api/conversations/root/children', json={'name': 'unmanaged'})
-        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.status_code, 201)
         with self.assertRaises(Exception) as refused:
             await create_fresh_record(self.db, self.db.get_attachment(row['implementer_id']),
                                       FreshAttachmentRequest())
         self.assertEqual(refused.exception.status_code, 409)
+
+    async def test_leaf_subcaptain_can_create_a_task(self):
+        from partyline.hierarchy import create_child_conversation
+        create_child_conversation(self.db, 'root', 'mid', 'Mid')
+        create_child_conversation(self.db, 'mid', 'leaf', 'Leaf')
+        self.db.add_attachment('leaf-lead', 'leaf', 'leaf-lead', 'fake', ['fake'], self.repo, 'owner')
+        self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='leaf-lead'")
+        self.actor = Principal(kind='machine', name='leaf-lead', conv_id='leaf',
+                               attachment_id='leaf-lead', is_lead=True)
+        response = self.client.post('/api/conversations/leaf/tasks', json={
+            'name': 'leaf task', 'goal': 'implement', 'implementer': 'builder'})
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()['root_id'], 'leaf')
 
     async def test_implementer_spawn_refusal_is_loud(self):
         self.actor = self.captain
@@ -190,14 +191,17 @@ class ApiTest(TaskFixture):
         root_messages, _ = self.db.message_page('root', limit=100)
         self.assertTrue(any('missing CLI' in m['body'] for m in root_messages))
 
-    async def test_reparenting_cannot_bypass_root_only_mode_or_task_parent(self):
+    async def test_reparenting_preserves_hierarchy_and_task_parent_is_immutable(self):
         self.db.create_conversation('other', 'Other')
         self.actor = self.human
         response = self.client.put('/api/conversations/other/parent', json={'parent_id': 'root'})
+        self.assertEqual(response.status_code, 200, response.text)
+        row = await self.create()
+        response = self.client.put(f"/api/conversations/{row['conv_id']}/parent",
+                                   json={'parent_id': 'other'})
         self.assertEqual(response.status_code, 409)
         with self.assertRaises(sqlite3.IntegrityError):
-            self.db._exec("UPDATE conversations SET parent_id='other' WHERE id='root'")
-
+            self.db._exec("UPDATE conversations SET parent_id='other' WHERE id=?", (row['conv_id'],))
 
     async def test_accept_requires_exact_full_approved_sha(self):
         from partyline.accept_sha import register_accept_route

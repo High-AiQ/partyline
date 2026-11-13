@@ -17,7 +17,7 @@ class DependencyError(ReviewError):
 
     def __init__(self, detail: str):
         super().__init__(409, f"review dependency provisioning failed: {detail}; "
-                              "lifecycle scripts are disabled")
+                              "JavaScript lifecycle scripts are disabled for built-in installs")
 
 
 def local_cache(checkout: str, name: str) -> str:
@@ -56,7 +56,7 @@ def install_argv(checkout: str, command: tuple[str, ...], local: str) -> list[st
     checkout = os.path.realpath(checkout)
     home = os.path.realpath(os.path.expanduser('~'))
     candidates = [os.path.join(home, path) for path in (
-        '.npm', '.cache/yarn', '.local/share/pnpm/store', '.yarn/berry/cache')]
+        '.npm', '.cache/yarn', '.local/share/pnpm/store', '.yarn/berry/cache', '.cache/uv')]
     caches = [path for path in candidates if os.path.isdir(path)
               and os.path.realpath(path) == path
               and os.path.commonpath((path, checkout)) != path]

@@ -228,7 +228,7 @@ class ImageApiTest(unittest.TestCase):
         install_auth_guard(app, self.db)
         app.include_router(media_router(self.runtime, self.store))
         self.client = TestClient(app)
-        self.db.create_conversation("line", "Line", captain_mode="manager_tree")
+        self.db.create_conversation("line", "Line", captain_mode="orchestrator")
         self.db.add_attachment(
             "fixture-live", "line", "fixture-live", "fake", ["fake"], "/tmp", "owner"
         )
@@ -425,7 +425,7 @@ class ImageApiTest(unittest.TestCase):
         self.assertEqual(self.client.get(f"/api/media/{image['id']}/original").status_code, 404)
 
     def test_images_are_segregated_by_line(self):
-        self.db.create_conversation("other", "Other", captain_mode="manager_tree")
+        self.db.create_conversation("other", "Other", captain_mode="orchestrator")
         self.post()
         self.assertTrue((self.root / "line").is_dir())
         self.assertFalse((self.root / "other").exists())
@@ -433,7 +433,7 @@ class ImageApiTest(unittest.TestCase):
     def test_machine_media_reads_follow_ancestors_only(self):
         for line, parent in (("parent", "line"), ("task", "parent"),
                              ("sibling", "parent"), ("child", "task"), ("other", None)):
-            self.db.create_conversation(line, line, captain_mode="manager_tree")
+            self.db.create_conversation(line, line, captain_mode="orchestrator")
             self.db._exec("UPDATE conversations SET parent_id=? WHERE id=?", (parent, line))
         self.db.add_attachment("worker", "task", "worker", "fake", ["fake"], "/tmp", "owner")
         self.db.set_attachment_status("worker", "running", "owner")
@@ -612,7 +612,7 @@ class ServerWiringTest(unittest.TestCase):
             original = (server.runtime, server.media, server.presence)
             server.runtime, server.media, server.presence = runtime, store, Presence(runtime)
             try:
-                db.create_conversation("line", "Line", captain_mode="manager_tree")
+                db.create_conversation("line", "Line", captain_mode="orchestrator")
                 message = db.add_message("line", "opus", "agent", "look")
                 store.store(
                     "line",

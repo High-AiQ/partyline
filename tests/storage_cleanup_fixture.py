@@ -40,7 +40,7 @@ class CleanupFixture(TaskFixture):
 
     def child(self, ident, archived=True):
         self.db.create_conversation(ident, ident)
-        self.db._exec("UPDATE conversations SET parent_id='root',captain_mode='manager_tree' WHERE id=?",
+        self.db._exec("UPDATE conversations SET parent_id='root',captain_mode='orchestrator' WHERE id=?",
                       (ident,))
         placed = place_child(self.db, 'root', ident)
         if archived:

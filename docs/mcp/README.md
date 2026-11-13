@@ -93,7 +93,7 @@ message's image references instead.
 
 | File | What it is | What it proves |
 | --- | --- | --- |
-| [`api-inventory.md`](api-inventory.md) | Every HTTP route in the app (Set 1, 136 routes from an AST pass) and the agent-reachable subset (Set 2, 104 routes) with a disposition for each | Each reachable route maps to a named tool, a captain operation, a guide topic, or an exclusion with a reason. Source references use handler names so line shifts do not stale the inventory. The names table lists the core tools and captain operations. |
+| [`api-inventory.md`](api-inventory.md) | Every HTTP route in the app (Set 1, 138 routes from an AST pass) and the agent-reachable subset (Set 2, 104 routes) with a disposition for each | Each reachable route maps to a named tool, a captain operation, a guide topic, or an exclusion with a reason. Source references use handler names so line shifts do not stale the inventory. The names table lists the core tools and captain operations. |
 | [`compat-matrix.md`](compat-matrix.md) | Per-client facts for Claude Code, Codex CLI, OpenCode V1 and V2: refresh behaviour, direct callability, dispatcher fallback, and config injection | Which clients re-list on `list_changed` and which need the dispatcher. Each runtime claim cites its retained log or is marked as a run report. |
 | [`design.md`](design.md) | Current design and source behaviour, plus client observations tied to their retained evidence | What the server does and its documented limits. Runtime claims remain pinned to the recorded client versions and logs. |
 | [`review-disposition.md`](review-disposition.md) | Finding-by-finding disposition of the shipping review | The exact fix/test or bounded limitation for each review finding. |
@@ -245,3 +245,8 @@ prevent abandoned attachments from wedging a resource. See
 Root captains can use the read-only `kernel_log` operation with optional `boot`
 (`previous` or `current`) and `lines` (1–300). It returns redacted kernel
 journal text lines; see [host kernel log](../resource-budget.md#host-kernel-log).
+
+Reviewers use `env_gap(repository, subpath, what_failed, tried)` when tests cannot run.
+The root captain uses `captain(op="review_env", args={operation, repository, subpath,
+setup, test})` to list, set, or delete environments. A set re-runs setup for affected
+open reviews and wakes their reviewers without changing the review round.

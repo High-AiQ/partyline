@@ -21,10 +21,10 @@ class RoleDeliveryTests(unittest.TestCase):
             self.assertIn("Your own line id is line.", att["role_briefing"])
             self.assertEqual(att["digest_rider"](), "task board")
             role.return_value = manager
-            self.assertIn("Captain pack", att["digest_rider"]())
+            self.assertIn("Orchestrator captain pack", att["digest_rider"]())
             later = att["digest_rider"]()
             self.assertIn("captain pack: GET /api/conversations/line/briefing", later)
-            self.assertNotIn("## Captain pack", later)
+            self.assertNotIn("## Orchestrator captain pack", later)
             role.return_value = ordinary
             self.assertIn("ordinary participant", att["digest_rider"]())
             self.assertEqual(att["digest_rider"](), "task board")
@@ -45,7 +45,7 @@ class RoleDeliveryTests(unittest.TestCase):
             bind_role_delivery(NO_GOAL, att)
         self.assertIn("## Worker pack", att["role_briefing"])
         self.assertIn("Commit locally", att["role_briefing"])
-        self.assertNotIn("## Captain pack", att["role_briefing"])
+        self.assertNotIn("## Orchestrator captain pack", att["role_briefing"])
 
     def test_a_worker_rider_rebriefs_when_a_captain_appears_and_goes(self):
         worker = RoleState("implementer", "line", None, ("read", "write"))
@@ -70,7 +70,7 @@ class RoleDeliveryTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         db = Db(os.path.join(directory.name, "partyline.db"))
         self.addCleanup(db.close)
-        db.create_conversation("line", "Line", captain_mode="manager_tree")
+        db.create_conversation("line", "Line", captain_mode="orchestrator")
         db.set_setting("docs_reminder_every_messages", "2")
         captain = RoleState("lead", "line", None, ("assign", "create_child"))
         worker = RoleState("implementer", "line", None, ("read", "write"), captained=True)
@@ -123,7 +123,7 @@ class RoleDeliveryTests(unittest.TestCase):
             bind_role_delivery(NO_GOAL, att)
             first = att["digest_rider"]()
             self.assertIn("helper command", first)
-            self.assertNotIn("## Captain pack", first)
+            self.assertNotIn("## Orchestrator captain pack", first)
             self.assertIn("captain pack: GET /api/conversations/line/briefing", first)
 
     def test_a_captained_worker_gets_the_reminder_once_per_role_state(self):
@@ -180,9 +180,9 @@ class RoleDeliveryTests(unittest.TestCase):
             bind_role_delivery(NO_GOAL, att)
             first_captain_wake = att["digest_rider"]()
             staffing_change = att["digest_rider"]()
-        self.assertIn("## Captain pack", first_captain_wake)
+        self.assertIn("## Orchestrator captain pack", first_captain_wake)
         self.assertIn("(staffing — in use: worker)", staffing_change)
-        self.assertNotIn("## Captain pack", staffing_change)
+        self.assertNotIn("## Orchestrator captain pack", staffing_change)
 
     def test_clearing_rider_state_is_an_observable_delta(self):
         captain = RoleState("lead", "line", None, ("assign",))

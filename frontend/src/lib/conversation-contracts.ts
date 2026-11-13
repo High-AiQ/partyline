@@ -12,8 +12,14 @@ export const PurgeAllResponseSchema = z.object({
 });
 export type PurgeAllResponse = z.infer<typeof PurgeAllResponseSchema>;
 
+export const ConversationStarResponseSchema = z.object({
+  ok: z.boolean(),
+  starred: z.boolean(),
+});
+export type ConversationStarResponse = z.infer<typeof ConversationStarResponseSchema>;
+
 export const ConversationSchema = z.object({
-  captain_mode: z.enum(["manager_tree", "orchestrator"]).optional(),
+  captain_mode: z.literal("orchestrator").optional(),
   default_review_policy: z.string().optional(),
   task_status: z
     .enum(["implementing", "idle", "in_review", "approved", "done", "blocked"])
@@ -27,11 +33,15 @@ export const ConversationSchema = z.object({
   task_repositories: z.array(z.string()).optional(),
   id: z.string(),
   parent_id: z.string().nullable().optional(),
+  /** The line this one continues (a "new chapter"), and its place in that chain. */
+  chapter_of: z.string().nullable().optional(),
+  chapter: z.number().int().positive().optional(),
   name: z.string(),
   topic: z.string(),
   cwd: z.string().nullable().optional(),
   created_at: z.number(),
   archived_at: z.number().nullable().default(null),
   live_count: z.number().int().nonnegative().default(0),
+  starred: z.boolean().optional(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;

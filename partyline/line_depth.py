@@ -55,7 +55,7 @@ def staffed_split_reason(db, conv_id: str) -> str | None:
     monitor) is never one of its implementers. Counting them refused every
     create_task once a person attached one (2026-10-23).
     """
-    if (db.get_conversation(conv_id) or {}).get("captain_mode") == "orchestrator":
+    if (db.get_conversation(conv_id) or {}).get("parent_id") is None:
         return None
     workers = live_workers(db, conv_id)
     if workers:

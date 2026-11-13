@@ -9,7 +9,7 @@ from .goal import MAX_TASK_GOAL
 
 class CaptainStyleIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    captain_mode: Literal['manager_tree', 'orchestrator']
+    captain_mode: Literal['orchestrator']
     default_review_policy: str = Field(default='captain', min_length=1, max_length=120)
 
 
@@ -174,3 +174,10 @@ class ShareRefOut(BaseModel):
 
 class AutoCleanIn(BaseModel):
     enabled: bool = False
+
+
+class EnvGapIn(BaseModel):
+    repository: str = Field(min_length=1, max_length=4096)
+    subpath: str = Field(default='.', max_length=1024)
+    what_failed: str = Field(min_length=1, max_length=2000)
+    tried: str = Field(min_length=1, max_length=2000)

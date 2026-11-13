@@ -40,6 +40,12 @@ describe("renderMessage", () => {
       expect(html).toContain('target="_blank"');
     });
 
+    it("opens a line link in this tab, where chapter notices point", () => {
+      const html = renderMessage("☏ continued in [Plan · ch 2](#/c/abc-123)", true);
+      expect(html).toContain('href="#/c/abc-123"');
+      expect(html).not.toContain('target="_blank"');
+    });
+
     it("shows markup a person actually typed, rather than rendering it", () => {
       // Chat is prose. "use <b> for bold" must show those characters.
       const html = renderMessage("use <b> for bold", false);

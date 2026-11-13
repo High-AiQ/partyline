@@ -28,20 +28,21 @@ class AppointStyleTest(HierarchyApiTest):
     def test_an_invalid_style_is_rejected_without_appointing(self):
         self.clear()
         self.assertEqual(self.appoint(captain_mode="pirate").status_code, 422)
+        self.assertEqual(self.appoint(captain_mode="manager_tree").status_code, 422)
         self.assertEqual(self.appoint(captain_mode="orchestrator",
                                       default_review_policy="no-such-preset").status_code, 400)
         self.assertEqual(self.client.get("/api/conversations/parent/lead").json()["attachment_id"], None)
-        self.assertEqual(self.db.get_conversation("parent")["captain_mode"], "manager_tree")
+        self.assertEqual(self.db.get_conversation("parent")["captain_mode"], "orchestrator")
 
     def test_a_machine_cannot_pass_a_style(self):
         response = self.client.post("/api/conversations/parent/lead", headers=self.lead,
                                     json={"attachment_id": "impl-att", "captain_mode": "orchestrator"})
         self.assertEqual(response.status_code, 403, response.text)
-        self.assertEqual(self.db.get_conversation("parent")["captain_mode"], "manager_tree")
+        self.assertEqual(self.db.get_conversation("parent")["captain_mode"], "orchestrator")
 
     def test_a_failed_appointment_restores_the_previous_style(self):
         self.clear()
         response = self.client.post("/api/conversations/parent/lead",
                                     json={"attachment_id": "missing", "captain_mode": "orchestrator"})
         self.assertGreaterEqual(response.status_code, 400)
-        self.assertEqual(self.db.get_conversation("parent")["captain_mode"], "manager_tree")
+        self.assertEqual(self.db.get_conversation("parent")["captain_mode"], "orchestrator")

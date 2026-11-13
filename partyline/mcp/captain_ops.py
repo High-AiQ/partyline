@@ -36,6 +36,10 @@ def execute(client, op, args, state):
     if op not in OPERATIONS:
         raise ValueError("unknown captain operation")
     _check_lead(state)
+    if op == "review_env":
+        if state.get("parent_id", "unknown") is not None:
+            raise ApiError("only the root captain may manage review environments")
+        return client.request("POST", _path(client.home, "review-environment"), args)
     if op == "kernel_log":
         if state.get("parent_id", "unknown") is not None:
             raise ApiError("only root captains can read the kernel log")
@@ -133,6 +137,7 @@ def execute(client, op, args, state):
         return client.request("POST", _path(conv, "attachments"), body)
     paths = {
         "create_child": ("create_child", "POST", "children"),
+        "new_chapter": ("chapter", "POST", "chapter"),
         "appoint_lead": ("appoint_lead", "POST", "lead"),
         "accept": ("accept", "POST", "accept"),
         "review_worktree": ("write", "POST", "review-worktrees"),
@@ -215,6 +220,8 @@ def _body(op, args):
     if op == "create_child":
         return {key: args[key] for key in ("name", "goal", "topic", "base", "repository")
                 if key in args}
+    if op == "new_chapter":
+        return {"name": args["name"]} if "name" in args else {}
     if op == "appoint_lead":
         return {"attachment_id": args["attachment_id"] or None}
     if op == "accept":

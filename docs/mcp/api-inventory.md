@@ -4,8 +4,8 @@ Scope: every HTTP and WebSocket route registered under `partyline/`, found by an
 
 This document has two labelled sets:
 
-- **Set 1: all routes found by the AST pass (136).** Method, path, source handler and current registration line, caller class, and whether an agent principal can call the route. Handler names are the stable reference; registration lines are a locator for this source revision.
-- **Set 2: agent-reachable subset (104).** Every route Set 1 marks reachable, with its MCP disposition and reason.
+- **Set 1: all routes found by the AST pass (138).** Method, path, source handler and current registration line, caller class, and whether an agent principal can call the route. Handler names are the stable reference; registration lines are a locator for this source revision.
+- **Set 2: agent-reachable subset (106).** Every route Set 1 marks reachable, with its MCP disposition and reason.
 
 **Agent-reachable** means a machine token or an attachment token passes the route's guard. Routes exempt from the bearer guard count as reachable because the guard admits any caller (rows 7-9, 108, 109). Human-only routes, the operator-token route (77), and the restart report-token route (98) are not agent-reachable.
 
@@ -22,7 +22,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 - **guide**: read on demand through the core `guide` tool.
 - **excluded**: never exposed to MCP. The reason states the rule.
 
-## Set 1: all 136 routes (AST pass)
+## Set 1: all 138 routes (AST pass)
 
 | # | Method | Path | Source handler (registration line) | Caller | Agent-reachable | Note |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -46,15 +46,17 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 18 | GET | `/api/docs/{category}/{topic}` | partyline/captain_docs.py:docs_topic (registration line 153) | H, or lead | yes | see Set 2 |
 | 19 | POST | `/api/attachments/{att_id}/compact` | partyline/compact_routes.py:compact_attachment (registration line 30) | M with `attach` | yes | see Set 2 |
 | 20 | DELETE | `/api/conversations/{conv_id}` | partyline/conversation_archive.py:archive_conversation (registration line 41) | H, or M lead with `archive` on a descendant | yes | see Set 2 |
-| 21 | GET | `/api/conversations` | partyline/conversation_routes.py:conversations (registration line 58) | H; M for visible lines | yes | see Set 2 |
-| 22 | POST | `/api/conversations` | partyline/conversation_routes.py:create_conversation (registration line 67) | H only | no | only a person opens a top-level line |
-| 23 | GET | `/api/conversations/{conv_id}` | partyline/conversation_routes.py:conversation_detail (registration line 77) | M with `read` | yes | see Set 2 |
-| 24 | PUT | `/api/conversations/{conv_id}/topic` | partyline/conversation_routes.py:set_topic (registration line 85) | M with `write` | yes | see Set 2 |
-| 25 | PUT | `/api/conversations/{conv_id}/name` | partyline/conversation_routes.py:rename_conversation (registration line 105) | M with `write` | yes | see Set 2 |
-| 26 | DELETE | `/api/conversations/archived` | partyline/conversation_routes.py:purge_all_archived (registration line 129) | H only | no | purge of all archived lines; person-only and destructive |
-| 27 | POST | `/api/conversations/{conv_id}/restore` | partyline/conversation_routes.py:restore_conversation (registration line 140) | M with `archive` | yes | see Set 2 |
-| 28 | DELETE | `/api/conversations/{conv_id}/purge` | partyline/conversation_routes.py:purge_conversation (registration line 155) | M with `archive` | yes | see Set 2 |
-| 29 | POST | `/api/conversations/{conv_id}/attachments` | partyline/conversation_routes.py:attach (registration line 168) | M with `attach` | yes | see Set 2 |
+| 21 | GET | `/api/conversations` | partyline/conversation_routes.py:conversations (registration line 60) | H; M for visible lines | yes | see Set 2 |
+| 21a | PUT | `/api/conversations/{conv_id}/star` | partyline/conversation_stars.py:star_conversation (registration line 42) | H only | no | person-owned star preference |
+| 21b | DELETE | `/api/conversations/{conv_id}/star` | partyline/conversation_stars.py:unstar_conversation (registration line 46) | H only | no | person-owned star preference |
+| 22 | POST | `/api/conversations` | partyline/conversation_routes.py:create_conversation (registration line 71) | H only | no | only a person opens a top-level line |
+| 23 | GET | `/api/conversations/{conv_id}` | partyline/conversation_routes.py:conversation_detail (registration line 81) | M with `read` | yes | see Set 2 |
+| 24 | PUT | `/api/conversations/{conv_id}/topic` | partyline/conversation_routes.py:set_topic (registration line 89) | M with `write` | yes | see Set 2 |
+| 25 | PUT | `/api/conversations/{conv_id}/name` | partyline/conversation_routes.py:rename_conversation (registration line 109) | M with `write` | yes | see Set 2 |
+| 26 | DELETE | `/api/conversations/archived` | partyline/conversation_routes.py:purge_all_archived (registration line 133) | H only | no | purge of all archived lines; person-only and destructive |
+| 27 | POST | `/api/conversations/{conv_id}/restore` | partyline/conversation_routes.py:restore_conversation (registration line 145) | M with `archive` | yes | see Set 2 |
+| 28 | DELETE | `/api/conversations/{conv_id}/purge` | partyline/conversation_routes.py:purge_conversation (registration line 160) | M with `archive` | yes | see Set 2 |
+| 29 | POST | `/api/conversations/{conv_id}/attachments` | partyline/conversation_routes.py:attach (registration line 173) | M with `attach` | yes | see Set 2 |
 | 30 | GET | `/api/docker-relay` | partyline/docker_relay_routes.py:relay_status (registration line 11) | H, or lead (own rows) | yes | see Set 2 |
 | 31 | GET | `/api/docker-workloads` | partyline/docker_workload_routes.py:workloads (registration line 21) | H; M for visible rows | yes | see Set 2 |
 | 32 | POST | `/api/docker-workloads/{container_id}/stop` | partyline/docker_workload_routes.py:stop (registration line 28) | owning principal | yes | see Set 2 |
@@ -163,8 +165,10 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 134 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/withdraw` | partyline/write_set_decisions.py:withdraw (registration line 190) | requesting attachment | yes | see Set 2 |
 | 135 | GET | `/api/conversations/{conv_id}/write-set` | partyline/write_set_routes.py:list_write_set (registration line 85) | M with `read` | yes | see Set 2 |
 | 136 | POST | `/api/conversations/{conv_id}/write-set` | partyline/write_set_routes.py:grant_or_request_write_set (registration line 92) | H grants; M files a request | yes | see Set 2 |
+| 137 | GET | `/api/conversations/{conv_id}/chapter` | partyline/chapter_routes.py:chapter_preview | M with `read` | yes | see Set 2 |
+| 138 | POST | `/api/conversations/{conv_id}/chapter` | partyline/chapter_routes.py:new_chapter | H, or L with `chapter` (own line only) | yes | see Set 2 |
 
-## Set 2: agent-reachable subset (104 routes)
+## Set 2: agent-reachable subset (106 routes)
 
 | # | Method | Path | Caller | Disposition | Reason |
 | --- | --- | --- | --- | --- | --- |
@@ -215,6 +219,8 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 55 | GET | `/api/conversations/{conv_id}/tip` | M with `read` | **excluded** | git tip read; not needed by the tool set |
 | 56 | POST | `/api/conversations/{conv_id}/refresh-base` | M with `write` | **excluded** | base-mirror refresh is a git-side effect; the tool set does not change git refs |
 | 57 | PUT | `/api/conversations/{conv_id}/gates` | H, or M with `assign` | **op**: captain op `set_gates` | declared gate commands; timeout capped at 14400 s |
+| 137 | GET | `/api/conversations/{conv_id}/chapter` | M with `read` | **excluded** | the dialog's preview (next name, captain preset); a captain starts a chapter with `new_chapter` and needs no preview |
+| 138 | POST | `/api/conversations/{conv_id}/chapter` | H, or L with `chapter` | **op**: captain op `new_chapter` | a captain continues only its own line; the new line has no captain until a person appoints one |
 | 58 | GET | `/api/conversations/{conv_id}/gates` | M with `read` | **excluded** | the captain declares gates with `set_gates` (row 57); reading them back is not needed by the tool set |
 | 59 | GET | `/api/conversations/{conv_id}/notes` | M with `read` | **tool**: `notes` (get) | line, tree or own attachment scope |
 | 60 | PUT | `/api/conversations/{conv_id}/notes` | M, by scope | **tool**: `notes` (set) | attachment notes are own only; line and tree need captain `assign`; 4000-character cap |
@@ -295,6 +301,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | `attach_worker` | captain op | 29 |
 | `detach_worker` | captain op | 121 |
 | `create_child` | captain op | 47 |
+| `new_chapter` | captain op | 138 |
 | `appoint_lead` | captain op | 45 |
 | `retire_child` | captain op | 20 |
 | `accept` | captain op | 2 |
@@ -338,7 +345,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 
 ## Coverage
 
-136 routes in total: 104 agent-reachable (Set 2) + 32 not agent-reachable (Set 1 notes) = 136. Route numbers 1-136 each appear exactly once in Set 1, and each agent-reachable number appears exactly once in Set 2. Dispositions in Set 2: 16 tool, 19 op, 3 guide, 66 excluded.
+138 routes in total: 104 agent-reachable (Set 2) + 34 not agent-reachable (Set 1 notes) = 138. Route numbers 1-136 and the person-only additions 21a/21b each appear exactly once in Set 1; each agent-reachable number appears exactly once in Set 2. Dispositions in Set 2: 16 tool, 19 op, 3 guide, 66 excluded.
 
 ## Orchestrator additions
 
@@ -347,7 +354,7 @@ These entries extend both inventory sets above. Registration handlers are in
 
 | Method | Path | Handler | Caller | Agent-reachable | MCP disposition |
 | --- | --- | --- | --- | --- | --- |
-| PUT | `/api/conversations/{conv_id}/captain-style` | `captain_style` | H, root line only | no | excluded: human chooses captain style and default review policy |
+| PUT | `/api/conversations/{conv_id}/captain-style` | `captain_style` | H, root line only | no | excluded: human chooses the default review policy |
 | POST | `/api/conversations/{conv_id}/tasks` | `create` | H or orchestrator root captain | yes | tool: `create_task`; `mode` `full` (default), `light` (review, gates scaled by `partyline/task_gates.py`) or `express` (no review, policy forced `none`, 422 with any other `review`), fixed at creation; optional `write_set` (absolute paths, at most 32) pre-grants write scope to the task line before the implementer starts, with the validation and authority of approving a request (inside the captain's own grants or checkout; docker access and anything wider is a person's decision) |
 | GET | `/api/conversations/{conv_id}/tasks` | `listing` | H or orchestrator root captain | yes | tool: `tasks`; includes bounded per-workspace real/mirror tips and unaccepted commits |
 | GET | `/api/conversations/{conv_id}/task` | `detail` | M with `read` | yes | guide: current structured task state, including after compaction |
@@ -398,3 +405,7 @@ is needed. The server checks the full outgoing message size too. The add-on body
 3 MiB. The transparent render uses that exact resolution; an aspect mismatch beyond 0.5% against the scene or explicit width/height
 is refused. Ordinary clamps and cancel/deadline behavior still apply. See the
 [relay design](../design/blender-python-relay.md#5-mcp-tools-agent-view).
+
+Review environments: people-only `GET` and `PUT /api/settings/review-environments`;
+reviewers report gaps with `POST /api/conversations/{id}/env-gap`; the root captain
+uses `POST /api/conversations/{root}/review-environment` for list, set, or delete.

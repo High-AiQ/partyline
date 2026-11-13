@@ -108,7 +108,7 @@ class AttachmentTmpTest(unittest.TestCase):
     def test_reap_line_and_missing_reaps_skip_foreign_scopes_and_names(self):
         db = Db(f"{self.tmp.name}/partyline.db")
         self.addCleanup(db.close)
-        db.create_conversation("line", "Line", captain_mode="manager_tree")
+        db.create_conversation("line", "Line", captain_mode="orchestrator")
         db.add_attachment("live-1", "line", "a", "raw", ["cat"], self.tmp.name)
         db.add_attachment("gone-1", "line", "b", "raw", ["cat"], self.tmp.name)
         for att_id in ("live-1", "gone-1", "no-row-1"):
@@ -157,8 +157,8 @@ class AttachmentTmpTest(unittest.TestCase):
     def test_the_rider_names_the_mount_and_this_lines_share(self):
         db = Db(f"{self.tmp.name}/partyline.db")
         self.addCleanup(db.close)
-        db.create_conversation("line", "Line", captain_mode="manager_tree")
-        db.create_conversation("other", "Other", captain_mode="manager_tree")
+        db.create_conversation("line", "Line", captain_mode="orchestrator")
+        db.create_conversation("other", "Other", captain_mode="orchestrator")
         db.add_attachment("live-1", "line", "a", "raw", ["cat"], self.tmp.name)
         db._exec("UPDATE attachments SET status='running' WHERE id='live-1'")
         db.add_attachment("live-2", "other", "b", "raw", ["cat"], self.tmp.name)
@@ -181,7 +181,7 @@ class AttachmentTmpTest(unittest.TestCase):
     def test_riders_within_the_ttl_read_the_cache_instead_of_walking(self):
         db = Db(f"{self.tmp.name}/partyline.db")
         self.addCleanup(db.close)
-        db.create_conversation("line", "Line", captain_mode="manager_tree")
+        db.create_conversation("line", "Line", captain_mode="orchestrator")
         db.add_attachment("live-1", "line", "a", "raw", ["cat"], self.tmp.name)
         db._exec("UPDATE attachments SET status='running' WHERE id='live-1'")
         ensure_tmp_dir({"id": "live-1"})
@@ -219,7 +219,7 @@ class CloseReapTest(unittest.IsolatedAsyncioTestCase):
         pin_tmp_base(self, Path(self.tmp.name, "tmp"))
         self.db = Db(f"{self.tmp.name}/partyline.db")
         self.addCleanup(self.db.close)
-        self.db.create_conversation("line", "Line", captain_mode="manager_tree")
+        self.db.create_conversation("line", "Line", captain_mode="orchestrator")
         self.db.add_attachment("det-1", "line", "d", "raw", ["cat"], self.tmp.name)
         self.db._exec("UPDATE attachments SET status='detached' WHERE id='det-1'")
         self.runtime = ChatRuntime(self.db)
@@ -249,8 +249,8 @@ class TmpReapRouteTest(unittest.TestCase):
         pin_tmp_base(self, Path(self.tmp.name, "tmp"))
         self.db = Db(f"{self.tmp.name}/partyline.db")
         self.addCleanup(self.db.close)
-        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
-        self.db.create_conversation("kid", "Kid", captain_mode="manager_tree")
+        self.db.create_conversation("root", "Root", captain_mode="orchestrator")
+        self.db.create_conversation("kid", "Kid", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='kid'")
         self.db.add_attachment("rootcap", "root", "cap", "raw", ["cat"], self.tmp.name)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='rootcap'")

@@ -4,9 +4,11 @@ import ConversationList from "./ConversationList.svelte";
 import { screenStatus } from "../../state/screen-status.svelte";
 import { tick } from "svelte";
 import { room } from "../../state/room.svelte.js";
+import * as starState from "../../state/conversation-star";
 
 afterEach(() => {
   room.conversations = [];
+  room.conversation = null;
   document.body.replaceChildren();
 });
 
@@ -42,6 +44,125 @@ describe("conversation rail live state", () => {
       expect(indicator.querySelector(".led.running")).toBeInstanceOf(HTMLSpanElement);
       expect(document.querySelector(".conv-name")?.textContent).toBe("Release line");
       expect(document.querySelector(".conv")?.textContent.trim()).toBe("Release line");
+    } finally {
+      await unmount(list);
+    }
+  });
+});
+
+describe("starred conversation rail", () => {
+  it("pins starred rows in normal order and reflects a live list refresh", async () => {
+    const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
+    room.conversations = [
+      { ...base, id: "first", name: "First" },
+      { ...base, id: "child", name: "Child", parent_id: "first" },
+      { ...base, id: "other", name: "Other" },
+    ];
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: {
+        onmanagement: vi.fn(),
+        onrename: vi.fn(),
+        oncloseprocesses: vi.fn(),
+        ondelete: vi.fn(),
+      },
+    });
+    try {
+      room.conversations = room.conversations.map((line) =>
+        line.id === "child" || line.id === "other" ? { ...line, starred: true } : line,
+      );
+      await tick();
+      expect([...document.querySelectorAll(".conv-name")].map((name) => name.textContent.trim())).toEqual([
+        "Child",
+        "Other",
+        "First",
+        "Other",
+      ]);
+      expect([...document.querySelectorAll("h2")].map((heading) => heading.textContent.trim())).toEqual([
+        "Starred",
+        "Lines",
+      ]);
+      expect(
+        document
+          .querySelector<HTMLButtonElement>('[aria-label="Unstar Child"]')
+          ?.getAttribute("aria-pressed"),
+      ).toBe("true");
+    } finally {
+      await unmount(list);
+    }
+  });
+
+  it("makes the row star keyboard discoverable and calls the shared toggle action", async () => {
+    room.conversations = [
+      {
+        id: "line",
+        name: "Line",
+        topic: "",
+        created_at: 1,
+        archived_at: null,
+        live_count: 0,
+      },
+    ];
+    const toggleStar = vi.spyOn(starState, "toggleConversationStar").mockResolvedValue(undefined);
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: {
+        onmanagement: vi.fn(),
+        onrename: vi.fn(),
+        oncloseprocesses: vi.fn(),
+        ondelete: vi.fn(),
+      },
+    });
+    try {
+      const star = document.querySelector<HTMLButtonElement>('[aria-label="Star Line"]');
+      expect(star?.getAttribute("aria-pressed")).toBe("false");
+      star?.focus();
+      await tick();
+      expect(document.activeElement).toBe(star);
+      expect(document.querySelector(".conv-actions")?.className).toContain("group-focus-within:opacity-100");
+      star?.click();
+      expect(toggleStar).toHaveBeenCalledWith(room, "line");
+    } finally {
+      await unmount(list);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("highlights the selected line in both the starred shortcut and main tree", async () => {
+    const root = {
+      id: "root",
+      name: "Root",
+      topic: "",
+      created_at: 1,
+      archived_at: null,
+      live_count: 0,
+      starred: true,
+    };
+    const child = {
+      id: "child",
+      name: "Child",
+      topic: "",
+      created_at: 2,
+      archived_at: null,
+      live_count: 0,
+      parent_id: "root",
+    };
+    room.conversations = [root, child];
+    room.conversation = child;
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: {
+        onmanagement: vi.fn(),
+        onrename: vi.fn(),
+        oncloseprocesses: vi.fn(),
+        ondelete: vi.fn(),
+      },
+    });
+    try {
+      await tick();
+      expect(
+        [...document.querySelectorAll(".conv.active .conv-name")].map((name) => name.textContent.trim()),
+      ).toEqual(["Child", "Child"]);
     } finally {
       await unmount(list);
     }
@@ -200,6 +321,68 @@ describe("active share indicators", () => {
     } finally {
       await unmount(list);
       vi.restoreAllMocks();
+    }
+  });
+});
+
+describe("conversation rail chapter chain", () => {
+  it("shows a quiet ch N on a continuing line and → on the one it continues", async () => {
+    const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
+    room.conversations = [
+      { ...base, id: "b", name: "Act two", chapter_of: "a", chapter: 2 },
+      { ...base, id: "a", name: "Plan" },
+      { ...base, id: "c", name: "Other" },
+    ];
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: { onmanagement: vi.fn(), onrename: vi.fn(), oncloseprocesses: vi.fn(), ondelete: vi.fn() },
+    });
+    try {
+      const rows = [...document.querySelectorAll(".conv-row")];
+      const row = (name: string) =>
+        rows.find((item) => item.querySelector(".conv-name .truncate")?.textContent.trim() === name);
+      expect(row("Act two")?.querySelector(".chapter-mark")?.textContent).toBe("ch 2");
+      expect(row("Act two")?.querySelector(".chapter-next")).toBeNull();
+      expect(row("Plan")?.querySelector(".chapter-mark")).toBeNull();
+      const next = [...document.querySelectorAll(".chapter-next")];
+      expect(next).toHaveLength(1);
+      expect(next[0]?.getAttribute("aria-label")).toBe("continued in Act two");
+      expect(row("Other")?.querySelector(".chapter-mark, .chapter-next")).toBeNull();
+    } finally {
+      await unmount(list);
+    }
+  });
+
+  it("offers new chapter in the line menu, but not on a task line", async () => {
+    const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
+    room.conversations = [
+      { ...base, id: "a", name: "Plan" },
+      { ...base, id: "t", name: "Task", task_status: "implementing" },
+    ];
+    const onchapter = vi.fn();
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: {
+        onmanagement: vi.fn(),
+        onrename: vi.fn(),
+        onchapter,
+        oncloseprocesses: vi.fn(),
+        ondelete: vi.fn(),
+      },
+    });
+    try {
+      const more = (name: string) =>
+        document.querySelector<HTMLButtonElement>(`.conv-more[aria-label="line actions for ${name}"]`);
+      more("Task")?.click();
+      await tick();
+      expect(document.querySelector(".new-chapter")).toBeNull();
+      more("Task")?.click(); // toggle the menu closed
+      more("Plan")?.click();
+      await tick();
+      document.querySelector<HTMLButtonElement>(".new-chapter")?.click();
+      expect(onchapter).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
+    } finally {
+      await unmount(list);
     }
   });
 });

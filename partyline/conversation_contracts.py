@@ -17,6 +17,11 @@ class PurgeAllResponse(BaseModel):
     skipped: list[SkippedPurge] = Field(default_factory=list)
 
 
+class ConversationStarResponse(BaseModel):
+    ok: bool
+    starred: bool
+
+
 class RetirementBlocker(BaseModel):
     code: str
     message: str
@@ -31,7 +36,7 @@ class BlockedArchiveResponse(BaseModel):
 
 
 class ConversationResponse(BaseModel):
-    captain_mode: Literal["manager_tree", "orchestrator"] = "orchestrator"
+    captain_mode: Literal["orchestrator"] = "orchestrator"
     default_review_policy: str = "captain"
     task_status: Literal["implementing", "idle", "in_review", "approved", "done", "blocked"] | None = None
     task_round: int | None = None
@@ -58,3 +63,6 @@ class ConversationResponse(BaseModel):
     archived_at: float | None = None
     live_count: int = Field(default=0, ge=0)
     parent_id: str | None = None
+    chapter_of: str | None = None
+    chapter: int = Field(default=1, ge=1)
+    starred: bool = False

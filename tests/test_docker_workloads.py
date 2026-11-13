@@ -86,7 +86,7 @@ class WorkloadsBase(unittest.IsolatedAsyncioTestCase):
         self.db = Db(f"{self.tmp.name}/p.db")
         self.addCleanup(self.db.close)
         for line in ("root", "child", "sibling"):
-            self.db.create_conversation(line, line, captain_mode="manager_tree")
+            self.db.create_conversation(line, line, captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='child'")
         self.daemon = FakeDaemon()
         self.grant = True

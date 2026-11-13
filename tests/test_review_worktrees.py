@@ -79,7 +79,7 @@ class ReviewWorktreesTest(unittest.TestCase):
         self.addCleanup(self.client.close)
         self.addCleanup(setattr, server, "runtime", server.runtime)
         server.runtime = self.runtime
-        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
+        self.db.create_conversation("root", "Root", captain_mode="orchestrator")
         self.db.add_attachment("root-lead", "root", "terra", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='root-lead'")
         user = auth_store.create_user(
@@ -247,7 +247,7 @@ class ReviewWorktreesTest(unittest.TestCase):
         self.assertEqual(self.create("deadbeef").status_code, 400)
         self.assertEqual(self.create("main").status_code, 400)
         loose = "loose"
-        self.db.create_conversation(loose, "loose", captain_mode="manager_tree")
+        self.db.create_conversation(loose, "loose", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='root', cwd=? WHERE id='loose'",
                       (self.directory.name,))
         self.assertEqual(self.create(sha, conv_id=loose).status_code, 409)

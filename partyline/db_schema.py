@@ -1,6 +1,8 @@
 """The SQLite schema and its append-only migration history; append idempotent entries, never edit."""
 from .db_schema_base import SCHEMA  # noqa: F401
 from .db_schema_extensions import MIGRATIONS as EXTENSIONS
+from .captain_style_schema import MIGRATIONS as RETIRE_MANAGER_TREE
+from .review_env_schema import MIGRATIONS as REVIEW_ENVIRONMENTS
 from .storage_cleanup_schema import MIGRATIONS as STORAGE_CLEANUP
 MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
@@ -215,6 +217,11 @@ MIGRATIONS = [
     # line's own branch was fast-forwarded to, and the only thing a parent
     # should treat as the line's work.
     "ALTER TABLE conversations ADD COLUMN accepted_sha TEXT",
+    # New chapter: the line this one continues, and its place in that chain
+    # (1 for a line that continues nothing). Nothing is deleted or moved.
+    "ALTER TABLE conversations ADD COLUMN chapter_of TEXT",
+    "ALTER TABLE conversations ADD COLUMN chapter INTEGER NOT NULL DEFAULT 1",
+    "CREATE INDEX IF NOT EXISTS idx_conversations_chapter_of ON conversations(chapter_of)",
     # Review worktrees a line is having adversarially reviewed, keyed by path
     # so two lines can never claim one directory. Records let accept, retire,
     # and the startup sweep prune them; the SHAs themselves stay in the repo.
@@ -274,7 +281,16 @@ MIGRATIONS = [
         BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]
 MIGRATIONS.extend(EXTENSIONS + STORAGE_CLEANUP)
+MIGRATIONS.append("""CREATE TABLE IF NOT EXISTS conversation_stars(
+    user_id INTEGER NOT NULL,
+    conv_id TEXT NOT NULL,
+    PRIMARY KEY(user_id, conv_id)
+)""")
 MIGRATIONS.append("""CREATE TABLE IF NOT EXISTS storage_cleanup_decisions(
     path TEXT PRIMARY KEY,
     evidence TEXT NOT NULL
 )""")
+
+MIGRATIONS.extend(RETIRE_MANAGER_TREE)  # after EXTENSIONS: it drops their old triggers
+
+MIGRATIONS.extend(REVIEW_ENVIRONMENTS)

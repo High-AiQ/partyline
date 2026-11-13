@@ -21,6 +21,7 @@ Capability = Literal[
     "close",
     "accept",
     "create_child",
+    "chapter",
     "report",
     "notify",
     "read_reports",
@@ -28,7 +29,7 @@ Capability = Literal[
     "archive", "link_parent",
     "create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task",
     "message_task", "set_task_goal",
-    "resume_work", "request_review", "review_verdict", "blocked", "waiting", "deliver",
+    "resume_work", "request_review", "review_verdict", "env_gap", "blocked", "waiting", "deliver",
 ]
 
 ALL_CAPABILITIES: tuple[Capability, ...] = get_args(Capability)
@@ -81,21 +82,19 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
         return False
     from .orchestrator_store import task, task_actions
     task_row = task(db, conv_id)
-    if capability in ("request_review", "review_verdict", "blocked", "waiting", "deliver"):
-        if (capability == "review_verdict" and conv_id == home and principal.is_lead
-                and conv.get('captain_mode', 'manager_tree') == 'orchestrator'):
+    if capability in ("request_review", "review_verdict", "env_gap", "blocked", "waiting", "deliver"):
+        if (capability == "review_verdict" and conv_id == home and principal.is_lead):
             return True
         return capability in task_actions(db, principal, conv_id)
     if capability == "resume_work" and capability in task_actions(db, principal, conv_id):
         return True
     if capability in ("create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task",
                       "message_task", "set_task_goal", "resume_work"):
-        return (conv_id == home and principal.is_lead and conv['parent_id'] is None
-                and conv.get('captain_mode', 'manager_tree') == 'orchestrator')
+        return conv_id == home and principal.is_lead and not task_row
     if task_row and capability == "archive" and not (
             principal.is_lead and home == task_row["root_id"] and conv_id != home):
         return False
-    if task_row and capability in ("attach", "appoint_lead", "create_child", "report", "notify"):
+    if task_row and capability in ("attach", "appoint_lead", "create_child", "chapter", "report", "notify"):
         return False
     if capability == "archive":
         # A captain may retire a descendant line it accepted, never itself or
@@ -115,6 +114,9 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
         # Deterministic only: a person, or a captain over this line. There is no
         # natural-language handoff — a line with no captain waits for a person.
         return _home_lead_tree(db, principal, conv_id)
+    if capability == "chapter":
+        # A captain continues its own line only; the new line is born outside its tree.
+        return principal.is_lead and conv_id == home
     if capability == "create_child":
         # People are never boxed by the depth cap; machines stop at it, and a
         # machine whose line already carries workers assigns them instead.
@@ -195,7 +197,7 @@ def deny_unless(
         raise HTTPException(403, "this credential cannot act on that line")
     if (conv_id in getattr(db, "retiring_lines", set())
             and capability in ("attach", "create_child", "accept", "assign", "write", "appoint_lead",
-                               "link_parent", "upload")):
+                               "link_parent", "upload", "chapter")):
         raise HTTPException(409, "retirement is in progress; this line cannot change")
 
 

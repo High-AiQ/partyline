@@ -54,6 +54,13 @@ export const SETTINGS: readonly SettingInfo[] = [
     keywords: "instructions briefing prompt",
   },
   {
+    id: "setting-review-environments",
+    section: "general",
+    label: "Review environments",
+    description: "Repository setup and test commands for review checkouts",
+    keywords: "lockfile dependencies test setup",
+  },
+  {
     id: "setting-theme",
     section: "appearance",
     label: "Theme",

@@ -55,7 +55,7 @@ class LineBridgeTest(unittest.TestCase):
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
         for conv, name in (("x", "3d game"), ("y", "tool"), ("kid", "kid of x")):
-            self.db.create_conversation(conv, name, captain_mode="manager_tree")
+            self.db.create_conversation(conv, name, captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='x' WHERE id='kid'")
         self.adapters = {}
         for att_id, name, conv in (("x-amb", "sonnet", "x"), ("x-other", "gem", "x"),
