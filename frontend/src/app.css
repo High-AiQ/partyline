@@ -20,6 +20,7 @@
   --color-red: #c96f5a;
   --color-pink: #ff6fb5; /* agent-control badge */
   --color-sky: #6aa7d9; /* full-review task mode */
+  --color-gold: #f0b840; /* starred line */
 
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --font-serif: "Instrument Serif", Georgia, serif;
@@ -54,6 +55,7 @@
     --color-red: #9b3e2e;
     --color-pink: #b0286e;
     --color-sky: #1f5f95;
+    --color-gold: #b07a12;
     --grain-opacity: 0.025;
   }
 }
@@ -78,6 +80,7 @@
   --color-red: #9b3e2e;
   --color-pink: #b0286e;
   --color-sky: #1f5f95;
+  --color-gold: #b07a12;
   --grain-opacity: 0.025;
 }
 
@@ -98,6 +101,7 @@
   --color-red: #c96f5a;
   --color-pink: #ff6fb5;
   --color-sky: #6aa7d9;
+  --color-gold: #f0b840;
   --grain-opacity: 0.05;
 }
 

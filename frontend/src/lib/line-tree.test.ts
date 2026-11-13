@@ -5,6 +5,9 @@ import {
   starredLineTree,
   storeExpandedLines,
   LINE_TREE_STORAGE_KEY,
+  RAIL_GROUPS_STORAGE_KEY,
+  readCollapsedGroups,
+  storeCollapsedGroups,
 } from "./line-tree";
 
 const lines = [
@@ -126,5 +129,35 @@ describe("line tree", () => {
       "sibling",
     ]);
     expect(main.filter((row) => row.visible).map((row) => row.line.id)).toEqual(lines.map((line) => line.id));
+  });
+});
+
+describe("collapsed rail groups", () => {
+  it("defaults to both groups open and persists the collapsed ones", () => {
+    expect([...readCollapsedGroups()]).toEqual([]);
+    storeCollapsedGroups(new Set(["starred"]));
+    expect([...readCollapsedGroups()]).toEqual(["starred"]);
+    storeCollapsedGroups(new Set(["starred", "main"]));
+    expect([...readCollapsedGroups()].sort()).toEqual(["main", "starred"]);
+  });
+
+  it("ignores corrupt or unknown stored values", () => {
+    localStorage.setItem(RAIL_GROUPS_STORAGE_KEY, "not json");
+    expect([...readCollapsedGroups()]).toEqual([]);
+    localStorage.setItem(RAIL_GROUPS_STORAGE_KEY, JSON.stringify(["starred", "bogus"]));
+    expect([...readCollapsedGroups()]).toEqual([]);
+  });
+
+  it("survives blocked storage", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect([...readCollapsedGroups()]).toEqual([]);
+    expect(() => {
+      storeCollapsedGroups(new Set(["main"]));
+    }).not.toThrow();
   });
 });

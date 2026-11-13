@@ -6,7 +6,18 @@ import { tick } from "svelte";
 import { room } from "../../state/room.svelte.js";
 import * as starState from "../../state/conversation-star";
 
+function props() {
+  return { onmanagement: vi.fn(), onrename: vi.fn(), oncloseprocesses: vi.fn(), ondelete: vi.fn() };
+}
+
+function star(label: string): HTMLButtonElement {
+  const found = document.querySelector<HTMLButtonElement>(`.conv-star[aria-label="${label}"]`);
+  if (!found) throw new Error(`missing star ${label}`);
+  return found;
+}
+
 afterEach(() => {
+  localStorage.clear();
   room.conversations = [];
   room.conversation = null;
   document.body.replaceChildren();
@@ -79,8 +90,8 @@ describe("starred conversation rail", () => {
         "Other",
       ]);
       expect([...document.querySelectorAll("h2")].map((heading) => heading.textContent.trim())).toEqual([
-        "Starred",
-        "Lines",
+        "▾Starred",
+        "▾Lines",
       ]);
       expect(
         document
@@ -92,36 +103,80 @@ describe("starred conversation rail", () => {
     }
   });
 
-  it("makes the row star keyboard discoverable and calls the shared toggle action", async () => {
+  it("shows an inline star left of the name: outlined when unstarred, filled gold when starred", async () => {
+    const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
     room.conversations = [
-      {
-        id: "line",
-        name: "Line",
-        topic: "",
-        created_at: 1,
-        archived_at: null,
-        live_count: 0,
-      },
+      { ...base, id: "plain", name: "Plain" },
+      { ...base, id: "kept", name: "Kept", starred: true, task_status: "implementing", task_mode: "full" },
+    ];
+    const list = mount(ConversationList, { target: document.body, props: props() });
+    try {
+      const outlined = star("Star Plain");
+      expect(outlined.getAttribute("aria-pressed")).toBe("false");
+      expect(outlined.querySelector("svg")?.getAttribute("fill")).toBe("none");
+      expect(outlined.className).toContain("text-cream-faint");
+      const filled = star("Unstar Kept");
+      expect(filled.getAttribute("aria-pressed")).toBe("true");
+      expect(filled.querySelector("svg")?.getAttribute("fill")).toBe("currentColor");
+      expect(filled.className).toContain("text-gold");
+      // Inside the row, not the actions cluster, and before both the kind icon and the name.
+      const row = filled.closest(".conv-row");
+      const slot = row?.querySelector(".star-slot");
+      expect(filled.closest(".conv-actions")).toBeNull();
+      expect(document.querySelectorAll(".conv-star")).toHaveLength(3);
+      const mode = row?.querySelector(".task-mode");
+      const name = row?.querySelector(".conv-name");
+      if (!slot || !mode || !name) throw new Error("missing star slot, kind icon or name");
+      // The star floats over this slot, which precedes the kind icon and the name.
+      expect(slot.compareDocumentPosition(mode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(slot.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // Every row reserves the same slot, so the name never shifts with the star state.
+      const slots = [...document.querySelectorAll(".star-slot")];
+      expect(slots).toHaveLength(3);
+      expect(new Set(slots.map((slot) => slot.className)).size).toBe(1);
+    } finally {
+      await unmount(list);
+    }
+  });
+
+  it("toggles the star from a keyboard-focusable button without opening or selecting the line", async () => {
+    room.conversations = [
+      { id: "line", name: "Line", topic: "", created_at: 1, archived_at: null, live_count: 0 },
     ];
     const toggleStar = vi.spyOn(starState, "toggleConversationStar").mockResolvedValue(undefined);
+    const open = vi.spyOn(room, "open").mockResolvedValue(undefined);
+    const list = mount(ConversationList, { target: document.body, props: props() });
+    try {
+      const button = star("Star Line");
+      expect(button.type).toBe("button");
+      button.focus();
+      await tick();
+      expect(document.activeElement).toBe(button);
+      button.click();
+      expect(toggleStar).toHaveBeenCalledWith(room, "line");
+      expect(open).not.toHaveBeenCalled();
+      expect(document.querySelector(".conv.active")).toBeNull();
+    } finally {
+      await unmount(list);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("does not toggle selection when the star is clicked in select mode", async () => {
+    room.conversations = [
+      { id: "line", name: "Line", topic: "", created_at: 1, archived_at: null, live_count: 0 },
+    ];
+    vi.spyOn(starState, "toggleConversationStar").mockResolvedValue(undefined);
     const list = mount(ConversationList, {
       target: document.body,
-      props: {
-        onmanagement: vi.fn(),
-        onrename: vi.fn(),
-        oncloseprocesses: vi.fn(),
-        ondelete: vi.fn(),
-      },
+      props: { ...props(), onarchivemany: vi.fn() },
     });
     try {
-      const star = document.querySelector<HTMLButtonElement>('[aria-label="Star Line"]');
-      expect(star?.getAttribute("aria-pressed")).toBe("false");
-      star?.focus();
+      document.querySelector<HTMLButtonElement>(".bulk-select")?.click();
       await tick();
-      expect(document.activeElement).toBe(star);
-      expect(document.querySelector(".conv-actions")?.className).toContain("group-focus-within:opacity-100");
-      star?.click();
-      expect(toggleStar).toHaveBeenCalledWith(room, "line");
+      star("Star Line").click();
+      await tick();
+      expect(document.body.textContent).toContain("0 selected");
     } finally {
       await unmount(list);
       vi.restoreAllMocks();
@@ -163,6 +218,85 @@ describe("starred conversation rail", () => {
       expect(
         [...document.querySelectorAll(".conv.active .conv-name")].map((name) => name.textContent.trim()),
       ).toEqual(["Child", "Child"]);
+    } finally {
+      await unmount(list);
+    }
+  });
+});
+
+describe("collapsible rail groups", () => {
+  const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
+  const names = () => [...document.querySelectorAll(".conv-name")].map((name) => name.textContent.trim());
+  const header = (group: string) =>
+    document.querySelector<HTMLButtonElement>(`.group-toggle[aria-label$="${group} group"]`);
+
+  it("collapses the Starred and Lines groups independently and remembers it across a remount", async () => {
+    room.conversations = [
+      { ...base, id: "a", name: "Alpha", starred: true },
+      { ...base, id: "b", name: "Beta" },
+    ];
+    let list = mount(ConversationList, { target: document.body, props: props() });
+    try {
+      expect(names()).toEqual(["Alpha", "Alpha", "Beta"]);
+      expect(header("Starred")?.getAttribute("aria-expanded")).toBe("true");
+      header("Starred")?.click();
+      await tick();
+      expect(names()).toEqual(["Alpha", "Beta"]);
+      expect(header("Starred")?.getAttribute("aria-expanded")).toBe("false");
+      expect(header("Starred")?.textContent).toContain("▸");
+      header("Lines")?.click();
+      await tick();
+      expect(names()).toEqual([]);
+      expect([...document.querySelectorAll("h2")].map((heading) => heading.textContent.trim())).toEqual([
+        "▸Starred",
+        "▸Lines",
+      ]);
+      await unmount(list);
+      document.body.replaceChildren();
+      list = mount(ConversationList, { target: document.body, props: props() });
+      expect(names()).toEqual([]);
+      header("Starred")?.click();
+      await tick();
+      expect(names()).toEqual(["Alpha"]);
+      header("Lines")?.click();
+      await tick();
+      expect(names()).toEqual(["Alpha", "Alpha", "Beta"]);
+    } finally {
+      await unmount(list);
+    }
+  });
+
+  it("never hides the whole list behind a Lines header that is not shown", async () => {
+    localStorage.setItem("partyline_collapsed_rail_groups", JSON.stringify(["main"]));
+    room.conversations = [{ ...base, id: "b", name: "Beta" }];
+    const list = mount(ConversationList, { target: document.body, props: props() });
+    try {
+      expect(document.querySelector("h2")).toBeNull();
+      expect(names()).toEqual(["Beta"]);
+    } finally {
+      await unmount(list);
+    }
+  });
+
+  it("expands and collapses a starred line's subtree from the Starred group, sharing the main list's state", async () => {
+    room.conversations = [
+      { ...base, id: "root", name: "Root", starred: true },
+      { ...base, id: "kid", name: "Kid", parent_id: "root" },
+    ];
+    const list = mount(ConversationList, { target: document.body, props: props() });
+    try {
+      const starredToggle = () =>
+        document.querySelector<HTMLButtonElement>('.tree-toggle[aria-label$="sublines of Root"]');
+      expect(names()).toEqual(["Root", "Root"]);
+      expect(starredToggle()?.getAttribute("aria-expanded")).toBe("false");
+      starredToggle()?.click();
+      await tick();
+      // One shared expand state: both the shortcut and the main tree show the child now.
+      expect(names()).toEqual(["Root", "Kid", "Root", "Kid"]);
+      expect(starredToggle()?.getAttribute("aria-expanded")).toBe("true");
+      starredToggle()?.click();
+      await tick();
+      expect(names()).toEqual(["Root", "Root"]);
     } finally {
       await unmount(list);
     }
@@ -229,9 +363,9 @@ describe("conversation rail bulk select", () => {
       expect(marker.compareDocumentPosition(live)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       expect(live.compareDocumentPosition(name)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       expect(rows[0]?.querySelector(".line-live")).toBeNull();
-      expect(rows[0]?.querySelector(".conv-name")?.parentElement?.previousElementSibling?.className).toBe(
-        live.parentElement?.className,
-      );
+      const slot = rows[0]?.querySelector(".conv-name")?.parentElement?.previousElementSibling;
+      expect(slot?.className).toContain("star-slot");
+      expect(slot?.previousElementSibling?.className).toBe(live.parentElement?.className);
       expect(document.querySelector(".conv-more")).toBeNull();
       document.querySelector<HTMLButtonElement>(".conv")?.click();
       await vi.waitFor(() => {

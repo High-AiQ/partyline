@@ -42,6 +42,28 @@ describe("TopBar conversation identity", () => {
     }
   });
 
+  it("has no star toggle: starring is done from the sidebar only", async () => {
+    room.conversation = {
+      id: "line",
+      name: "Starred line",
+      topic: "",
+      created_at: 1,
+      archived_at: null,
+      live_count: 0,
+      starred: true,
+    };
+    room.conversations = [room.conversation];
+    const app = mount(TopBar, { target: document.body });
+    try {
+      await tick();
+      expect(document.querySelector('[aria-label^="Unstar"], [aria-label^="Star"]')).toBeNull();
+      expect(document.querySelector("#topbar")?.textContent).not.toMatch(/[★☆]/);
+    } finally {
+      room.conversations = [];
+      await unmount(app);
+    }
+  });
+
   it("opens TopicDialog when the topic button is activated", async () => {
     room.conversation = {
       id: "line",
