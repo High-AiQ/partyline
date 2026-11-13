@@ -1,6 +1,8 @@
 """The SQLite schema and its append-only migration history; append idempotent entries, never edit."""
 from .db_schema_base import SCHEMA  # noqa: F401
 from .db_schema_extensions import MIGRATIONS as EXTENSIONS
+from .captain_style_schema import MIGRATIONS as RETIRE_MANAGER_TREE
+from .review_env_schema import MIGRATIONS as REVIEW_ENVIRONMENTS
 from .storage_cleanup_schema import MIGRATIONS as STORAGE_CLEANUP
 MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
@@ -284,30 +286,6 @@ MIGRATIONS.append("""CREATE TABLE IF NOT EXISTS storage_cleanup_decisions(
     evidence TEXT NOT NULL
 )""")
 
-# Retire the old root-only style constraint and update the persistent column default.
-# The schema rewrite is idempotent; RESET reloads it in this connection as well.
-MIGRATIONS.extend([
-    "DROP TRIGGER IF EXISTS orchestrator_root_insert",
-    "DROP TRIGGER IF EXISTS orchestrator_root_update",
-    "UPDATE conversations SET captain_mode='orchestrator' WHERE captain_mode!='orchestrator'",
-    "PRAGMA writable_schema=ON",
-    "UPDATE sqlite_schema SET sql=replace(sql, \"DEFAULT 'manager_tree'\", "
-    "\"DEFAULT 'orchestrator'\") WHERE type='table' AND name='conversations'",
-    "PRAGMA writable_schema=RESET",
-    # Reserve the historic names so the old CREATE IF NOT EXISTS entries do not
-    # briefly restore their root-only constraint on every subsequent startup.
-    "CREATE TRIGGER IF NOT EXISTS orchestrator_root_insert BEFORE INSERT ON conversations "
-    "WHEN 0 BEGIN SELECT 1; END",
-    "CREATE TRIGGER IF NOT EXISTS orchestrator_root_update BEFORE UPDATE ON conversations "
-    "WHEN 0 BEGIN SELECT 1; END",
-])
+MIGRATIONS.extend(RETIRE_MANAGER_TREE)  # after EXTENSIONS: it drops their old triggers
 
-MIGRATIONS.append("""CREATE TABLE IF NOT EXISTS review_environments(
-    repository TEXT NOT NULL,
-    subpath TEXT NOT NULL DEFAULT '.',
-    setup_command TEXT NOT NULL DEFAULT '',
-    test_command TEXT NOT NULL DEFAULT '',
-    set_by TEXT NOT NULL,
-    set_at REAL NOT NULL,
-    PRIMARY KEY(repository, subpath)
-)""")
+MIGRATIONS.extend(REVIEW_ENVIRONMENTS)
