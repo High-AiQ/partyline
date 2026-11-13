@@ -75,7 +75,7 @@ class RootMentionTest(TaskFixture):
 
     async def test_other_line_process_is_still_held_back(self):
         await self.setUp_task()
-        self.db.create_conversation('other', 'Other', captain_mode='manager_tree')
+        self.db.create_conversation('other', 'Other', captain_mode='orchestrator')
         self.db.add_attachment('peer', 'other', 'peer', 'fake', ['fake'], self.repo, 'owner')
         self.db._exec("UPDATE attachments SET status='running' WHERE id='peer'")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='other'")

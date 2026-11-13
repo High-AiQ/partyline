@@ -4,7 +4,6 @@
   import BridgeSection from "./BridgeSection.svelte";
   import { ApiError, api } from "../../lib/api";
   import { hierarchyApi } from "../../lib/hierarchy-api";
-  import type { CaptainStyle } from "../../lib/orchestrator-api";
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte";
   import { isLive } from "../../lib/attachments";
@@ -18,7 +17,6 @@
   let parentId = $state("");
   let captainId = $state("");
   let appointedId = $state("");
-  let mode = $state<CaptainStyle["captain_mode"]>("orchestrator");
   let review = $state("captain");
   let appointing = $state(false);
   let loading = $state(true);
@@ -43,7 +41,6 @@
         if (cancelled) return;
         managed = detail.conversation;
         parentId = detail.conversation.parent_id ?? "";
-        mode = detail.conversation.captain_mode ?? "orchestrator";
         review = detail.conversation.default_review_policy ?? "captain";
         return hierarchyApi.lead(conversation.id);
       })
@@ -73,7 +70,9 @@
     try {
       // The style on screen travels with the appointment, so the captain's first brief matches it.
       const style =
-        managed && !managed.parent_id ? { captain_mode: mode, default_review_policy: review } : undefined;
+        managed && !managed.parent_id
+          ? { captain_mode: "orchestrator" as const, default_review_policy: review }
+          : undefined;
       const lead = await hierarchyApi.appoint(conversation.id, captainId || null, style);
       captainId = lead.attachment_id ?? "";
       appointedId = captainId;
@@ -89,7 +88,6 @@
 
   async function updateStyle(updated: Conversation): Promise<void> {
     managed = updated;
-    mode = updated.captain_mode ?? "orchestrator";
     review = updated.default_review_policy ?? "captain";
     if (room.conversation?.id === updated.id) room.conversation = updated;
     await room.loadConversations();
@@ -121,7 +119,6 @@
     {#if managed && !managed.parent_id}
       <CaptainStyleSection
         conversation={managed}
-        bind:mode
         bind:review
         showSave={Boolean(appointedId)}
         onupdate={updateStyle}
@@ -154,7 +151,7 @@
             <button type="button" onclick={close}>close</button>
             <button type="button" disabled={saving} onclick={() => saveParent(null)}>unlink parent</button>
           </div>
-        {:else if managed?.captain_mode !== "orchestrator"}
+        {:else}
           <label for="parentLine">parent line</label>
           <select id="parentLine" bind:value={parentId} disabled={saving}>
             <option value="">none · independent line</option>

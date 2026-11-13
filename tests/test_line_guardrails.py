@@ -60,7 +60,7 @@ class GuardrailTest(unittest.TestCase):
         self.addCleanup(setattr, server, "_start_attachment", server._start_attachment)
         server.runtime = self.runtime
         server._start_attachment = fake_start
-        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
+        self.db.create_conversation("root", "Root", captain_mode="orchestrator")
         self.db.add_attachment("root-lead", "root", "terra", "fake", ["fake"], self.directory.name)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='root-lead'")
         user = auth_store.create_user(
@@ -389,7 +389,7 @@ class GuardrailTest(unittest.TestCase):
         repo = self._repo()
         self.db._exec("UPDATE attachments SET cwd=? WHERE id='root-lead'", (repo,))
         placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
-            captain_mode="manager_tree")["id"])
+            captain_mode="orchestrator")["id"])
         self.assertTrue(os.path.isdir(placed["cwd"]))
         remove_for_line(self.db.get_conversation("kid"))
         self.assertFalse(os.path.exists(placed["cwd"]))
@@ -399,7 +399,7 @@ class GuardrailTest(unittest.TestCase):
         repo = self._repo()
         self.db._exec("UPDATE attachments SET cwd=? WHERE id='root-lead'", (repo,))
         self.db.create_conversation("old-kid", "old kid",
-            captain_mode="manager_tree")  # born before placement existed
+            captain_mode="orchestrator")  # born before placement existed
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='old-kid'")
         att = self.client.post("/api/conversations/old-kid/attachments",
                                json={"name": "grok", "adapter": "raw", "command": "sh"},
@@ -411,9 +411,9 @@ class GuardrailTest(unittest.TestCase):
         self.assertIn("git worktree", self.db.list_messages("old-kid")[0]["body"])
 
     def test_an_unplaced_grandchild_falls_back_to_its_ancestors_not_the_server(self):
-        self.db.create_conversation("kid", "kid", captain_mode="manager_tree")
+        self.db.create_conversation("kid", "kid", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='kid'")
-        self.db.create_conversation("grandkid", "grandkid", captain_mode="manager_tree")
+        self.db.create_conversation("grandkid", "grandkid", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='kid' WHERE id='grandkid'")
         self.db.add_attachment("kid-x", "kid", "x", "fake", ["fake"], self.directory.name)
         self.assertEqual(line_cwd(self.db, "grandkid"), self.directory.name)

@@ -28,7 +28,7 @@ class MessageRoutesTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(f"{self.directory.name}/partyline.db")
-        self.db.create_conversation("line", "Line", captain_mode="manager_tree")
+        self.db.create_conversation("line", "Line", captain_mode="orchestrator")
         self.runtime = ChatRuntime(self.db)
         self.media = MediaStore(self.db, Path(self.directory.name) / "media")
         self.db.add_attachment("worker", "line", "sol", "fake", ["fake"], "/tmp", "owner")
@@ -158,7 +158,7 @@ class MessageRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
 
     def test_child_process_does_not_make_parent_line_live(self):
-        self.db.create_conversation("child", "Child", captain_mode="manager_tree")
+        self.db.create_conversation("child", "Child", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='child'")
         self.db.set_attachment_status("worker", "exited", "owner")
         self.db.add_attachment("child-worker", "child", "terra", "fake", ["fake"], "/tmp")

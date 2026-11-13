@@ -4,7 +4,7 @@ import { request } from "./http";
 import { ConversationSchema } from "./conversation-contracts";
 
 export const CaptainStyleSchema = z.object({
-  captain_mode: z.enum(["manager_tree", "orchestrator"]),
+  captain_mode: z.literal("orchestrator"),
   default_review_policy: z.string().min(1),
 });
 export type CaptainStyle = z.infer<typeof CaptainStyleSchema>;

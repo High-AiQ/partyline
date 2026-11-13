@@ -46,7 +46,6 @@ describe("orchestrator controls", () => {
       target: document.body,
       props: {
         conversation: root,
-        mode: "manager_tree" as const,
         review: "captain",
         showSave: true,
         onupdate,
@@ -54,8 +53,7 @@ describe("orchestrator controls", () => {
     });
     try {
       await tick();
-      expect(document.querySelector("#defaultReviewPolicy")).toBeNull();
-      select("#captainStyle", "orchestrator");
+      expect(document.querySelector("#captainStyle")).toBeNull();
       await tick();
       await vi.waitFor(() => {
         expect(document.body.textContent).toContain("Independent reviewer");

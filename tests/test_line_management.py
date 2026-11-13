@@ -80,7 +80,7 @@ class CurrentSchemaAdoptionTests(unittest.TestCase):
             path = Path(directory) / "instance.db"
             db = Db(path)
             for ident in ("root", "child", "other"):
-                db.create_conversation(ident, ident, captain_mode="manager_tree")
+                db.create_conversation(ident, ident, captain_mode="orchestrator")
                 db.add_attachment(ident + "-lead", ident, "manager", "codex", ["codex"], directory)
             db.close()
             setup = Setup(lines=[

@@ -176,12 +176,8 @@ def hierarchy_router(runtime) -> APIRouter:
     async def link_parent(request: Request, conv_id: str, body: ParentIn):
         deny_unless(db, request_principal(request), conv_id, "link_parent")
         from .orchestrator_store import task
-        current = db.get_conversation(conv_id)
-        if task(db, conv_id) or (body.parent_id and current.get('captain_mode') == 'orchestrator'):
-            raise HTTPException(409, 'task parents and orchestrator root placement cannot change')
-        if (body.parent_id and
-                (db.get_conversation(body.parent_id) or {}).get('captain_mode') == 'orchestrator'):
-            raise HTTPException(409, 'orchestrator children are created through create_task')
+        if task(db, conv_id):
+            raise HTTPException(409, 'task parents cannot change')
         try:
             conv = set_parent(db, conv_id, body.parent_id)
         except HierarchyError as exc:
@@ -196,8 +192,6 @@ def hierarchy_router(runtime) -> APIRouter:
     )
     async def create_child(request: Request, conv_id: str, body: ChildIn):
         from .child_create import create_child as create
-        if (db.get_conversation(conv_id) or {}).get("captain_mode") == "orchestrator":
-            raise HTTPException(409, "use create_task for an orchestrator root")
         return await create(runtime, request_principal(request), conv_id, body)
 
     @router.get(

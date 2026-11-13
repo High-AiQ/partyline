@@ -164,7 +164,7 @@ class CaptainIdleTest(TaskFixture):
         for number in range(9):
             child = f'line{number}'
             self.db.create_conversation(child, child)
-            self.db._exec("UPDATE conversations SET parent_id='root',captain_mode='manager_tree' "
+            self.db._exec("UPDATE conversations SET parent_id='root',captain_mode='orchestrator' "
                           "WHERE id=?", (child,))
             self.db._exec("INSERT INTO line_reports(parent_conv_id,child_conv_id,author,body,notify,"
                           "created_at) VALUES('root',?,'worker','ready',1,1)", (child,))
@@ -297,7 +297,7 @@ class CaptainIdleTest(TaskFixture):
     async def test_pending_return_to_descendant_captain_is_a_scheduled_wake(self):
         await self.setup_tree()
         self.db.create_conversation('sub', 'Sub')
-        self.db._exec("UPDATE conversations SET parent_id='root',captain_mode='manager_tree' WHERE id='sub'")
+        self.db._exec("UPDATE conversations SET parent_id='root',captain_mode='orchestrator' WHERE id='sub'")
         self.db.add_attachment('subcaptain', 'sub', 'subcaptain', 'fake', ['fake'], self.repo, 'owner')
         self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='subcaptain'")
         self.runtime.live['subcaptain'] = self.runtime.live['captain']

@@ -82,7 +82,7 @@ class RoutingTest(TaskFixture):
         from partyline.role_delivery import current_role, _instructions
         self.assertEqual(task_pack(None, 'missing', 'implementer'), '')
         self.assertEqual(task_pack(self.db, 'root', 'lead'), '')
-        pack = role_instructions(['assign'], 'root', None, captain_mode='orchestrator')
+        pack = role_instructions(['assign'], 'root', None)
         self.assertIn('reviewer', pack)
         self.assertIn('approval IS acceptance', pack)
         self.assertNotIn('Worked example', pack)

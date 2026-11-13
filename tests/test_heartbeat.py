@@ -23,7 +23,6 @@ from partyline.auth_store import ensure_api_token
 from partyline.db import Db
 from partyline.heartbeat_routes import heartbeat_router
 from partyline.hierarchy import create_child_conversation, set_lead, set_parent
-from partyline.role_briefing import role_instructions
 from partyline.runtime import ChatRuntime
 
 ROOT = "root"
@@ -62,7 +61,7 @@ class HeartbeatFixture(unittest.IsolatedAsyncioTestCase):
         self.runtime = ChatRuntime(self.db)
         self.runtime.broadcast = AsyncMock()
         self.runtime.route_mentions = AsyncMock()
-        self.db.create_conversation(ROOT, "Root", captain_mode="manager_tree")
+        self.db.create_conversation(ROOT, "Root", captain_mode="orchestrator")
         self.db.add_attachment(
             OWNER, ROOT, "astra", "raw", ["sh"], self.directory.name, "owner"
         )
@@ -680,7 +679,7 @@ class RootRevalidationTest(HeartbeatFixture):
     async def test_a_line_that_gains_a_parent_stops_being_eligible(self):
         """Root is a runtime fact: a line can be linked under another later."""
         self.enable()
-        self.db.create_conversation("new-parent", "Parent", captain_mode="manager_tree")
+        self.db.create_conversation("new-parent", "Parent", captain_mode="orchestrator")
         set_parent(self.db, ROOT, "new-parent")
 
         self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL * 3))
@@ -695,7 +694,7 @@ class TwoRootLinesTest(HeartbeatFixture):
 
     def setUp(self):
         super().setUp()
-        self.db.create_conversation("other-root", "Other Root", captain_mode="manager_tree")
+        self.db.create_conversation("other-root", "Other Root", captain_mode="orchestrator")
         self.db.add_attachment(
             "other-lead", "other-root", "sol", "raw", ["sh"],
             self.directory.name, "owner",
@@ -863,22 +862,6 @@ class StatusTest(HeartbeatFixture):
             )
         finally:
             reopened.close()
-
-
-class BriefingTest(unittest.TestCase):
-    def test_only_a_root_manager_is_told_about_the_heartbeat(self):
-        actions = ["assign", "create_child", "read_reports", "report"]
-
-        flag = features.overridden(heartbeat=True)
-        flag.__enter__()
-        self.addCleanup(flag.__exit__, None, None, None)
-        root = role_instructions(actions, ROOT, None)
-        self.assertIn("POST /api/heartbeat", root)
-        self.assertIn("DELETE /api/heartbeat", root)
-        self.assertIn("authorizes no", root)
-
-        self.assertNotIn("/api/heartbeat", role_instructions(actions, "child", ROOT))
-        self.assertNotIn("/api/heartbeat", role_instructions(["read", "write"], ROOT, None))
 
 
 class RouteTest(HeartbeatFixture):
@@ -1257,7 +1240,7 @@ class SnapshotHashTest(HeartbeatFixture):
         with a JSON payload attached.
         """
         first = heartbeat_snapshot.build(self.db, ROOT, 0)
-        self.db.create_conversation("elsewhere", "Unrelated", captain_mode="manager_tree")
+        self.db.create_conversation("elsewhere", "Unrelated", captain_mode="orchestrator")
         self.db.add_message("elsewhere", "greg", "human", "not this tree")
         second = heartbeat_snapshot.build(self.db, ROOT, 0)
 

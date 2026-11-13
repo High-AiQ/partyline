@@ -91,10 +91,6 @@ def write_captain_style(db, actor, conv_id, captain_mode, policy):
     conv = db.get_conversation(conv_id)
     if conv['parent_id'] is not None:
         raise HTTPException(409, 'captain style can only be set on a root line')
-    if conv['captain_mode'] != captain_mode and db._exec(
-            'SELECT 1 FROM conversations WHERE parent_id=? AND archived_at IS NULL LIMIT 1',
-            (conv_id,)).fetchone():
-        raise HTTPException(409, 'captain style cannot change while active child lines exist')
     validate_policy(db, policy)
     db._exec('UPDATE conversations SET captain_mode=?,default_review_policy=? WHERE id=?',
              (captain_mode, policy, conv_id))
@@ -105,8 +101,8 @@ def require_root(db, actor, root_id):
     from .machine_scope import deny_unless
     deny_unless(db, actor, root_id, 'assign')
     conv = db.get_conversation(root_id)
-    if conv['parent_id'] is not None or conv['captain_mode'] != 'orchestrator':
-        raise HTTPException(409, 'this operation requires an orchestrator root')
+    if task(db, root_id):
+        raise HTTPException(409, 'task lines cannot create tasks')
     if actor.kind == 'machine' and actor.conv_id != root_id:
         raise HTTPException(403, 'only the root captain creates and lists tasks')
     return conv

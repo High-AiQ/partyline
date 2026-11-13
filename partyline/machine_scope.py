@@ -82,16 +82,14 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
     from .orchestrator_store import task, task_actions
     task_row = task(db, conv_id)
     if capability in ("request_review", "review_verdict", "blocked", "waiting", "deliver"):
-        if (capability == "review_verdict" and conv_id == home and principal.is_lead
-                and conv.get('captain_mode', 'manager_tree') == 'orchestrator'):
+        if (capability == "review_verdict" and conv_id == home and principal.is_lead):
             return True
         return capability in task_actions(db, principal, conv_id)
     if capability == "resume_work" and capability in task_actions(db, principal, conv_id):
         return True
     if capability in ("create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task",
                       "message_task", "set_task_goal", "resume_work"):
-        return (conv_id == home and principal.is_lead and conv['parent_id'] is None
-                and conv.get('captain_mode', 'manager_tree') == 'orchestrator')
+        return conv_id == home and principal.is_lead and not task_row
     if task_row and capability == "archive" and not (
             principal.is_lead and home == task_row["root_id"] and conv_id != home):
         return False

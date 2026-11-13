@@ -9,7 +9,7 @@ from .goal import MAX_TASK_GOAL
 
 class CaptainStyleIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    captain_mode: Literal['manager_tree', 'orchestrator']
+    captain_mode: Literal['orchestrator']
     default_review_policy: str = Field(default='captain', min_length=1, max_length=120)
 
 

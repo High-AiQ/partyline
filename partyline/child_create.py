@@ -21,7 +21,7 @@ async def create_child(runtime, principal, conv_id, body, workspace=False, on_re
     if task(db, conv_id):
         raise HTTPException(409, "task lines cannot create child lines")
     deny_staffed_split(db, principal, conv_id)  # the loud reason first
-    deny_unless(db, principal, conv_id, "create_child")
+    deny_unless(db, principal, conv_id, "create_task" if workspace else "create_child")
     cwd = line_cwd(db, conv_id)
     target, target_error = await asyncio.to_thread(placement_root, body.repository)
     if target_error:

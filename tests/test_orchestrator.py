@@ -186,11 +186,7 @@ class WorkflowTest(TaskFixture):
 
     async def test_mode_is_root_only_and_idempotent_migrations(self):
         create_child_conversation(self.db, 'root', 'child', 'Child')
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.db._exec("UPDATE conversations SET captain_mode='orchestrator' WHERE id='child'")
-        # Release the intentionally failed write before another connection
-        # tests idempotent migrations; otherwise SQLite waits its busy timeout.
-        self.db.conn.rollback()
+        self.assertEqual(self.db.get_conversation('child')['captain_mode'], 'orchestrator')
         from partyline.db import Db
         reopened = Db(self.db.path)
         reopened.close()

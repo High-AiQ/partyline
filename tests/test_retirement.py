@@ -63,7 +63,7 @@ class RetirementTest(unittest.TestCase):
         self.addCleanup(setattr, server, "_start_attachment", server._start_attachment)
         server.runtime = self.runtime
         server._start_attachment = fake_start
-        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
+        self.db.create_conversation("root", "Root", captain_mode="orchestrator")
         self.db.add_attachment("root-lead", "root", "terra", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='root-lead'")
         user = auth_store.create_user(

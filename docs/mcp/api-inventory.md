@@ -347,7 +347,7 @@ These entries extend both inventory sets above. Registration handlers are in
 
 | Method | Path | Handler | Caller | Agent-reachable | MCP disposition |
 | --- | --- | --- | --- | --- | --- |
-| PUT | `/api/conversations/{conv_id}/captain-style` | `captain_style` | H, root line only | no | excluded: human chooses captain style and default review policy |
+| PUT | `/api/conversations/{conv_id}/captain-style` | `captain_style` | H, root line only | no | excluded: human chooses the default review policy |
 | POST | `/api/conversations/{conv_id}/tasks` | `create` | H or orchestrator root captain | yes | tool: `create_task`; `mode` `full` (default), `light` (review, gates scaled by `partyline/task_gates.py`) or `express` (no review, policy forced `none`, 422 with any other `review`), fixed at creation; optional `write_set` (absolute paths, at most 32) pre-grants write scope to the task line before the implementer starts, with the validation and authority of approving a request (inside the captain's own grants or checkout; docker access and anything wider is a person's decision) |
 | GET | `/api/conversations/{conv_id}/tasks` | `listing` | H or orchestrator root captain | yes | tool: `tasks`; includes bounded per-workspace real/mirror tips and unaccepted commits |
 | GET | `/api/conversations/{conv_id}/task` | `detail` | M with `read` | yes | guide: current structured task state, including after compaction |

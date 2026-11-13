@@ -35,11 +35,11 @@ class ListingBoundsTest(unittest.TestCase):
         self.addCleanup(self.db.close)
         db = self.db
         db.create_conversation("root", "root")
-        db.create_conversation("live1", "live", "manager_tree")
+        db.create_conversation("live1", "live", "orchestrator")
         db._exec("UPDATE conversations SET parent_id='root', accepted_sha='a' WHERE id='live1'")
         for index in range(RETIRED):
             conv = f"old{index}"
-            db.create_conversation(conv, conv, "manager_tree")
+            db.create_conversation(conv, conv, "orchestrator")
             db._exec("UPDATE conversations SET parent_id='root', accepted_sha=?, archived_at=? WHERE id=?",
                      (f"sha{index:02d}", 1000 + index, conv))
             db._exec("INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,"

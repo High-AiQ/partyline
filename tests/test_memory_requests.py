@@ -25,7 +25,7 @@ class MemoryRequestTest(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.runtime = ChatRuntime(self.db)
         self.runtime.broadcast = AsyncMock()
-        self.db.create_conversation("line", "Line", captain_mode="manager_tree")
+        self.db.create_conversation("line", "Line", captain_mode="orchestrator")
         self.db.add_attachment("worker", "line", "worker", "fake", ["fake"], self.temp.name)
         self.db.add_attachment("captain", "line", "captain", "fake", ["fake"], self.temp.name)
         self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='captain'")
@@ -72,7 +72,7 @@ class MemoryRequestTest(unittest.TestCase):
 
     def subtree(self):
         """A child line under 'line' with its own running worker attachment."""
-        self.db.create_conversation("sub", "Sub", captain_mode="manager_tree")
+        self.db.create_conversation("sub", "Sub", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='sub'")
         self.db.add_attachment("subworker", "sub", "subworker", "fake", ["fake"], self.temp.name)
         self.db._exec("UPDATE attachments SET status='running' WHERE id='subworker'")
@@ -117,7 +117,7 @@ class MemoryRequestTest(unittest.TestCase):
             self.client.get("/api/conversations/sub/memory-request").json()["request"])
 
     def test_captain_cannot_file_for_attachment_outside_its_scope(self):
-        self.db.create_conversation("elsewhere", "Elsewhere", captain_mode="manager_tree")
+        self.db.create_conversation("elsewhere", "Elsewhere", captain_mode="orchestrator")
         self.db.add_attachment("stranger", "elsewhere", "stranger", "fake", ["fake"],
                                self.temp.name)
         self.db._exec("UPDATE attachments SET status='running' WHERE id='stranger'")

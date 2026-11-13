@@ -1236,12 +1236,12 @@ full contract is `docs/contracts/line-bridge.md`; the code is
 
 ## Orchestrator captains and task lines
 
-New root lines default to `captain_mode: "orchestrator"`; existing lines keep their
-stored mode. A person can switch a root line between `orchestrator` and `manager_tree`
-using `PUT /api/conversations/<root>/captain-style`. A child cannot be an orchestrator, and style cannot change
-while children exist. The root's `default_review_policy` defaults to `captain`;
-it may also be `none` or an exact reviewer preset name. A task's mode (full, light or
-express) is chosen separately at creation (see Task modes below).
+All captains use the orchestrator pack. Existing lines are migrated to
+`captain_mode: "orchestrator"`; the API accepts that value and rejects the retired
+`manager_tree` value. Hierarchies and sub-captains remain available. A person can
+set a root's `default_review_policy` using `PUT /api/conversations/<root>/captain-style`;
+it defaults to `captain` and may also be `none` or an exact reviewer preset name.
+A task's mode (full, light or express) is chosen separately at creation.
 
 Preset role traits govern agent staffing: implementers need **Fast implementer**; captains,
 sub-captains and reviewers need **Can manage a line**. Choose a free Fast implementer
@@ -1292,8 +1292,7 @@ uses the task's current fenced tip. Policies determine the next action:
 The reviewer's structured `review_verdict(approve | changes, findings)` drives the
 state machine; prose is never a verdict. Changes wake the implementer and advance
 the round count. There is no round cap. Approval marks the task approved and sends
-one root report. **Reviewer approval is acceptance in orchestrator mode.** This is
-a deliberate exception to the manager-tree rule that acceptance cannot be delegated.
+one root report. **Reviewer approval is acceptance.**
 The root reviews only captain-policy tasks and always owns merging and pushing.
 `accept` records only the approved task SHA and refuses `allow_descendant` for tasks.
 

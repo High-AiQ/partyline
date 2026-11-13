@@ -53,7 +53,7 @@ class TaskReadsRootMediaTest(TaskFixture):
         sibling = await create_task(self.runtime, self.captain, 'root', TaskIn(
             name='other', goal='Other work', implementer='builder', review='inspector'))
         sibling_frame = self.store_on(sibling['conv_id'])
-        self.db.create_conversation('stranger', 'Stranger', 'manager_tree')
+        self.db.create_conversation('stranger', 'Stranger', 'orchestrator')
         stranger_frame = self.store_on('stranger')
         reviewer = await self.staff_reviewer()
         for who in (mine, reviewer):
@@ -81,7 +81,7 @@ class TaskReadsRootMediaTest(TaskFixture):
         root_frame = self.store_on('root')
         await self.create()
         task_frame = self.store_on(self.conv_id)
-        self.db.create_conversation('grand', 'Grand', 'manager_tree')
+        self.db.create_conversation('grand', 'Grand', 'orchestrator')
         self.db._exec('UPDATE conversations SET parent_id=? WHERE id=?',
                       (self.conv_id, 'grand'))
         self.db.add_attachment('deep', 'grand', 'deep', 'fake', ['fake'], '/tmp', 'owner')

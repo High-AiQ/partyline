@@ -86,7 +86,7 @@ class Tree(unittest.IsolatedAsyncioTestCase):
         self.clock = FakeClock()
         self.runtime.returns.clock = self.clock.monotonic
         self.runtime.returns.sleep = self.clock.sleep
-        self.db.create_conversation("parent", "Parent", captain_mode="manager_tree")
+        self.db.create_conversation("parent", "Parent", captain_mode="orchestrator")
         create_child_conversation(self.db, "parent", "child", "Child")
         self.speakers = {}
         self.adapters = {}
@@ -382,6 +382,8 @@ class ReturnPathTest(Tree):
         self.db._exec("UPDATE conversations SET goal=? WHERE id=?", (text, line))
 
     async def test_an_idle_line_with_an_open_goal_wakes_its_captain_once(self):
+        self.db.create_conversation("grandparent", "Grandparent")
+        self.db._exec("UPDATE conversations SET parent_id='grandparent' WHERE id='parent'")
         self.goal()
         await self.turn("worker", "The build is ready.")
 
@@ -403,6 +405,8 @@ class ReturnPathTest(Tree):
         )
 
     async def test_a_goal_wake_waits_until_every_process_is_idle(self):
+        self.db.create_conversation("grandparent", "Grandparent")
+        self.db._exec("UPDATE conversations SET parent_id='grandparent' WHERE id='parent'")
         self.goal()
         await self.presence.began("parent", "worker")
         await self.presence.goal_stall.check("parent")
@@ -415,6 +419,8 @@ class ReturnPathTest(Tree):
         )
 
     async def test_a_working_descendant_blocks_the_parent_goal_wake_until_idle(self):
+        self.db.create_conversation("grandparent", "Grandparent")
+        self.db._exec("UPDATE conversations SET parent_id='grandparent' WHERE id='parent'")
         self.goal()
         await self.presence.began("child", "builder")
         await self.turn("worker", "The build is ready.")
@@ -429,6 +435,8 @@ class ReturnPathTest(Tree):
         )
 
     async def test_setting_a_goal_on_an_idle_line_wakes_once_after_quiet_gate(self):
+        self.db.create_conversation("grandparent", "Grandparent")
+        self.db._exec("UPDATE conversations SET parent_id='grandparent' WHERE id='parent'")
         self.goal()
         await self.presence.goal_stall.check("parent")
         await self.drain_goal()
@@ -461,6 +469,8 @@ class ReturnPathTest(Tree):
         self.assertEqual(len(wakes()), 1)
 
     async def test_a_child_return_settle_rechecks_parent_goal(self):
+        self.db.create_conversation("grandparent", "Grandparent")
+        self.db._exec("UPDATE conversations SET parent_id='grandparent' WHERE id='parent'")
         self.goal("parent", "Ship it")
         await self.human("parent", "@builder check this")
         await self.presence.began("child", "builder")
@@ -476,6 +486,8 @@ class ReturnPathTest(Tree):
         )
 
     async def test_a_goal_wake_waits_for_continuous_pty_output_until_the_cap(self):
+        self.db.create_conversation("grandparent", "Grandparent")
+        self.db._exec("UPDATE conversations SET parent_id='grandparent' WHERE id='parent'")
         self.goal()
         self.clock.on_sleep = lambda now: setattr(self.adapters["worker"], "last_output_at", now)
         await self.turn("worker", "The build is ready.")
@@ -536,6 +548,8 @@ class ReturnPathTest(Tree):
         self.assertEqual(len(self.returns_to("lead")), 1)
 
     async def test_a_quiet_goal_line_wakes_once_and_an_empty_goal_does_not(self):
+        self.db.create_conversation("grandparent", "Grandparent")
+        self.db._exec("UPDATE conversations SET parent_id='grandparent' WHERE id='parent'")
         self.goal()
         await self.turn("worker", "The build is ready.")
         await self.presence.goal_stall.check("parent")
@@ -632,6 +646,8 @@ class ReturnPathTest(Tree):
         self.assertTrue(wakes[0].startswith("↩"))
 
     async def test_a_notice_only_captain_turn_does_not_repeat_the_goal_wake(self):
+        self.db.create_conversation("grandparent", "Grandparent")
+        self.db._exec("UPDATE conversations SET parent_id='grandparent' WHERE id='parent'")
         self.goal()
         await self.turn("worker", "The build is ready.")
         self.assertEqual(
@@ -847,7 +863,7 @@ class ReturnPathTest(Tree):
         """2026-09-23 write-fence-audit: sol rings terra, terra delegates, the
         worker reports, terra says nothing. sol gets one notice, and it says
         terra said nothing."""
-        self.db.create_conversation("write-fence", "write-fence", captain_mode="manager_tree")
+        self.db.create_conversation("write-fence", "write-fence", captain_mode="orchestrator")
         create_child_conversation(self.db, "write-fence", "write-fence-audit", "write-fence-audit")
         for att_id, line in (
             ("sol", "write-fence"),

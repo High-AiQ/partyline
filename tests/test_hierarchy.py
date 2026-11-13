@@ -65,7 +65,7 @@ class HierarchyApiTest(unittest.TestCase):
             app, self.runtime, self.media, None, {}, {}, fake_start
         )
         self.client = TestClient(app)
-        self.parent = self.db.create_conversation("parent", "Parent", captain_mode="manager_tree")
+        self.parent = self.db.create_conversation("parent", "Parent", captain_mode="orchestrator")
         self.db.add_attachment("lead-att", "parent", "astra", "fake", ["fake"], "/tmp")
         self.db.add_attachment("impl-att", "parent", "grok", "fake", ["fake"], "/tmp")
         # Not live: a captain whose line carries a live worker assigns it rather
@@ -102,7 +102,7 @@ class HierarchyApiTest(unittest.TestCase):
         self.directory.cleanup()
 
     def test_appointment_obeys_captain_trait_matrix(self):
-        self.db.create_conversation('child-roles', 'Child', captain_mode='manager_tree')
+        self.db.create_conversation('child-roles', 'Child', captain_mode='orchestrator')
         self.db._exec("UPDATE conversations SET parent_id='parent' WHERE id='child-roles'")
         self.db.add_attachment('candidate', 'child-roles', 'candidate', 'fake', ['fake'], '/tmp')
         path = '/api/conversations/child-roles/lead'
@@ -144,7 +144,7 @@ class HierarchyApiTest(unittest.TestCase):
         worker = self.activate_impl()
         briefing = self.client.get("/api/conversations/parent/briefing", headers=self.lead)
         self.assertEqual(briefing.status_code, 200, briefing.text)
-        self.assertIn("## Captain pack", briefing.json()["briefing"])
+        self.assertIn("## Orchestrator captain pack", briefing.json()["briefing"])
         denied = self.client.get("/api/conversations/parent/briefing", headers=worker)
         self.assertEqual(denied.status_code, 403)
 
@@ -180,7 +180,7 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(distinct.status_code, 200, distinct.text)
 
     def test_independent_roots_may_reuse_a_live_handle(self):
-        self.db.create_conversation("root2", "Root2", captain_mode="manager_tree")
+        self.db.create_conversation("root2", "Root2", captain_mode="orchestrator")
         self.fake_spawn([])
         reused = self.client.post(
             "/api/conversations/root2/attachments",
@@ -189,8 +189,8 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(reused.status_code, 200, reused.text)
 
     def test_linking_refuses_a_tree_wide_live_handle_collision(self):
-        self.db.create_conversation("root2", "Root2", captain_mode="manager_tree")
-        self.db.create_conversation("root3", "Root3", captain_mode="manager_tree")
+        self.db.create_conversation("root2", "Root2", captain_mode="orchestrator")
+        self.db.create_conversation("root3", "Root3", captain_mode="orchestrator")
         self.db.add_attachment("clash-a", "root2", "clash", "fake", ["fake"], "/tmp")
         self.db.add_attachment("clash-b", "root3", "CLASH", "fake", ["fake"], "/tmp")
         merged = self.client.put(
@@ -212,9 +212,9 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(relinked.status_code, 200, relinked.text)
 
     def test_linking_under_a_non_root_parent_checks_the_ancestors(self):
-        self.db.create_conversation("proot", "PRoot", captain_mode="manager_tree")
-        self.db.create_conversation("pchild", "PChild", captain_mode="manager_tree")
-        self.db.create_conversation("nomad", "Nomad", captain_mode="manager_tree")
+        self.db.create_conversation("proot", "PRoot", captain_mode="orchestrator")
+        self.db.create_conversation("pchild", "PChild", captain_mode="orchestrator")
+        self.db.create_conversation("nomad", "Nomad", captain_mode="orchestrator")
         self.client.put("/api/conversations/pchild/parent", json={"parent_id": "proot"})
         self.db.add_attachment("att-1", "proot", "worker", "fake", ["fake"], "/tmp")
         self.db.add_attachment("att-2", "nomad", "worker", "fake", ["fake"], "/tmp")
@@ -232,8 +232,8 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(moved.status_code, 200, moved.text)
 
     def test_repointing_a_parented_line_is_refused_until_unlinked(self):
-        self.db.create_conversation("root2", "Root2", captain_mode="manager_tree")
-        self.db.create_conversation("root3", "Root3", captain_mode="manager_tree")
+        self.db.create_conversation("root2", "Root2", captain_mode="orchestrator")
+        self.db.create_conversation("root3", "Root3", captain_mode="orchestrator")
         linked = self.client.put(
             "/api/conversations/root3/parent", json={"parent_id": "root2"}
         )
@@ -300,7 +300,7 @@ class HierarchyApiTest(unittest.TestCase):
             files=[("file", ("brief.png", png(), "image/png"))],
         )
         file_id = posted.json()["files"][0]["id"]
-        self.db.create_conversation("other", "Other", captain_mode="manager_tree")
+        self.db.create_conversation("other", "Other", captain_mode="orchestrator")
         self.db.add_attachment("other-att", "other", "kimi", "fake", ["fake"], "/tmp")
         stranger = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "other-att")}
         url = f"/api/media/{file_id}/original"
@@ -314,7 +314,7 @@ class HierarchyApiTest(unittest.TestCase):
 
     def test_implementer_cannot_post_media_on_an_unrelated_line(self):
         worker = self.activate_impl()
-        self.db.create_conversation("other", "Other", captain_mode="manager_tree")
+        self.db.create_conversation("other", "Other", captain_mode="orchestrator")
         posted = self.client.post(
             "/api/conversations/other/files",
             data={"title": "nope"},
@@ -445,14 +445,14 @@ class HierarchyApiTest(unittest.TestCase):
 
     def test_unrelated_line_is_hidden_from_implementer_list(self):
         worker = self.activate_impl()
-        self.db.create_conversation("secret", "Secret", captain_mode="manager_tree")
+        self.db.create_conversation("secret", "Secret", captain_mode="orchestrator")
         listed = self.client.get("/api/conversations", headers=worker)
         ids = {row["id"] for row in listed.json()}
         self.assertIn("parent", ids)
         self.assertNotIn("secret", ids)
 
     def test_human_still_lists_every_line(self):
-        self.db.create_conversation("secret", "Secret", captain_mode="manager_tree")
+        self.db.create_conversation("secret", "Secret", captain_mode="orchestrator")
         listed = self.client.get("/api/conversations", headers=self.human)
         ids = {row["id"] for row in listed.json()}
         self.assertIn("secret", ids)
@@ -622,7 +622,7 @@ class HierarchyApiTest(unittest.TestCase):
                          ["☏ working directory: /tmp"])
 
     def test_human_can_link_an_existing_line_as_a_child(self):
-        self.db.create_conversation("book", "Book", captain_mode="manager_tree")
+        self.db.create_conversation("book", "Book", captain_mode="orchestrator")
         linked = self.client.put(
             "/api/conversations/book/parent", json={"parent_id": "parent"}
         )
@@ -679,7 +679,7 @@ class HierarchyApiTest(unittest.TestCase):
 
     def test_machine_cannot_appoint_a_foreign_line_after_its_lead_detaches(self):
         worker = self.activate_impl()
-        self.db.create_conversation("other", "Other", captain_mode="manager_tree")
+        self.db.create_conversation("other", "Other", captain_mode="orchestrator")
         self.db.add_attachment("other-mgr", "other", "astra-other", "fake", ["fake"], "/tmp")
         refused = self.client.post(
             "/api/conversations/other/lead",
@@ -1071,7 +1071,7 @@ class HierarchyApiTest(unittest.TestCase):
 
     def test_attachment_id_scope_matches_the_line(self):
         self.activate_impl()
-        self.db.create_conversation("other", "Other", captain_mode="manager_tree")
+        self.db.create_conversation("other", "Other", captain_mode="orchestrator")
         self.db.add_attachment("other-att", "other", "x", "fake", ["fake"], "/tmp")
         principal = resolve_principal(
             self.db, auth_store.ensure_api_token(self.db, "impl-att")
