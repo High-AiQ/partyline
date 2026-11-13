@@ -192,11 +192,14 @@ def preflight(runtime, att: dict) -> tuple[str, str | None] | None:
     from . import server
     from .attachment_commands import validated_attachment_command
     from .orchestrator_store import attachment_task
-    from .preset_roles import require_resume
+    from .preset_roles import is_helper
 
-    role = require_resume(runtime.db, att["id"])
-    if role is None:
+    if is_helper(att):
         return None
+    row = attachment_task(runtime.db, att["id"])
+    role = (("reviewer" if row["reviewer_id"] == att["id"] else "implementer")
+            if row else "captain" if att.get("is_lead") or att.get("is_successor")
+            else "implementer")
     try:
         validated_attachment_command(att["adapter"], shlex.join(att["command"]), server.ADAPTERS,
                                      server.ADAPTER_METADATA)
@@ -204,7 +207,6 @@ def preflight(runtime, att: dict) -> tuple[str, str | None] | None:
         raise HTTPException(400, str(exc)) from exc
     if not os.path.isdir(att["cwd"]):
         raise HTTPException(400, "its working directory no longer exists")
-    row = attachment_task(runtime.db, att["id"])
     preset = (row["policy"] if row["reviewer_id"] == att["id"] else row["implementer_preset"]) \
         if row else None
     return role, preset
@@ -242,7 +244,7 @@ async def swap(runtime, presence, att: dict, armed: Armed, plan: tuple[str, str 
                                 reason=f"rotated after {armed.reason}")
     role, preset = plan
     await server._start_attachment(fresh, checkpoint=checkpoint, fresh=True, staffing_role=role,
-                                   staffing_preset=preset, announce=False)
+                                   staffing_preset=preset, announce=False, rotation=True)
     # The start delivered what is newer than the cursor, which covers what was held in
     # memory; ids the old instance persisted as skipped are delivered by this flush.
     if presence.queue.held_count(att_id) and att_id in runtime.live:

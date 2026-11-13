@@ -77,3 +77,18 @@ class HelperResumeRolesTest(TaskFixture):
         with patch.object(server, '_resume_adapter', resume):
             resumed = await server.resume_attachment(request, 'idle')
         self.assertEqual(resumed['status'], 'running')
+
+
+class PresetMatchDiagnosticsTest(TaskFixture):
+    def test_recorded_missing_duplicate_and_changed_command(self):
+        self.db.add_attachment('plain', 'root', 'plain', 'fake', ['original'], self.repo, 'owner')
+        for recorded, expected in (('gone', "recorded preset 'gone' not found"),
+                                   ('DUP', "several presets match recorded preset 'DUP'"),
+                                   (None, 'command differs from every preset')):
+            self.db.save_preset('dup1', 'dup1', 'dup', 'fake', 'other', implements=True)
+            self.db.save_preset('dup2', 'dup2', 'Dup', 'fake', 'other', implements=True)
+            self.db._exec('UPDATE attachments SET preset=? WHERE id=?', (recorded, 'plain'))
+            with self.assertRaises(HTTPException) as error:
+                require_resume(self.db, 'plain')
+            self.assertEqual(error.exception.status_code, 403)
+            self.assertIn(expected, error.exception.detail)

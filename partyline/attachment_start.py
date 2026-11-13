@@ -77,15 +77,14 @@ async def rollback_start(runtime, att):
 
 async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
                            checkpoint="", fresh=False, staffing_role=None, principal=None,
-                           staffing_preset=None, announce=True):
-    if staffing_role and (principal is None or principal.kind != 'user'):
-        from .preset_roles import attachment_preset, require_named_role, require_role
+                           staffing_preset=None, announce=True, rotation=False):
+    if staffing_role and not rotation and (principal is None or principal.kind != 'user'):
+        from .preset_roles import require_attachment_role, require_named_role
         try:
             if staffing_preset:
                 require_named_role(runtime.db, staffing_preset, staffing_role)
             else:
-                require_role(attachment_preset(runtime.db, att), staffing_role,
-                             name=att.get('preset') or att['name'])
+                require_attachment_role(runtime.db, att, staffing_role)
         except HTTPException:
             await rollback_start(runtime, att)
             raise

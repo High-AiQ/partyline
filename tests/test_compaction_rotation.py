@@ -252,6 +252,7 @@ class RolesTest(RotationFixture):
     async def test_a_captain_keeps_captainship_and_its_pack_state(self):
         self.db.create_conversation("child", "Child")
         write_notes(self.db, "root", "attachment", HANDOFF, "captain")
+        self.db._exec("UPDATE presets SET can_manage=0 WHERE name='boss'")
         await self.compact("captain")
         await self.compact("captain")
         await self.turn("captain")
@@ -270,6 +271,7 @@ class RolesTest(RotationFixture):
         row = await self.create()
         ident = row["implementer_id"]
         self.go_live(ident)
+        self.db._exec("UPDATE presets SET implements=0 WHERE name='builder'")
         self.starts.clear()  # the task's own first staffing is not a rotation
         await self.compact(ident)
         await self.compact(ident)
@@ -418,7 +420,7 @@ class GuardsTest(RotationFixture):
 
     async def test_a_process_that_cannot_be_restarted_is_left_running(self):
         await self.reach_the_ask()
-        self.db._exec("UPDATE presets SET implements=0 WHERE name='builder'")
+        self.db._exec("UPDATE attachments SET cwd=? WHERE id='worker'", (os.path.join(self.repo, "missing"),))
         await self.turn("worker")
         self.assertEqual(self.starts, [])
         self.assertEqual(self.row_of("worker")["status"], "running")
@@ -474,7 +476,10 @@ class RealStartTest(RotationFixture):
         async def start():
             await on_status("running")
 
-        adapter.start, adapter.stop = start, AsyncMock(side_effect=lambda: on_status("detached"))
+        async def stop():
+            await on_status("detached")
+
+        adapter.start, adapter.stop = start, AsyncMock(side_effect=stop)
         adapter.raw_deliver = adapter.deliver = AsyncMock(return_value=True)
         self.adapters.append(adapter)
         return adapter
@@ -506,6 +511,43 @@ class RealStartTest(RotationFixture):
         return [m["body"] for m in self.db.list_messages("root")
                 if m["sender_type"] == "system" and not m.get("audience_attachment_id")
                 and "worker" in m["body"]]
+
+    async def test_plain_process_without_captain_or_fast_trait_rotates(self):
+        self.db._exec("UPDATE attachments SET is_lead=0 WHERE id='captain'")
+        self.db._exec("DELETE FROM attachments WHERE id='captain'")
+        self.db._exec("UPDATE presets SET implements=0 WHERE name='builder'")
+        from fastapi import HTTPException
+        from partyline.preset_roles import require_resume
+        with self.assertRaises(HTTPException) as error:
+            require_resume(self.db, "worker")
+        self.assertEqual(error.exception.status_code, 403)
+        await self.rotate_worker()
+        self.assertEqual(self.row_of("worker")["status"], "running")
+        self.assertEqual(len(self.adapters), 1)
+
+    async def test_plain_process_rotates_when_recorded_preset_is_missing_or_ambiguous(self):
+        self.db.save_preset("duplicate", "duplicate", "Builder", "fake", "fake", implements=True)
+        for name in ("missing", "BUILDER"):
+            self.db._exec("UPDATE attachments SET preset=? WHERE id='worker'", (name,))
+            await self.rotate_worker()
+            self.assertEqual(self.row_of("worker")["status"], "running")
+        self.assertEqual(len(self.adapters), 2)
+
+    async def test_task_implementer_rotates_after_trait_removed_through_real_start(self):
+        row = await self.create()
+        ident = row["implementer_id"]
+        self.go_live(ident)
+        self.db._exec("UPDATE presets SET implements=0 WHERE name='builder'")
+        for _ in range(2):
+            await self.compact(ident)
+        await self.turn(ident)
+        att = self.row_of(ident)
+        ask = next(m for m in self.db.list_messages(att["conv_id"])
+                   if m.get("audience_attachment_id") == ident and "hand-off note" in m["body"])
+        self.db.set_last_seen(ident, ask["id"], att["runtime_owner"])
+        await self.turn(ident)
+        self.assertEqual(self.row_of(ident)["status"], "running")
+        self.assertEqual(self.adapters[-1].att["id"], ident)
 
     async def test_the_fresh_instance_is_told_to_continue_and_the_line_hears_one_notice(self):
         await self.rotate_worker(HANDOFF)
@@ -574,7 +616,7 @@ class RealStartTest(RotationFixture):
         await self.compact("worker")
         await self.turn("worker")
         self.read_ask("worker")
-        self.db._exec("UPDATE presets SET implements=0 WHERE name='builder'")
+        self.db._exec("UPDATE attachments SET cwd=? WHERE id='worker'", (os.path.join(self.repo, "missing"),))
         await self.turn("worker")
         self.assertEqual(self.adapters, [])
         flush.assert_awaited_once_with([41])
