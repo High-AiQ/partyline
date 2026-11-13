@@ -42,6 +42,7 @@ export function lineTree<T extends LiveLine>(
   lines: readonly T[],
   expanded: ReadonlySet<string>,
   selectedId?: string,
+  pinnedIds: ReadonlySet<string> = new Set(),
 ): TreeRow<T>[] {
   const ordered = orderedLines(lines);
   const forced = new Set<string>();
@@ -52,6 +53,17 @@ export function lineTree<T extends LiveLine>(
     if (ancestor && ancestor.depth < selectedDepth) {
       forced.add(ancestor.line.id);
       selectedDepth = ancestor.depth;
+    }
+  }
+  for (const pinnedId of pinnedIds) {
+    const pinnedIndex = ordered.findIndex((row) => row.line.id === pinnedId);
+    let depth = ordered[pinnedIndex]?.depth ?? 0;
+    for (let i = pinnedIndex - 1; i >= 0 && depth > 0; i--) {
+      const ancestor = ordered[i];
+      if (ancestor && ancestor.depth < depth) {
+        forced.add(ancestor.line.id);
+        depth = ancestor.depth;
+      }
     }
   }
   return ordered.map(({ line, depth }, index) => {
@@ -76,4 +88,14 @@ export function lineTree<T extends LiveLine>(
       visible,
     };
   });
+}
+
+/** Keep each group in the rail's ordinary hierarchy order. */
+export function starredFirst<T extends { line: { id: string } }>(
+  rows: readonly T[],
+  starredIds: ReadonlySet<string>,
+): T[] {
+  return [...rows].sort(
+    (left, right) => Number(starredIds.has(right.line.id)) - Number(starredIds.has(left.line.id)),
+  );
 }

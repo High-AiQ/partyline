@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { lineTree, readExpandedLines, storeExpandedLines, LINE_TREE_STORAGE_KEY } from "./line-tree";
+import {
+  lineTree,
+  readExpandedLines,
+  starredFirst,
+  storeExpandedLines,
+  LINE_TREE_STORAGE_KEY,
+} from "./line-tree";
 
 const lines = [
   { id: "root", live_count: 4 },
@@ -50,5 +56,22 @@ describe("line tree", () => {
     expect(rows.filter((row) => row.visible).map((row) => row.line.id)).toEqual(lines.map((line) => line.id));
     expect(rows.slice(0, 2).every((row) => row.expanded)).toBe(true);
     expect(expanded.size).toBe(0);
+  });
+  it("shows a starred child through collapsed ancestors and pins stars in normal order", () => {
+    const rows = lineTree(lines, new Set(), undefined, new Set(["grandchild", "other"]));
+    expect(rows.filter((row) => row.visible).map((row) => row.line.id)).toEqual([
+      "root",
+      "child",
+      "grandchild",
+      "sibling",
+      "other",
+    ]);
+    expect(starredFirst(rows, new Set(["other", "grandchild"])).map((row) => row.line.id)).toEqual([
+      "grandchild",
+      "other",
+      "root",
+      "child",
+      "sibling",
+    ]);
   });
 });

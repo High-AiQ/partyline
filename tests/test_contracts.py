@@ -49,6 +49,7 @@ class ContractTest(unittest.TestCase):
                 "archived_at": None,
                 "live_count": 0,
                 "parent_id": None,
+                "starred": False,
             },
         )
 

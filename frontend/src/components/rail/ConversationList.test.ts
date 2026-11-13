@@ -4,6 +4,7 @@ import ConversationList from "./ConversationList.svelte";
 import { screenStatus } from "../../state/screen-status.svelte";
 import { tick } from "svelte";
 import { room } from "../../state/room.svelte.js";
+import * as starState from "../../state/conversation-star";
 
 afterEach(() => {
   room.conversations = [];
@@ -44,6 +45,81 @@ describe("conversation rail live state", () => {
       expect(document.querySelector(".conv")?.textContent.trim()).toBe("Release line");
     } finally {
       await unmount(list);
+    }
+  });
+});
+
+describe("starred conversation rail", () => {
+  it("pins starred rows in normal order and reflects a live list refresh", async () => {
+    const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
+    room.conversations = [
+      { ...base, id: "first", name: "First" },
+      { ...base, id: "child", name: "Child", parent_id: "first" },
+      { ...base, id: "other", name: "Other" },
+    ];
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: {
+        onmanagement: vi.fn(),
+        onrename: vi.fn(),
+        oncloseprocesses: vi.fn(),
+        ondelete: vi.fn(),
+      },
+    });
+    try {
+      room.conversations = room.conversations.map((line) =>
+        line.id === "child" || line.id === "other" ? { ...line, starred: true } : line,
+      );
+      await tick();
+      expect([...document.querySelectorAll(".conv-name")].map((name) => name.textContent.trim())).toEqual([
+        "Child",
+        "Other",
+        "First",
+      ]);
+      expect(document.querySelector("h2")?.textContent).toBe("Starred");
+      expect(
+        document
+          .querySelector<HTMLButtonElement>('[aria-label="Unstar Child"]')
+          ?.getAttribute("aria-pressed"),
+      ).toBe("true");
+    } finally {
+      await unmount(list);
+    }
+  });
+
+  it("makes the row star keyboard discoverable and calls the shared toggle action", async () => {
+    room.conversations = [
+      {
+        id: "line",
+        name: "Line",
+        topic: "",
+        created_at: 1,
+        archived_at: null,
+        live_count: 0,
+      },
+    ];
+    const toggleStar = vi.spyOn(starState, "toggleConversationStar").mockResolvedValue(undefined);
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: {
+        onmanagement: vi.fn(),
+        onrename: vi.fn(),
+        oncloseprocesses: vi.fn(),
+        ondelete: vi.fn(),
+      },
+    });
+    try {
+      const star = document.querySelector<HTMLButtonElement>('[aria-label="Star Line"]');
+      expect(star?.getAttribute("aria-pressed")).toBe("false");
+      star?.focus();
+      await tick();
+      expect(document.activeElement).toBe(star);
+      expect(document.querySelector(".conv-actions")?.className).toContain("group-focus-within:opacity-100");
+      star?.click();
+      expect(toggleStar).toHaveBeenCalledWith(room, "line");
+    } finally {
+      await unmount(list);
+      vi.restoreAllMocks();
     }
   });
 });
