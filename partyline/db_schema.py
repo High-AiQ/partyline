@@ -215,6 +215,11 @@ MIGRATIONS = [
     # line's own branch was fast-forwarded to, and the only thing a parent
     # should treat as the line's work.
     "ALTER TABLE conversations ADD COLUMN accepted_sha TEXT",
+    # New chapter: the line this one continues, and its place in that chain
+    # (1 for a line that continues nothing). Nothing is deleted or moved.
+    "ALTER TABLE conversations ADD COLUMN chapter_of TEXT",
+    "ALTER TABLE conversations ADD COLUMN chapter INTEGER NOT NULL DEFAULT 1",
+    "CREATE INDEX IF NOT EXISTS idx_conversations_chapter_of ON conversations(chapter_of)",
     # Review worktrees a line is having adversarially reviewed, keyed by path
     # so two lines can never claim one directory. Records let accept, retire,
     # and the startup sweep prune them; the SHAs themselves stay in the repo.

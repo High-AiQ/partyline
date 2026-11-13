@@ -704,6 +704,30 @@ inside the same 4k cap — and the re-briefing ends with the nudge to update
 them. A worker whose notes go stale (16 turns without a write, on adapters
 that report turns) hears a one-line reminder on its wake every 8 turns.
 
+## New chapter
+
+When a long-lived line's topic moves on, **New chapter** (the line's `⋯` menu, or `POST
+/api/conversations/<id>/chapter`) starts a fresh line that carries the standing state forward.
+Only a person or that line's own captain may start one (capability `chapter`; a captain runs it as
+`captain("new_chapter", {conv_id, name?})`); task lines and archived lines refuse it, and a line
+continues once (a second request is a 409 naming the existing successor).
+
+| Copied to the new line | Left alone |
+| --- | --- |
+| name (default `<name> · ch N`, editable), topic, goal, **line** notes, captain style and review policy, parent, folder | processes (the old line's stay put and keep running), messages, attachment notes, open task lines (still children of the old line) |
+
+Tree notes stay on the tree root, which is why a child line's tree notes need no copy. A *root*
+line's chapter is the root of a new tree, so its tree notes are copied once to start it.
+
+The link is durable: `conversations.chapter_of` (the previous line's id) and `chapter` (1 for a
+line that continues nothing), both in the conversation contract. Each line gets a system notice
+with a link the web client follows in place (`continued in [name](#/c/<id>)` on the old line,
+`continues from [name](#/c/<id>)` on the new one); the rail marks the new line `ch N` and the old
+one `→`. `GET …/chapter` previews the next name, chapter number, live process count and the preset
+the old captain runs. The dialog can appoint a captain in the new line from that preset (ticked
+when the old line has one) using the ordinary attach and appoint routes; a captain starting a
+chapter gets a line with no captain, because only a person appoints one.
+
 ## Captain-declared exclusive resources
 
 Captains use the MCP `resources(conv_id, operation, name?)` operation to `list`,

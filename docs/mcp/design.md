@@ -106,7 +106,7 @@ Both `validation.py` and `captain_schemas.validate` are hand-written subsets of 
 - Each operation the caller may use is also a named tool with the same name. Named tools appear only
   for a live lead.
 - The operations are a fixed allowlist: `staffing`, `list_presets`, `attach_worker`, `detach_worker`,
-  `create_child`, `appoint_lead`, `retire_child`, `accept`, `review_worktree`, `share_ref`,
+  `create_child`, `new_chapter`, `appoint_lead`, `retire_child`, `accept`, `review_worktree`, `share_ref`,
   `request_write_set`, `decide_write_set`, `request_restart`, `process_overview`, `ack_report`, `set_goal`, `set_gates`,
   `docs_read`, `write_set_requests`, and `reports`. Each has a fixed argument schema with length, enum, and range
   checks. No caller supplies a route or method.

@@ -4,8 +4,8 @@ Scope: every HTTP and WebSocket route registered under `partyline/`, found by an
 
 This document has two labelled sets:
 
-- **Set 1: all routes found by the AST pass (136).** Method, path, source handler and current registration line, caller class, and whether an agent principal can call the route. Handler names are the stable reference; registration lines are a locator for this source revision.
-- **Set 2: agent-reachable subset (104).** Every route Set 1 marks reachable, with its MCP disposition and reason.
+- **Set 1: all routes found by the AST pass (138).** Method, path, source handler and current registration line, caller class, and whether an agent principal can call the route. Handler names are the stable reference; registration lines are a locator for this source revision.
+- **Set 2: agent-reachable subset (106).** Every route Set 1 marks reachable, with its MCP disposition and reason.
 
 **Agent-reachable** means a machine token or an attachment token passes the route's guard. Routes exempt from the bearer guard count as reachable because the guard admits any caller (rows 7-9, 108, 109). Human-only routes, the operator-token route (77), and the restart report-token route (98) are not agent-reachable.
 
@@ -22,7 +22,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 - **guide**: read on demand through the core `guide` tool.
 - **excluded**: never exposed to MCP. The reason states the rule.
 
-## Set 1: all 136 routes (AST pass)
+## Set 1: all 138 routes (AST pass)
 
 | # | Method | Path | Source handler (registration line) | Caller | Agent-reachable | Note |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -163,8 +163,10 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 134 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/withdraw` | partyline/write_set_decisions.py:withdraw (registration line 190) | requesting attachment | yes | see Set 2 |
 | 135 | GET | `/api/conversations/{conv_id}/write-set` | partyline/write_set_routes.py:list_write_set (registration line 85) | M with `read` | yes | see Set 2 |
 | 136 | POST | `/api/conversations/{conv_id}/write-set` | partyline/write_set_routes.py:grant_or_request_write_set (registration line 92) | H grants; M files a request | yes | see Set 2 |
+| 137 | GET | `/api/conversations/{conv_id}/chapter` | partyline/chapter_routes.py:chapter_preview | M with `read` | yes | see Set 2 |
+| 138 | POST | `/api/conversations/{conv_id}/chapter` | partyline/chapter_routes.py:new_chapter | H, or L with `chapter` (own line only) | yes | see Set 2 |
 
-## Set 2: agent-reachable subset (104 routes)
+## Set 2: agent-reachable subset (106 routes)
 
 | # | Method | Path | Caller | Disposition | Reason |
 | --- | --- | --- | --- | --- | --- |
@@ -215,6 +217,8 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 55 | GET | `/api/conversations/{conv_id}/tip` | M with `read` | **excluded** | git tip read; not needed by the tool set |
 | 56 | POST | `/api/conversations/{conv_id}/refresh-base` | M with `write` | **excluded** | base-mirror refresh is a git-side effect; the tool set does not change git refs |
 | 57 | PUT | `/api/conversations/{conv_id}/gates` | H, or M with `assign` | **op**: captain op `set_gates` | declared gate commands; timeout capped at 14400 s |
+| 137 | GET | `/api/conversations/{conv_id}/chapter` | M with `read` | **excluded** | the dialog's preview (next name, captain preset); a captain starts a chapter with `new_chapter` and needs no preview |
+| 138 | POST | `/api/conversations/{conv_id}/chapter` | H, or L with `chapter` | **op**: captain op `new_chapter` | a captain continues only its own line; the new line has no captain until a person appoints one |
 | 58 | GET | `/api/conversations/{conv_id}/gates` | M with `read` | **excluded** | the captain declares gates with `set_gates` (row 57); reading them back is not needed by the tool set |
 | 59 | GET | `/api/conversations/{conv_id}/notes` | M with `read` | **tool**: `notes` (get) | line, tree or own attachment scope |
 | 60 | PUT | `/api/conversations/{conv_id}/notes` | M, by scope | **tool**: `notes` (set) | attachment notes are own only; line and tree need captain `assign`; 4000-character cap |
@@ -295,6 +299,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | `attach_worker` | captain op | 29 |
 | `detach_worker` | captain op | 121 |
 | `create_child` | captain op | 47 |
+| `new_chapter` | captain op | 138 |
 | `appoint_lead` | captain op | 45 |
 | `retire_child` | captain op | 20 |
 | `accept` | captain op | 2 |

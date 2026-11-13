@@ -283,6 +283,9 @@ def register_conversation_routes(
         from .preset_roles import start_staffed
         return await start_staffed(runtime, att, s._start_attachment, role, principal, auto_lead)
 
+    from .chapter_routes import register_chapter_routes
+    register_chapter_routes(app, _server)
+
     globals().update({
         "conversations": conversations, "create_conversation": create_conversation,
         "conversation_detail": conversation_detail, "set_topic": set_topic,

@@ -12,16 +12,19 @@
   import { SvelteSet } from "svelte/reactivity";
   import TaskStatusChip from "./TaskStatusChip.svelte";
   import TaskModeIcon from "./TaskModeIcon.svelte";
+  import ChapterMark from "./ChapterMark.svelte";
   import LineMenu from "./LineMenu.svelte";
   import { lineTree, readExpandedLines, storeExpandedLines } from "../../lib/line-tree";
   import { toggleSelection } from "../../lib/bulk-select";
   import { tooltip } from "../../lib/tooltip";
+  import { chapterMarker } from "../../lib/chapters";
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte";
 
   interface Props {
     onrename: (conversation: Conversation) => void;
     onmanagement: (conversation: Conversation) => void;
+    onchapter?: (conversation: Conversation) => void;
     oncloseprocesses: (conversation: Conversation) => void;
     ondelete: (conversation: Conversation) => void;
     onarchivemany?: (conversations: Conversation[], done: () => void) => void;
@@ -32,7 +35,7 @@
     conversation: Conversation;
   }
 
-  let { onrename, onmanagement, oncloseprocesses, ondelete, onarchivemany }: Props = $props();
+  let { onrename, onmanagement, onchapter, oncloseprocesses, ondelete, onarchivemany }: Props = $props();
 
   const indicators = $derived(screenStatus.indicators);
   let expanded = $state<Set<string>>(readExpandedLines());
@@ -99,6 +102,7 @@
 <nav id="convs" class="min-h-0 flex-1 overflow-y-auto py-2.5" aria-label="lines">
   {#each rows.filter((row) => row.visible) as { line: conversation, depth, descendants, liveDescendants, expanded: isExpanded, forced } (conversation.id)}
     {@const open = menu?.conversation.id === conversation.id}
+    {@const chain = chapterMarker(conversation, room.conversations)}
     <div class="conv-row group relative flex items-stretch" class:menu-open={open}>
       <button
         class="conv relative flex min-w-0 w-full flex-1 cursor-pointer items-center gap-2 border-0 p-[9px] pl-5 text-left text-[13.5px] [font-family:inherit] {room
@@ -138,7 +142,7 @@
               indicators={indicators.filter((item) => item.conv_id === conversation.id)}
             /><span class="min-w-0 flex-1 truncate" use:tooltip={{ label: conversation.name }}
               >{conversation.name}</span
-            ></span
+            >{#if chain.label ?? chain.continuedIn}<ChapterMark {chain} />{/if}</span
           >
           <TaskStatusChip status={conversation.task_status} round={conversation.task_round} />
         </span>
@@ -194,6 +198,7 @@
     close={() => (menu = null)}
     {onrename}
     {onmanagement}
+    {onchapter}
     {oncloseprocesses}
     {ondelete}
   />

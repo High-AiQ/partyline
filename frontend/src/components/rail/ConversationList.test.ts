@@ -203,3 +203,65 @@ describe("active share indicators", () => {
     }
   });
 });
+
+describe("conversation rail chapter chain", () => {
+  it("shows a quiet ch N on a continuing line and → on the one it continues", async () => {
+    const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
+    room.conversations = [
+      { ...base, id: "b", name: "Act two", chapter_of: "a", chapter: 2 },
+      { ...base, id: "a", name: "Plan" },
+      { ...base, id: "c", name: "Other" },
+    ];
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: { onmanagement: vi.fn(), onrename: vi.fn(), oncloseprocesses: vi.fn(), ondelete: vi.fn() },
+    });
+    try {
+      const rows = [...document.querySelectorAll(".conv-row")];
+      const row = (name: string) =>
+        rows.find((item) => item.querySelector(".conv-name .truncate")?.textContent.trim() === name);
+      expect(row("Act two")?.querySelector(".chapter-mark")?.textContent).toBe("ch 2");
+      expect(row("Act two")?.querySelector(".chapter-next")).toBeNull();
+      expect(row("Plan")?.querySelector(".chapter-mark")).toBeNull();
+      const next = [...document.querySelectorAll(".chapter-next")];
+      expect(next).toHaveLength(1);
+      expect(next[0]?.getAttribute("aria-label")).toBe("continued in Act two");
+      expect(row("Other")?.querySelector(".chapter-mark, .chapter-next")).toBeNull();
+    } finally {
+      await unmount(list);
+    }
+  });
+
+  it("offers new chapter in the line menu, but not on a task line", async () => {
+    const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
+    room.conversations = [
+      { ...base, id: "a", name: "Plan" },
+      { ...base, id: "t", name: "Task", task_status: "implementing" },
+    ];
+    const onchapter = vi.fn();
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: {
+        onmanagement: vi.fn(),
+        onrename: vi.fn(),
+        onchapter,
+        oncloseprocesses: vi.fn(),
+        ondelete: vi.fn(),
+      },
+    });
+    try {
+      const more = (name: string) =>
+        document.querySelector<HTMLButtonElement>(`.conv-more[aria-label="line actions for ${name}"]`);
+      more("Task")?.click();
+      await tick();
+      expect(document.querySelector(".new-chapter")).toBeNull();
+      more("Task")?.click(); // toggle the menu closed
+      more("Plan")?.click();
+      await tick();
+      document.querySelector<HTMLButtonElement>(".new-chapter")?.click();
+      expect(onchapter).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
+    } finally {
+      await unmount(list);
+    }
+  });
+});

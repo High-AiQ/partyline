@@ -27,6 +27,9 @@ export const ConversationSchema = z.object({
   task_repositories: z.array(z.string()).optional(),
   id: z.string(),
   parent_id: z.string().nullable().optional(),
+  /** The line this one continues (a "new chapter"), and its place in that chain. */
+  chapter_of: z.string().nullable().optional(),
+  chapter: z.number().int().positive().optional(),
   name: z.string(),
   topic: z.string(),
   cwd: z.string().nullable().optional(),
