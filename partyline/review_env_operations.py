@@ -62,16 +62,20 @@ async def refresh_reviews(runtime, root_id, entry):
     rows = db._exec("SELECT conv_id FROM task_reviews WHERE root_id=? AND status='in_review'",
                     (root_id,)).fetchall()
     from .orchestrator_revive import task_lock
+    failures = []
     for record in rows:
         async with task_lock(runtime, record['conv_id']):
             row = task(db, record['conv_id'])
             if not row or row['status'] != 'in_review':
                 continue
-            await refresh_task(runtime, row, entry)
+            failures.extend(await refresh_task(runtime, row, entry))
+    if failures:
+        raise HTTPException(409, 'review environment saved, but setup failed: ' + '; '.join(failures))
 
 
 async def refresh_task(runtime, row, entry):
     db = runtime.db
+    failures = []
     for repo in row['repositories']:
         if repository_key(repo['repository']) != normalize(entry.repository):
             continue
@@ -87,7 +91,8 @@ async def refresh_task(runtime, row, entry):
             await notify_root(runtime, row, exc.detail)
             if row['reviewer_id']:
                 await tell(runtime, row['reviewer_id'], exc.detail)
-            raise HTTPException(exc.status_code, exc.detail) from exc
+            failures.append(f"{row['conv_id']} ({repo['path']}): {exc.detail}")
+            continue
         repo['test_commands'] = [{'subpath': e.subpath, 'command': e.test_command}
                                  for e in entries_for(db, repo['repository'], changed)]
         db._exec('UPDATE task_reviews SET repositories=? WHERE conv_id=?',
@@ -96,3 +101,4 @@ async def refresh_task(runtime, row, entry):
             await tell(runtime, row['reviewer_id'], f"Review environment updated in {repo['path']}/"
                        f"{entry.subpath}. Test command: {entry.test_command or '(none set)'}. "
                        'Continue this review and report what ran.')
+    return failures

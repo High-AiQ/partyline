@@ -67,3 +67,29 @@ class ReviewEnvFlowTest(TaskFixture):
         messages = self.db.list_messages(self.conv_id)
         self.assertTrue(any('run tests' in m['body'] and m['audience_attachment_id'] == row['reviewer_id']
                             for m in messages))
+
+    async def test_failed_setup_does_not_prevent_other_reviews_refreshing(self):
+        first = await self.review()
+        second = await self.review()
+        body = ReviewEnvOperation(operation='set', repository=self.repo, setup='prepare', test='run tests')
+        from fastapi import HTTPException
+        from partyline.review_install_sandbox import DependencyError
+        self.runtime.post_message = AsyncMock()
+        with patch('partyline.review_env_operations.provision',
+                   side_effect=[DependencyError('first failed'), None]) as provision, \
+                patch('partyline.review_env_operations.tell', new_callable=AsyncMock) as tell:
+            with self.assertRaises(HTTPException) as error:
+                await operate(self.runtime, self.captain, 'root', body)
+        self.assertIn('first failed', error.exception.detail)
+        self.assertEqual(provision.call_count, 2)
+        messages = {call.args[1]: call.args[2] for call in tell.await_args_list}
+        self.assertIn('first failed', messages[first['reviewer_id']])
+        self.assertIn('run tests', messages[second['reviewer_id']])
+        self.assertEqual(self.row()['round'], second['round'])
+        with patch('partyline.review_env_operations.provision',
+                   side_effect=[DependencyError('first failed'), DependencyError('second failed')]), \
+                patch('partyline.review_env_operations.tell', new_callable=AsyncMock):
+            with self.assertRaises(HTTPException) as both:
+                await operate(self.runtime, self.captain, 'root', body)
+        self.assertIn('first failed', both.exception.detail)
+        self.assertIn('second failed', both.exception.detail)

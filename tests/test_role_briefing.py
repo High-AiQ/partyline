@@ -346,3 +346,8 @@ class RoleBriefingTests(unittest.TestCase):
                 self.assertIn("`git log <branch>` from outside shows the", text)
                 self.assertIn("review-worktrees", text)
                 self.assertIn("never a raw `git worktree add`", text)
+
+    def test_orchestrator_captain_receives_environment_gap_guidance(self):
+        text = role_instructions(['assign'], 'root', None, captain_mode='orchestrator')
+        self.assertIn('review_env', text)
+        self.assertIn('already reported in its gates', text)
