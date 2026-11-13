@@ -133,6 +133,7 @@ def execute(client, op, args, state):
         return client.request("POST", _path(conv, "attachments"), body)
     paths = {
         "create_child": ("create_child", "POST", "children"),
+        "new_chapter": ("chapter", "POST", "chapter"),
         "appoint_lead": ("appoint_lead", "POST", "lead"),
         "accept": ("accept", "POST", "accept"),
         "review_worktree": ("write", "POST", "review-worktrees"),
@@ -215,6 +216,8 @@ def _body(op, args):
     if op == "create_child":
         return {key: args[key] for key in ("name", "goal", "topic", "base", "repository")
                 if key in args}
+    if op == "new_chapter":
+        return {"name": args["name"]} if "name" in args else {}
     if op == "appoint_lead":
         return {"attachment_id": args["attachment_id"] or None}
     if op == "accept":

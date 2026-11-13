@@ -16,7 +16,7 @@ class Client:
                       "conv_id": "home", "attachment_id": "att",
                       "actions": ["read", "assign", "write", "attach", "close",
                                   "create_child", "appoint_lead", "archive", "accept",
-                                  "read_reports"]}
+                                  "read_reports", "chapter"]}
         self.target = {**self.state, "conv_id": "child"}
         self.calls = []
 
@@ -59,6 +59,21 @@ class CaptainToolTests(unittest.TestCase):
                 "POST", "/api/conversations/child/attachments",
                 {"name": "helper", "adapter": "raw", "command": "cat",
                  "counts_toward_total": value}))
+
+    def test_new_chapter_runs_through_the_captain_door_on_the_home_line(self):
+        client = Client()
+        self.assertIn("new_chapter", {t["name"] for t in tools_captain.tool_list(client.state)})
+        tools_captain.call(client, "captain", {"op": "new_chapter", "args": {
+            "conv_id": "home", "name": "Next act"}}, client.state)
+        self.assertEqual(client.calls[-1],
+                         ("POST", "/api/conversations/home/chapter", {"name": "Next act"}))
+        tools_captain.call(client, "new_chapter", {"conv_id": "home"}, client.state)
+        self.assertEqual(client.calls[-1], ("POST", "/api/conversations/home/chapter", {}))
+        client.target["actions"] = ["read"]  # another line, no chapter right there
+        with self.assertRaisesRegex(Exception, "not authorized"):
+            tools_captain.call(client, "new_chapter", {"conv_id": "child"}, client.state)
+        lacking = {**client.state, "actions": [a for a in client.state["actions"] if a != "chapter"]}
+        self.assertNotIn("new_chapter", {t["name"] for t in tools_captain.tool_list(lacking)})
 
     def test_attach_worker_forwards_successor(self):
         client = Client()

@@ -5,7 +5,8 @@ from . import captain_ops, tools_tasks
 
 _ACTION = {
     "resources": "assign", "staffing": "assign", "attach_worker": "attach", "detach_worker": "close",
-    "create_child": "create_child", "appoint_lead": "appoint_lead", "retire_child": "assign",
+    "create_child": "create_child", "new_chapter": "chapter",
+    "appoint_lead": "appoint_lead", "retire_child": "assign",
     "accept": "accept", "review_worktree": "write", "share_ref": "message_task",
     "request_write_set": "write",
     "decide_write_set": "read", "write_set_requests": "read",
@@ -74,6 +75,8 @@ def tool_list(state: dict) -> list[dict]:
     for op in permitted(state):
         descriptions = {
             "create_child": "Create a child line; its captain requires Can manage a line checked.",
+            "new_chapter": "Start a fresh line that continues your own line (same parent, folder, topic, "
+                "goal, notes and captain style; nothing moves or is deleted). A person appoints its captain.",
             "attach_worker": "Staff an implementer with Fast implementer checked; "
                 "for visual work prefer Reads images. Set staffing_role=captain for a sub-captain. "
                 "For handover, attach on your own line with successor=true, "
