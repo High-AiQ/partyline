@@ -1,5 +1,16 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-13 — A banner that loads after the list cannot rescue a broken list
+
+The false assumption was that the restart banner reaches every tab. Its live event is sent once, at
+filing, and a tab connecting later fetched it only after the line list parsed. A pulled checkout
+served the 2.117 bundle to a 2.116 server whose `captain_mode: "manager_tree"` rows the new schema
+rejected, so the whole rail went empty and the restart that would migrate those rows never showed.
+The hello on both wires now carries `restart_request` (an older server without it gets one fetch),
+server-owned enums on `ConversationSchema` read unknown values as absent, and one unreadable row
+drops only itself. Tests: `frontend/src/state/hello-pending.test.ts`,
+`frontend/src/lib/conversation-contracts.test.ts`, `tests/test_polling_maintenance_events.py`.
+
 ## Matching a message's text does not prove the message was pasted
 
 The false assumption was that a pending message whose whole digest line appears in the kept

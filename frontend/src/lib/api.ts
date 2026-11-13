@@ -6,6 +6,7 @@ import {
   CloseProcessesResultSchema,
   AttachmentSchema,
   ConversationDetailSchema,
+  ConversationListSchema,
   ConversationSchema,
   FileUploadResponseSchema,
   OkResultSchema,
@@ -167,7 +168,7 @@ export const api: PartylineApi = {
 
   conversations: (archived = false) =>
     request(`/api/conversations${archived ? "?archived=1" : ""}`, {
-      schema: ConversationSchema.array(),
+      schema: ConversationListSchema,
     }),
   conversation: (id, includeGit = true) =>
     request(`/api/conversations/${id}${includeGit ? "" : "?include_git=false"}`, {

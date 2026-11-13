@@ -6,6 +6,7 @@ import { room } from "./room.svelte.js";
 import { session } from "./session.svelte.js";
 import { voicePresets } from "./voice-presets.svelte.js";
 import { resources } from "./resources.svelte.js";
+import { restart } from "./restart.svelte.js";
 import { wire } from "./wire.svelte.js";
 
 export function connectAccountWire(identity: WireIdentity, handshake: (hello: HelloEvent) => void): void {
@@ -20,6 +21,9 @@ export function connectAccountWire(identity: WireIdentity, handshake: (hello: He
         voicePresets.receive(event.settings);
       } else if (event.type === "resources") {
         resources.snapshot = event.snapshot;
+      } else if (event.type === "restart_request") {
+        // Broadcast to every wire, this one included: no line has to be open to decide it.
+        restart.apply(event.request);
       }
     },
     () => undefined,

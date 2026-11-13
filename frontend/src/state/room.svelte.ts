@@ -19,7 +19,6 @@ import { sayOnLine } from "../lib/room-say";
 import { sendFailures } from "./send-failures.svelte.js";
 import { sendOffLine } from "../lib/offline-wire";
 import type { WireIdentity } from "../lib/wire-commands";
-import { restart } from "./restart.svelte.js";
 import { approvals } from "./approvals.svelte";
 import { writeSet } from "./write-set.svelte.js";
 import { memoryRequest } from "./memory-request.svelte.js";
@@ -92,7 +91,6 @@ class Room {
     const updated = await api.conversations();
     lineLiveState.reconcile(this.conversations, updated);
     this.conversations = updated;
-    void restart.load().catch(ignoreBackgroundFailure);
     // Arriving on a deep link: the route named a line before the list existed.
     const routedId = routedConversationId();
     if (!routedId) return;

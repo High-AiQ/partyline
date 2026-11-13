@@ -122,3 +122,19 @@ class MaintenanceEventsTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(hello['type'], 'hello')
                 self.assertEqual(hello['speech_settings']['default'], 'local')
                 self.assertEqual(hello['resource_snapshot']['live_processes'], 3)
+                self.assertIn('restart_request', hello)
+                self.assertIsNone(hello['restart_request'])
+
+    async def test_hello_replays_pending_restart_on_both_wires(self):
+        from partyline.restart_requests import RestartRequest
+        pending = RestartRequest(id='r1', conversation_id='c1', requester='opus',
+                                 reason='deploy', created_at=1.0)
+        runtime = SimpleNamespace(db=Mock(), restart_request=pending)
+        speech = SimpleNamespace(settings=SimpleNamespace(model_dump=lambda: {}))
+        with patch.object(browser_snapshots, 'speech_snapshot', return_value=speech), \
+                patch.object(browser_snapshots, '_view', return_value={}), \
+                patch('partyline.docker_workloads.inventory.kick'):
+            for line in ('~account', 'line'):
+                hello = await browser_snapshots.hello_payload(runtime, line, 'greg', 'b', '2.117.1', None)
+                self.assertEqual(hello['restart_request']['id'], 'r1')
+                self.assertEqual(hello['restart_request']['reason'], 'deploy')

@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { AttachmentSchema } from "./attachment-contracts";
 import { ConversationSchema } from "./conversation-contracts";
-export { ConversationSchema } from "./conversation-contracts";
+export { ConversationListSchema, ConversationSchema } from "./conversation-contracts";
 export type { Conversation } from "./conversation-contracts";
 import { ReactionResponseSchema } from "./reaction-contracts";
 
