@@ -190,10 +190,13 @@ hide the manual process attachment panel because their staffing is server-owned.
 
 The conversation rail puts a person's starred lines in a `Starred` group above
 the regular hierarchy, preserving normal order inside each group. Stars are
-stored per account; `conversations_changed` refreshes the list across tabs. A
-starred child is shown with its ancestors expanded in the rail without changing
-the saved expansion choices. The star is a small inline button left of the line
-name (outlined when unstarred, filled `gold` when starred) on every row; it is the
+stored per account; `conversations_changed` refreshes the list across tabs. Only
+a top-level line (no parent) can be starred: a child row has no star and no
+reserved slot, so its `↳`, kind icon and name sit flush, and `PUT .../star` on a
+child answers 409. A star saved on a child before that rule stays in the table
+but is never reported as `starred` and never listed; `DELETE` still clears it.
+The star is a small inline button left of the line
+name (outlined when unstarred, filled `gold` when starred) on every top-level row; it is the
 only place to star a line, so the line header has no star. The `Starred` and `Lines`
 headers collapse their group (remembered per browser in `localStorage`), and a
 starred line's subtree toggles through the same expansion state as the main list.
