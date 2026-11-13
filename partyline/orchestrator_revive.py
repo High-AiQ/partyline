@@ -51,8 +51,15 @@ async def brief_reviewer(runtime, row, reviewer):
     note = (f" Your session may be new; round {row['round']} follows changes requested earlier; "
             f"previous round findings: {row['previous_findings']}"
             if row['round'] > 1 and row['previous_findings'] else '')
+    commands = ''.join(
+        f"\n- {item['path']}/{entry['subpath']}: {entry['command'] or '(no test command set)'}"
+        for item in repos for entry in item.get('test_commands', []))
+    guidance = (f"\nReview environment test commands:{commands}\n" if commands else '')
+    guidance += ('Run the configured test commands and state in verdict findings what ran and '
+                 'what passed, or why it could not run. If the suite cannot run, call env_gap instead of '
+                 'approving on code reading alone. ')
     await tell(runtime, reviewer['id'],
-               where + f"{row['what']} — {row['location']}. "
+               where + guidance + f"{row['what']} — {row['location']}. "
                'Call review_verdict(approve|changes, findings, sha=SHA); for multiple repositories, '
                'pass repositories with every repository and SHA. Never push or implement. '
                'Your approval is acceptance; the root captain merges.' + note,

@@ -301,3 +301,13 @@ MIGRATIONS.extend([
     "CREATE TRIGGER IF NOT EXISTS orchestrator_root_update BEFORE UPDATE ON conversations "
     "WHEN 0 BEGIN SELECT 1; END",
 ])
+
+MIGRATIONS.append("""CREATE TABLE IF NOT EXISTS review_environments(
+    repository TEXT NOT NULL,
+    subpath TEXT NOT NULL DEFAULT '.',
+    setup_command TEXT NOT NULL DEFAULT '',
+    test_command TEXT NOT NULL DEFAULT '',
+    set_by TEXT NOT NULL,
+    set_at REAL NOT NULL,
+    PRIMARY KEY(repository, subpath)
+)""")

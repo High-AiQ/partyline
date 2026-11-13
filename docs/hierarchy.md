@@ -1573,3 +1573,13 @@ structured open work remains but nothing is running or scheduled. The captain sh
 restart, reopen or resume the work, or tell the person what it is blocked on. An unchanged idle verdict is reported only once.
 Only live lines count: a retired line's task and its unread reports are history. The
 alert names the first five items and counts the rest.
+
+### Review environment setup
+
+Managed task reviews provision the nearest supported lockfile for each changed file,
+including npm, pnpm, yarn, and uv. Setup runs before the reviewer starts in a sandbox
+limited to the review checkout and package caches; setup failures reach the captain.
+Instance settings can supply setup and test commands per repository and subpath; they
+are not read from the reviewed repository. Reviewers run the listed tests and report
+what ran and passed, or call `env_gap` when the suite cannot run. A root captain can
+set an environment and wake the reviewer in the same round.

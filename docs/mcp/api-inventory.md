@@ -403,3 +403,7 @@ is needed. The server checks the full outgoing message size too. The add-on body
 3 MiB. The transparent render uses that exact resolution; an aspect mismatch beyond 0.5% against the scene or explicit width/height
 is refused. Ordinary clamps and cancel/deadline behavior still apply. See the
 [relay design](../design/blender-python-relay.md#5-mcp-tools-agent-view).
+
+Review environments: people-only `GET` and `PUT /api/settings/review-environments`;
+reviewers report gaps with `POST /api/conversations/{id}/env-gap`; the root captain
+uses `POST /api/conversations/{root}/review-environment` for list, set, or delete.

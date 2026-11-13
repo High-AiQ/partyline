@@ -1,6 +1,7 @@
 <script lang="ts">
   /** The instance label (read-only, from config) and the global prose every briefing carries. */
   import { onDestroy, onMount } from "svelte";
+  import ReviewEnvironments from "./ReviewEnvironments.svelte";
   import SettingsSection from "../SettingsSection.svelte";
   import SettingRow from "../SettingRow.svelte";
   import SaveIndicator from "../SaveIndicator.svelte";
@@ -78,4 +79,5 @@
       <SaveIndicator state={save} idle={loading ? "loading…" : dirty ? "unsaved changes" : ""} />
     </form>
   </SettingRow>
+  <ReviewEnvironments />
 </SettingsSection>

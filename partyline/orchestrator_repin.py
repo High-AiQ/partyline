@@ -82,6 +82,8 @@ async def repin(runtime, row, body, entries):
             await tell(runtime, updated['reviewer_id'],
                        f'Review SHA changed from {old} to {new}. You must review the new commits '
                        'and name their SHA (or all repositories and SHAs) in review_verdict.')
+            from .orchestrator_revive import brief_reviewer
+            await brief_reviewer(runtime, updated, db.get_attachment(updated['reviewer_id']))
         else:
             await revive_reviewer(runtime, updated)
     await report(runtime, updated)

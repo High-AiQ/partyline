@@ -3,16 +3,17 @@
 from urllib.parse import quote
 
 from ..orchestrator_contracts import (
-    BlockedIn, DeliverIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, TaskIn, VerdictIn, WaitingIn)
+    BlockedIn, EnvGapIn, DeliverIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn,
+    TaskIn, VerdictIn, WaitingIn)
 from .client import ApiError
 from .validation import validate_arguments
 
-_MODELS = {'blocked': BlockedIn, 'deliver': DeliverIn, 'create_task': TaskIn,
+_MODELS = {'env_gap': EnvGapIn, 'blocked': BlockedIn, 'deliver': DeliverIn, 'create_task': TaskIn,
            'request_review': ReviewRequestIn,
            'review_verdict': VerdictIn,
            'resume_work': ResumeIn, 'reopen_task': ReopenIn, 'message_task': MessageTaskIn,
            'waiting': WaitingIn, 'set_task_goal': ReopenIn}
-_PATHS = {'blocked': ('POST', 'blocked'), 'deliver': ('POST', 'deliver'),
+_PATHS = {'env_gap': ('POST', 'env-gap'), 'blocked': ('POST', 'blocked'), 'deliver': ('POST', 'deliver'),
           'create_task': ('POST', 'tasks'), 'tasks': ('GET', 'tasks'),
           'request_review': ('POST', 'request-review'), 'review_verdict': ('POST', 'review-verdict'),
           'restart_reviewer': ('POST', 'task/reviewer'),
@@ -22,7 +23,7 @@ _PATHS = {'blocked': ('POST', 'blocked'), 'deliver': ('POST', 'deliver'),
 OPERATIONS = tuple(_PATHS)
 
 
-_WHO = {'deliver': 'the implementer of an express task',
+_WHO = {'env_gap': "the task's reviewer", 'deliver': 'the implementer of an express task',
         'resume_work': "the task's implementer and the root captain",
         'blocked': "the task's implementer", 'request_review': "the task's implementer",
         'review_verdict': "the task's reviewer, or the root captain under captain review "

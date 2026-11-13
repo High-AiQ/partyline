@@ -62,3 +62,17 @@ class SettingsRoutesTest(unittest.TestCase):
             "/api/settings/global_prose", json={"value": "x" * 10001}, headers=self.headers,
         )
         self.assertEqual(422, response.status_code)
+
+    def test_review_environments_are_people_only_and_audited(self):
+        path = '/api/settings/review-environments'
+        entry = {'repository': '/tmp/example', 'test_command': 'run tests'}
+        self.assertEqual(403, self.client.get(path, headers=self.machine_headers).status_code)
+        self.assertEqual(403, self.client.put(path, json={'entries': [entry]},
+                                              headers=self.machine_headers).status_code)
+        response = self.client.put(path, json={'entries': [entry]}, headers=self.headers)
+        self.assertEqual(200, response.status_code)
+        saved = response.json()['entries'][0]
+        self.assertEqual(saved['set_by'], 'tester')
+        self.assertGreater(saved['set_at'], 0)
+        self.assertEqual(saved['subpath'], '.')
+        self.assertEqual(self.client.get(path, headers=self.headers).json()['entries'], [saved])

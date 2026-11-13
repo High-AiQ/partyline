@@ -169,7 +169,7 @@ def task_actions(db, actor, conv_id):
         if row['mode'] == 'express':
             actions.add('deliver')
     if actor.attachment_id == row['reviewer_id']:
-        actions.add('review_verdict')
+        actions.update(('review_verdict', 'env_gap'))
     if row['policy'] == 'captain' and actor.is_lead and actor.conv_id == row['root_id']:
         actions.add('review_verdict')
     return actions

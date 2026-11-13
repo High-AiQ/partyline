@@ -36,6 +36,10 @@ def execute(client, op, args, state):
     if op not in OPERATIONS:
         raise ValueError("unknown captain operation")
     _check_lead(state)
+    if op == "review_env":
+        if state.get("parent_id", "unknown") is not None:
+            raise ApiError("only the root captain may manage review environments")
+        return client.request("POST", _path(client.home, "review-environment"), args)
     if op == "kernel_log":
         if state.get("parent_id", "unknown") is not None:
             raise ApiError("only root captains can read the kernel log")

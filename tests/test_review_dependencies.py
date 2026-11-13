@@ -196,3 +196,37 @@ class ReviewDependenciesTests(unittest.TestCase):
         with patch('partyline.review_dependencies.run_installer', side_effect=install):
             with self.assertRaisesRegex(ReviewError, 'symlink escapes'):
                 provision(str(self.review))
+
+    def test_changed_files_choose_nearest_locks_and_uv(self):
+        nested = self.review / 'nested'
+        (nested / 'package-lock.json').unlink()
+        (nested / 'uv.lock').write_text('version = 1')
+        calls = []
+
+        def install(command, cwd, **kwargs):
+            calls.append((command, Path(cwd), kwargs['env']))
+            return subprocess.CompletedProcess(command, 0, '', '')
+
+        with patch('partyline.review_dependencies.run_installer', side_effect=install):
+            provision(str(self.review), changed=['nested/src/file.py', 'other.js'])
+        self.assertEqual({item[1] for item in calls}, {self.review, nested})
+        uv = next(item for item in calls if item[1] == nested)
+        self.assertEqual(uv[0], ('uv', 'sync', '--frozen', '--all-extras', '--all-groups'))
+        self.assertEqual(uv[2]['UV_PROJECT_ENVIRONMENT'], str(nested / '.venv'))
+
+    def test_mixed_python_and_javascript_locks_install_both(self):
+        (self.review / 'uv.lock').write_text('version = 1')
+        calls = []
+
+        def install(command, cwd, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, '', '')
+
+        with patch('partyline.review_dependencies.run_installer', side_effect=install):
+            provision(str(self.review), changed=['src/file.py'])
+        self.assertEqual([command[0] for command in calls], ['uv', 'npm'])
+        (self.review / 'yarn.lock').write_text('')
+        with patch('partyline.review_dependencies.run_installer') as installer:
+            with self.assertRaisesRegex(ReviewError, 'multiple lockfiles'):
+                provision(str(self.review), changed=['src/file.py'])
+        installer.assert_not_called()

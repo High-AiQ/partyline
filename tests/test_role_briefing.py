@@ -69,3 +69,8 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertNotIn("\n", WORKER_REMINDER)
         self.assertIn("edit only on your captain's @mention", WORKER_REMINDER)
         self.assertIn("the goal above is context, not your assignment", WORKER_REMINDER)
+
+    def test_orchestrator_captain_receives_environment_gap_guidance(self):
+        text = role_instructions(['assign'], 'root', None)
+        self.assertIn('review_env', text)
+        self.assertIn('already reported in its gates', text)

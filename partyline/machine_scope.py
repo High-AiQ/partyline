@@ -29,7 +29,7 @@ Capability = Literal[
     "archive", "link_parent",
     "create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task",
     "message_task", "set_task_goal",
-    "resume_work", "request_review", "review_verdict", "blocked", "waiting", "deliver",
+    "resume_work", "request_review", "review_verdict", "env_gap", "blocked", "waiting", "deliver",
 ]
 
 ALL_CAPABILITIES: tuple[Capability, ...] = get_args(Capability)
@@ -82,7 +82,7 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
         return False
     from .orchestrator_store import task, task_actions
     task_row = task(db, conv_id)
-    if capability in ("request_review", "review_verdict", "blocked", "waiting", "deliver"):
+    if capability in ("request_review", "review_verdict", "env_gap", "blocked", "waiting", "deliver"):
         if (capability == "review_verdict" and conv_id == home and principal.is_lead):
             return True
         return capability in task_actions(db, principal, conv_id)

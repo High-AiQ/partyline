@@ -2,6 +2,9 @@
 
 ORCHESTRATOR = (
     "## Orchestrator captain pack\n"
+    'When a reviewer reports an environment gap, prefer setup or test commands the implementer '
+    'already reported in its gates; use captain(op="review_env", args=...) to resolve it. '
+
     "Do not end a turn promising future work unless something will actually wake you, "
     "such as a live worker, task wait or scheduled deadline. Otherwise do the work now "
     "or tell the person plainly what blocks you. Act on the idle alert. "

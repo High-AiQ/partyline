@@ -6,7 +6,8 @@ from .auth_guard import request_principal
 from .contracts import ConversationEvent, ConversationResponse, ConversationsChangedEvent
 from .machine_scope import deny_unless
 from .orchestrator_contracts import (
-    BlockedIn, CaptainStyleIn, DeliverIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, ShareRefIn,
+    BlockedIn, EnvGapIn, CaptainStyleIn, DeliverIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn,
+    ShareRefIn,
     ShareRefOut, TaskIn, TaskReview, VerdictIn, WaitingIn)
 from .orchestrator_handles import message_task, task_line
 from .orchestrator_stall import blocked, resume_work
@@ -98,6 +99,17 @@ def orchestrator_router(runtime):
     @router.post('/api/conversations/{conv_id}/review-verdict', response_model=TaskReview)
     async def verdict(request: Request, conv_id: str, body: VerdictIn):
         return await review_verdict(runtime, request_principal(request), conv_id, body)
+
+    @router.post('/api/conversations/{conv_id}/env-gap', response_model=TaskReview)
+    async def env_gap(request: Request, conv_id: str, body: EnvGapIn):
+        from .orchestrator_store import require_task
+        from .orchestrator_notices import notify_root
+        row = require_task(db, request_principal(request), conv_id, reviewer=True)
+        if row['status'] != 'in_review':
+            raise HTTPException(409, 'no review is open')
+        await notify_root(runtime, row, f"Review environment gap in {body.repository}/{body.subpath}: "
+                          f"{body.what_failed}; tried: {body.tried}")
+        return row
 
     @router.post('/api/conversations/{conv_id}/blocked', response_model=TaskReview)
     async def block(request: Request, conv_id: str, body: BlockedIn):

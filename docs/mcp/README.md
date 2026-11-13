@@ -245,3 +245,8 @@ prevent abandoned attachments from wedging a resource. See
 Root captains can use the read-only `kernel_log` operation with optional `boot`
 (`previous` or `current`) and `lines` (1–300). It returns redacted kernel
 journal text lines; see [host kernel log](../resource-budget.md#host-kernel-log).
+
+Reviewers use `env_gap(repository, subpath, what_failed, tried)` when tests cannot run.
+The root captain uses `captain(op="review_env", args={operation, repository, subpath,
+setup, test})` to list, set, or delete environments. A set re-runs setup for affected
+open reviews and wakes their reviewers without changing the review round.

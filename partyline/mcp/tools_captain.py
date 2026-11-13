@@ -4,7 +4,8 @@ from .captain_schemas import OPERATIONS, schema, validate
 from . import captain_ops, tools_tasks
 
 _ACTION = {
-    "resources": "assign", "staffing": "assign", "attach_worker": "attach", "detach_worker": "close",
+    "review_env": "assign", "resources": "assign", "staffing": "assign",
+    "attach_worker": "attach", "detach_worker": "close",
     "create_child": "create_child", "new_chapter": "chapter",
     "appoint_lead": "appoint_lead", "retire_child": "assign",
     "accept": "accept", "review_worktree": "write", "share_ref": "message_task",
@@ -73,6 +74,8 @@ def tool_list(state: dict) -> list[dict]:
               "inputSchema": guide({"kind": "machine", "role": "implementer", "is_lead": False})[
                   "fallback"]["inputSchema"]}]
     for op in permitted(state):
+        if op == "review_env":
+            continue  # only through captain(op, args)
         descriptions = {
             "create_child": "Create a child line; its captain requires Can manage a line checked.",
             "new_chapter": "Start a fresh line that continues your own line (same parent, folder, topic, "

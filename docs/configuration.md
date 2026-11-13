@@ -156,3 +156,14 @@ stopped through the normal lifespan teardown, so nothing is orphaned — and `GE
 lists what would be stopped. Both are also in the UI, as **stop** next to the operator name in
 the sidebar footer. Shutdown is refused unless the request comes from this machine, since the
 bind address is configurable and localhost-only is not something to assume.
+
+### Review environments
+
+Settings → General → Review environments stores optional repository-specific setup and
+test commands in Partyline's database. Use an origin URL or the absolute repository
+path when no origin exists, and a repository-relative subpath (default `.`). Nested
+subpaths select the longest match for each changed file. Empty setup uses a supported
+lockfile; empty test means no command is prescribed. Entries show who set them and when.
+Only people can edit these settings in the web client. A root captain can also resolve
+reviewer-reported gaps through `captain(op="review_env", args=...)`; changes are posted
+on the root line.
