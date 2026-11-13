@@ -88,11 +88,12 @@ export function starredLineTree<T extends LiveLine>(
   const rows = lineTree(lines, expanded, selectedId);
   const roots = rows.filter((row, index) => {
     if (!starredIds.has(row.line.id)) return false;
-    for (let ancestorIndex = index - 1; ancestorIndex >= 0; ancestorIndex--) {
+    let ancestorDepth = row.depth;
+    for (let ancestorIndex = index - 1; ancestorIndex >= 0 && ancestorDepth > 0; ancestorIndex--) {
       const ancestor = rows[ancestorIndex];
-      if (ancestor && ancestor.depth < row.depth) {
+      if (ancestor && ancestor.depth < ancestorDepth) {
         if (starredIds.has(ancestor.line.id)) return false;
-        if (ancestor.depth === 0) break;
+        ancestorDepth = ancestor.depth;
       }
     }
     return true;
@@ -106,11 +107,16 @@ export function starredLineTree<T extends LiveLine>(
       let visible = index === rootIndex;
       if (!visible) {
         visible = true;
-        for (let ancestorIndex = rootIndex; ancestorIndex < index; ancestorIndex++) {
+        let ancestorDepth = row.depth;
+        for (
+          let ancestorIndex = index - 1;
+          ancestorIndex >= rootIndex && ancestorDepth > root.depth;
+          ancestorIndex--
+        ) {
           const ancestor = rows[ancestorIndex];
-          if (ancestor && ancestor.depth < row.depth && !ancestor.expanded) {
-            visible = false;
-            break;
+          if (ancestor && ancestor.depth < ancestorDepth) {
+            if (!ancestor.expanded) visible = false;
+            ancestorDepth = ancestor.depth;
           }
         }
       }

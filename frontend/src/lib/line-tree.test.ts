@@ -87,6 +87,33 @@ describe("line tree", () => {
     expect(rows.filter((row) => row.depth === 0).map((row) => row.line.id)).toEqual(["root"]);
     expect(rows.find((row) => row.line.id === "grandchild")?.depth).toBe(2);
   });
+  it("does not let one sibling's collapsed subtree hide another sibling's descendants", () => {
+    const siblings = [
+      { id: "root", live_count: 0 },
+      { id: "a", parent_id: "root", live_count: 0 },
+      { id: "a-child", parent_id: "a", live_count: 0 },
+      { id: "b", parent_id: "root", live_count: 0 },
+      { id: "b-child", parent_id: "b", live_count: 0 },
+    ];
+    const rows = starredLineTree(siblings, new Set(["root", "b"]), undefined, new Set(["root"]));
+    expect(rows.filter((row) => row.visible).map((row) => row.line.id)).toEqual([
+      "root",
+      "a",
+      "b",
+      "b-child",
+    ]);
+  });
+  it("does not treat a starred sibling's descendant as nested beneath that star", () => {
+    const siblings = [
+      { id: "root", live_count: 0 },
+      { id: "a", parent_id: "root", live_count: 0 },
+      { id: "a-child", parent_id: "a", live_count: 0 },
+      { id: "b", parent_id: "root", live_count: 0 },
+      { id: "b-child", parent_id: "b", live_count: 0 },
+    ];
+    const rows = starredLineTree(siblings, new Set(), undefined, new Set(["a", "b-child"]));
+    expect(rows.filter((row) => row.depth === 0).map((row) => row.line.id)).toEqual(["a", "b-child"]);
+  });
   it("expands the selection path in both the shortcut and unchanged main tree", () => {
     const selected = "grandchild";
     const expanded = new Set<string>();
