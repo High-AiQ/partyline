@@ -46,15 +46,17 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 18 | GET | `/api/docs/{category}/{topic}` | partyline/captain_docs.py:docs_topic (registration line 153) | H, or lead | yes | see Set 2 |
 | 19 | POST | `/api/attachments/{att_id}/compact` | partyline/compact_routes.py:compact_attachment (registration line 30) | M with `attach` | yes | see Set 2 |
 | 20 | DELETE | `/api/conversations/{conv_id}` | partyline/conversation_archive.py:archive_conversation (registration line 41) | H, or M lead with `archive` on a descendant | yes | see Set 2 |
-| 21 | GET | `/api/conversations` | partyline/conversation_routes.py:conversations (registration line 58) | H; M for visible lines | yes | see Set 2 |
-| 22 | POST | `/api/conversations` | partyline/conversation_routes.py:create_conversation (registration line 67) | H only | no | only a person opens a top-level line |
-| 23 | GET | `/api/conversations/{conv_id}` | partyline/conversation_routes.py:conversation_detail (registration line 77) | M with `read` | yes | see Set 2 |
-| 24 | PUT | `/api/conversations/{conv_id}/topic` | partyline/conversation_routes.py:set_topic (registration line 85) | M with `write` | yes | see Set 2 |
-| 25 | PUT | `/api/conversations/{conv_id}/name` | partyline/conversation_routes.py:rename_conversation (registration line 105) | M with `write` | yes | see Set 2 |
-| 26 | DELETE | `/api/conversations/archived` | partyline/conversation_routes.py:purge_all_archived (registration line 129) | H only | no | purge of all archived lines; person-only and destructive |
-| 27 | POST | `/api/conversations/{conv_id}/restore` | partyline/conversation_routes.py:restore_conversation (registration line 140) | M with `archive` | yes | see Set 2 |
-| 28 | DELETE | `/api/conversations/{conv_id}/purge` | partyline/conversation_routes.py:purge_conversation (registration line 155) | M with `archive` | yes | see Set 2 |
-| 29 | POST | `/api/conversations/{conv_id}/attachments` | partyline/conversation_routes.py:attach (registration line 168) | M with `attach` | yes | see Set 2 |
+| 21 | GET | `/api/conversations` | partyline/conversation_routes.py:conversations (registration line 60) | H; M for visible lines | yes | see Set 2 |
+| 21a | PUT | `/api/conversations/{conv_id}/star` | partyline/conversation_stars.py:star_conversation (registration line 42) | H only | no | person-owned star preference |
+| 21b | DELETE | `/api/conversations/{conv_id}/star` | partyline/conversation_stars.py:unstar_conversation (registration line 46) | H only | no | person-owned star preference |
+| 22 | POST | `/api/conversations` | partyline/conversation_routes.py:create_conversation (registration line 71) | H only | no | only a person opens a top-level line |
+| 23 | GET | `/api/conversations/{conv_id}` | partyline/conversation_routes.py:conversation_detail (registration line 81) | M with `read` | yes | see Set 2 |
+| 24 | PUT | `/api/conversations/{conv_id}/topic` | partyline/conversation_routes.py:set_topic (registration line 89) | M with `write` | yes | see Set 2 |
+| 25 | PUT | `/api/conversations/{conv_id}/name` | partyline/conversation_routes.py:rename_conversation (registration line 109) | M with `write` | yes | see Set 2 |
+| 26 | DELETE | `/api/conversations/archived` | partyline/conversation_routes.py:purge_all_archived (registration line 133) | H only | no | purge of all archived lines; person-only and destructive |
+| 27 | POST | `/api/conversations/{conv_id}/restore` | partyline/conversation_routes.py:restore_conversation (registration line 145) | M with `archive` | yes | see Set 2 |
+| 28 | DELETE | `/api/conversations/{conv_id}/purge` | partyline/conversation_routes.py:purge_conversation (registration line 160) | M with `archive` | yes | see Set 2 |
+| 29 | POST | `/api/conversations/{conv_id}/attachments` | partyline/conversation_routes.py:attach (registration line 173) | M with `attach` | yes | see Set 2 |
 | 30 | GET | `/api/docker-relay` | partyline/docker_relay_routes.py:relay_status (registration line 11) | H, or lead (own rows) | yes | see Set 2 |
 | 31 | GET | `/api/docker-workloads` | partyline/docker_workload_routes.py:workloads (registration line 21) | H; M for visible rows | yes | see Set 2 |
 | 32 | POST | `/api/docker-workloads/{container_id}/stop` | partyline/docker_workload_routes.py:stop (registration line 28) | owning principal | yes | see Set 2 |
@@ -343,7 +345,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 
 ## Coverage
 
-136 routes in total: 104 agent-reachable (Set 2) + 32 not agent-reachable (Set 1 notes) = 136. Route numbers 1-136 each appear exactly once in Set 1, and each agent-reachable number appears exactly once in Set 2. Dispositions in Set 2: 16 tool, 19 op, 3 guide, 66 excluded.
+138 routes in total: 104 agent-reachable (Set 2) + 34 not agent-reachable (Set 1 notes) = 138. Route numbers 1-136 and the person-only additions 21a/21b each appear exactly once in Set 1; each agent-reachable number appears exactly once in Set 2. Dispositions in Set 2: 16 tool, 19 op, 3 guide, 66 excluded.
 
 ## Orchestrator additions
 

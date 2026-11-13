@@ -12,6 +12,12 @@ export const PurgeAllResponseSchema = z.object({
 });
 export type PurgeAllResponse = z.infer<typeof PurgeAllResponseSchema>;
 
+export const ConversationStarResponseSchema = z.object({
+  ok: z.boolean(),
+  starred: z.boolean(),
+});
+export type ConversationStarResponse = z.infer<typeof ConversationStarResponseSchema>;
+
 export const ConversationSchema = z.object({
   captain_mode: z.literal("orchestrator").optional(),
   default_review_policy: z.string().optional(),
@@ -36,5 +42,6 @@ export const ConversationSchema = z.object({
   created_at: z.number(),
   archived_at: z.number().nullable().default(null),
   live_count: z.number().int().nonnegative().default(0),
+  starred: z.boolean().optional(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;

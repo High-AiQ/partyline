@@ -17,6 +17,11 @@ class PurgeAllResponse(BaseModel):
     skipped: list[SkippedPurge] = Field(default_factory=list)
 
 
+class ConversationStarResponse(BaseModel):
+    ok: bool
+    starred: bool
+
+
 class RetirementBlocker(BaseModel):
     code: str
     message: str
@@ -60,3 +65,4 @@ class ConversationResponse(BaseModel):
     parent_id: str | None = None
     chapter_of: str | None = None
     chapter: int = Field(default=1, ge=1)
+    starred: bool = False

@@ -51,6 +51,7 @@ class ContractTest(unittest.TestCase):
                 "parent_id": None,
                 "chapter_of": None,
                 "chapter": 1,
+                "starred": False,
             },
         )
 

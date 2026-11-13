@@ -77,3 +77,51 @@ export function lineTree<T extends LiveLine>(
     };
   });
 }
+
+/** Give each top-level starred line a depth-zero shortcut and its own subtree. */
+export function starredLineTree<T extends LiveLine>(
+  lines: readonly T[],
+  expanded: ReadonlySet<string>,
+  selectedId: string | undefined,
+  starredIds: ReadonlySet<string>,
+): TreeRow<T>[] {
+  const rows = lineTree(lines, expanded, selectedId);
+  const roots = rows.filter((row, index) => {
+    if (!starredIds.has(row.line.id)) return false;
+    let ancestorDepth = row.depth;
+    for (let ancestorIndex = index - 1; ancestorIndex >= 0 && ancestorDepth > 0; ancestorIndex--) {
+      const ancestor = rows[ancestorIndex];
+      if (ancestor && ancestor.depth < ancestorDepth) {
+        if (starredIds.has(ancestor.line.id)) return false;
+        ancestorDepth = ancestor.depth;
+      }
+    }
+    return true;
+  });
+  const shortcuts: TreeRow<T>[] = [];
+  for (const root of roots) {
+    const rootIndex = rows.indexOf(root);
+    for (let index = rootIndex; index < rows.length; index++) {
+      const row = rows[index];
+      if (!row || (index > rootIndex && row.depth <= root.depth)) break;
+      let visible = index === rootIndex;
+      if (!visible) {
+        visible = true;
+        let ancestorDepth = row.depth;
+        for (
+          let ancestorIndex = index - 1;
+          ancestorIndex >= rootIndex && ancestorDepth > root.depth;
+          ancestorIndex--
+        ) {
+          const ancestor = rows[ancestorIndex];
+          if (ancestor && ancestor.depth < ancestorDepth) {
+            if (!ancestor.expanded) visible = false;
+            ancestorDepth = ancestor.depth;
+          }
+        }
+      }
+      shortcuts.push({ ...row, depth: row.depth - root.depth, visible });
+    }
+  }
+  return shortcuts;
+}

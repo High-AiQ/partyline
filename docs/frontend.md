@@ -188,6 +188,12 @@ not describe the attachment's available memory.
 Task rows also show `blocked` when the implementer reports a blocker. Task lines
 hide the manual process attachment panel because their staffing is server-owned.
 
+The conversation rail puts a person's starred lines in a `Starred` group above
+the regular hierarchy, preserving normal order inside each group. Stars are
+stored per account; `conversations_changed` refreshes the list across tabs. A
+starred child is shown with its ancestors expanded in the rail without changing
+the saved expansion choices.
+
 Jack cards use the adapter's `listens` capability (default true). Live listeners
 show peek; stopped listeners keep resume, start fresh and edit command. Non-listeners
 hide peek and offer restart alongside edit command when stopped. Restart reruns
