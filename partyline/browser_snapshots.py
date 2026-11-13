@@ -17,7 +17,17 @@ async def hello_payload(runtime, *identity):
     speech = await asyncio.to_thread(speech_snapshot, runtime.db)
     resources = await resource_snapshot(runtime, refresh_docker=False)  # runtime kicks after hello
     return {**identity_payload(*identity), 'speech_settings': speech.settings.model_dump(),
-            'resource_snapshot': resources}
+            'resource_snapshot': resources, 'restart_request': pending_restart(runtime)}
+
+
+def pending_restart(runtime) -> dict | None:
+    """Replay the instance-wide decision a person owes on every handshake.
+
+    Its live event is broadcast once, when filed; a tab that connects later must
+    still see it, and an explicit None clears a banner decided while it was away.
+    """
+    request = getattr(runtime, 'restart_request', None)
+    return request.model_dump(mode='json') if request is not None else None
 
 
 async def resource_snapshot(runtime, *, refresh_docker=True):

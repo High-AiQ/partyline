@@ -77,6 +77,8 @@ host usable, while the latter makes an OOM kill only the affected attachment.
    it; a machine credential can never approve its own restart. There is no requirement to wait for
    every participant to go idle first — a process caught mid-turn is recovered automatically (see
    below).
+   The pending request rides every websocket hello, on a line or on the account wire with no line
+   open, so a tab that connects after the filing still shows the banner even if nothing else loads.
 4. **Approval persists the plan and restarts the unit.** Approving a request persists an automatic
    reattach plan covering every live process on every line (`create_restart_plan`, `mode="automatic"`,
    `scope="all"`), warns every open tab that the server is going down, and schedules

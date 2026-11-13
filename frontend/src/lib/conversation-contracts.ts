@@ -18,15 +18,21 @@ export const ConversationStarResponseSchema = z.object({
 });
 export type ConversationStarResponse = z.infer<typeof ConversationStarResponseSchema>;
 
+/**
+ * The server owns these enums and can be a release ahead of or behind this bundle
+ * (a pulled checkout serves the new UI before the service restarts). An unknown
+ * value reads as absent rather than failing the row, the list, or a wire frame.
+ */
 export const ConversationSchema = z.object({
-  captain_mode: z.literal("orchestrator").optional(),
+  captain_mode: z.literal("orchestrator").optional().catch(undefined),
   default_review_policy: z.string().optional(),
   task_status: z
     .enum(["implementing", "idle", "in_review", "approved", "done", "blocked"])
     .nullable()
-    .optional(),
+    .optional()
+    .catch(null),
   task_round: z.number().int().nonnegative().nullable().optional(),
-  task_mode: z.enum(["full", "light", "express"]).nullable().optional(),
+  task_mode: z.enum(["full", "light", "express"]).nullable().optional().catch(null),
   task_root_name: z.string().nullable().optional(),
   task_implementer_name: z.string().nullable().optional(),
   task_reviewer_name: z.string().nullable().optional(),
@@ -45,3 +51,13 @@ export const ConversationSchema = z.object({
   starred: z.boolean().optional(),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
+
+/** One unreadable line drops only itself: a single bad row once emptied the whole rail. */
+export const ConversationListSchema = z.array(z.unknown()).transform((rows) =>
+  rows.flatMap((row) => {
+    const parsed = ConversationSchema.safeParse(row);
+    if (parsed.success) return [parsed.data];
+    console.warn("skipping a line the list could not read:", parsed.error.message);
+    return [];
+  }),
+);

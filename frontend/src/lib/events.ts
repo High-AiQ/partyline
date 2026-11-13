@@ -25,6 +25,11 @@ export const HelloEventSchema = z.object({
   handle: z.string(),
   speech_settings: AsrSettingsSchema.optional(),
   resource_snapshot: ResourceSnapshotSchema.optional(),
+  /** The instance-wide pending restart, replayed on every handshake; absent from older servers. */
+  restart_request: z
+    .lazy(() => RestartRequestSchema)
+    .nullable()
+    .optional(),
   build: z.string().optional(),
   // Required: an old tab must not retain a stale release badge after reconnect.
   version: z.string(),

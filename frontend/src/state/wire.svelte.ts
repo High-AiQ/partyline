@@ -1,5 +1,6 @@
 import { voicePresets } from "./voice-presets.svelte.js";
 import { resources } from "./resources.svelte.js";
+import { applyHelloPending } from "./room-pending-sync";
 /**
  * The wire: one WebSocket to one line, and an honest account of its health.
  *
@@ -189,6 +190,7 @@ class Wire {
         }
         if (payload.speech_settings) voicePresets.receive(payload.speech_settings);
         if (payload.resource_snapshot) resources.snapshot = payload.resource_snapshot;
+        applyHelloPending(payload, this.#handshakenFor === convId);
         onHandshake(payload);
         authenticationPhase = "initial";
         this.stopped = false;
