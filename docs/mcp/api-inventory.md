@@ -47,7 +47,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 19 | POST | `/api/attachments/{att_id}/compact` | partyline/compact_routes.py:compact_attachment (registration line 30) | M with `attach` | yes | see Set 2 |
 | 20 | DELETE | `/api/conversations/{conv_id}` | partyline/conversation_archive.py:archive_conversation (registration line 41) | H, or M lead with `archive` on a descendant | yes | see Set 2 |
 | 21 | GET | `/api/conversations` | partyline/conversation_routes.py:conversations (registration line 60) | H; M for visible lines | yes | see Set 2 |
-| 21a | PUT | `/api/conversations/{conv_id}/star` | partyline/conversation_stars.py:star_conversation (registration line 42) | H only | no | person-owned star preference |
+| 21a | PUT | `/api/conversations/{conv_id}/star` | partyline/conversation_stars.py:star_conversation (registration line 42) | H only | no | person-owned star preference; 409 on a line that has a parent (only top-level lines can be starred) |
 | 21b | DELETE | `/api/conversations/{conv_id}/star` | partyline/conversation_stars.py:unstar_conversation (registration line 46) | H only | no | person-owned star preference |
 | 22 | POST | `/api/conversations` | partyline/conversation_routes.py:create_conversation (registration line 71) | H only | no | only a person opens a top-level line |
 | 23 | GET | `/api/conversations/{conv_id}` | partyline/conversation_routes.py:conversation_detail (registration line 81) | M with `read` | yes | see Set 2 |

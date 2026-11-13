@@ -101,7 +101,10 @@ export function lineTree<T extends LiveLine>(
   });
 }
 
-/** Give each top-level starred line a depth-zero shortcut and its own subtree. */
+/**
+ * Give each starred top-level line a depth-zero shortcut and its own subtree.
+ * Only lines without a parent can be starred; a star left on a child is ignored.
+ */
 export function starredLineTree<T extends LiveLine>(
   lines: readonly T[],
   expanded: ReadonlySet<string>,
@@ -109,18 +112,7 @@ export function starredLineTree<T extends LiveLine>(
   starredIds: ReadonlySet<string>,
 ): TreeRow<T>[] {
   const rows = lineTree(lines, expanded, selectedId);
-  const roots = rows.filter((row, index) => {
-    if (!starredIds.has(row.line.id)) return false;
-    let ancestorDepth = row.depth;
-    for (let ancestorIndex = index - 1; ancestorIndex >= 0 && ancestorDepth > 0; ancestorIndex--) {
-      const ancestor = rows[ancestorIndex];
-      if (ancestor && ancestor.depth < ancestorDepth) {
-        if (starredIds.has(ancestor.line.id)) return false;
-        ancestorDepth = ancestor.depth;
-      }
-    }
-    return true;
-  });
+  const roots = rows.filter((row) => !row.line.parent_id && starredIds.has(row.line.id));
   const shortcuts: TreeRow<T>[] = [];
   for (const root of roots) {
     const rootIndex = rows.indexOf(root);

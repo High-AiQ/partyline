@@ -14,7 +14,8 @@ def starred_ids(db, user_id: int) -> set[str]:
 
 def add_star_flags(db, rows: list[dict], user_id: int | None) -> list[dict]:
     starred = starred_ids(db, user_id) if user_id is not None else set()
-    return [{**row, "starred": row["id"] in starred} for row in rows]
+    # Only top-level lines can be starred; a star left on a child before that rule is ignored.
+    return [{**row, "starred": row["id"] in starred and not row.get("parent_id")} for row in rows]
 
 
 def set_star(db, user_id: int, conv_id: str, starred: bool) -> bool:
@@ -37,8 +38,11 @@ def register_star_routes(app: FastAPI, runtime) -> None:
         principal = request_principal(request)
         if principal.user_id is None:
             raise HTTPException(403, "only a person can star a line")
-        if runtime.db.get_conversation(conv_id) is None:
+        line = runtime.db.get_conversation(conv_id)
+        if line is None:
             raise HTTPException(404, "conversation not found")
+        if starred and line["parent_id"]:
+            raise HTTPException(409, "only a top-level line can be starred, not a subline")
         changed = set_star(runtime.db, principal.user_id, conv_id, starred)
         if changed:
             await runtime.broadcast_all(ConversationsChangedEvent())

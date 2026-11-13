@@ -49,7 +49,11 @@
 
   let expanded = $state<Set<string>>(readExpandedLines());
   const starredIds = $derived(
-    new Set(room.conversations.filter((line) => line.starred && !line.archived_at).map((line) => line.id)),
+    new Set(
+      room.conversations
+        .filter((line) => line.starred && !line.parent_id && !line.archived_at)
+        .map((line) => line.id),
+    ),
   );
   const mainRows = $derived(lineTree(room.conversations, expanded, room.conversation?.id));
   const shortcutRows = $derived(

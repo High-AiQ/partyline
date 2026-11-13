@@ -2,6 +2,7 @@
   /**
    * One row of the rail: the line, its star, its subtree toggle and its ⋯.
    *
+   * Only a top-level line can be starred, so a child row has no star and no slot.
    * The star is a sibling of the row button, not a child: a button cannot hold a
    * button, and a click on the star must not open the line. It floats over an
    * empty slot reserved inside the row button, so the name's alignment never
@@ -39,9 +40,10 @@
   const indicators = $derived(screenStatus.indicators.filter((item) => item.conv_id === conversation.id));
   const chain = $derived(chapterMarker(conversation, room.conversations));
   const active = $derived(room.conversation?.id === conversation.id);
-  const starred = $derived(conversation.starred ?? false);
+  const starrable = $derived(!conversation.parent_id);
+  const starred = $derived(starrable && (conversation.starred ?? false));
   /** Where the star slot starts: the row padding plus the fixed-width things before it. */
-  const slotLeft = $derived(20 + Math.min(depth, 4) * 16 + (selecting ? 21 : 0) + (depth > 0 ? 18 : 0) + 15);
+  const slotLeft = $derived(20 + (selecting ? 21 : 0) + 15);
 </script>
 
 <div class="conv-row group relative flex items-stretch" class:menu-open={menuOpen}>
@@ -73,7 +75,7 @@
         >
       {/if}
     </span>
-    <span class="star-slot w-3 flex-none" aria-hidden="true"></span>
+    {#if starrable}<span class="star-slot w-3 flex-none" aria-hidden="true"></span>{/if}
     <span class="min-w-0 flex flex-col items-start gap-1">
       <span class="conv-name flex w-full min-w-0 items-center gap-1"
         ><TaskModeIcon line={conversation} /><ShareIcon {indicators} /><span
@@ -84,34 +86,34 @@
       <TaskStatusChip status={conversation.task_status} round={conversation.task_round} />
     </span>
   </button>
-  <button
-    type="button"
-    class="conv-star absolute top-0 flex h-[38px] w-8 items-center justify-center rounded-sm border-0 bg-transparent p-0 hover:bg-transparent hover:text-gold focus-visible:outline-2 focus-visible:outline-copper-hot {starred
-      ? 'text-gold'
-      : 'text-cream-faint'}"
-    style:left="{slotLeft - 10}px"
-    use:tooltip={{ label: starred ? "unstar line" : "star line" }}
-    aria-label="{starred ? 'Unstar' : 'Star'} {conversation.name}"
-    aria-pressed={starred}
-    onclick={(event) => {
-      event.stopPropagation();
-      void toggleConversationStar(room, conversation.id);
-    }}
-  >
-    <svg
-      class="star-glyph"
-      viewBox="0 0 16 16"
-      width="13"
-      height="13"
-      fill={starred ? "currentColor" : "none"}
-      stroke="currentColor"
-      stroke-width="1.4"
-      stroke-linejoin="round"
-      aria-hidden="true"
+  {#if starrable}<button
+      type="button"
+      class="conv-star absolute top-0 flex h-[38px] w-8 items-center justify-center rounded-sm border-0 bg-transparent p-0 hover:bg-transparent hover:text-gold focus-visible:outline-2 focus-visible:outline-copper-hot {starred
+        ? 'text-gold'
+        : 'text-cream-faint'}"
+      style:left="{slotLeft - 10}px"
+      use:tooltip={{ label: starred ? "unstar line" : "star line" }}
+      aria-label="{starred ? 'Unstar' : 'Star'} {conversation.name}"
+      aria-pressed={starred}
+      onclick={(event) => {
+        event.stopPropagation();
+        void toggleConversationStar(room, conversation.id);
+      }}
     >
-      <path d="M8 1.6 10 6l4.6.5-3.4 3.1 1 4.6L8 11.8l-4.2 2.4 1-4.6L1.4 6.5 6 6z" />
-    </svg>
-  </button>
+      <svg
+        class="star-glyph"
+        viewBox="0 0 16 16"
+        width="13"
+        height="13"
+        fill={starred ? "currentColor" : "none"}
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M8 1.6 10 6l4.6.5-3.4 3.1 1 4.6L8 11.8l-4.2 2.4 1-4.6L1.4 6.5 6 6z" />
+      </svg>
+    </button>{/if}
   {#if row.descendants > 0}
     <button
       type="button"

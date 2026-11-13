@@ -80,11 +80,11 @@ describe("starred conversation rail", () => {
     });
     try {
       room.conversations = room.conversations.map((line) =>
-        line.id === "child" || line.id === "other" ? { ...line, starred: true } : line,
+        line.id === "first" || line.id === "other" ? { ...line, starred: true } : line,
       );
       await tick();
       expect([...document.querySelectorAll(".conv-name")].map((name) => name.textContent.trim())).toEqual([
-        "Child",
+        "First",
         "Other",
         "First",
         "Other",
@@ -95,7 +95,7 @@ describe("starred conversation rail", () => {
       ]);
       expect(
         document
-          .querySelector<HTMLButtonElement>('[aria-label="Unstar Child"]')
+          .querySelector<HTMLButtonElement>('[aria-label="Unstar First"]')
           ?.getAttribute("aria-pressed"),
       ).toBe("true");
     } finally {
@@ -134,6 +134,33 @@ describe("starred conversation rail", () => {
       const slots = [...document.querySelectorAll(".star-slot")];
       expect(slots).toHaveLength(3);
       expect(new Set(slots.map((slot) => slot.className)).size).toBe(1);
+    } finally {
+      await unmount(list);
+    }
+  });
+
+  it("gives a child row no star control or slot, and ignores a stale child star in Starred", async () => {
+    const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
+    const kidLine = { ...base, id: "kid", name: "Kid", parent_id: "root", starred: true };
+    room.conversations = [{ ...base, id: "root", name: "Root" }, kidLine];
+    room.conversation = kidLine;
+    const list = mount(ConversationList, { target: document.body, props: props() });
+    try {
+      await tick();
+      // The stale star on the child makes no Starred group at all.
+      expect([...document.querySelectorAll("h2")]).toHaveLength(0);
+      const rowOf = (name: string) =>
+        [...document.querySelectorAll(".conv-row")].find(
+          (row) => row.querySelector(".conv-name")?.textContent.trim() === name,
+        );
+      const kid = rowOf("Kid");
+      const root = rowOf("Root");
+      if (!kid || !root) throw new Error("missing rows");
+      expect(kid.querySelector(".conv-star")).toBeNull();
+      expect(kid.querySelector(".star-slot")).toBeNull();
+      expect(kid.querySelector('[aria-label="child line"]')?.textContent).toBe("↳");
+      expect(root.querySelector(".conv-star")).not.toBeNull();
+      expect(document.querySelectorAll(".conv-star")).toHaveLength(1);
     } finally {
       await unmount(list);
     }
@@ -202,7 +229,7 @@ describe("starred conversation rail", () => {
       live_count: 0,
       parent_id: "root",
     };
-    room.conversations = [root, child];
+    room.conversations = [root, { ...child, starred: true }];
     room.conversation = child;
     const list = mount(ConversationList, {
       target: document.body,

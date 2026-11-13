@@ -70,25 +70,22 @@ describe("line tree", () => {
     ]);
     expect(rows.filter((row) => row.visible).map((row) => row.line.id)).toEqual(["root", "child", "sibling"]);
   });
-  it("puts a starred grandchild at depth zero without changing the main tree", () => {
+  it("ignores a star left on a child or grandchild: only roots form shortcuts", () => {
     const expanded = new Set<string>();
-    const starred = starredLineTree(lines, expanded, undefined, new Set(["grandchild"]));
-    const main = lineTree(lines, expanded);
-    expect(starred.map((row) => [row.line.id, row.depth])).toEqual([["grandchild", 0]]);
-    expect(main.filter((row) => row.visible).map((row) => [row.line.id, row.depth])).toEqual([
-      ["root", 0],
-      ["other", 0],
-    ]);
-  });
-  it("shows a nested star only inside its starred ancestor shortcut", () => {
+    expect(starredLineTree(lines, expanded, undefined, new Set(["child", "grandchild"]))).toEqual([]);
     const rows = starredLineTree(
       lines,
       new Set(["root", "child"]),
       undefined,
-      new Set(["root", "grandchild"]),
+      new Set(["root", "child", "grandchild"]),
     );
     expect(rows.filter((row) => row.depth === 0).map((row) => row.line.id)).toEqual(["root"]);
     expect(rows.find((row) => row.line.id === "grandchild")?.depth).toBe(2);
+    const main = lineTree(lines, expanded);
+    expect(main.filter((row) => row.visible).map((row) => [row.line.id, row.depth])).toEqual([
+      ["root", 0],
+      ["other", 0],
+    ]);
   });
   it("does not let one sibling's collapsed subtree hide another sibling's descendants", () => {
     const siblings = [
@@ -105,17 +102,6 @@ describe("line tree", () => {
       "b",
       "b-child",
     ]);
-  });
-  it("does not treat a starred sibling's descendant as nested beneath that star", () => {
-    const siblings = [
-      { id: "root", live_count: 0 },
-      { id: "a", parent_id: "root", live_count: 0 },
-      { id: "a-child", parent_id: "a", live_count: 0 },
-      { id: "b", parent_id: "root", live_count: 0 },
-      { id: "b-child", parent_id: "b", live_count: 0 },
-    ];
-    const rows = starredLineTree(siblings, new Set(), undefined, new Set(["a", "b-child"]));
-    expect(rows.filter((row) => row.depth === 0).map((row) => row.line.id)).toEqual(["a", "b-child"]);
   });
   it("expands the selection path in both the shortcut and unchanged main tree", () => {
     const selected = "grandchild";
