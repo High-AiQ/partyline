@@ -23,6 +23,29 @@ export function storeExpandedLines(expanded: ReadonlySet<string>): void {
   }
 }
 
+export type RailGroup = "starred" | "main";
+export const RAIL_GROUPS_STORAGE_KEY = "partyline_collapsed_rail_groups";
+const CollapsedGroupsSchema = z.array(z.enum(["starred", "main"]));
+
+export function readCollapsedGroups(): Set<RailGroup> {
+  try {
+    const parsed = CollapsedGroupsSchema.safeParse(
+      JSON.parse(localStorage.getItem(RAIL_GROUPS_STORAGE_KEY) ?? "[]") as unknown,
+    );
+    return new Set(parsed.success ? parsed.data : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function storeCollapsedGroups(collapsed: ReadonlySet<RailGroup>): void {
+  try {
+    localStorage.setItem(RAIL_GROUPS_STORAGE_KEY, JSON.stringify([...collapsed]));
+  } catch {
+    // The in-memory choice still works if storage is unavailable.
+  }
+}
+
 interface LiveLine extends ParentLinkedLine {
   live_count: number;
 }

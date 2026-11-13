@@ -8,7 +8,6 @@
    * would cost a row of it to repeat what this row already says.
    */
   import { room } from "../../state/room.svelte.js";
-  import { toggleConversationStar } from "../../state/conversation-star";
   import { dialogs } from "../../state/dialogs.svelte.js";
   import { layout } from "../../state/layout.svelte.js";
   import { isLive, latestJacks } from "../../lib/attachments";
@@ -22,9 +21,6 @@
   import { tooltip } from "../../lib/tooltip";
 
   const topic = $derived((room.conversation?.topic ?? "").trim());
-  const currentLine = $derived(
-    room.conversations.find((candidate) => candidate.id === room.conversation?.id) ?? room.conversation,
-  );
   /** Live jacks only: the badge answers "is anything running", not "how many
    *  rows are in the table". */
   const liveJacks = $derived(latestJacks(room.attachments).filter(isLive).length);
@@ -49,17 +45,6 @@
     class="min-w-0 max-w-[40%] flex-[0_1_auto] truncate font-serif text-[24px] font-normal text-cream italic"
     >{room.conversation?.name ?? "—"}</span
   >
-  {#if currentLine}
-    <button
-      type="button"
-      class="shrink-0 rounded border border-line bg-transparent px-2 py-1 text-[15px] leading-none text-copper-hot hover:bg-ink-3 focus-visible:outline-2 focus-visible:outline-copper-hot"
-      aria-label="{currentLine.starred ? 'Unstar' : 'Star'} {currentLine.name}"
-      aria-pressed={currentLine.starred}
-      use:tooltip={{ label: currentLine.starred ? "unstar line" : "star line" }}
-      onclick={() => void toggleConversationStar(room, currentLine.id)}
-      >{currentLine.starred ? "★" : "☆"}</button
-    >
-  {/if}
   {#if room.conversation}
     <!-- A button, not a span: it does something when clicked, so it should be
            reachable by keyboard and announced as an action. Styled back down to

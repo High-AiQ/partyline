@@ -192,7 +192,11 @@ The conversation rail puts a person's starred lines in a `Starred` group above
 the regular hierarchy, preserving normal order inside each group. Stars are
 stored per account; `conversations_changed` refreshes the list across tabs. A
 starred child is shown with its ancestors expanded in the rail without changing
-the saved expansion choices.
+the saved expansion choices. The star is a small inline button left of the line
+name (outlined when unstarred, filled `gold` when starred) on every row; it is the
+only place to star a line, so the line header has no star. The `Starred` and `Lines`
+headers collapse their group (remembered per browser in `localStorage`), and a
+starred line's subtree toggles through the same expansion state as the main list.
 
 Jack cards use the adapter's `listens` capability (default true). Live listeners
 show peek; stopped listeners keep resume, start fresh and edit command. Non-listeners
