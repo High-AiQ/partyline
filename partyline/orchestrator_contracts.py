@@ -174,3 +174,10 @@ class ShareRefOut(BaseModel):
 
 class AutoCleanIn(BaseModel):
     enabled: bool = False
+
+
+class EnvGapIn(BaseModel):
+    repository: str = Field(min_length=1, max_length=4096)
+    subpath: str = Field(default='.', max_length=1024)
+    what_failed: str = Field(min_length=1, max_length=2000)
+    tried: str = Field(min_length=1, max_length=2000)

@@ -28,6 +28,7 @@ SHORT = {
     "review_verdict": "Give the verdict on the requested review: approve or changes, with findings.",
     "request_review": "Hand a full task to review: sha, what, where. Refused on an express task.",
     "blocked": "Tell the root captain you are blocked, with the reason.",
+    "env_gap": "Report a review test environment gap to the root captain.",
     "waiting": "Tell the server a long command is running, so you are not called stalled.",
     "resume_work": "Say you resumed work after being blocked, with a note.",
     "deliver": "END an express task: report what and where as text; there is no SHA or review.",

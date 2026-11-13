@@ -87,14 +87,22 @@ def _move(db, conv_id: str, root: str, full: str) -> dict:
         _exclude(root, REVIEW_DIR)
         _git("worktree", "prune", cwd=root)
         _run(root, "worktree", "add", "--detach", path, full)
-    provision(path, sources_for(db, conv_id, root))
+    from .review_environments import changed_files, entries_for
+    try:
+        changed = changed_files(db, conv_id, root, full)
+        environments = entries_for(db, root, changed)
+        provision(path, sources_for(db, conv_id, root), changed, environments)
+    except ValueError as exc:
+        from .review_install_sandbox import DependencyError
+        raise DependencyError(str(exc)) from exc
     db._exec(
         "INSERT INTO review_worktrees(conv_id,sha,path,created_at) VALUES(?,?,?,?) "
         "ON CONFLICT(path) DO UPDATE SET conv_id=excluded.conv_id, sha=excluded.sha, "
         "created_at=excluded.created_at",
         (conv_id, full, path, time.time()),
     )
-    return {"repository": root, "sha": full, "path": path}
+    return {"repository": root, "sha": full, "path": path,
+            "test_commands": [{"subpath": e.subpath, "command": e.test_command} for e in environments]}
 
 
 def move_task_review_worktrees(db, conv_id: str, entries: list[tuple[str, str]],

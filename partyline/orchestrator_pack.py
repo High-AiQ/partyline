@@ -95,6 +95,8 @@ def task_pack(db, conv_id, role):
         f"{_root_sentence(db, conv_id, row['root_id'])}"
         f"{_workspace_sentence(db, conv_id, role)}"
         f'{RESOURCES}{FENCE}'
+        'When a reviewer reports an environment gap, prefer setup or test commands the implementer '
+        'already reported in its gates; use captain(op=review_env) to resolve it. '
         'The implementer follows the assigned goal and calls request_review(sha, what, where). '
         'request_review is the hand-off: the server staffs the reviewer and notifies it — '
         'never @mention review-<tag>/impl-<tag> handles, your task, or its line name, '

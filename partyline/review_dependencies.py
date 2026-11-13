@@ -12,6 +12,7 @@ from .review_install_sandbox import (DependencyError, cache_location, install_ar
                                      run_installer)
 
 LOCKS = {
+    "uv.lock": ("uv", "sync", "--frozen", "--all-extras", "--all-groups"),
     "package-lock.json": ("npm", "ci", "--prefer-offline", "--ignore-scripts"),
     "npm-shrinkwrap.json": ("npm", "ci", "--prefer-offline", "--ignore-scripts"),
     "pnpm-lock.yaml": ("pnpm", "install", "--frozen-lockfile", "--prefer-offline",
@@ -120,13 +121,48 @@ def _link_install(folder: str, path: str, sources: list[str], lock: str) -> bool
     return False
 
 
-def provision(path: str, sources: list[str] | None = None) -> None:
+def provision(path: str, sources: list[str] | None = None,
+              changed: list[str] | None = None, overrides=None) -> None:
     """Link protected matching installs or install each locked package locally."""
     try:
+        selected = None
+        custom = {}
+        if changed is not None:
+            selected = set()
+            overrides = overrides or []
+            for entry in overrides:
+                folder = os.path.join(path, entry.subpath)
+                if not Path(folder).resolve().is_relative_to(Path(path).resolve()):
+                    raise ValueError(f"environment subpath escapes review checkout: {entry.subpath}")
+                if entry.setup_command:
+                    custom[folder] = entry.setup_command
+            for name in changed:
+                parts = Path(name).parts
+                matches = [e for e in overrides
+                           if parts[:len(Path(e.subpath).parts)] == Path(e.subpath).parts]
+                entry = max(matches, key=lambda e: len(Path(e.subpath).parts)) if matches else None
+                if entry and entry.setup_command:
+                    continue
+                folder = Path(path, name).parent
+                while folder.is_relative_to(path):
+                    if any((folder / lock).is_file() for lock in LOCKS):
+                        selected.add(str(folder))
+                        break
+                    if folder == Path(path):
+                        break
+                    folder = folder.parent
+            for folder, command in custom.items():
+                tmp = local_cache(path, "tmp")
+                env = dict(os.environ, TMPDIR=tmp, TMP=tmp, TEMP=tmp)
+                result = run_installer(install_argv(path, ("/bin/sh", "-c", command), os.path.dirname(tmp)),
+                                       cwd=folder, timeout=300, env=env)
+                if result.returncode:
+                    detail = (result.stderr or result.stdout).strip()[-1000:]
+                    raise ValueError(f"setup in {folder} failed: {detail}")
         for folder, dirs, files in os.walk(path, followlinks=False):
-            dirs[:] = [d for d in dirs if d not in ("node_modules", ".git")
+            dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", ".venv")
                        and not os.path.islink(os.path.join(folder, d))]
-            if "package.json" not in files:
+            if selected is not None and folder not in selected:
                 continue
             locks = [name for name in LOCKS if name in files]
             if not locks:
@@ -135,7 +171,8 @@ def provision(path: str, sources: list[str] | None = None) -> None:
                 locks.remove("package-lock.json")  # npm gives shrinkwrap precedence
             if len(locks) != 1:
                 raise ValueError(f"multiple lockfiles in {folder}")
-            if _link_install(folder, path, sources or [], locks[0]):
+            if (locks[0] in ("package-lock.json", "npm-shrinkwrap.json")
+                    and _link_install(folder, path, sources or [], locks[0])):
                 continue
             command = LOCKS[locks[0]]
             if locks[0] == "yarn.lock":
@@ -145,12 +182,18 @@ def provision(path: str, sources: list[str] | None = None) -> None:
             env = dict(os.environ, YARN_ENABLE_SCRIPTS="0")
             tmp = local_cache(path, "tmp")
             env.update(TMPDIR=tmp, TMP=tmp, TEMP=tmp)
-            if locks[0] in ("package-lock.json", "npm-shrinkwrap.json"):
+            if locks[0] == "uv.lock":
+                env["UV_CACHE_DIR"] = cache_location(path, "uv", ".cache/uv")
+                env["UV_LINK_MODE"] = "copy"
+                env["UV_PROJECT_ENVIRONMENT"] = os.path.join(folder, ".venv")
+                if not Path(env["UV_PROJECT_ENVIRONMENT"]).resolve().is_relative_to(Path(path).resolve()):
+                    raise ValueError("dependency directory escapes review checkout")
+            elif locks[0] in ("package-lock.json", "npm-shrinkwrap.json"):
                 env["npm_config_cache"] = cache_location(path, "npm", ".npm")
             elif locks[0] == "pnpm-lock.yaml":
                 store = cache_location(path, "pnpm", ".local/share/pnpm/store")
                 command = (*command, "--store-dir", store)
-            else:
+            elif locks[0] == "yarn.lock":
                 cache = ".yarn/berry/cache" if "--immutable" in command else ".cache/yarn"
                 env["YARN_CACHE_FOLDER"] = cache_location(path, "yarn", cache)
             result = run_installer(install_argv(path, command, os.path.dirname(tmp)),
@@ -158,6 +201,13 @@ def provision(path: str, sources: list[str] | None = None) -> None:
             if result.returncode:
                 detail = (result.stderr or result.stdout).strip()[-1000:]
                 raise ValueError(f"{locks[0]} install in {folder} failed: {detail}")
+            if locks[0] == "uv.lock":
+                venv = os.path.join(folder, ".venv")
+                if not os.path.realpath(venv).startswith(os.path.realpath(path) + os.sep):
+                    raise ValueError(f"dependency directory escapes review checkout: {venv}")
+                continue
+            if locks[0] not in ("package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock"):
+                continue
             modules = os.path.join(folder, "node_modules")
             if not os.path.isdir(modules):
                 os.makedirs(modules)

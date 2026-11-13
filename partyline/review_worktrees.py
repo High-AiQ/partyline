@@ -125,7 +125,13 @@ def create_review_worktree(db, conv_id: str, sha: str, repository: str = "") -> 
                 409, f"cannot create the review worktree: {detail[-1] if detail else 'git failed'}"
             )
     from .review_dependencies import provision, sources_for
-    provision(path, sources_for(db, conv_id, root))
+    from .review_environments import changed_files, entries_for
+    from .review_install_sandbox import DependencyError
+    try:
+        changed = changed_files(db, conv_id, root, full)
+        provision(path, sources_for(db, conv_id, root), changed, entries_for(db, root, changed))
+    except ValueError as exc:
+        raise DependencyError(str(exc)) from exc
     created_at = time.time()
     db._exec(
         "INSERT INTO review_worktrees(conv_id,sha,path,created_at) VALUES(?,?,?,?) "
