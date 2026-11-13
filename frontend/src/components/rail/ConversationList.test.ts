@@ -8,6 +8,7 @@ import * as starState from "../../state/conversation-star";
 
 afterEach(() => {
   room.conversations = [];
+  room.conversation = null;
   document.body.replaceChildren();
 });
 
@@ -75,8 +76,12 @@ describe("starred conversation rail", () => {
         "Child",
         "Other",
         "First",
+        "Other",
       ]);
-      expect(document.querySelector("h2")?.textContent).toBe("Starred");
+      expect([...document.querySelectorAll("h2")].map((heading) => heading.textContent.trim())).toEqual([
+        "Starred",
+        "Lines",
+      ]);
       expect(
         document
           .querySelector<HTMLButtonElement>('[aria-label="Unstar Child"]')
@@ -120,6 +125,46 @@ describe("starred conversation rail", () => {
     } finally {
       await unmount(list);
       vi.restoreAllMocks();
+    }
+  });
+
+  it("highlights the selected line in both the starred shortcut and main tree", async () => {
+    const root = {
+      id: "root",
+      name: "Root",
+      topic: "",
+      created_at: 1,
+      archived_at: null,
+      live_count: 0,
+      starred: true,
+    };
+    const child = {
+      id: "child",
+      name: "Child",
+      topic: "",
+      created_at: 2,
+      archived_at: null,
+      live_count: 0,
+      parent_id: "root",
+    };
+    room.conversations = [root, child];
+    room.conversation = child;
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: {
+        onmanagement: vi.fn(),
+        onrename: vi.fn(),
+        oncloseprocesses: vi.fn(),
+        ondelete: vi.fn(),
+      },
+    });
+    try {
+      await tick();
+      expect(
+        [...document.querySelectorAll(".conv.active .conv-name")].map((name) => name.textContent.trim()),
+      ).toEqual(["Child", "Child"]);
+    } finally {
+      await unmount(list);
     }
   });
 });

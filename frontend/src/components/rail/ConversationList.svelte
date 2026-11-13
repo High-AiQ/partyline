@@ -13,7 +13,8 @@
   import TaskStatusChip from "./TaskStatusChip.svelte";
   import TaskModeIcon from "./TaskModeIcon.svelte";
   import LineMenu from "./LineMenu.svelte";
-  import { lineTree, readExpandedLines, starredFirst, storeExpandedLines } from "../../lib/line-tree";
+  import { lineTree, readExpandedLines, starredLineTree, storeExpandedLines } from "../../lib/line-tree";
+  import type { TreeRow } from "../../lib/line-tree";
   import { toggleSelection } from "../../lib/bulk-select";
   import { tooltip } from "../../lib/tooltip";
   import type { Conversation } from "../../lib/contracts";
@@ -31,6 +32,13 @@
   interface MenuState {
     anchor: HTMLButtonElement;
     conversation: Conversation;
+    rowKey: string;
+  }
+
+  interface GroupedRow extends TreeRow<Conversation> {
+    group: "starred" | "main";
+    key: string;
+    groupIndex: number;
   }
 
   let { onrename, onmanagement, oncloseprocesses, ondelete, onarchivemany }: Props = $props();
@@ -40,9 +48,24 @@
   const starredIds = $derived(
     new Set(room.conversations.filter((line) => line.starred && !line.archived_at).map((line) => line.id)),
   );
-  const rows = $derived(
-    starredFirst(lineTree(room.conversations, expanded, room.conversation?.id, starredIds), starredIds),
+  const mainRows = $derived(lineTree(room.conversations, expanded, room.conversation?.id));
+  const shortcutRows = $derived(
+    starredLineTree(room.conversations, expanded, room.conversation?.id, starredIds),
   );
+  const rows = $derived.by((): GroupedRow[] => [
+    ...shortcutRows.map((row, groupIndex) => ({
+      ...row,
+      group: "starred" as const,
+      key: `starred:${row.line.id}`,
+      groupIndex,
+    })),
+    ...mainRows.map((row, groupIndex) => ({
+      ...row,
+      group: "main" as const,
+      key: `main:${row.line.id}`,
+      groupIndex,
+    })),
+  ]);
   const visibleRows = $derived(rows.filter((row) => row.visible));
 
   function toggleTree(id: string): void {
@@ -66,11 +89,11 @@
   /** `{anchor, conversation}` while a menu is open, else null. */
   let menu = $state<MenuState | null>(null);
 
-  function toggle(event: MouseEvent, conversation: Conversation): void {
+  function toggle(event: MouseEvent, conversation: Conversation, rowKey: string): void {
     event.stopPropagation();
     if (!(event.currentTarget instanceof HTMLButtonElement)) return;
     const anchor = event.currentTarget;
-    menu = menu?.anchor === anchor ? null : { anchor, conversation };
+    menu = menu?.anchor === anchor ? null : { anchor, conversation, rowKey };
   }
 </script>
 
@@ -104,17 +127,23 @@
 {/if}
 
 <nav id="convs" class="min-h-0 flex-1 overflow-y-auto py-2.5" aria-label="lines">
-  {#each visibleRows as { line: conversation, depth, descendants, liveDescendants, expanded: isExpanded, forced }, index (conversation.id)}
-    {#if index === 0 && starredIds.has(conversation.id)}
+  {#each visibleRows as row (row.key)}
+    {@const conversation = row.line}
+    {@const depth = row.depth}
+    {@const descendants = row.descendants}
+    {@const liveDescendants = row.liveDescendants}
+    {@const isExpanded = row.expanded}
+    {@const forced = row.forced}
+    {#if row.groupIndex === 0 && row.group === "starred"}
       <h2 class="px-5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-cream-faint">
         Starred
       </h2>
-    {:else if index > 0 && starredIds.has(conversation.id) && !starredIds.has(visibleRows[index - 1]?.line.id ?? "")}
+    {:else if row.groupIndex === 0 && row.group === "main" && shortcutRows.length > 0}
       <h2 class="px-5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-cream-faint">
-        Starred
+        Lines
       </h2>
     {/if}
-    {@const open = menu?.conversation.id === conversation.id}
+    {@const open = menu?.rowKey === row.key}
     <div class="conv-row group relative flex items-stretch" class:menu-open={open}>
       <button
         class="conv relative flex min-w-0 w-full flex-1 cursor-pointer items-center gap-2 border-0 p-[9px] pl-5 text-left text-[13.5px] [font-family:inherit] {room
@@ -209,7 +238,7 @@
             aria-label="line actions for {conversation.name}"
             aria-expanded={open}
             onclick={(event) => {
-              toggle(event, conversation);
+              toggle(event, conversation, row.key);
             }}>⋯</button
           >
         {/if}

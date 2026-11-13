@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   lineTree,
   readExpandedLines,
-  starredFirst,
+  starredLineTree,
   storeExpandedLines,
   LINE_TREE_STORAGE_KEY,
 } from "./line-tree";
@@ -57,21 +57,47 @@ describe("line tree", () => {
     expect(rows.slice(0, 2).every((row) => row.expanded)).toBe(true);
     expect(expanded.size).toBe(0);
   });
-  it("shows a starred child through collapsed ancestors and pins stars in normal order", () => {
-    const rows = lineTree(lines, new Set(), undefined, new Set(["grandchild", "other"]));
-    expect(rows.filter((row) => row.visible).map((row) => row.line.id)).toEqual([
+  it("keeps a starred parent's expanded subtree inside the Starred group", () => {
+    const rows = starredLineTree(lines, new Set(["root"]), undefined, new Set(["root"]));
+    expect(rows.map((row) => [row.line.id, row.depth])).toEqual([
+      ["root", 0],
+      ["child", 1],
+      ["grandchild", 2],
+      ["sibling", 1],
+    ]);
+    expect(rows.filter((row) => row.visible).map((row) => row.line.id)).toEqual(["root", "child", "sibling"]);
+  });
+  it("puts a starred grandchild at depth zero without changing the main tree", () => {
+    const expanded = new Set<string>();
+    const starred = starredLineTree(lines, expanded, undefined, new Set(["grandchild"]));
+    const main = lineTree(lines, expanded);
+    expect(starred.map((row) => [row.line.id, row.depth])).toEqual([["grandchild", 0]]);
+    expect(main.filter((row) => row.visible).map((row) => [row.line.id, row.depth])).toEqual([
+      ["root", 0],
+      ["other", 0],
+    ]);
+  });
+  it("shows a nested star only inside its starred ancestor shortcut", () => {
+    const rows = starredLineTree(
+      lines,
+      new Set(["root", "child"]),
+      undefined,
+      new Set(["root", "grandchild"]),
+    );
+    expect(rows.filter((row) => row.depth === 0).map((row) => row.line.id)).toEqual(["root"]);
+    expect(rows.find((row) => row.line.id === "grandchild")?.depth).toBe(2);
+  });
+  it("expands the selection path in both the shortcut and unchanged main tree", () => {
+    const selected = "grandchild";
+    const expanded = new Set<string>();
+    const starred = starredLineTree(lines, expanded, selected, new Set(["root"]));
+    const main = lineTree(lines, expanded, selected);
+    expect(starred.filter((row) => row.visible).map((row) => row.line.id)).toEqual([
       "root",
       "child",
       "grandchild",
       "sibling",
-      "other",
     ]);
-    expect(starredFirst(rows, new Set(["other", "grandchild"])).map((row) => row.line.id)).toEqual([
-      "grandchild",
-      "other",
-      "root",
-      "child",
-      "sibling",
-    ]);
+    expect(main.filter((row) => row.visible).map((row) => row.line.id)).toEqual(lines.map((line) => line.id));
   });
 });

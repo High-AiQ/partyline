@@ -42,7 +42,6 @@ export function lineTree<T extends LiveLine>(
   lines: readonly T[],
   expanded: ReadonlySet<string>,
   selectedId?: string,
-  pinnedIds: ReadonlySet<string> = new Set(),
 ): TreeRow<T>[] {
   const ordered = orderedLines(lines);
   const forced = new Set<string>();
@@ -53,17 +52,6 @@ export function lineTree<T extends LiveLine>(
     if (ancestor && ancestor.depth < selectedDepth) {
       forced.add(ancestor.line.id);
       selectedDepth = ancestor.depth;
-    }
-  }
-  for (const pinnedId of pinnedIds) {
-    const pinnedIndex = ordered.findIndex((row) => row.line.id === pinnedId);
-    let depth = ordered[pinnedIndex]?.depth ?? 0;
-    for (let i = pinnedIndex - 1; i >= 0 && depth > 0; i--) {
-      const ancestor = ordered[i];
-      if (ancestor && ancestor.depth < depth) {
-        forced.add(ancestor.line.id);
-        depth = ancestor.depth;
-      }
     }
   }
   return ordered.map(({ line, depth }, index) => {
@@ -90,12 +78,44 @@ export function lineTree<T extends LiveLine>(
   });
 }
 
-/** Keep each group in the rail's ordinary hierarchy order. */
-export function starredFirst<T extends { line: { id: string } }>(
-  rows: readonly T[],
+/** Give each top-level starred line a depth-zero shortcut and its own subtree. */
+export function starredLineTree<T extends LiveLine>(
+  lines: readonly T[],
+  expanded: ReadonlySet<string>,
+  selectedId: string | undefined,
   starredIds: ReadonlySet<string>,
-): T[] {
-  return [...rows].sort(
-    (left, right) => Number(starredIds.has(right.line.id)) - Number(starredIds.has(left.line.id)),
-  );
+): TreeRow<T>[] {
+  const rows = lineTree(lines, expanded, selectedId);
+  const roots = rows.filter((row, index) => {
+    if (!starredIds.has(row.line.id)) return false;
+    for (let ancestorIndex = index - 1; ancestorIndex >= 0; ancestorIndex--) {
+      const ancestor = rows[ancestorIndex];
+      if (ancestor && ancestor.depth < row.depth) {
+        if (starredIds.has(ancestor.line.id)) return false;
+        if (ancestor.depth === 0) break;
+      }
+    }
+    return true;
+  });
+  const shortcuts: TreeRow<T>[] = [];
+  for (const root of roots) {
+    const rootIndex = rows.indexOf(root);
+    for (let index = rootIndex; index < rows.length; index++) {
+      const row = rows[index];
+      if (!row || (index > rootIndex && row.depth <= root.depth)) break;
+      let visible = index === rootIndex;
+      if (!visible) {
+        visible = true;
+        for (let ancestorIndex = rootIndex; ancestorIndex < index; ancestorIndex++) {
+          const ancestor = rows[ancestorIndex];
+          if (ancestor && ancestor.depth < row.depth && !ancestor.expanded) {
+            visible = false;
+            break;
+          }
+        }
+      }
+      shortcuts.push({ ...row, depth: row.depth - root.depth, visible });
+    }
+  }
+  return shortcuts;
 }
