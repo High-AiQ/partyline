@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 
 from partyline.db import Db
-from partyline.hierarchy import set_parent
+from partyline.conversation_contracts import ConversationResponse
+from partyline.hierarchy import create_child_conversation, set_parent
 from partyline.role_delivery import _instructions, current_role
 
 
@@ -36,3 +37,20 @@ class RetireManagerModeTest(unittest.TestCase):
                                 "VALUES('new','New',0)")
                 self.assertEqual(db.get_conversation('new')['captain_mode'], 'orchestrator')
                 db.close()
+
+    def test_child_creation_does_not_depend_on_the_column_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Db(Path(directory) / 'db.sqlite')
+            self.addCleanup(db.close)
+            db.create_conversation('root', 'Root')
+            # Simulate a SQLite build that declined the writable_schema rewrite.
+            db.conn.execute('PRAGMA writable_schema=ON')
+            db.conn.execute("UPDATE sqlite_schema SET sql=replace(sql, \"DEFAULT 'orchestrator'\", "
+                            "\"DEFAULT 'manager_tree'\") WHERE name='conversations' AND type='table'")
+            db.conn.execute('PRAGMA writable_schema=RESET')
+            db.conn.execute("INSERT INTO conversations(id,name,created_at) VALUES('probe','Probe',0)")
+            self.assertEqual(db.get_conversation('probe')['captain_mode'], 'manager_tree')
+            self.assertEqual(db.create_conversation('new-root', 'New root')['captain_mode'], 'orchestrator')
+            child = create_child_conversation(db, 'root', 'child', 'Child')
+            self.assertEqual(child['captain_mode'], 'orchestrator')
+            self.assertEqual(ConversationResponse.model_validate(child).captain_mode, 'orchestrator')
