@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-13 — Rotation is not staffing
+
+The false assumption was that restarting an existing process for context hygiene must
+revalidate its staffing traits. A changed or ambiguous preset then blocked rotation of a
+person-attached process. Rotation preserves the attachment and validates its command and
+working directory without granting a new role; agent-initiated resumes still enforce the
+staffing gate. Tests: `tests/test_compaction_rotation.py`, `tests/test_helper_resume_roles.py`.
+
 ## 2026-11-13 — A banner that loads after the list cannot rescue a broken list
 
 The false assumption was that the restart banner reaches every tab. Its live event is sent once, at

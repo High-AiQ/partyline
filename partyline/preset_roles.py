@@ -18,8 +18,7 @@ def require_role(preset, role, *, name=None):
     field, label = ROLE_TRAITS[role]
     if preset is None:
         raise HTTPException(403, f"preset '{name or 'unknown'}' cannot be staffed as {role}: "
-                            f'a uniquely matching preset with {label} checked is required; '
-                            'a person can change checkboxes in Settings → Presets')
+                            'no uniquely matching preset was found')
     if not coerce_traits(preset)[field]:
         raise HTTPException(403, f"preset '{preset['name']}' cannot be staffed as {role}: "
                             f'{label} is not checked; a person can change its checkboxes '
@@ -36,12 +35,10 @@ def named_preset(db, name):
 
 def require_named_role(db, name, role):
     matches = [p for p in db.list_presets() if p['name'] == name]
-    try:
-        return require_role(matches[0] if len(matches) == 1 else None, role, name=name)
-    except HTTPException as exc:
-        if len(matches) != 1:
-            raise HTTPException(400, exc.detail) from exc
-        raise
+    if len(matches) != 1:
+        detail = 'not found' if not matches else 'matches several presets'
+        raise HTTPException(400, f"preset '{name}' {detail}")
+    return require_role(matches[0], role, name=name)
 
 
 def attachment_preset(db, att, presets=None):
@@ -65,12 +62,34 @@ def attachment_preset(db, att, presets=None):
     return matches[0] if len(matches) == 1 else None
 
 
+def require_attachment_role(db, att, role, presets=None):
+    presets = db.list_presets() if presets is None else presets
+    preset = attachment_preset(db, att, presets)
+    if preset is None:
+        recorded = att.get('preset')
+        if recorded:
+            hits = [p for p in presets if p['name'].lower() == recorded.lower()]
+            detail = (f"several presets match recorded preset '{recorded}'" if len(hits) > 1
+                      else f"recorded preset '{recorded}' not found")
+        else:
+            hits = []
+            for p in presets:
+                try:
+                    if p['adapter'] == att['adapter'] and shlex.split(p['command']) == list(att['command']):
+                        hits.append(p)
+                except ValueError:
+                    continue
+            detail = ('several presets match this process command' if len(hits) > 1
+                      else 'command differs from every preset for this adapter')
+        raise HTTPException(403, f'no unique preset matches this process: {detail}')
+    return require_role(preset, role)
+
+
 def require_captain_assignment(db, conv_id, ident, before, *, person=False):
     if not person and ident and (not before or before['id'] != ident):
         target = db.get_attachment(ident)
         if target and target['conv_id'] == conv_id:
-            require_role(attachment_preset(db, target), 'captain',
-                         name=target.get('preset') or target['name'])
+            require_attachment_role(db, target, 'captain')
 
 
 def is_helper(att):
@@ -105,12 +124,12 @@ def require_resume(db, ident, *, person=False):
             # non-task, non-helper process fails closed: an agent resuming it
             # needs the same Fast implementer preset it would to attach one.
             role = 'implementer'
-        require_role(attachment_preset(db, att), role, name=att.get('preset') or att['name'])
+        require_attachment_role(db, att, role)
         return role
 
 
 def seat_captain(db, att):
-    require_role(attachment_preset(db, att), 'captain', name=att.get('preset') or att['name'])
+    require_attachment_role(db, att, 'captain')
     with db.lock:
         changed = db.conn.execute(
             'UPDATE attachments SET is_lead=1 WHERE id=? AND NOT EXISTS '

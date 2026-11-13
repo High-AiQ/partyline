@@ -106,7 +106,7 @@ class ReplaceAttachmentTest(unittest.TestCase):
         self.db.delete_preset('fixture')
         response = self.replace(att_id='cap', headers=self.captain_token)
         self.assertEqual(response.status_code, 403, response.text)
-        self.assertIn('Can manage a line', response.text)
+        self.assertIn('command differs from every preset', response.text)
         self.assertIn('cap', self.runtime.live)
 
     def test_replacement_keeps_the_recorded_preset(self):

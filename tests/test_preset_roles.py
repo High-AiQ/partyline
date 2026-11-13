@@ -52,7 +52,7 @@ class PresetRolesTest(unittest.TestCase):
                 require_named_role(SimpleNamespace(list_presets=lambda rows=rows: rows), 'sample', 'reviewer')
             self.assertEqual(error.exception.status_code, 400)
             self.assertIn('sample', error.exception.detail)
-            self.assertIn('Can manage a line', error.exception.detail)
+            self.assertIn('not found' if not rows else 'several presets', error.exception.detail)
 
     def test_recorded_preset_retains_its_traits_after_command_edit(self):
         preset = {'name': 'sample', 'adapter': 'fake', 'command': 'fake --new',
@@ -122,7 +122,7 @@ class PresetRolesTest(unittest.TestCase):
         # Memory and write-set approvals resume live processes; server restart
         # recovery also continues live processes, rather than staffing new ones.
         boundaries = {
-            'attachment_start.py': {'start_attachment': {'require_role'}},
+            'attachment_start.py': {'start_attachment': {'require_attachment_role'}},
             'orchestrator_staff.py': {'spawn': {'require_named_role'},
                                       'restart': {'require_named_role'},
                                       'ensure_reviewer': {'require_named_role'}},
@@ -130,15 +130,16 @@ class PresetRolesTest(unittest.TestCase):
             'orchestrator_reopen.py': {'reopen_task': {'require_named_role'}},
             'orchestrator_revive.py': {'restart_implementer': {'require_named_role'}},
             'hierarchy_routes.py': {'appoint_lead': {'require_captain_assignment'}},
-            'captain_handover.py': {'accept': {'require_role'}},
+            'captain_handover.py': {'accept': {'require_attachment_role'}},
             'conversation_routes.py': {'attach': {'require_role', 'start_staffed'}},
             'server.py': {'resume_attachment': {'require_resume'}},
             'attachment_lifecycle_routes.py': {'_start_replacement': {'require_resume'},
                                                 'replace_attachment': {'require_resume'}},
             'preset_roles.py': {'require_named_role': {'require_role'},
-                                'require_captain_assignment': {'require_role'},
-                                'require_resume': {'require_role', 'require_named_role'},
-                                'seat_captain': {'require_role'}},
+                                'require_captain_assignment': {'require_attachment_role'},
+                                'require_resume': {'require_attachment_role', 'require_named_role'},
+                                'seat_captain': {'require_attachment_role'},
+                                'require_attachment_role': {'require_role'}},
             'orchestrator_store.py': {'validate_policy': {'require_named_role'}},
         }
         for filename, functions in boundaries.items():

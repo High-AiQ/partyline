@@ -227,10 +227,10 @@ def register_conversation_routes(
         if auto_lead:
             deny_unless(db, principal, conv_id, 'appoint_lead')
         if not is_human(principal):
-            from .preset_roles import attachment_preset, require_named_role, require_role
+            from .preset_roles import require_attachment_role, require_named_role, require_role
             selected = (require_named_role(db, body.preset_name, role) if body.preset_name else
-                        attachment_preset(db, {'name': body.name, 'adapter': body.adapter,
-                                               'command': command}))
+                        require_attachment_role(db, {'name': body.name, 'adapter': body.adapter,
+                                                     'command': command}, role))
             if body.preset_name:
                 import shlex
                 try:
