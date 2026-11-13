@@ -115,8 +115,11 @@ function parseHumanSource(source: string, parser: Marked): string {
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (!(node instanceof Element)) return;
   if (node.tagName === "A" && node.hasAttribute("href")) {
-    node.setAttribute("target", "_blank");
-    node.setAttribute("rel", "noopener noreferrer");
+    // A line link (`#/c/<id>`, as "continued in" notices carry) opens in this tab.
+    if (!node.getAttribute("href")?.startsWith("#/c/")) {
+      node.setAttribute("target", "_blank");
+      node.setAttribute("rel", "noopener noreferrer");
+    }
   }
   for (const attribute of [...node.attributes]) {
     if (
@@ -166,7 +169,8 @@ const PURIFY_CONFIG = {
     "td",
   ],
   ALLOWED_ATTR: ["href", "class", "target", "rel", "data-code-language", "data-code-source", "data-math"],
-  ALLOWED_URI_REGEXP: /^(?:https?|mailto):/i,
+  // `#/c/<id>` is a line link: chapter notices point at lines this way.
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|#\/c\/[^\s"<>]+$)/i,
   RETURN_DOM_FRAGMENT: true,
 } as const satisfies DomPurifyConfig;
 
