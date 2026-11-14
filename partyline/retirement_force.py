@@ -96,11 +96,11 @@ def _remove(state):
                 if not owner:
                     raise OSError("nested worktree registration changed")
                 remove_directory(full, owner)
-                git(owner, "worktree", "remove", "--force", full)
+                git(owner, "worktree", "remove", "--force", "--force", full)
         remove_directory(state["cwd"], state["root"])
     except OSError as exc:
         raise HTTPException(409, "worktree removal did not complete; registration retained") from exc
-    git(state["root"], "worktree", "remove", "--force", state["cwd"])
+    git(state["root"], "worktree", "remove", "--force", "--force", state["cwd"])
     if owned:
         git(state["root"], "update-ref", "-d", f"refs/heads/{state['branch']}", owned)
     return True

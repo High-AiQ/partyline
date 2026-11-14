@@ -23,6 +23,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .auth_guard import request_principal
+from .worktree_recovery import add_worktree, locked_paths, remove_registration
 from .line_worktree import _exclude, _git, rev
 from .machine_scope import deny_unless
 from .nested_repositories import keep_reason
@@ -45,9 +46,7 @@ _MERGED_NAME = re.compile(r"[0-9a-f]{40}-onto-[0-9a-f]{40}")
 class ScratchWorktreeIn(BaseModel):
     sha: str = Field(min_length=4, max_length=64)
     repository: str = Field(default="", max_length=4096)
-    # 5.5: a trial merge — the checkout starts at this ref as the host sees
-    # it, then the candidate SHA is merged in. Conflicts abort the merge and
-    # answer 409 with the conflicting paths; nothing is left half-merged.
+    # Trial merges abort on conflict and return the conflicting paths.
     merge_onto: str = Field(default="", max_length=256)
 
 
@@ -128,7 +127,7 @@ def create_scratch_worktree(db, conv_id: str, sha: str, repository: str = "",
     if not os.path.isdir(path):
         _git("worktree", "prune", cwd=root)
         base = onto_sha or full
-        done = _git("worktree", "add", "--detach", path, base, cwd=root)
+        done = add_worktree(root, path, "--detach", path, base, git=_git)
         if done.returncode != 0:
             detail = (done.stderr or "").strip().splitlines()
             raise ReviewError(
@@ -174,7 +173,10 @@ def list_scratch_worktrees(db, conv_id: str) -> list[dict]:
 def remove_scratch_path(path: str) -> bool:
     """Delete one scratch checkout, git first; False if it failed or holds a repository."""
     if not os.path.isdir(path):
-        return True  # already gone by hand; only the record is stale
+        marker = f"/{SCRATCH_DIR}/"
+        if marker in path:
+            remove_registration(path.split(marker, 1)[0], path)
+        return True
     if keep_reason(path):
         return False
     marker = f"/{SCRATCH_DIR}/"
@@ -217,22 +219,18 @@ def prune_scratch_worktrees(db, conv_id: str) -> int:
 
 
 def sweep_scratch_worktrees(db, root: str) -> None:
-    """Startup sweep for one repository's ``.scratch`` directory.
-
-    Same contract as the review sweep: only full-SHA directories are
-    partyline's, a checkout whose line is gone or archived is a leftover,
-    and a record whose directory vanished is deleted.
-    """
+    """Sweep disposable SHA directories; retain live owners and locked registrations."""
     directory = os.path.join(root, SCRATCH_DIR)
     if not os.path.isdir(directory):
         return
     rows = {row["path"]: row["conv_id"] for row in
             db._exec("SELECT path, conv_id FROM scratch_worktrees").fetchall()}
+    locked = locked_paths(root)
     for name in sorted(os.listdir(directory)):
         path = os.path.join(directory, name)
         from .storage_worktrees import in_use
-        if in_use(db, path) or db._exec("SELECT 1 FROM retirement_preserved_paths WHERE path=?",
-                                       (path,)).fetchone():
+        if path in locked or in_use(db, path) or db._exec(
+                "SELECT 1 FROM retirement_preserved_paths WHERE path=?", (path,)).fetchone():
             continue
         if not os.path.isdir(path):
             continue
@@ -245,7 +243,7 @@ def sweep_scratch_worktrees(db, root: str) -> None:
             db._exec("DELETE FROM scratch_worktrees WHERE path=?", (path,))
             logger.info("scratch worktree sweep: removed %s", path)
     for path in rows:
-        if not os.path.isdir(path):
+        if path.startswith(directory + os.sep) and not os.path.isdir(path) and not _registered(root, path):
             db._exec("DELETE FROM scratch_worktrees WHERE path=?", (path,))
 
 

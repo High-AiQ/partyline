@@ -43,7 +43,7 @@ def remove_empty(root, path, branch=None, conv_id=None):
         return False
     from .storage_cleanup import remove_path
     remove_path(path)
-    _git('worktree', 'remove', '--force', path, cwd=root)
+    _git('worktree', 'remove', '--force', '--force', path, cwd=root)
     return True
 
 

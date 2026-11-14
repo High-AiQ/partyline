@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 
 from .checkout_health import fetch_upstream
 from .git_fence import mirror_branch_ref
 from .line_worktree import WORKTREES_DIR, _exclude, _git, line_cwd, repo_root, rev, slug
 from .nested_repositories import SKIP, nested_repositories
 from .worktree_paths import branch_name
+from .worktree_recovery import add_worktree, remove_registration
 
 SCAN_DEPTH = 3
 SCAN_SKIP = SKIP | {WORKTREES_DIR, ".review", ".scratch"}
@@ -48,7 +50,11 @@ def _free(repos: list[str], folder: str, name: str) -> bool:
 
 
 def _add(repo: str, path: str, branch: str, start: str) -> bool:
-    return _git("worktree", "add", "-b", branch, path, start, cwd=repo).returncode == 0
+    try:
+        return add_worktree(repo, path, "-b", branch, path, start,
+                            git=_git, branch=branch).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 class UpstreamUnavailable(Exception):
@@ -105,7 +111,7 @@ def place_task(db, root_id: str, conv_id: str, base: str = "checkout") -> dict |
         head = starts.get(repo) or rev(repo, "rev-parse", "HEAD")
         if not (head and _add(repo, where, branch, head)):
             for done, path, _head in reversed(made):
-                _git("worktree", "remove", "--force", path, cwd=done)
+                remove_registration(done, path)
                 _git("branch", "-D", branch, cwd=done)
             if plain:
                 shutil.rmtree(task_dir, ignore_errors=True)

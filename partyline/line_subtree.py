@@ -8,6 +8,8 @@ a live child, which is the state the one-line route refuses.
 
 from __future__ import annotations
 
+import asyncio
+
 from . import docker_relay
 from .bridge_service import close_for_line
 from .contracts import ConversationArchivedEvent, ConversationDeletedEvent
@@ -24,6 +26,8 @@ async def archive_line(runtime, conv_id: str) -> list[str]:
     runtime.db.archive_conversation(conv_id)
     if hub := getattr(runtime, "screen_hub", None):
         await hub.window_grants.expire()  # consent given to a line ends with the line
+    from .worktree_recovery import heal_initializing
+    await asyncio.to_thread(heal_initializing, runtime.db)
     runtime.sockets.pop(conv_id, None)
     return stopped
 

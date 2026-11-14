@@ -12,6 +12,7 @@ import os
 import shutil
 import time
 
+from .worktree_recovery import add_worktree
 from .line_worktree import REVIEW_DIR, _exclude, _git, rev
 from .review_scope import (
     ReviewError, accepted_repositories, branch_candidates, describe, on_line_branch,
@@ -86,7 +87,9 @@ def _move(db, conv_id: str, root: str, full: str) -> dict:
         os.makedirs(os.path.join(root, REVIEW_DIR), exist_ok=True)
         _exclude(root, REVIEW_DIR)
         _git("worktree", "prune", cwd=root)
-        _run(root, "worktree", "add", "--detach", path, full)
+        done = add_worktree(root, path, "--detach", path, full, git=_git)
+        if done.returncode:
+            raise ReviewError(409, f"cannot create the task review checkout: {done.stderr.strip()}")
     from .review_environments import changed_files, entries_for
     try:
         changed = changed_files(db, conv_id, root, full)

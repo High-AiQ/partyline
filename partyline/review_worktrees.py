@@ -24,6 +24,7 @@ from .auth_guard import request_principal
 from .nested_repositories import keep_reason
 from .system_notice import post_system_notice
 from .hierarchy_contracts import ReviewWorktreeIn, ReviewWorktreeOut
+from .worktree_recovery import add_worktree, locked_paths, remove_registration
 from .line_worktree import REVIEW_DIR, _exclude, _git, line_cwd, repo_and_worktree, rev
 from .machine_scope import deny_unless
 from .task_workspaces import workspaces
@@ -118,7 +119,7 @@ def create_review_worktree(db, conv_id: str, sha: str, repository: str = "") -> 
             )
     if not os.path.isdir(path):
         _git("worktree", "prune", cwd=root)  # a hand-deleted checkout leaves a stale registration
-        done = _git("worktree", "add", "--detach", path, full, cwd=root)
+        done = add_worktree(root, path, "--detach", path, full, git=_git)
         if done.returncode != 0:
             detail = (done.stderr or "").strip().splitlines()
             raise ReviewError(
@@ -158,7 +159,10 @@ def remove_review_path(path: str) -> bool:
     so removal is forced and never asks about uncommitted scratch.
     """
     if not os.path.isdir(path):
-        return True  # already gone by hand; only the record is stale
+        marker = f"/{REVIEW_DIR}/"
+        if marker in path:
+            remove_registration(path.split(marker, 1)[0], path)
+        return True
     if keep_reason(path):
         return False
     marker = f"/{REVIEW_DIR}/"
@@ -223,11 +227,12 @@ def sweep_review_worktrees(db, root: str) -> None:
         return
     rows = {row["path"]: row["conv_id"] for row in
             db._exec("SELECT path, conv_id FROM review_worktrees").fetchall()}
+    locked = locked_paths(root)
     for name in sorted(os.listdir(directory)):
         path = os.path.join(directory, name)
         from .storage_worktrees import in_use
-        if in_use(db, path) or db._exec("SELECT 1 FROM retirement_preserved_paths WHERE path=?",
-                                       (path,)).fetchone():
+        if path in locked or in_use(db, path) or db._exec(
+                "SELECT 1 FROM retirement_preserved_paths WHERE path=?", (path,)).fetchone():
             continue
         if not os.path.isdir(path) or not _SHA_DIR.fullmatch(name):
             continue
@@ -238,7 +243,7 @@ def sweep_review_worktrees(db, root: str) -> None:
             db._exec("DELETE FROM review_worktrees WHERE path=?", (path,))
             logger.info("review worktree sweep: removed %s", path)
     for path in rows:
-        if not os.path.isdir(path):
+        if path.startswith(directory + os.sep) and not os.path.isdir(path) and not _registered(root, path):
             db._exec("DELETE FROM review_worktrees WHERE path=?", (path,))
 
 
