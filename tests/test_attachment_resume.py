@@ -172,9 +172,9 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
             hook_url=lambda *_args: "hook",
         )
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_real_resume_suppresses_staged_backlog_during_a_wake(self, *_mocks):
         from partyline.resume_continuation import drain, resume_with_backlog
         old = self.db.add_message("line", "greg", "human", "@luna older")
@@ -209,9 +209,9 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.queued_delivery_ids("one"), [])
         self.assertEqual(self.db.get_attachment("one")["last_seen"], old["id"] + 1)
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_startup_backlog_is_registered_before_adapter_starts(self, *_mocks):
         message = self.db.add_message("line", "greg", "human", "@luna older")
         def make(*args, **kwargs):
@@ -225,9 +225,9 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
             return adapter
         await resume_adapter("one", [message], **self.resume_arguments(make))
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_non_listener_restarts_fresh_in_automatic_plan(self, *_mocks):
         from partyline.reattach import ReattachCoordinator, create_restart_plan
         from partyline.contracts import RestartPlanRequest
@@ -256,9 +256,9 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(att["cwd"], self.directory.name)
         self.assertEqual(att["name"], "luna")
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_resume_loads_fence_and_history_off_loop(self, *_mocks):
         import threading
         from partyline.attachment_resume import delivered_history
@@ -269,22 +269,22 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
         def history(db, att):
             threads.append(threading.get_ident())
             return delivered_history(db, att)
-        with patch("partyline.attachment_resume.fence_workspaces.load", side_effect=fence), \
+        with patch("partyline.attachment_wiring.fence_workspaces.load", side_effect=fence), \
              patch("partyline.attachment_resume.delivered_history", side_effect=history):
             await resume_adapter("one", None, **self.resume_arguments())
         self.assertEqual(len(threads), 2)
         self.assertTrue(all(ident != main for ident in threads))
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_resume_adapter_loads_write_grants(self, *_mocks):
         await resume_adapter("one", None, **self.resume_arguments())
         self.assertEqual([row["path"] for row in self.captured["write_grants"]], [self.grant])
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_session_resuming_adapter_without_a_session_is_refused(self, *_mocks):
         arguments = self.resume_arguments()
         arguments["adapter_metadata"] = {
@@ -299,17 +299,17 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
         start.assert_not_called()
         self.assertNotIn("luna", self.runtime.live)
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_id_resuming_adapter_without_a_session_still_resumes(self, *_mocks):
         # Claude resumes by attachment id and never declares the capability.
         self.assertIsNone(self.db.get_attachment("one")["cli_session"])
         await resume_adapter("one", None, **self.resume_arguments())
         self.assertIn("att", self.captured)
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
     async def test_resume_resumes_into_the_same_temp_directory(self, *_mocks):
         # provision_connection runs for real: it is the seam that re-ensures
         # the attachment's private temp directory (5.12), and its connection
@@ -322,9 +322,9 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.captured["att"]["tmp_dir"], expected)
         self.assertTrue(Path(expected).is_dir())
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_resumed_process_briefing_receives_saved_global_prose(self, *_mocks):
         prose = "Keep the saved release notes in view."
         self.db.set_setting("global_prose", prose)
@@ -332,18 +332,18 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.captured["att"]["global_prose"], prose)
         self.assertIn(prose, self.captured["briefing"])
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_resumed_process_briefing_gets_none_for_empty_global_prose(self, *_mocks):
         self.db.set_setting("global_prose", " \n ")
         await resume_adapter("one", None, **self.resume_arguments())
         self.assertIsNone(self.captured["att"]["global_prose"])
         self.assertNotIn("Keep the saved release notes in view.", self.captured["briefing"])
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_status_refusal_names_attachment_and_line(self, *_mocks):
         self.db.claim_attachment("one", "live-generation")
         self.db.set_attachment_status("one", "running", "live-generation")
@@ -362,9 +362,9 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
             f"{hashlib.sha256(b'live-generation').hexdigest()[:8]})",
         )
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_claim_refusal_refreshes_same_attachment_liveness(self, *_mocks):
         self.db.set_setting("max_live_processes", "4")
         for ident in ("other-a", "other-b", "other-c"):
@@ -403,9 +403,9 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
             f"{hashlib.sha256(b'manual-generation').hexdigest()[:8]})",
         )
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_explicit_resume_of_long_stopped_process_is_refused_at_capacity(self, *_mocks):
         self.db.set_setting("max_live_processes", "4")
         for index in range(4):
@@ -423,9 +423,9 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("4 of 4 live processes", raised.exception.detail)
         self.assertEqual(self.db.get_attachment("one")["status"], "exited")
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_restart_plan_member_is_grandfathered_at_capacity(self, *_mocks):
         self.db.set_setting("max_live_processes", "4")
         self.runtime.reattaching.add("one")
@@ -442,9 +442,9 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.get_attachment("one")["status"], "starting")
         self.assertIn("one", self.runtime.live)
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_claim_refusal_identifies_a_different_live_attachment(self, *_mocks):
         async def competing_handle(
             db, att_id, runtime_owner, requested_lease, *, grandfathered=False
@@ -481,9 +481,9 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
             f"{hashlib.sha256(b'other-generation').hexdigest()[:8]})",
         )
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
     async def test_concurrent_resumes_only_start_one_attachment(self, *_mocks):
         started = asyncio.Event()
         release = asyncio.Event()
@@ -516,8 +516,8 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("already live", raised.exception.detail)
         self.assertIn("one", raised.exception.detail)
 
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
     async def test_cleanup_during_resume_provisioning_keeps_connection_and_mcp_files(self, *_mocks):
         from pathlib import Path
         from partyline.agent_connection import provision_connection
@@ -532,11 +532,11 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
             for suffix in ('.json', '.mcp.json'):
                 self.assertTrue(Path(db_path + '.agent-connections', att['id'] + suffix).is_file())
 
-        with patch('partyline.attachment_resume.provision_connection', side_effect=provision):
+        with patch('partyline.attachment_wiring.provision_connection', side_effect=provision):
             await resume_adapter('one', None, **self.resume_arguments())
         self.assertEqual(observed, ['starting'])
 
-    @patch("partyline.attachment_resume.provision_connection", side_effect=OSError('disk full'))
+    @patch("partyline.attachment_wiring.provision_connection", side_effect=OSError('disk full'))
     async def test_resume_preparation_failure_releases_the_starting_claim(self, _provision):
         with self.assertRaises(HTTPException) as raised:
             await resume_adapter('one', None, **self.resume_arguments())

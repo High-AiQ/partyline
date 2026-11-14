@@ -5,60 +5,18 @@ import logging
 
 from fastapi import HTTPException
 
-from .agent_connection import provision_connection
-from .adapter_capabilities import adapter_completion, compaction_detect
+from .adapter_capabilities import adapter_completion
+from .attachment_wiring import wire_attachment
 from .attachment_view import attach_memory_usage, attachment_response
-from .auth_store import ensure_api_token
-from .compaction_events import transcript_compaction_callback
 from .fence import FenceUnavailable
 from .process_memory import MemoryScopeUnavailable
-from .process_incidents import exit_callback
-from .provider_errors import provider_error_callback
-from .preset_traits import auto_compact_tokens_for
-from .fence_protect import database_paths
-from .hook_routes import surface_attention
-from . import fence_workspaces
-from .review_worktrees import list_review_worktrees
-from .scratch_worktrees import list_scratch_worktrees
-from .role_delivery import bind_role_delivery
-from .write_set_routes import load_write_grants
 from .resume_backlog import addressed_backlog
-from .resource_budget import format_limit, settings
-from .turn_usage import turn_usage_callback
 
 logger = logging.getLogger(__name__)
 
 
 def prepare_attachment(att, runtime, hook_url, checkpoint):
-    conv = runtime.db.get_conversation(att["conv_id"])
-    att["api_token"] = ensure_api_token(runtime.db, att["id"])
-    att["memory_limit"] = att.get("memory_limit") or format_limit(
-        settings(runtime.db)["default_process_memory_bytes"]
-    )
-    att["global_prose"] = runtime.db.get_setting("global_prose")
-    att["conv_name"], att["topic"] = conv["name"], conv["topic"]
-    att["hook_url"] = hook_url(att["id"], att["runtime_owner"])
-    load_write_grants(runtime.db, att)
-    att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
-    att["scratch_worktrees"] = list_scratch_worktrees(runtime.db, att["conv_id"])
-    fence_workspaces.load(runtime.db, att)
-    att["db_paths"] = database_paths(runtime.db)
-    provision_connection(runtime.db.path, att)
-    att["digest_rider"] = lambda: ""  # role delivery layers the goal and staffing on top
-    bind_role_delivery(runtime.db, att, runtime)
-    att["fresh_checkpoint"] = checkpoint
-    att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
-    att["on_process_exit"] = exit_callback(runtime, att)
-    att["on_provider_error"] = provider_error_callback(runtime, att)
-    att["on_turn_usage"] = turn_usage_callback(runtime, att)  # a no-op for adapters that never call it
-    # The preset's explicit auto-compact threshold (§2.13), re-read on every
-    # start so a resume picks up a changed preset; 0 lets the CLI default.
-    att["auto_compact_tokens"] = auto_compact_tokens_for(runtime.db, att)
-    if compaction_detect(att) == "transcript":
-        # Claude gets its rebrief from hook stdout; a transcript-only
-        # harness gets it as a private wake, and the adapter calls this
-        # when its own tail sees the compaction (2.13, §5-generalised).
-        att["on_compaction"] = transcript_compaction_callback(runtime, att)
+    wire_attachment(att, runtime, hook_url, checkpoint=checkpoint)
 
 
 async def rollback_start(runtime, att):

@@ -14,25 +14,16 @@ import uuid
 
 from fastapi import HTTPException
 
+from .attachment_wiring import wire_attachment
 from .captain_handover_completion import ensure_handover_detached
 from .adapter_capabilities import adapter_completion
 from .activation_diagnostics import activation_context, line_name
-from .auth_store import rotate_api_token
-from .agent_connection import provision_connection, bind_connection_hint
 from .fence import FenceUnavailable
-from .fence_protect import database_paths
-from .hook_routes import surface_attention
-from .process_incidents import exit_callback
-from .turn_usage import turn_usage_callback
 from .hierarchy import tree_live_name_conflict
-from .role_delivery import bind_role_delivery
-from . import fence_workspaces
-from .review_worktrees import list_review_worktrees
 from .reattach import ResumedAttachment
 from .resume_folder import ensure_resume_folder
 from .restart_capabilities import adapter_can_restart, adapter_can_resume, resume_needs_session
 from .transcript_delivery import TranscriptDeliveryRecord
-from .write_set_routes import load_write_grants
 from .resource_budget import cap_bytes, claim_resume, format_limit, settings
 
 logger = logging.getLogger(__name__)
@@ -228,17 +219,7 @@ async def _resume_adapter_locked(
     ):
         raise HTTPException(409, claim_refusal_detail(runtime, att))
     try:
-        att["api_token"] = rotate_api_token(runtime.db, att_id)
-        att["hook_url"] = hook_url(att_id, runtime_owner)
-        att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
-        load_write_grants(runtime.db, att)
-        await asyncio.to_thread(fence_workspaces.load, runtime.db, att)
-        att["global_prose"] = runtime.db.get_setting("global_prose")
-        att["db_paths"] = database_paths(runtime.db)
-        await asyncio.to_thread(provision_connection, runtime.db.path, att)
-        att["digest_rider"] = lambda: ""
-        bind_connection_hint(att)
-        bind_role_delivery(runtime.db, att, runtime)
+        await asyncio.to_thread(wire_attachment, att, runtime, hook_url, resume=True)
         history = await asyncio.to_thread(delivered_history, runtime.db, att)
         att["delivered_bodies"] = history.bodies
         att["delivered_transcript_records"] = history.transcript_records
@@ -250,9 +231,6 @@ async def _resume_adapter_locked(
             conv["id"], att_id,
             runtime.post_callback(att_id, conv["id"], runtime_owner, route=False),
         )
-        att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
-        att["on_process_exit"] = exit_callback(runtime, att)
-        att["on_turn_usage"] = turn_usage_callback(runtime, att)  # a resume records too
         adapter = make_adapter(
             att["adapter"],
             att,

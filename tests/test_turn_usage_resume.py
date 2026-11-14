@@ -89,9 +89,9 @@ class ReattachUsageTest(unittest.IsolatedAsyncioTestCase):
         metadata = {kind.split("-")[0]: {"capabilities": {"resume": True}}}
         arguments = dict(runtime=self.runtime, adapter_metadata=metadata, make_adapter=make,
                          presence=_Presence(), hook_url=lambda *_: "hook")
-        with (patch("partyline.attachment_resume.bind_role_delivery"),
-              patch("partyline.attachment_resume.bind_connection_hint"),
-              patch("partyline.attachment_resume.provision_connection"),
+        with (patch("partyline.attachment_wiring.bind_role_delivery"),
+              patch("partyline.attachment_wiring.bind_connection_hint"),
+              patch("partyline.attachment_wiring.provision_connection"),
               patch.object(cls, "start", side_effect=spawn),
               patch.object(cls, "stage_startup_delivery", return_value=False)):
             await resume_adapter("one", None, **arguments)
