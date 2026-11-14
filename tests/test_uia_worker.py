@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from partyline_helper.uia_action_worker import ActionWorker, run_action
 from partyline_helper.uia_gate import DispatchGate
 from partyline_helper.uia_identity import element_id
+from partyline_helper.uia_windows import WindowsProvider
 from tests.test_uia_action import ActionProvider
 
 
@@ -17,9 +18,18 @@ class Provider(ActionProvider):
                           {"rect": (0, 0, 5, 5)}])
         self.calls = []
         self.foreground_hwnd = 99
+        self.z_order = [99, 1]
 
     def foreground(self):
         return self.foreground_hwnd
+
+    def restore_foreground(self, hwnd, expected_current):
+        if self.foreground_hwnd != expected_current:
+            return False
+        self.foreground_hwnd = hwnd
+        self.z_order.remove(hwnd)
+        self.z_order.insert(0, hwnd)
+        return True
 
     def action_call(self, node, action, value):
         return lambda: self.calls.append((node, action, value))
@@ -211,6 +221,7 @@ class GateTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual("completed", result["status"])
                 self.assertIs(result["foreground_changed"], expected_changed)
                 self.assertIs(result["target_came_forward"], expected_target)
+                self.assertIs(result["foreground_restored"], before == 99 and after == 1)
                 sink = Mock()
                 session = SimpleNamespace(tools=SimpleNamespace(audit=sink))
                 audit(session, grant, message, {"name": "field"}, result)
@@ -218,8 +229,92 @@ class GateTests(unittest.IsolatedAsyncioTestCase):
                 entry = json.loads(sink.append.call_args.args[4])
                 self.assertIs(entry["foreground_changed"], expected_changed)
                 self.assertIs(entry["target_came_forward"], expected_target)
+                self.assertIs(entry["foreground_restored"], before == 99 and after == 1)
                 self.assertEqual(6, entry["value_length"])
                 self.assertNotIn("secret", str(sink.append.call_args))
+
+    async def test_person_foreground_change_before_restore_is_not_overwritten(self):
+        provider = Provider()
+        provider.foreground_hwnd = 99
+        samples = iter((99, 1, 7, 7))
+        provider.foreground = lambda: next(samples)
+        provider.restore_foreground = Mock(wraps=provider.restore_foreground)
+        provider.action_call = lambda *_: lambda: setattr(provider, "foreground_hwnd", 1)
+        gate = DispatchGate()
+        generation = gate.grant()
+        grant = {"hwnd": 1, "pid": 2}
+        access = SimpleNamespace(gate=gate, list_windows=lambda: [grant])
+        message = {"element_id": element_id(provider, 1, [0]), "action": "invoke"}
+        result = run_action(access, grant, generation, message, factory=lambda _: provider)
+        self.assertFalse(result["foreground_restored"])
+        provider.restore_foreground.assert_not_called()
+
+    async def test_expand_that_raises_the_target_restores_previous_focus_and_z_order(self):
+        provider = Provider()
+        provider.nodes[1]["patterns"] = ["ExpandCollapse"]
+        provider.action_call = lambda *_: lambda: (
+            setattr(provider, "foreground_hwnd", 1), provider.z_order.insert(0, provider.z_order.pop(1)))
+        gate = DispatchGate()
+        generation = gate.grant()
+        grant = {"hwnd": 1, "pid": 2}
+        access = SimpleNamespace(gate=gate, list_windows=lambda: [grant])
+        message = {"element_id": element_id(provider, 1, [0]), "action": "expand"}
+        result = run_action(access, grant, generation, message, factory=lambda _: provider)
+        self.assertEqual("completed", result["status"])
+        self.assertTrue(result["foreground_restored"])
+        self.assertEqual(99, provider.foreground_hwnd)
+        self.assertEqual([99, 1], provider.z_order)
+
+    async def test_press_action_that_raises_the_target_is_restored_generically(self):
+        provider = Provider()
+        def raises_target(*args, **kwargs):
+            provider.foreground_hwnd = 1
+            provider.z_order.insert(0, provider.z_order.pop(1))
+            return {"status": "no_effect", "posted": 0}
+        gate = DispatchGate()
+        generation = gate.grant()
+        grant = {"hwnd": 1, "pid": 2}
+        access = SimpleNamespace(gate=gate, list_windows=lambda: [grant])
+        message = {"element_id": element_id(provider, 1, [0]), "action": "press", "key": "enter"}
+        with patch("partyline_helper.uia_action_worker.prepare", return_value=(1, {})), \
+                patch("partyline_helper.uia_action_worker.press", side_effect=raises_target) as pressed:
+            result = run_action(access, grant, generation, message, factory=lambda _: provider)
+        pressed.assert_called_once()
+        self.assertEqual("no_effect", result["status"])
+        self.assertTrue(result["foreground_restored"])
+        self.assertEqual([99, 1], provider.z_order)
+
+
+class NativeForegroundRestoreTests(unittest.IsolatedAsyncioTestCase):
+    def provider(self, user32):
+        provider = object.__new__(WindowsProvider)
+        provider.user32 = user32
+        return provider
+
+    def test_previous_hwnd_is_raised_then_activated_with_input_queue_attached(self):
+        state = {"foreground": 1}
+        user32 = Mock()
+        user32.GetForegroundWindow.side_effect = lambda: state["foreground"]
+        user32.GetWindowThreadProcessId.return_value = 42
+        user32.AttachThreadInput.return_value = True
+        user32.SetWindowPos.return_value = True
+        user32.SetForegroundWindow.side_effect = lambda hwnd: state.update(foreground=hwnd) or True
+        kernel = SimpleNamespace(GetCurrentThreadId=Mock(return_value=24))
+        with patch("partyline_helper.uia_windows.ctypes.windll", SimpleNamespace(kernel32=kernel),
+                   create=True):
+            restored = self.provider(user32).restore_foreground(99, 1)
+        self.assertTrue(restored)
+        user32.SetWindowPos.assert_called_once_with(99, None, 0, 0, 0, 0, 0x13)
+        user32.SetForegroundWindow.assert_called_once_with(99)
+        self.assertEqual([unittest.mock.call(24, 42, True), unittest.mock.call(24, 42, False)],
+                         user32.AttachThreadInput.call_args_list)
+
+    def test_person_foreground_change_prevents_native_z_order_or_focus_changes(self):
+        user32 = Mock()
+        user32.GetForegroundWindow.return_value = 7
+        self.assertFalse(self.provider(user32).restore_foreground(99, 1))
+        user32.SetWindowPos.assert_not_called()
+        user32.SetForegroundWindow.assert_not_called()
 
     async def test_foreground_is_recorded_when_pattern_raises(self):
         provider = Provider()

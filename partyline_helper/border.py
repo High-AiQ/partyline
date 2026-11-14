@@ -5,7 +5,7 @@ import threading
 from .border_native import native_backend
 
 BORDER_THICKNESS = 4
-MODE_COLORS = {"share": "#f6c344", "control": "#ef4444"}
+MODE_COLORS = {"share": "#f6c344", "control": "#ef4444", "window": "#38bdf8"}
 
 
 def outside_strips(region, thickness=BORDER_THICKNESS, scale=1.0):

@@ -14,6 +14,7 @@ from .uia_window_identity import unmark
 from .window_target_picker import select_target
 from .uia_events import UIAEventSubscription
 from .uia_event_state import EventState
+from .window_outline import WindowOutline
 
 WINDOWS_VERSION = 1  # 1: a window is shared with a line, not with one process
 MESSAGES = ("share_targets", "window_grant_result", "revoke_window")
@@ -31,10 +32,11 @@ class WindowSession:
 
 class WindowShares:
     def __init__(self, session, window_picker=select_window, target_picker=select_target,
-                 event_factory=UIAEventSubscription):
+                 event_factory=UIAEventSubscription, outline_factory=WindowOutline):
         self._changes = Changes()
         self.session, self.window_picker, self.target_picker = session, window_picker, target_picker
         self.event_factory = event_factory
+        self.outline_factory = outline_factory
         self.grants, self.waiters, self.tasks = {}, {}, set()
         self.event_timers = {}
         self.picking, self.generation = False, 0
@@ -62,6 +64,7 @@ class WindowShares:
         task = asyncio.create_task(coroutine)
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
+        return task
 
     async def send_revoked(self, ident, reason="revoked by the person"):
         with contextlib.suppress(ConnectionClosed, OSError):
@@ -115,6 +118,9 @@ class WindowShares:
             state = EventState()
             self.grants[ident]["event_state"] = state
             access.event_status = state.status
+            outline = self.outline_factory(selected["hwnd"], pid=selected["pid"])
+            self.grants[ident]["outline"] = outline
+            self.grants[ident]["outline_task"] = self.spawn(outline.start())
             self.spawn(self.start_events(ident, selected["hwnd"]))
             selected, registered = None, None
             self.changed()
@@ -134,6 +140,8 @@ class WindowShares:
             if timer:
                 timer.cancel()
             entry["access"].revoke()
+            if outline := entry.get("outline"):
+                outline.close()
             self.spawn(entry["worker"].close())
             if subscription := entry.get("events"):
                 self.spawn(asyncio.to_thread(subscription.close))

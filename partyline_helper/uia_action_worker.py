@@ -25,7 +25,7 @@ def provider_factory(hwnd):  # pragma: no cover - Windows COM provider
 
 
 def run_action(access, grant, generation, message, factory=provider_factory):
-    observed, foreground_samples = {}, []
+    observed, foreground_samples = {"foreground_restored": False}, []
     dispatched = False
     try:
         provider = factory(grant["hwnd"])
@@ -91,8 +91,19 @@ def run_action(access, grant, generation, message, factory=provider_factory):
                 after = provider.foreground()
                 foreground_samples.extend((before, after))
                 changed = before != after
+                restored = False
+                if (message["action"] != "window_focus" and before and before != grant["hwnd"]
+                        and after == grant["hwnd"] and provider.foreground() == grant["hwnd"]
+                        and not access.gate.revoked.is_set()
+                        and access.gate.generation == generation):
+                    restore = getattr(provider, "restore_foreground", None)
+                    try:
+                        restored = bool(restore and restore(before, grant["hwnd"]))
+                    except Exception:
+                        restored = False
                 observed.update(foreground_changed=changed,
-                                target_came_forward=bool(changed and after == grant["hwnd"]))
+                                target_came_forward=bool(changed and after == grant["hwnd"]),
+                                foreground_restored=restored)
 
         selection, revoked_during = access.gate.dispatch(generation, invoke)
         selection = selection if isinstance(selection, dict) else {}
@@ -157,7 +168,8 @@ def audit(session, grant, message, props, result):
             "name": props.get("name", "unknown"), "action": message.get("action"),
             "result": result.get("status"), "revoked_during": result.get("revoked_during", False),
             "foreground_changed": result.get("foreground_changed"),
-            "target_came_forward": result.get("target_came_forward")}
+            "target_came_forward": result.get("target_came_forward"),
+            "foreground_restored": result.get("foreground_restored", False)}
     if message.get("force"):
         info["force"] = True
         info["reported_disabled"] = result.get("reported_disabled", False)

@@ -18,13 +18,30 @@ TARGET = {"line_id": "alpha", "line_name": "Alpha"}
 WINDOW = {"hwnd": 10, "pid": 42, "title": "Editor", "process": "editor.exe"}
 
 
+class FakeOutline:
+    def __init__(self, hwnd, pid=None):
+        self.hwnd, self.pid, self.started, self.closed = hwnd, pid, False, False
+        self.closed_event = asyncio.Event()
+
+    async def start(self):
+        self.started = True
+
+    def close(self):
+        self.closed = True
+        self.closed_event.set()
+
+
 class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.socket = FakeSocket()
         self.session = Session(self.socket, FakeDesktop(), FakeTerminal(), "Desktop")
         self.session.tools.audit = SimpleNamespace(append=Mock(), ensure_writable=Mock())
+        self.outlines = []
         self.manager = WindowShares(self.session, window_picker=lambda: dict(WINDOW),
-                                    target_picker=lambda _: TARGET)
+                                    target_picker=lambda _: TARGET,
+                                    outline_factory=lambda hwnd, pid=None: self.outlines.append(
+                                        FakeOutline(hwnd, pid))
+                                    or self.outlines[-1])
         self.session.windows = self.manager
         self.targets = {"request_id": "targets", "lines": [
             {"line_id": "alpha", "line_name": "Alpha", "processes": [PROCESS]},
@@ -60,6 +77,9 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
         kind, fields = call.args[0], call.kwargs
         self.assertEqual("window_grant", kind)
         self.assertEqual("alpha", fields["line_id"])
+        outline = self.manager.grants[fields["grant_id"]]["outline"]
+        await self.manager.grants[fields["grant_id"]]["outline_task"]
+        self.assertTrue(outline.started)
         self.assertNotIn("attachment_id", fields)
         ident = next(iter(self.manager.grants))
         self.assertEqual("Editor → «Alpha»", self.session.status.window_grants[ident])
@@ -85,10 +105,13 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
         first_access = self.manager.grants[first]["access"]
         await self.manager.receive({"type": "revoke_window", "grant_id": first})
         self.assertTrue(first_access.gate.revoked.is_set())
+        self.assertTrue(self.outlines[0].closed)  # server revoke, including line archival
         self.assertEqual([second], list(self.manager.grants))
         self.assertIn("Browser → «Alpha»", self.session.status.label)
         self.manager.revoke_all()
         self.assertFalse(self.manager.grants)
+        self.assertTrue(self.outlines[0].closed)
+        self.assertTrue(self.outlines[1].closed)
         self.assertIsNone(self.session.status.window_title)
         await self.manager.close()
         self.assertEqual("revoked by the person", (await self.socket.next("window_revoked"))["reason"])
@@ -113,6 +136,48 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
         revoked = await self.socket.next("window_revoked")
         self.assertEqual(ident, revoked["grant_id"])
         self.assertEqual("window closed", revoked["reason"])
+
+    async def test_tray_stop_of_one_grant_closes_its_outline(self):
+        await self.manager.choose()
+        ident = next(iter(self.manager.grants))
+        self.session.status.stop_window_grant = self.manager.revoke
+        self.session.status.request_stop_window_grant(ident)
+        self.assertTrue(self.outlines[0].closed)
+
+    async def test_window_closed_watch_revokes_and_closes_its_outline(self):
+        await self.manager.choose()
+        entry = next(iter(self.manager.grants.values()))
+        outline = entry["outline"]
+        async def closed(_grant):
+            return "window closed"
+        entry["access"].check = closed
+
+        class Events:
+            def __init__(self, *_args):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def wait(self):
+                await asyncio.Future()
+
+        with patch("partyline_helper.window_shares.WindowEvents", Events):
+            watching = asyncio.create_task(self.manager.watch())
+            await outline.closed_event.wait()
+            watching.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await watching
+        self.assertTrue(outline.closed)
+        self.assertFalse(self.manager.grants)
+
+    async def test_manager_close_disconnect_closes_every_outline(self):
+        await self.manager.choose()
+        await self.manager.close()
+        self.assertTrue(self.outlines[0].closed)
 
     async def test_pending_picker_stop_all_prevents_late_consent(self):
         selected, finish = asyncio.Event(), asyncio.Event()

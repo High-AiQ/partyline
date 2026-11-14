@@ -23,6 +23,15 @@ Screen-control tools appear only after control consent.
 Claude Code and OpenCode V2 refresh their tool list on MCP `list_changed`. Codex CLI does not, so its
 screen tools remain listed for the session and return a clear denial when no screen is shared.
 
+Each granted window has a thin blue outline just outside its visible frame. It follows the window and
+hides while the window is minimized or on another virtual desktop. It is click-through, does not take
+focus, and supported Windows versions exclude it from screen capture. The outline stays above other
+windows while the grant is active and is removed as soon as the grant ends.
+
+Some UI Automation actions can bring the granted window forward. When an action does that, the helper
+restores the window that was in front before the action, provided the granted window is still in front
+when the action completes. Actions intended to activate a window are not restored.
+
 The Partyline Computers dialog shows these
 commands with your server's address and a pairing code filled in, each with a copy
 button. Run them in a terminal **on the computer you want to share, not on the
