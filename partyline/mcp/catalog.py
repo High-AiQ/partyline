@@ -11,8 +11,8 @@ through the one `extras(op, args)` tool; `guide()` lists them with a line each a
 from __future__ import annotations
 
 from . import (
-    tools_blender, tools_captain, tools_check, tools_control, tools_core, tools_handover,
-    tools_resources, tools_tasks,
+    tools_blender, tools_bridge, tools_captain, tools_check, tools_control, tools_core, tools_handover,
+    tools_resources, tools_tasks, tools_turn_usage, tools_usage,
 )
 from .captain_schemas import ACK_HINT
 from .client import ApiError
@@ -20,17 +20,19 @@ from .validation import validate_arguments
 from .descriptions import one_line, slim_schema
 
 # The order a name is looked up in; the first module serving it handles the call.
-DISPATCH = (tools_blender, tools_check, tools_control, tools_handover, tools_resources, tools_tasks,
-            tools_core, tools_captain)
+DISPATCH = (tools_usage, tools_turn_usage, tools_blender, tools_bridge, tools_check, tools_control,
+            tools_handover, tools_resources, tools_tasks, tools_core, tools_captain)
 # The order tools are shown in.
-LISTING = (tools_core, tools_captain, tools_tasks, tools_resources, tools_handover, tools_control,
-           tools_blender, tools_check)
+LISTING = (tools_usage, tools_turn_usage, tools_core, tools_captain, tools_tasks, tools_resources,
+           tools_handover, tools_control, tools_blender, tools_check, tools_bridge)
 
 # Reached through extras(op, args): rare errands, or tools a client cannot be given later.
 EXTRAS_OPS = frozenset({
+    "tool_usage", "turn_usage",
     "blender_request", "blender_exec", "blender_scene_info", "blender_render", "blender_screenshot",
     "blender_end", "render_check", "upload_3d_model", "upload_file",
     "offer_handover", "cancel_handover", "accept_handover", "complete_handover",
+    "screen_window_snapshot",  # elements are the default way to read a window; this is the rare errand
 })
 # Clients that never re-list cannot gain a screen tool when a share starts, so the
 # whole control set is reached through extras there; the others list it while shared.
@@ -38,12 +40,13 @@ SCREEN_CONTROL = frozenset({
     "screen_element_action", "screen_control_request", "screen_click", "screen_move",
     "screen_drag", "screen_scroll", "screen_type", "screen_key",
 })
-SCREEN = SCREEN_CONTROL | {"screen_frame", "screen_elements"}
+SCREEN = SCREEN_CONTROL | {"screen_frame", "screen_elements", "screen_window_snapshot"}
 # Captain and task operations that stay listed; every other one runs as captain(op, args).
 EVERYDAY = frozenset({
     "attach_worker", "detach_worker", "create_child", "accept", "ack_report", "list_presets", "reports",
     "create_task", "tasks", "message_task", "set_task_goal", "reopen_task",
     "env_gap", "blocked", "deliver", "request_review", "review_verdict", "waiting", "resume_work",
+    "nudge_reviewer",
 })
 EXTRAS = "extras"
 CAPTAIN = "captain"
@@ -56,7 +59,8 @@ def every_tool(state: dict) -> list[dict]:
 
 def door(name: str, state: dict) -> str | None:
     """The tool that runs ``name`` when it is not listed itself; None when it is listed."""
-    if name in EXTRAS_OPS or (name in SCREEN_CONTROL and not state.get("dynamic_screen_tools")):
+    if name in EXTRAS_OPS or (name in SCREEN_CONTROL | {tools_bridge.NAME}
+                              and not state.get("dynamic_screen_tools")):
         return EXTRAS
     if name in (*tools_captain.OPERATIONS, *tools_tasks.OPERATIONS) and name not in EVERYDAY:
         return CAPTAIN
@@ -119,8 +123,12 @@ def dispatch(client, name: str, args: dict, state: dict):
         return dispatch(client, args["op"], args["args"], state)
     module = owner(state, name)
     if module is None:
+        if name == tools_bridge.NAME:
+            raise ApiError("no open bridge: bridge_send is for the ambassador of a line with an open bridge")
         if name in SCREEN and state.get("dynamic_screen_tools"):
-            raise ApiError("no screen shared with you")
+            raise ApiError("no screen shared with you" if not state.get("screen_windows") else
+                           "no monitor is shared with you, but a window is: use screen_window_snapshot "
+                           "(or screen_elements first); do not ask the person to share the whole screen")
         raise ValueError("tool is not currently available to this attachment")
     if module is tools_core:
         tool = next(item for item in tools_core.tool_list(state) if item["name"] == name)

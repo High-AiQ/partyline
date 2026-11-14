@@ -1,14 +1,18 @@
 """The Windows packaging files, checked as text on Linux: the invariants a first real build must not lose."""
+import importlib.util
 import re
+import tempfile
 import unittest
 from pathlib import Path
+
+from partyline.helper_release import installer_info
 
 ROOT = Path(__file__).resolve().parent.parent
 ISS = (ROOT / "packaging/windows/installer.iss").read_text()
 SPEC = (ROOT / "packaging/windows/PartylineHelper.spec").read_text()
 WORKFLOW = (ROOT / ".github/workflows/windows-installer.yml").read_text()
 CHECKS = (ROOT / ".github/workflows/checks.yml").read_text()
-DOWNLOAD = (ROOT / "frontend/src/lib/helper-installer.ts").read_text()
+VERSION_SCRIPT = ROOT / "packaging/windows/make_version_info.py"
 
 
 def section(name):
@@ -29,10 +33,31 @@ class InstallerScriptTests(unittest.TestCase):
         self.assertNotIn("{commonpf", ISS)
         self.assertNotIn("HKLM", ISS)
 
-    def test_the_output_name_matches_the_download_link(self):
-        link = re.search(r"/releases/latest/download/([\w.-]+)\"", DOWNLOAD).group(1)
-        self.assertEqual(re.search(r"OutputBaseFilename=(\S+)", ISS).group(1) + ".exe", link)
-        self.assertIn(link, WORKFLOW)
+    def test_the_installer_file_name_carries_the_version(self):
+        self.assertIn("OutputBaseFilename=PartylineHelper-Setup-{#AppVersion}\n", ISS)
+        self.assertNotRegex(ISS, r"OutputBaseFilename=PartylineHelper-Setup\s*\n")  # no fixed name
+        self.assertIn("/DAppVersion=$env:VERSION", WORKFLOW)  # the workflow passes the helper version in
+        self.assertIn("PartylineHelper-Setup-$env:VERSION.exe", WORKFLOW)
+        self.assertNotIn("latest/download", WORKFLOW + ISS)
+
+    def test_the_installer_and_the_installed_exe_carry_windows_version_resources(self):
+        self.assertIn("VersionInfoVersion={#VersionNumbers}", ISS)
+        self.assertIn('#define VersionNumbers AppVersion + ".0"', ISS)
+        self.assertIn("VersionInfoProductVersion={#AppVersion}", ISS)
+        self.assertRegex(SPEC, r"\n\s+version=VERSION_FILE,")  # PyInstaller embeds the exe's version resource
+        self.assertNotIn("os.path.exists(VERSION_FILE)", SPEC)  # never skipped when missing
+        self.assertNotIn("version=None", SPEC)
+        # The spec writes the file itself, before the EXE is declared, so every build path (CI, local) has it.
+        self.assertIn("from make_version_info import main as write_version_info", SPEC)
+        self.assertLess(SPEC.index("write_version_info([VERSION_FILE])"), SPEC.index("exe = EXE("))
+
+    def test_the_download_url_and_file_name_agree_with_the_build(self):
+        info = installer_info("1.2.0")
+        self.assertEqual(info["filename"], "PartylineHelper-Setup-1.2.0.exe")
+        for template in ("PartylineHelper-Setup-{#AppVersion}", "PartylineHelper-Setup-$env:VERSION"):
+            self.assertEqual(template.replace("{#AppVersion}", "1.2.0").replace("$env:VERSION", "1.2.0")
+                             + ".exe", info["filename"])
+        self.assertTrue(info["url"].endswith("/helper-v1.2.0/" + info["filename"]))  # tag = helper-v<ver>
 
     def test_install_steps_run_in_order_stop_then_register_then_start(self):
         self.assertEqual(parameters("Run"), ["stop", "install", "start"])
@@ -83,18 +108,51 @@ class FreezeSpecTests(unittest.TestCase):
             self.assertIn(package, extras)
 
 
+class VersionResourceTests(unittest.TestCase):
+    def load(self):
+        spec = importlib.util.spec_from_file_location("make_version_info", VERSION_SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_the_version_file_carries_the_helper_version_in_every_field(self):
+        text = self.load().version_info("1.2.0")
+        self.assertIn("filevers=(1, 2, 0, 0)", text)
+        self.assertIn("prodvers=(1, 2, 0, 0)", text)
+        self.assertIn("StringStruct('FileVersion', '1.2.0')", text)
+        self.assertIn("StringStruct('ProductVersion', '1.2.0')", text)
+        self.assertIn("StringStruct('OriginalFilename', 'PartylineHelper.exe')", text)
+
+    def test_a_short_or_odd_version_still_gives_four_numbers(self):
+        module = self.load()
+        self.assertEqual(module.four_part("3"), (3, 0, 0, 0))
+        self.assertEqual(module.four_part("1.2.3.4.5"), (1, 2, 3, 4))
+
+    def test_it_writes_the_file_for_the_current_helper_version(self):
+        from partyline_helper import __version__
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "sub" / "version_info.txt"
+            self.load().main([str(out)])
+            self.assertIn(f"StringStruct('ProductVersion', '{__version__}')", out.read_text(encoding="utf-8"))
+
+
 class WorkflowTests(unittest.TestCase):
     def test_it_builds_on_windows_for_helper_prs_and_tags(self):
         self.assertIn("runs-on: windows-latest", WORKFLOW)
         self.assertNotIn("branches: [main]", WORKFLOW)
         self.assertRegex(WORKFLOW, r'tags: \["helper-v\*"\]')
         self.assertIn("actions/upload-artifact@v4", WORKFLOW)
-        self.assertIn("path: build/installer/PartylineHelper-Setup.exe", WORKFLOW)
+        self.assertIn("name: PartylineHelper-Setup-${{ env.VERSION }}-${{ github.sha }}", WORKFLOW)
+        self.assertIn("path: build/installer/PartylineHelper-Setup-${{ env.VERSION }}.exe", WORKFLOW)
 
     def test_only_a_tag_creates_a_release_asset(self):
         step = WORKFLOW[WORKFLOW.index("name: attach to the release"):]
         self.assertIn("if: ${{ env.TAG != '' }}", step)
         self.assertIn("gh release upload", step)
+        self.assertIn('"build/installer/PartylineHelper-Setup-$env:VERSION.exe"', step)  # the versioned file
+        self.assertEqual(step.count("gh release upload"), 1)  # no fixed-name alias
+        self.assertNotIn("PartylineHelper-Setup.exe", step)
         self.assertIn("startsWith(github.ref, 'refs/tags/helper-v')", WORKFLOW)
 
     def test_tags_made_by_the_tag_job_dispatch_the_build(self):

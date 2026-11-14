@@ -21,6 +21,7 @@ from .orchestrator_store import task
 from .line_resources import report
 from .presence import IDLE
 from .process_counts import counts
+from .turn_usage_routes import turn_usage_router
 from .workspace_visibility import workspace_visibility
 from .process_overview_contracts import (
     ProcessOverviewAttachment,
@@ -105,6 +106,8 @@ def process_overview(runtime, conv_id: str, *, include_retired: bool = True, lim
 
 
 def register_process_overview_route(app: FastAPI, runtime) -> None:
+    app.include_router(turn_usage_router(runtime))  # model usage reads live beside the line overview
+
     @app.get(
         "/api/conversations/{conv_id}/process-overview",
         response_model=ProcessOverviewResponse,

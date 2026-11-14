@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from .helper_release import update_available
+from .helper_release import installer_info, update_available
 from partyline_helper import __version__ as helper_version
 from .screen_connections import device_valid
 from .local_tools import TOOL_MESSAGES, LocalTools
@@ -21,6 +21,7 @@ from .screen_frames import BufferedFrame, ShareBuffer
 from .screen_share_frames import add_frame
 from .screen_share_stop import stop_share as stop_screen_share
 from .screen_elements import ElementsHub
+from .screen_window_snapshot import WindowSnapshots
 from .screen_window_grants import MESSAGES as WINDOW_MESSAGES, WindowGrants
 from .screen_pair_limits import PairLimits
 from .screen_requests import capture, preview
@@ -44,6 +45,7 @@ class ScreenHub:
         self.snap_waiters: dict[str, tuple[ShareBuffer, asyncio.Future]] = {}
         self.preview_waiters: dict[str, tuple[str, str | int, asyncio.Future]] = {}
         self.elements = ElementsHub(self)
+        self.snapshots = WindowSnapshots(self)
         self.window_grants = WindowGrants(self)
         self.control = ControlHub(self)
         self.tools = LocalTools(self)
@@ -88,7 +90,7 @@ class ScreenHub:
                 return
             current = {**device, "socket": ws, "name": hello.device_name,
                        "os": hello.os, "helper_version": hello.helper_version, "control": hello.control,
-                       "tools": hello.tools, "windows": hello.windows,
+                       "tools": hello.tools, "windows": hello.windows, "press": hello.press,
                        "monitors": [item.model_dump() for item in hello.monitors],
                        "last_seen": time.monotonic()}
             old = self.devices.get(ident)
@@ -106,7 +108,7 @@ class ScreenHub:
             if hello.update_check:
                 await pushed("screen", ws.send_json({"type": "ping", "helper_update": {
                     "available": update_available(hello.helper_version), "version": helper_version,
-                    "url": "https://github.com/High-AiQ/partyline/releases/latest/download/PartylineHelper-Setup.exe"}}))
+                    "url": installer_info(helper_version)["url"]}}))
             await self._device_event(current, True)
             last_ping = time.monotonic()
             while True:
@@ -160,6 +162,8 @@ class ScreenHub:
                     await self.window_grants.from_helper(current, message)
                 elif kind in ("window_elements", "window_element_result"):
                     self.elements.receive(current, message)
+                elif kind == "window_snapshot":
+                    await self.snapshots.from_helper(current, message)
                 elif kind in CONTROL_MESSAGES:
                     await self.control.from_helper(current, message)
                 elif kind in TOOL_MESSAGES:

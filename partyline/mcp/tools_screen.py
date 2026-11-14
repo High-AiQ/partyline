@@ -18,13 +18,13 @@ def screen_frame_tool():
 
 
 ELEMENTS_NOTE = (
-    "Read a window a person shared with this line (UI Automation tree, each answer ~4 KB; any process on "
-    "the line may). No arguments: summary. find: query "
-    "(name), value, control_type; root=<id> lists children; text=true reads the page; id=<id> shows one "
-    "element whole. Use screen_element_action on its ids. State recaptures on UIA change events and "
-    "every 3 seconds; answers include "
-    "snapshot_age_seconds and change_event_since_snapshot. Refresh with refresh=true after a visible "
-    "change or when you need a fresh read now. Element ids survive refresh=true."
+    "Read a window shared with this line or inherited from an ancestor (Windows UI Automation, "
+    "not DOM; ~4 KB). No arguments: "
+    "summary. find by query/name, value, control_type; root=<id> lists children; text=true reads text; "
+    "id=<id> reads one element; inspect=<id> compares live UIA with the stored snapshot and event clock. "
+    "Use screen_element_action on ids. Cache reuse requires a live event-counter barrier on new "
+    "helpers; old helpers expire after 3 seconds. Answers include snapshot_age_seconds and "
+    "change_event_since_snapshot. Refresh with refresh=true; unchanged ids survive. more=true continues."
 )
 ELEMENTS_PROPERTIES = {
     "device": {"type": "string", "description": "Computer name when several are online."},
@@ -40,6 +40,8 @@ ELEMENTS_PROPERTIES = {
     "value": {"type": "string", "maxLength": 200, "description": "Find by value (same syntax as query)."},
     "control_type": {"type": "string", "maxLength": 40, "description": "Find: Hyperlink, Button, Edit, ..."},
     "id": {"type": "string", "maxLength": 128, "description": "Read one element whole: full name and value."},
+    "inspect": {"type": "string", "maxLength": 128,
+                "description": "Probe live state, ancestors and provider against the stored element."},
     "text": {"type": "boolean", "description": "Return the text a person reads instead of elements."},
     "changes": {"type": "boolean", "description": "List what the last refresh added (offset pages it)."},
     "context": {"type": "integer", "minimum": 0, "maximum": 5, "description": "Lines around each text hit."},
@@ -47,11 +49,28 @@ ELEMENTS_PROPERTIES = {
     "bounds": {"type": "boolean", "description": "Add screen and frame pixel rectangles."},
 }
 ELEMENTS_FLAGS = ("refresh", "more", "text", "bounds")
+WINDOW_TOOLS = ("screen_elements", "screen_window_snapshot")  # what a window grant alone allows
 
 
 def screen_elements_tool():
     return {"name": "screen_elements", "description": ELEMENTS_NOTE,
             "inputSchema": {"type": "object", "properties": ELEMENTS_PROPERTIES, "required": [],
+                            "additionalProperties": False}}
+
+
+WINDOW_SNAPSHOT_NOTE = (
+    "One screenshot of a window a person shared with this line, only that window. Not the default: "
+    "read screen_elements first, and its deltas after each screen_element_action. Use this when layout or "
+    "visuals matter, or when elements do not explain what is on screen. Returns variants full, slim and "
+    "thumb (url, size, image tokens); slim is the usual choice; get_media fetches one. Protected content "
+    "shows black; the person sees each capture."
+)
+WINDOW_SNAPSHOT_PROPERTIES = {key: ELEMENTS_PROPERTIES[key] for key in ("device", "window")}
+
+
+def screen_window_snapshot_tool():
+    return {"name": "screen_window_snapshot", "description": WINDOW_SNAPSHOT_NOTE,
+            "inputSchema": {"type": "object", "properties": WINDOW_SNAPSHOT_PROPERTIES, "required": [],
                             "additionalProperties": False}}
 
 
@@ -66,11 +85,16 @@ def elements_query(args):
 def call(client, name, args, state, conv):
     from .client import ApiError
     if state.get("dynamic_screen_tools") and not (
-            state.get("screen_read") or (name == "screen_elements" and state.get("screen_windows"))):
+            state.get("screen_read") or (name in WINDOW_TOOLS and state.get("screen_windows"))):
         raise ApiError("no screen shared with you")
     from urllib.parse import quote
     base = f"/api/conversations/{quote(conv, safe='')}"
     if name == "screen_elements":
         return client.request("POST", base + "/screen-elements" + elements_query(args), timeout=60)
+    if name == "screen_window_snapshot":
+        pairs = [f"{key}={quote(str(args[key]), safe='')}" for key in WINDOW_SNAPSHOT_PROPERTIES
+                 if args.get(key)]
+        query = "?" + "&".join(pairs) if pairs else ""
+        return client.request("POST", base + "/screen-window-snapshot" + query, timeout=60)
     query = "?mark_pointer=true" if args.get("mark_pointer") else ""
     return client.request("POST", base + "/screen-frame" + query)

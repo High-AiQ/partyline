@@ -433,6 +433,25 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
         noted.assert_awaited_once_with("auto")
         self.post.assert_not_awaited()  # the summary is not speech
 
+    async def test_only_a_completed_assistant_row_reports_usage_once(self):
+        from tests import turn_usage_fixtures as fx
+
+        noted = AsyncMock()
+        self.adapter.att["on_turn_usage"] = noted
+        self.claim()
+        unfinished = fx.opencode_row()
+        unfinished["time"]["completed"] = None
+        self.row("a1", "assistant", unfinished, seq=2)
+        await self.adapter._poll()
+        noted.assert_not_awaited()
+        self.db.execute("DELETE FROM session_message WHERE id='a1'")
+        self.row("a1", "assistant", fx.opencode_row(), seq=2)
+        await self.adapter._poll()
+        await self.adapter._poll()
+        noted.assert_awaited_once()
+        turn = noted.await_args.args[0]
+        self.assertEqual((turn["response_id"], turn["output"], turn["reasoning"]), ("a1", 581, 380))
+
     async def test_an_unfinished_compaction_row_and_a_manual_reason(self):
         from unittest.mock import AsyncMock
 

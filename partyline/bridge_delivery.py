@@ -102,38 +102,47 @@ async def route_bridge(runtime, conv_id: str, message: dict) -> bool:
         peer = side_view(db, bridge, side(bridge, speaker["id"])[1])
         await _tell(runtime, conv_id, speaker["id"],
                     f"⚠ nothing crossed: your counterpart is @{peer['name']} on "
-                    f"«{peer['conv_name']}» — address it as @[bridge]{peer['name']}")
+                    f"«{peer['conv_name']}» — send to it with bridge_send")
     return False
 
 
 async def _deliver(runtime, conv_id: str, message: dict) -> bool:
+    status, note = await deliver_copy(runtime, conv_id, message)
+    speaker = speaker_attachment(runtime.db, conv_id, message) if note else None
+    if speaker:
+        await _tell(runtime, conv_id, speaker["id"], note)
+    return True
+
+
+async def deliver_copy(runtime, conv_id: str, message: dict) -> tuple[str, str | None]:
+    """Carry one stamped message to the counterpart: (status, note for the sender).
+
+    status is ``delivered``, ``queued`` (the peer is not attached; it waits for it)
+    or a refusal, ``limit``, ``closed`` or ``gone``, where nothing crossed. The note
+    is what the sender should be told; both the ``@[bridge]`` prefix and the
+    ``bridge_send`` tool come through here.
+    """
     db = runtime.db
     speaker = speaker_attachment(db, conv_id, message)
     bridge = open_bridge_for_attachment(db, speaker["id"]) if speaker else None
     if bridge is None or bridge["id"] != message["bridge_id"]:
-        if speaker:
-            await _tell(runtime, conv_id, speaker["id"],
-                        "⚠ this bridge is closed: nothing crossed")
-        return True
+        return "closed", "⚠ this bridge is closed: nothing crossed"
     mine, theirs = side(bridge, speaker["id"])
     peer = side_view(db, bridge, theirs)
     target = db.get_attachment(peer["attachment_id"])
     now = time.time()
     if sent_in_window(db, bridge["id"], speaker["id"], now) >= WINDOW_LIMIT:
-        await _tell(runtime, conv_id, speaker["id"],
-                    f"⚠ bridge rate limit: {WINDOW_LIMIT} messages per {WINDOW_SECONDS // 60} "
-                    "minutes — this one was not delivered; wait before sending more")
         await _pause_once(runtime, bridge, now)
-        return True
+        return "limit", (
+            f"⚠ bridge rate limit: {WINDOW_LIMIT} messages per {WINDOW_SECONDS // 60} "
+            "minutes — this one was not delivered; wait before sending more")
     if target is None:
-        await _tell(runtime, conv_id, speaker["id"],
-                    f"⚠ @{peer['name']} is gone — nothing crossed")
-        return True
+        return "gone", f"⚠ @{peer['name']} is gone — nothing crossed"
     plan = db.get_restart_plan()
+    status, note = "delivered", None
     if target["status"] not in ("starting", "running") and peer["attachment_id"] not in (
             plan["attachment_ids"] if plan else []):
-        await _tell(runtime, conv_id, speaker["id"],
-                    f"@{peer['name']} is not attached — your message is waiting for it")
+        status, note = "queued", f"@{peer['name']} is not attached — your message is waiting for it"
     copy = db.add_message(peer["conv_id"], message["sender"], "agent", message["body"])
     db._exec(
         "UPDATE messages SET source_attachment_id=?, source_conv_id=?,"
@@ -142,7 +151,7 @@ async def _deliver(runtime, conv_id: str, message: dict) -> bool:
     )
     copy = select_message_by_id(db._exec, peer["conv_id"], copy["id"])
     await runtime.route_mentions(peer["conv_id"], copy, force=True)
-    return True
+    return status, note
 
 
 async def _pause_once(runtime, bridge: dict, now: float) -> None:

@@ -166,7 +166,7 @@ class NavigationTests(PageCase):
         self.assertTrue(second["lines"].startswith(f"{first['next_offset']}: "))
 
     async def test_a_capture_cap_leaves_a_cursor_and_more_continues_it(self):
-        with patch("partyline.screen_elements.MAX_NODES", 1500):
+        with patch("partyline.screen_element_state.MAX_NODES", 1500):
             partial = await self.ask()
             self.assertIn("more=true", partial["partial"])
             self.assertLess(partial["nodes"], 5200)
@@ -190,7 +190,7 @@ class LifecycleTests(PageCase):
 
     async def test_refresh_starts_a_new_snapshot_and_ends_the_old_cursor(self):
         first = await self.ask()
-        with patch("partyline.screen_elements.MAX_NODES", 300):
+        with patch("partyline.screen_element_state.MAX_NODES", 300):
             await self.ask(refresh=True)
         old = next(iter(self.access.walks))
         second = await self.ask(refresh=True)

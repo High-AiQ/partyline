@@ -1,7 +1,8 @@
 <script lang="ts">
   /** How to pair and run the native screen helper; shared by the share dialog and Settings. */
   import { copyText } from "../lib/clipboard";
-  import { HELPER_WINDOWS_INSTALLER_URL, onWindows } from "../lib/helper-installer";
+  import { onWindows } from "../lib/helper-installer";
+  import { helperInstaller } from "../state/helper-installer.svelte.js";
 
   let { origin, code }: { origin: string; code: string } = $props();
 
@@ -29,6 +30,7 @@
   ]);
   const status = $state<Record<string, string>>({});
   const windows = onWindows();
+  if (windows) void helperInstaller.ensure();
 
   function selectNode(node: HTMLElement | null): void {
     if (!node) return;
@@ -50,13 +52,18 @@
     <div class="space-y-1" data-testid="windows-installer">
       <h4 class="font-semibold">Windows: no terminal needed</h4>
       <p>
-        <a class="link-button primary" href={HELPER_WINDOWS_INSTALLER_URL} data-testid="download-windows"
-          >Download for Windows</a
-        >
+        {#if helperInstaller.info}
+          <a class="link-button primary" href={helperInstaller.info.url} data-testid="download-windows"
+            >Download for Windows ({helperInstaller.info.version})</a
+          >
+        {:else}
+          <span data-testid="download-windows-pending">Looking up the installer…</span>
+        {/if}
       </p>
       <ol class="list-decimal pl-5">
         <li>
-          Open <code>PartylineHelper-Setup.exe</code>. It installs for you only; no administrator rights.
+          Open <code>{helperInstaller.info?.filename ?? "PartylineHelper-Setup-<version>.exe"}</code>. It
+          installs for you only; no administrator rights.
         </li>
         <li>
           While the installer is unsigned, Windows SmartScreen may say “Windows protected your PC”. Click

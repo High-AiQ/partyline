@@ -1,5 +1,35 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-14 — Dropdown options need not be children of the ComboBox
+
+The false assumptions were that a granted HWND subtree contains every dropdown popup,
+that options are children of their opener, and that a successful pattern call proves a
+state change. Live Chrome exposed a sibling List while ExpandCollapse still reported
+Collapsed; other providers can use owned top-level windows. Snapshot scope now includes
+only visible same-process owner-chain popups, named selection searches nearby/new Lists,
+and action results compare pattern state and separately report discovered options.
+Rooted post-action reads retain the root. UIA's IsEnabled can also disagree with a usable
+web link: retain ARIA/ancestor evidence and require an explicit, person-informed force
+request to try the pattern and its accessible default action. Regressions:
+`tests/test_uia_dropdown.py`, `tests/test_uia_disabled.py`.
+
+The same-process restriction belongs to appended popups, not hosted content inside the
+granted HWND. Persistent UIA subscriptions must remain on granted/popup roots, with
+popup registration changes deferred from WinEvent callbacks to the message loop; an
+unfiltered desktop subscription is not a cheap substitute. Selection cleanup must not
+replace the result after Select has already run, or mask an earlier refusal. Hosted
+subtree, popup-root lifecycle and failed-collapse regressions cover these boundaries.
+
+## 2026-11-14 — Line grants must cover the work delegated below them
+
+The false assumption was that sharing with a line meant excluding its sublines. A task
+implementer then received a 403 for a window shared with its project. Window grants now
+flow down live parent links, with inherited notices, attach briefings and MCP capability
+flags using the same scope. Ancestors, siblings and unrelated lines cannot use the grant;
+archiving a subline preserves its parent’s consent. Seeing ancestor names must not widen
+operational access: Docker workload scopes explicitly exclude ancestors. Plain-tree regressions:
+`tests/test_window_grant_subtree.py`.
+
 ## 2026-11-14 — A failed worktree add can leave a locked registration
 
 The false assumption was that an unsuccessful `git worktree add` creates nothing and
@@ -2899,3 +2929,25 @@ mail filed after the settling and a short list of restart notes (`CONTINUATION`,
 banner) are treated by time or kind. A write-set or memory notice that arrived between settling and a reopen is
 consumed with the rest; the reopened worker files again. Tests: `tests/test_settled_task_mail.py` (real
 `ReattachCoordinator` followed by a live wake; failed admission, recovery, approval).
+
+
+### A debounced invalidation push is not a snapshot freshness barrier
+
+False assumption: waiting half a second after an action and expiring a UIA tree after three seconds
+would keep the agent's state aligned with a visible browser change. UIA may deliver a later event,
+and a helper push can still be coalescing when a server read reuses the tree. Dropping the tree also
+lost the baseline needed to show a state change on an otherwise stable element id.
+
+Increment the helper's per-grant counter in the native callback, authorize cached reads only with a
+live subscription and matching counter, and label capture races. Retain the previous tree for state
+deltas; compare enabled/value/selection as well as identities. `tests/test_screen_state_truth.py`
+covers in-flight pushes, changes during/after capture, continuation epochs, dead subscriptions and
+legacy fallback without real elapsed-time waits. `inspect` reads current UIA independently from the
+retained snapshot; use the manual retest in `docs/screen-helper.md` to distinguish Chrome accessibility
+state from Partyline staleness.
+
+A state delta must compare semantic fields, not layout, focus or pattern-list noise. Counting a
+scroll's rectangle shifts as updates can mark a Document changed and fold away the link whose
+enabled state actually changed. The layout-shift regression in `tests/test_screen_state_truth.py`
+requires that link to remain visible. A live/snapshot mismatch also takes precedence over ancestor
+evidence in either direction; a disabled ancestor must never conceal stale state on the target.

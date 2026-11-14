@@ -12,6 +12,8 @@ READ_TIMEOUT = 33  # seconds; START_LIMIT + BUDGET + KILL_SLACK must stay below 
 
 def read_options(message):
     """The only fields of a read request the helper honours."""
+    if isinstance(message.get("inspect"), str):
+        return {"inspect": message["inspect"][:128]}
     cursor = message.get("cursor")
     return {"cursor": cursor[:64]} if isinstance(cursor, str) and cursor else {}
 

@@ -81,7 +81,7 @@ def collapse(tree, nodes):
     return out
 
 
-def listing(tree, root, depth, offset):
+def listing(tree, root, depth, offset, include_root=False):
     """Children of `root` (or grandchildren too), each with its own child count."""
     found = tree.subtree(root)
     if found is None:
@@ -96,9 +96,11 @@ def listing(tree, root, depth, offset):
             if level < depth:
                 walk(node.id, level + 1)
 
+    if include_root:
+        rows.append((tree.nodes[root], 0))
     walk(root, 1)
     return page(tree, rows[offset:], offset, lambda row: tree.line(
-        row[0], row[1] - 1, extra=counted(tree, row[0])), len(rows))
+        row[0], row[1] if include_root else row[1] - 1, extra=counted(tree, row[0])), len(rows))
 
 
 def page(tree, rows, offset, render, total, starts=None):
@@ -151,11 +153,15 @@ def changes(tree, offset=0):
     """What a new snapshot has that the one before did not: the topmost new elements, and the counts."""
     before = tree.before or set()
     added = [ident for ident in tree.order if ident not in before]
+    updated = [ident for ident in tree.order if ident in tree.updated]
+    added += updated
     fresh = set(added)
     tops = [tree.nodes[ident] for ident in added if tree.nodes[ident].parent not in fresh]
     body = page(tree, tops[offset:], offset, lambda node: tree.line(node, 0, extra=counted(tree, node)),
                 len(tops))
-    body["diff"] = f"+{len(added)} -{len(before - set(tree.nodes))}"
+    body["diff"] = f"+{len(added) - len(updated)} -{len(before - set(tree.nodes))}"
+    if updated:
+        body["diff"] += f" ~{len(updated)}"
     return body
 
 

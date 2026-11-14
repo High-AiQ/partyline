@@ -166,10 +166,12 @@ def task_actions(db, actor, conv_id):
     actions = set()
     if actor.attachment_id == row['implementer_id']:
         actions.update(('request_review', 'blocked', 'resume_work', 'waiting'))
+        if row['status'] == 'in_review':
+            actions.add('nudge_reviewer')
         if row['mode'] == 'express':
             actions.add('deliver')
     if actor.attachment_id == row['reviewer_id']:
-        actions.update(('review_verdict', 'env_gap'))
+        actions.update(('review_verdict', 'env_gap', 'waiting'))
     if row['policy'] == 'captain' and actor.is_lead and actor.conv_id == row['root_id']:
         actions.add('review_verdict')
     return actions

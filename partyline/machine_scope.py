@@ -28,7 +28,7 @@ Capability = Literal[
     "appoint_lead",
     "archive", "link_parent",
     "create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task",
-    "message_task", "set_task_goal",
+    "message_task", "set_task_goal", "nudge_reviewer",
     "resume_work", "request_review", "review_verdict", "env_gap", "blocked", "waiting", "deliver",
 ]
 
@@ -40,7 +40,11 @@ def is_human(principal: Principal) -> bool:
 
 
 def visible_conversation_ids(db: Db, principal: Principal) -> set[str] | None:
-    """None means every line (humans). Machines see home plus descendants."""
+    """None means every line (humans). Machines see home plus descendants.
+
+    Ancestors are not visible here. Window grants reach a line's live ancestors through
+    ``screen_grants.window_line_ids``, which is the only place their names are needed.
+    """
     if is_human(principal):
         return None
     home = principal.conv_id
@@ -70,7 +74,7 @@ def _live_lead(db: Db, conv_id: str) -> dict | None:
 
 def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -> bool:
     if is_human(principal):
-        return True
+        return capability != "nudge_reviewer"
     if principal.kind != "machine" or not principal.conv_id:
         return False
     if capability == "upload":
@@ -82,7 +86,8 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
         return False
     from .orchestrator_store import task, task_actions
     task_row = task(db, conv_id)
-    if capability in ("request_review", "review_verdict", "env_gap", "blocked", "waiting", "deliver"):
+    if capability in ("request_review", "review_verdict", "env_gap", "blocked", "waiting", "deliver",
+                      "nudge_reviewer"):
         if (capability == "review_verdict" and conv_id == home and principal.is_lead):
             return True
         return capability in task_actions(db, principal, conv_id)

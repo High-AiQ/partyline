@@ -1,4 +1,4 @@
-"""An implementer that is waiting on a long command, not stuck.
+"""A task process that is waiting on a long command, not stuck.
 
 The task server read every silent turn as a missing hand-off: one reminder,
 then a `stalled` report to the root captain. An implementer waiting for a
@@ -6,7 +6,7 @@ ten-minute test run looks exactly like that from the outside — the process is
 alive, its CLI sits at the prompt, and nothing is posted because nothing has
 finished yet. The report was false, and it cost a captain an interruption.
 
-Only the implementer knows what it waits for, so it says so here, in a
+Only the task process knows what it waits for, so it says so here, in a
 structured call that the stall heuristic honours until it runs out. Nothing is
 inferred from prose: a chat message saying "still waiting" is not a wait, and
 a wait is not a stall. The wait defers the reminder and the escalation; it
@@ -35,10 +35,11 @@ def live(row, now=None):
 
 
 def note(row):
-    """The gentle line note: this implementer is waiting, and that is not a stall."""
+    """The gentle line note: this task process is waiting, and that is not a stall."""
     until = row.get('wait_until')
     clock = time.strftime('%H:%M', time.localtime(until)) if until else 'soon'
-    who = row.get('implementer_handle') or 'the implementer'
+    role = 'reviewer' if row['status'] == 'in_review' else 'implementer'
+    who = row.get(f'{role}_handle') or f'the {role}'
     return (f"⏳ waiting, not stalled: {who} is waiting on "
             f"«{row.get('wait_reason') or 'a long command'}» until {clock}; "
             'a hand-off is not due yet.')
@@ -57,11 +58,13 @@ def _declare(db, conv_id, reason, until):
 
 
 async def waiting(runtime, actor, conv_id, body):
-    """The implementer says it is waiting on a long command."""
+    """The implementer or reviewer says it is waiting on a long command."""
     db = runtime.db
-    row = require_task(db, actor, conv_id)
-    if row['status'] not in ('implementing', 'idle'):
-        raise HTTPException(409, 'only an implementing task can wait')
+    row = task(db, conv_id)
+    reviewer = bool(row and row['reviewer_id'] == actor.attachment_id)
+    row = require_task(db, actor, conv_id, reviewer=reviewer)
+    if row['status'] not in (('in_review',) if reviewer else ('implementing', 'idle')):
+        raise HTTPException(409, 'only the active implementer or reviewer can wait')
     until = time.time() + body.seconds
     row = await asyncio.to_thread(_declare, db, conv_id, body.reason, until)
     await runtime.post_message(conv_id, 'system', 'system', note(row))
@@ -93,7 +96,8 @@ def _reset_expired(db, row):
                        'WHERE conv_id=? AND wait_until=?', (row['conv_id'], row['wait_until']))
     if changed.rowcount != 1:
         return None
-    return db.get_attachment(row['implementer_id'])
+    role = 'reviewer_id' if row['status'] == 'in_review' else 'implementer_id'
+    return db.get_attachment(row[role])
 
 
 async def resume_expired(runtime, row):
@@ -105,10 +109,12 @@ async def resume_expired(runtime, row):
     """
     if not expired(row):
         return
-    if row['status'] not in ('implementing', 'idle'):
+    if row['status'] not in ('implementing', 'idle') and not (
+            row['status'] == 'in_review' and row['reviewer_id']):
         return
+    role = 'reviewer_id' if row['status'] == 'in_review' else 'implementer_id'
     presence = getattr(runtime, 'presence', None)
-    if presence is not None and presence.is_working(row['implementer_id']):
+    if presence is not None and presence.is_working(row[role]):
         return  # a tool call in flight: the hand-off is not due yet
     att = await asyncio.to_thread(_reset_expired, runtime.db, row)
     if att is None:

@@ -20,6 +20,7 @@ from .local_tools_routes import tools_router
 from .render_check_routes import render_check_router
 from .screen_control_routes import control_router
 from .screen_frame_store import frame_reference
+from .helper_release import installer_info
 from .screen_hub import ScreenHub
 from .screen_grants import grant_router
 from .screen_snapshot import owner_devices, owner_indicators
@@ -83,6 +84,11 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         device_id, token, owner_id, _ = result
         await hub._device_event({"id": device_id, "owner_id": owner_id}, False)
         return {"device_id": device_id, "token": token}
+
+    @router.get("/api/screen/helper-installer")
+    async def helper_installer(request: Request):
+        request_principal(request)
+        return installer_info()
 
     @router.get("/api/screen/devices")
     async def devices(request: Request, conv_id: str | None = None):
@@ -204,6 +210,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
 
     from .screen_elements import elements_router
     app.include_router(elements_router(runtime, hub))
+    from .screen_window_snapshot import snapshot_router
+    app.include_router(snapshot_router(runtime, hub, store))
     app.include_router(grant_router(runtime, hub))
     app.include_router(router)
     app.include_router(control_router(runtime, hub, store))

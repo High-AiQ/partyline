@@ -20,6 +20,13 @@ export type { NormalizedRegion, ScreenShare } from "./screen-contracts";
 
 const IndicatorsSchema = z.object({ indicators: z.array(IndicatorSchema) });
 const PairCodeSchema = z.object({ code: z.string(), expires_in: z.number() });
+const HelperInstallerSchema = z.object({
+  version: z.string(),
+  filename: z.string(),
+  url: z.string(),
+  releases_url: z.string(),
+});
+export type HelperInstaller = z.infer<typeof HelperInstallerSchema>;
 const PairClaimSchema = z.object({ device_id: z.string(), token: z.string() });
 const StartSchema = z.object({ share_id: z.string(), status: z.string() });
 const PreviewSchema = z.object({
@@ -49,6 +56,8 @@ export const screenApi = {
     request("/api/screen/devices" + (convId ? "?conv_id=" + encodeURIComponent(convId) : ""), {
       schema: DevicesSchema,
     }),
+  /** The Windows installer of the helper version this server ships; the server owns the URL. */
+  installer: () => request("/api/screen/helper-installer", { schema: HelperInstallerSchema }),
   indicators: () => request("/api/screen/active-indicators", { schema: IndicatorsSchema }),
   pair: (convId?: string) =>
     request("/api/screen/pair" + (convId ? "?conv_id=" + encodeURIComponent(convId) : ""), {

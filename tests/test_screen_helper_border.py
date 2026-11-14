@@ -1,6 +1,7 @@
 """Capture-zone border tests use fake backends and never create native windows."""
 import asyncio
 import ctypes
+import queue
 import threading
 import unittest
 from types import SimpleNamespace
@@ -111,6 +112,37 @@ class TkLifetimeTests(unittest.TestCase):
                 root.destroy.assert_called()
                 if drawing_fails:
                     self.assertEqual(len(errors), 1)
+
+    def test_backend_drains_queued_outline_commands_to_latest_show_or_hide(self):
+        class Commands:
+            def __init__(self, newer):
+                self.newer = list(newer)
+                self.first = True
+
+            def get(self, timeout):
+                if self.first:
+                    self.first = False
+                    return ("show", [(0, 0, 10, 3)], "#38bdf8")
+                return ("close",)
+
+            def get_nowait(self):
+                if self.newer:
+                    return self.newer.pop(0)
+                raise queue.Empty
+
+        for newer, expected in (
+                ([ ("hide",), ("show", [(20, 20, 10, 3)], "#38bdf8") ], [(20, 20, 10, 3)]),
+                ([ ("show", [(20, 20, 10, 3)], "#38bdf8"), ("hide",) ], [])):
+            with self.subTest(expected=expected):
+                root = Mock()
+                fake_tk = SimpleNamespace(Tk=Mock(return_value=root))
+                backend = TkBackend(Mock())
+                backend.commands = Commands(newer)
+                with patch.dict("sys.modules", {"tkinter": fake_tk}), \
+                        patch.object(backend, "make_window", return_value=Mock()) as make_window:
+                    backend.run()
+                self.assertEqual([call.args[2] for call in make_window.call_args_list], expected)
+                root.destroy.assert_called_once_with()
 
 
 class X11Tests(unittest.TestCase):

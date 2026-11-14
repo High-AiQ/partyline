@@ -3,28 +3,32 @@ import sys
 import threading
 
 
-PROPERTIES = (30010, 30045, 30086, 30079, 30070, 30005)
+PROPERTIES = (30010, 30045, 30086, 30079, 30070, 30005, 30101, 30102, 30096)
 
 
-def register_handlers(automation, uia, root, changed, com_object):
+def register_handlers(automation, uia, root, changed, com_object, accepts=lambda sender: True,
+                      structure_only=False):
     """Bind the exact UIA sink methods while keeping handler objects strongly referenced."""
     class PropertyHandler(com_object):
         _com_interfaces_ = [uia.IUIAutomationPropertyChangedEventHandler]
 
         def HandlePropertyChangedEvent(self, sender, property_id, new_value):
-            changed()
+            if accepts(sender):
+                changed()
 
     class StructureHandler(com_object):
         _com_interfaces_ = [uia.IUIAutomationStructureChangedEventHandler]
 
         def HandleStructureChangedEvent(self, sender, change_type, runtime_id):
-            changed()
+            if accepts(sender):
+                changed()
 
     handlers = []
     properties, structure = PropertyHandler(), StructureHandler()
     try:
-        automation.AddPropertyChangedEventHandler(root, 7, None, properties, list(PROPERTIES))
-        handlers.append(("property", root, properties))
+        if not structure_only:
+            automation.AddPropertyChangedEventHandler(root, 7, None, properties, list(PROPERTIES))
+            handlers.append(("property", root, properties))
         automation.AddStructureChangedEventHandler(root, 7, None, structure)
         handlers.append(("structure", root, structure))
     except Exception:
@@ -44,13 +48,19 @@ def remove_handlers(automation, handlers):
 class UIAEventSubscription:
     """Keep the UIA COM handlers alive on a message-pumping apartment thread."""
 
-    def __init__(self, hwnd, changed):
+    def __init__(self, hwnd, changed, structure_only=False):
         self.hwnd, self.changed = hwnd, changed
+        self.structure_only = structure_only
         self.thread = None
         self.ready = threading.Event()
         self.cancelled = threading.Event()
         self.state_lock = threading.Lock()
         self.started = False
+
+    @property
+    def live(self):
+        return bool(self.started and self.thread and self.thread.is_alive()
+                    and not self.cancelled.is_set())
 
     def start(self):
         if sys.platform != "win32":
@@ -80,7 +90,7 @@ class UIAEventSubscription:
         import comtypes.client
         from ctypes import wintypes
 
-        handlers = []
+        handlers, popup_hook, roots = [], None, None
         user = ctypes.WinDLL("user32", use_last_error=True)
         initialized = False
         user.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM,
@@ -93,21 +103,41 @@ class UIAEventSubscription:
             from comtypes import COMObject
 
             automation = comtypes.client.CreateObject(uia.CUIAutomation, interface=uia.IUIAutomation)
-            root = automation.ElementFromHandle(self.hwnd)
-            handlers = register_handlers(automation, uia, root, self.changed, COMObject)
+            from .uia_windows import WindowsProvider
+            from .uia_popups import hook_popups, sender_in_scope
+            from .uia_event_roots import POPUP_REFRESH, WindowHandlers
+            provider = WindowsProvider(self.hwnd)
             message = wintypes.MSG()
             user.PeekMessageW(ctypes.byref(message), None, 0, 0, 0)
             thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+            def refresh():
+                user.PostThreadMessageW(thread_id, POPUP_REFRESH, 0, 0)
+            popup_hook, popup_callback = hook_popups(user, provider.scope, self.changed, refresh)
+            if self.structure_only:  # only the short Expand deadline may use desktop scope
+                root = automation.GetRootElement()
+                handlers = register_handlers(automation, uia, root, self.changed, COMObject,
+                                             lambda sender: sender_in_scope(provider, sender), True)
+            else:
+                roots = WindowHandlers(automation, uia, self.hwnd, provider.scope, self.changed, COMObject)
+                roots.start()  # no COM calls or sender walks inside persistent UIA handlers
             if not self._mark_started(thread_id, automation, handlers):
                 return
             while user.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
+                if message.message == POPUP_REFRESH and roots is not None:
+                    roots.refresh()
+                    continue
                 user.TranslateMessage(ctypes.byref(message))
                 user.DispatchMessageW(ctypes.byref(message))
         except Exception:
             self.ready.set()  # unsupported UIA event registration falls back to bounded snapshots
         finally:
+            self.started = False
+            if popup_hook:
+                user.UnhookWinEvent(popup_hook)
             if "automation" in locals():
                 try:
+                    if roots is not None:
+                        roots.close()
                     remove_handlers(automation, handlers)
                 except Exception:
                     pass

@@ -1235,7 +1235,11 @@ full contract is `docs/contracts/line-bridge.md`; the code is
   `DELETE /api/bridges/<id>`); a process token gets 403. A bridge is refused
   with 409 for lines in one tree, a line that already has a bridge, a
   non-live ambassador, or an archived line.
-- **Speaking.** An ambassador's message containing `@[bridge]<peer>` is
+- **Speaking.** The `bridge_send(text, client_key)` MCP tool (listed only while
+  the caller is the ambassador of an open bridge; capability flag `bridge_open`)
+  delivers through the same path, rate limit and log as the prefix, and returns
+  `delivered` or `queued`. It posts nothing to either chat, so an ambassador can
+  answer its peer and still tell its own people in the final message. An ambassador's message containing `@[bridge]<peer>` is
   delivered whole to the peer as a private copy (audience = the peer, stamped
   `bridge_id`, forced wake). The ordinary `@name` regex never matches `@[`. A
   person's `@[bridge]` is ignored; a non-ambassador or wrong handle gets a
@@ -1446,6 +1450,22 @@ either. The wait only defers the check: when it runs out the task owes a hand-of
 again and gets the same single reminder, never a skipped straight to a stall
 report. A wait is a structured statement, never prose: a chat message saying
 "still waiting" waits for nothing.
+
+A reviewer returning idle during `in_review` without `review_verdict` or `env_gap`
+also sends the root a deduplicated notify report: `stalled: reviewer returned
+without review_verdict or env_gap`. It is reported once per review round, including
+across duplicate turn receipts and server restarts. An open harness turn or a live
+`waiting(reason, seconds)` suppresses the report; reviewers can declare waits too.
+An expired review wait checks the reviewer again. An `env_gap` excuses that turn;
+the next reviewer turn must make progress or declare another gap or wait.
+
+During `in_review`, only the task's own implementer can call `nudge_reviewer()`
+(HTTP `POST /api/conversations/{conv_id}/task/nudge-reviewer`, empty body or `{}`).
+It delivers a fixed request to continue and submit `review_verdict` or `env_gap`,
+at most once per round. Text arguments are rejected: reviewer independence means
+the implementer can prompt progress but cannot steer the verdict. A dead reviewer
+returns 409 directing the implementer to the root captain's `restart_reviewer`.
+Root captains and people retain `message_task` for free-text messages.
 
 ## Task modes: full, light and express
 

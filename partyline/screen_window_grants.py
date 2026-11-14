@@ -75,7 +75,8 @@ def share_targets(db, owner_id, *, offered=None, window_lines=True):
             processes.append({"attachment_id": att["id"], "name": att["name"],
                               "preset": preset["title"] if preset else att["adapter"]})
         if processes or window_lines:
-            groups.append({"line_id": line["id"], "line_name": line["name"], "processes": processes})
+            groups.append({"line_id": line["id"], "line_name": line["name"],
+                           "parent_id": line.get("parent_id"), "processes": processes})
     return groups
 
 
@@ -180,6 +181,8 @@ class WindowGrants:
         self.actions.pop(grant_id, None)
         if elements := getattr(self.hub, "elements", None):
             elements.end(grant_id)
+        if snapshots := getattr(self.hub, "snapshots", None):
+            snapshots.end(grant_id)
         entry = self.known.pop(grant_id, None)
         device_id = entry["device_id"] if entry else None
         self.hub.runtime.db._exec("DELETE FROM screen_line_window_grants WHERE id=?", (grant_id,))

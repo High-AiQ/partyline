@@ -3,7 +3,7 @@
   import WindowGrantList from "./WindowGrantList.svelte";
   import Modal from "../Modal.svelte";
   import PairingSteps from "../PairingSteps.svelte";
-  import { HELPER_WINDOWS_INSTALLER_URL } from "../../lib/helper-installer";
+  import { helperInstaller } from "../../state/helper-installer.svelte.js";
   import { screenStatus } from "../../state/screen-status.svelte.js";
   import ControlBadge from "./ControlBadge.svelte";
   import { room } from "../../state/room.svelte.js";
@@ -38,6 +38,10 @@
   const monitor = $derived(device?.monitors.find((item) => item.id === monitorId));
   const preview = $derived(monitor ? (previews[monitor.id] ?? "") : "");
 
+  $effect(() => {
+    if (open && devices.some((item) => item.update_available && item.os === "Windows"))
+      void helperInstaller.ensure();
+  });
   $effect(() => {
     if (screenStatus.openPicker !== pickerRequest) {
       pickerRequest = screenStatus.openPicker;
@@ -180,9 +184,13 @@
           <span class="text-copper" role="status" data-testid="helper-update"
             >Helper update available{item.helper_version ? ` (running ${item.helper_version})` : ""}.
             {#if item.os === "Windows"}
-              <a href={HELPER_WINDOWS_INSTALLER_URL} data-testid="helper-update-download"
-                >Download the new installer</a
-              > on that computer and run it.
+              {#if helperInstaller.info}
+                <a href={helperInstaller.info.url} data-testid="helper-update-download"
+                  >Download the new installer ({helperInstaller.info.version})</a
+                > on that computer and run it.
+              {:else}
+                Download the new installer on that computer and run it.
+              {/if}
             {:else}
               Run the install command from “Pair this computer with Partyline” on that computer again.
             {/if}</span

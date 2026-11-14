@@ -33,6 +33,14 @@ processes, opened and closed only by a person.
    - **On open, each ambassador is sent the bridge pack** (below) as a private system message
      addressed to it (`audience_attachment_id`), forcing a wake.
 3. **Speaking.**
+   - **The tool:** `bridge_send(text, client_key)` (`POST /api/conversations/<line>/bridge-send`)
+     is the recommended way. It exists only for the ambassador of an open bridge (capability flag
+     `bridge_open`; clients that never re-list reach it through `extras`), stamps and delivers
+     exactly like the mention (same rate limit, audit row, private copy and wake), returns
+     `delivered` or `queued` (the peer is not attached), and is refused with 409/429 when the
+     bridge is closed or the limit is hit. A repeated `client_key` delivers once. It posts nothing
+     to either chat, so the turn's final message stays free for the line's own people. The
+     `@[bridge]` mention below keeps working.
    - **The mention:** the sole way for an ambassador to address its counterpart is the mention
      `@[bridge]<name>` in its own message, where `<name>` is the counterpart's handle (matched
      case-insensitively, as with ordinary mentions). The ordinary `@name` regex does not match
@@ -96,9 +104,12 @@ processes, opened and closed only by a person.
 ## The bridge pack (text injected to each ambassador)
 
 > **Bridge open.** You are this line's ambassador to @<peer> on «<peer line>», a separate project.
-> - Address it with `@[bridge]<peer>`. That whole message goes only to @<peer>. The people on your
->   line don't see bridge messages (they can read the bridge log), so report anything they or your
->   line's processes need in a separate, normal message, never inside an @[bridge] message.
+> - Send to @<peer> with the `bridge_send` tool (text, client_key; if it is not listed, run it as
+>   `extras(op="bridge_send", args={...})`). The text goes only to @<peer>. The people on your line
+>   don't see bridge messages (they can read the bridge log), so tell them and your line's
+>   processes in your normal final message, never through the bridge. Writing `@[bridge]<peer>` at
+>   the start of a message still works, but then that whole message goes to the bridge and nothing
+>   reaches your people.
 > - Its replies reach you as private messages marked as coming over the bridge.
 > - Only text crosses: no files, tokens, credentials or secrets. Its line's checkout, fence and
 >   people are not yours, and yours are not its.

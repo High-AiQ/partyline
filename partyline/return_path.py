@@ -204,7 +204,8 @@ class ReturnPath:
             return
         if parent:
             self.notify_parent.add(att_id)
-        self.pending[att_id] = asyncio.create_task(self._settle(att_id))
+        self.pending[att_id] = asyncio.create_task(self._settle(
+            att_id, line_task(self.runtime.db, finisher["conv_id"])))
 
     def _working(self, att_id: str) -> bool:
         return bool(self.presence is not None and self.presence.is_working(att_id))
@@ -236,7 +237,7 @@ class ReturnPath:
             "since_id": min(since) if since else finisher.get("last_seen") or None,
         }
 
-    async def _settle(self, att_id: str) -> list[dict]:
+    async def _settle(self, att_id: str, review=None) -> list[dict]:
         await self.sleep(self.grace)
         ended_at = self.ended_at.get(att_id, self.clock())
         if not await wait_until_quiet(
@@ -252,7 +253,7 @@ class ReturnPath:
         if finisher is None:
             return []
         if line_task(self.runtime.db, finisher["conv_id"]):
-            await task_stall.settle(self.runtime, finisher)
+            await task_stall.settle(self.runtime, finisher, review)
             peer = task_peer(self.runtime.db, finisher)
             requesters = {peer['id']: peer} if peer else {}
             askers = {}

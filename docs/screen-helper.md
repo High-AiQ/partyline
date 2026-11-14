@@ -23,6 +23,15 @@ Screen-control tools appear only after control consent.
 Claude Code and OpenCode V2 refresh their tool list on MCP `list_changed`. Codex CLI does not, so its
 screen tools remain listed for the session and return a clear denial when no screen is shared.
 
+Each granted window has a thin blue outline just outside its visible frame. It follows the window and
+hides while the window is minimized or on another virtual desktop. It is click-through, does not take
+focus, and supported Windows versions exclude it from screen capture. The outline stays above other
+windows while the grant is active and is removed as soon as the grant ends.
+
+Some UI Automation actions can bring the granted window forward. When an action does that, the helper
+restores the window that was in front before the action, provided the granted window is still in front
+when the action completes. Actions intended to activate a window are not restored.
+
 The Partyline Computers dialog shows these
 commands with your server's address and a pairing code filled in, each with a copy
 button. Run them in a terminal **on the computer you want to share, not on the
@@ -33,11 +42,16 @@ for both forms below. Keep the `run` terminal open and answer `y` to each share 
 
 For a person who should never open a terminal: one download, one double-click, then only native dialogs.
 In Partyline's **Computers** dialog, a visitor on Windows sees **Download for Windows**
-(`https://github.com/High-AiQ/partyline/releases/latest/download/PartylineHelper-Setup.exe`; the
-release asset has a fixed name so that link stays valid). Linux and macOS visitors keep the `uvx`
+(the link points at the exact helper version this server ships). Installers are listed on the
+[releases page](https://github.com/High-AiQ/partyline/releases). Each is named `PartylineHelper-Setup-<helper version>.exe`
+and attached to the `helper-v<helper version>` release, for example
+`releases/download/helper-v1.2.0/PartylineHelper-Setup-1.2.0.exe`; there is no fixed-name or `latest` alias, and the
+version also shows in the file's Properties → Details. The server builds that URL in one place
+(`installer_info` in `partyline/helper_release.py`); the web UI reads it from `GET /api/screen/helper-installer` and a
+connecting helper gets the same link in its update message. Linux and macOS visitors keep the `uvx`
 commands described below.
 
-1. Open `PartylineHelper-Setup.exe`. It installs for the current user only (no administrator rights, no UAC
+1. Open `PartylineHelper-Setup-<version>.exe`. It installs for the current user only (no administrator rights, no UAC
    prompt) to `%LOCALAPPDATA%\Programs\Partyline Helper`, adds a Start-menu entry and an uninstaller
    (Settings → Apps), registers `partyline://` and start-at-login (the same `install` logic as the `uvx`
    route, pointed at the installed exe) and starts the helper.
@@ -100,11 +114,14 @@ Computers list show available updates; unknown versions are not flagged.
 **Building.** `.github/workflows/windows-installer.yml` runs on `windows-latest`: it freezes the helper with
 PyInstaller (`packaging/windows/PartylineHelper.spec`), checks the frozen exe (`selfcheck`), builds the installer
 with Inno Setup (`packaging/windows/installer.iss`), installs and uninstalls it silently as a smoke test and
-uploads `PartylineHelper-Setup.exe` as an artifact for helper pull requests. A `helper-v*` tag publishes
-it to the helper release. The tag-version job dispatches the workflow for tags created with `GITHUB_TOKEN`.
+uploads `PartylineHelper-Setup-<version>.exe` as an artifact for helper pull requests. A `helper-v*` tag publishes
+only that versioned file to the helper release. The spec runs `packaging/windows/make_version_info.py` to write the exe's Windows
+version resource from `partyline_helper.__version__`, and the workflow passes the same version to Inno Setup
+(`/DAppVersion`) for the installer's file name and version resource. The tag-version job dispatches the workflow for tags created with `GITHUB_TOKEN`.
 Locally on Windows, with uv:
 `uv run --extra helper python packaging/windows/make_icon.py build/PartylineHelper.ico`, then
-`uv run --extra helper --with pyinstaller==6.14.2 pyinstaller packaging/windows/PartylineHelper.spec`, then
+`uv run --extra helper --with pyinstaller==6.14.2 pyinstaller packaging/windows/PartylineHelper.spec` (the spec itself
+writes the exe's version resource, so no build path can omit it), then
 `iscc /DAppVersion=<version> packaging\windows\installer.iss`.
 
 Choices: **PyInstaller, onedir, windowed** (mature hooks for tkinter, Pillow, ctypes users; a onefile build would
@@ -263,46 +280,48 @@ require a new request and fresh consent. Backoff reaches at most 60 seconds.
 
 ### Read a Windows window's UI elements
 
-In the helper tray, choose **Share a window…**, select a visible window by title and
-executable, then choose exactly one line in **Share this window with which line?** The
-second picker lists every line visible to the paired computer's owner, with a count of the
-processes attached to it. Lines with no process are listed too, so you can share first and
-let a process attach later. Nothing is selected by default; cancelling either picker grants
-no access. The line can be any line the computer's owner can open. Window grants need no
-captain, task or subline: a plain line with a few person-attached processes is the primary
-case.
+In the helper tray, choose **Share a window…**, select a visible window by title and executable,
+then choose exactly one line in **Share this window with which line?** The second picker lists every
+line visible to the paired computer's owner, with a count of the processes attached to it, with
+sublines indented beneath their parent. Lines with no process are listed too, so you can share first
+and let a process attach later. Nothing is selected by default; cancelling either picker grants no
+access. The line can be any line the computer's owner can open. Window grants need no captain, task
+or subline: a plain line with a few person-attached processes is the primary case.
 
-A grant belongs to the line, not to one process. Every live process attached to that line
-can call `screen_elements` and `screen_element_action` on its windows, including processes
-that attach later and processes started by a compaction rotation. Processes on other
-lines are refused, and when the holding line is one the caller may see (its own line, or a
-descendant for a captain) the refusal names it so the caller can ask the person; a hidden
-line is never named, and an id or title held there answers like a missing window. Sublines do not inherit a grant. When a grant starts or ends, the line sees
-one brief system message and every live process on the line receives a private terminal
-notice with the window ID and usage instructions (an ending names its reason). A process
-that attaches to, or is re-briefed on, a line with live grants hears about them in its
-briefing.
+A grant belongs to the line, not to one process. Every live process attached to that line or any
+live, non-archived subline can call `screen_elements` and `screen_element_action` on its windows,
+including processes that attach later and processes started by a compaction rotation. Ancestors,
+siblings and unrelated lines cannot use the grant. When the holding line is one the caller may see
+(its own line, an ancestor, or a descendant for a captain) the refusal names it so the caller can
+ask the person; a hidden line is never named, and an id or title held there answers like a missing
+window. Inheritance works in plain line trees and captain/task trees alike. When a grant starts or
+ends, the owning line sees one brief system message and every live process on that line and its live
+sublines receives a private terminal notice with the window ID and usage instructions (an ending
+names its reason). A process that attaches to, or is re-briefed on, a line with live grants hears
+about them in its briefing, with inherited grants naming the owning line.
 
-You can share several windows with the same line, or different windows with different
-lines. The tray lists each as **window → «line»**, with its own **Stop**;
-**Stop all sharing** ends every grant and the screen share. An item appears when its grant starts and disappears when
-it ends, including when the web or the server revokes it. The web computer list also shows each
-target line and offers **Stop sharing window**. Your sidebar marks each target line with
-a computer icon; its tooltip names the shared windows and their lines. A grant ends when you stop it (tray **Stop**,
-**Stop all sharing**, or the web **Stop sharing window**), the window closes, the helper disconnects, the server
-restarts, or the line is archived or deleted. A process detaching, exiting, resuming or being replaced
-by a compaction rotation does not end it. Ending one grant leaves other windows alone. Consent is never
-restored after a restart. Grants and revocations are recorded in the helper's local audit.
+You can share several windows with the same line, or different windows with different lines. The
+tray lists each as **window → «line» (and its sublines)**, with its own **Stop**; **Stop all
+sharing** ends every grant and the screen share. An item appears when its grant starts and
+disappears when it ends, including when the web or the server revokes it. The web computer list also
+shows each target line and offers **Stop sharing window**. Your sidebar marks each target line with
+a computer icon; its tooltip names the shared windows and their lines. A grant ends when you stop it
+(tray **Stop**, **Stop all sharing**, or the web **Stop sharing window**), the window closes, the
+helper disconnects, the server restarts, or the owning line is archived or deleted. Archiving or
+retiring a subline keeps its parent’s grant. A process detaching, exiting, resuming or being
+replaced by a compaction rotation does not end it. Ending one grant leaves other windows alone.
+Consent is never restored after a restart. Grants and revocations are recorded in the helper's local
+audit.
 
-Window grants cover `screen_elements` and `screen_element_action`. With one window the
-target is unambiguous. With several, pass `window` as the grant ID or title; an ambiguous
-call lists the choices, and each snapshot returns its grant ID as `window`. Snapshots and
-element caches are per grant, shared by the processes on the line, so a second process reads
-the stored tree. Actions on one window run one at a time, so two processes on the line never
-interleave dispatches. These grants are independent of line-based pixel sharing and
-mouse/keyboard control:
-`screen_frame`, `screen_click`, `screen_type`, `screen_key`, `screen_scroll`, `screen_drag`
-and `screen_move` keep their existing pixel-share permissions.
+Window grants cover `screen_elements`, `screen_element_action` and `screen_window_snapshot`. With one window the target is
+unambiguous. With several, pass `window` as the grant ID or title; an ambiguous call lists every
+choice with its owning line, and each snapshot returns its grant ID as `window`. Inherited reads
+also name the owning line in `inherited_from`. Snapshots and element caches are per grant, shared by
+the processes on the line and its sublines, so a second process reads the stored tree. Actions on
+one window run one at a time, so processes across the subtree never interleave dispatches. These
+grants are independent of line-based pixel sharing and mouse/keyboard control: `screen_frame`,
+`screen_click`, `screen_type`, `screen_key`, `screen_scroll`, `screen_drag` and `screen_move` keep
+their existing pixel-share permissions.
 
 The server stores live grants in `screen_line_window_grants`, keyed by line. The earlier
 per-process table and its detach, exit and activation triggers are dropped when the database
@@ -313,7 +332,8 @@ revalidates the line against the lines visible to the owner. Machine credentials
 revoke grants, and a different human cannot revoke the owner's grants. Access pauses on
 the secure desktop and resumes only while the same window and grant are still live.
 
-**Compatibility.** The helper announces `windows: 1` in its hello; helpers before 1.1.0 omit it.
+**Compatibility.** The helper announces `windows` in its hello: 1 shares a window with a line, 2 (helper 1.2.0) also takes
+window screenshots; helpers before 1.1.0 omit it.
 For a helper that announces it, `list_share_targets` returns every visible line (with an empty
 `processes` list where none is attached) and `window_grant` carries `line_id`. A helper that
 omits it still picks a process, so it is offered only lines that have a live process, and its
@@ -369,8 +389,8 @@ elements hash to the same id, the later one moves on to its next candidate, and 
 element holds each id for as long as the window grant lasts, whatever happens to its trees (expiry, eviction,
 a failed refresh), so a gone element's id is never handed to another one. A window that has been given
 more than 100,000 ids starts a new numbering (every id changes and gains an `-1`, `-2`... epoch suffix, so an id from before can never name an element after) rather than forget a claim. A summary's pager and repeated-row lines are clipped to 200 characters each and share a 900-byte budget. The helper's own ids
-(16 or 64 hex digits) from the same snapshot are still accepted. This is server-side only: the helper and
-its wire format are unchanged, and a helper older than the whole-window capture still works as before.
+(16 or 64 hex digits) from the same snapshot are still accepted. Stable id translation is server-side, and a helper older than the whole-window capture still works
+as before. Optional event-clock and inspect metadata below requires the updated helper.
 
 How the capture works. The helper walks the tree depth-first in tree order, in parts of at most 2,000
 elements, 10,000 visited nodes or 3 s, whichever comes first. A part that stops early returns a
@@ -378,13 +398,13 @@ elements, 10,000 visited nodes or 3 s, whichever comes first. A part that stops 
 nodes. A larger window comes back marked `partial` and `more=true` continues it from the same cursor, so
 no cap is a dead end (there is no depth limit, since the walk is iterative). The helper keeps each
 part's ids and paths, merged, until the next plain snapshot; a cursor from an earlier snapshot is
-refused as expired. The server keeps at most 16 trees and refreshes them after 3 seconds. UI Automation property and structure events also invalidate a grant's tree immediately; if event registration is unavailable, the 3-second bound still applies. A cursor remembers, for each unread section, which element it hangs under and how many children that element had; if the page changed when a part resumes, those sections are dropped rather than read from shifted positions, and every answer carries a `changed` note telling the agent to `refresh`. Each answer reports `snapshot_age_seconds` and `change_event_since_snapshot`. Stored trees total at most 300,000 nodes (120,000 in one), go when their grant ends or a refresh starts, and answers are measured in UTF-8 bytes (4,096 at most, title and hint included), so CJK pages fit. An older helper sends a flat list: summary and `ls` work on it, with a note to update the helper. The first part's whole-tree prefetch runs under the start limit, not the part's 3 s budget. Every part runs in the
+refused as expired. The server keeps at most 16 trees. New helpers permit reuse only after a live subscription/event-counter barrier; without confirmed events every read recaptures. Older helpers retain the 3-second expiry and pushed-event fallback. UI Automation property and structure events invalidate a grant's tree, retaining it only as a delta baseline. A cursor remembers, for each unread section, which element it hangs under and how many children that element had; if the page changed when a part resumes, those sections are dropped rather than read from shifted positions, and every answer carries a `changed` note telling the agent to `refresh`. Each answer reports `snapshot_age_seconds` and `change_event_since_snapshot`. Stored trees total at most 300,000 nodes (120,000 in one), go when their grant ends or a refresh starts, and answers are measured in UTF-8 bytes (4,096 at most, title and hint included), so CJK pages fit. An older helper sends a flat list: summary and `ls` work on it, with a note to update the helper. The first part's whole-tree prefetch runs under the start limit, not the part's 3 s budget. Every part runs in the
 isolated child process (killed about 12 s after its budget); the unread frontier travels to the child in
 a file, because it can be far longer than a command line. Unnamed, patternless
 `Pane`/`Group`/`Custom` wrappers are walked but not listed.
 
 Speed. The Windows provider asks UI Automation for a cache request (control view; the properties and
-pattern-availability flags, plus the Value and Toggle state) so a node costs no further cross-process
+pattern-availability flags, plus Value, Toggle, SelectionItem and ExpandCollapse state) so a node costs no further cross-process
 calls. The first part prefetches the whole tree with one TreeScope_Subtree request; later parts, and the
 action recheck, fetch a node and its children (TreeScope_Element | Children) once per parent. If the
 one-call prefetch ever outruns its budget, the helper switches to per-parent reads for later snapshots.
@@ -395,8 +415,48 @@ once a Windows box is available and tune `MAX_ELEMENTS`, `BUDGET` and `KILL_SLAC
 `partyline_helper/uia_snapshot.py` and `uia_process.py` if needed.
 
 Errors, denied consent, closed windows and unsupported platforms return an unavailable reason.
-Settle/wait, macOS AX and Linux AT-SPI are planned. The Windows-only helper dependency `comtypes`
+macOS AX and Linux AT-SPI are planned. The Windows-only helper dependency `comtypes`
 supplies the typed UI Automation COM interfaces; it is not installed on other platforms.
+
+### Screenshot of the chosen window
+
+`screen_window_snapshot` (listed with `screen_elements`; on clients that never re-list, `extras(op="screen_window_snapshot")`)
+returns one image of a window shared with the caller's line, and of nothing else. It is not the default way to
+work in a window: read `screen_elements` first, and the deltas after each `screen_element_action`; take a
+screenshot only when layout or visuals matter, or when elements do not explain what is on screen. The grant
+notice an agent receives says the same. It needs no pixel share and no monitor region, so an agent with only a
+window grant never has to ask for the whole screen.
+
+- **Capture.** The helper takes that window's own content with Windows Graphics Capture for one window handle,
+  falling back to `PrintWindow(PW_RENDERFULLCONTENT)`. A covered or partly off-screen window comes out whole;
+  desktop pixels, which would include other windows, are never grabbed. A minimised window is refused with a
+  plain error and is never restored. Protected (DRM) content is drawn black by Windows; an all-black result
+  carries a `note` saying so.
+- **Access.** The same as `screen_elements`: only processes on the grant's line, machine credentials need read
+  access to that line, other lines get the same refusal, and a grant that has ended is a clear error. The route is
+  `POST /api/conversations/{conv_id}/screen-window-snapshot?window=&device=`, and the window is resolved only
+  through `resolve_window`, as for elements.
+- **No limits on the picture.** It is the window at its own resolution, with no size cap and no rate limit; the
+  person's visibility is the audit below. The helper sends it as a lossless PNG, in as many 4 MB binary
+  messages as it takes. Only if that exceeds what the media store itself accepts (20 MB) does it use the highest
+  WebP quality that fits (never fewer pixels).
+- **Variants.** The media store keeps the capture as the original and derives `slim` (at most 1600 px) and `thumb`
+  (at most 512 px) as it does for every image. The result lists `full`, `slim` and `thumb`, each with its `url`
+  (`/api/media/<id>/original|slim|thumb`, which `get_media` also fetches), `width`, `height` and `image_tokens`
+  (width x height / 750 after a model's own resize). `slim` is the usual choice; `full` is the window's own pixels.
+- **Result.** Also `file` (the same reference as `screen_frame`, whose `urls` an agent can post to the line),
+  `window`, `title`, and `unchanged`: true when the bytes match this agent's previous capture of the window, in which
+  case the stored file is reused.
+- **Audit.** Each capture is recorded in the screen control audit (who asked, the grant, the size) and noted in the
+  line; the helper's local audit records it too. The tray's window label reads "last screenshot HH:MM by @handle"
+  and the web window-grant list carries `last_screenshot` for the grant.
+- **Protocol.** The server sends `snapshot_window` (`request_id`, `grant_id`, `agent`); the helper
+  answers `window_snapshot` with the same `request_id`, `ok`, and either `error` or `mime`, `width`, `height` and
+  `media: true` and `chunks: n`, followed by n binary messages that join into the image.
+  The helper checks consent once more under its writer lock immediately before the first byte leaves, and the
+  server checks once more after it has stored and announced the capture, immediately before it answers; if the
+  grant ended in between, nothing is sent or returned, the new media is deleted, and the audit gains a "withheld" entry. Only a helper whose hello says `windows: 2` is asked; an older
+  one is told "update the Partyline helper to use window screenshots" at once, never left to time out.
 
 ### Act on elements in the chosen window
 
@@ -410,7 +470,9 @@ helper reads pattern state (range, scroll axes, window abilities) only for the a
 | --- | --- | --- |
 | `invoke`, `toggle` | Invoke, Toggle | none |
 | `set_value` | Value | `value` (text) |
-| `select`, `add_to_selection`, `remove_from_selection` | SelectionItem | none |
+| `press` | UIA focus, then window messages | `key`: `enter`, `tab`, or `escape` only |
+| `select` | SelectionItem; ComboBox expands then selects an option | `value` (option name) on ComboBox; none on an option |
+| `add_to_selection`, `remove_from_selection` | SelectionItem | none |
 | `expand`, `collapse` | ExpandCollapse | none |
 | `scroll` | Scroll | `direction` (`up`, `down`, `left`, `right`), `amount` (`small`, `large`) |
 | `set_scroll_percent` | Scroll | `horizontal_percent` and/or `vertical_percent`, 0 to 100 |
@@ -419,12 +481,54 @@ helper reads pattern state (range, scroll axes, window abilities) only for the a
 | `window_close`, `window_minimize`, `window_maximize`, `window_restore` | Window | none |
 | `window_move`, `window_resize` | Transform | `x`, `y` (screen pixels) / `width`, `height` |
 
+**Commit a field.** After `set_value`, use `press` with `key="enter"` to request navigation or
+submission. Prefer `invoke` on a submit/default button when the UIA tree exposes one: UIA has no
+general Enter/submit pattern. For Enter, the helper first checks the field's immediate container
+for enabled Invoke buttons named Submit, Search or Go (case insensitive). A match returns
+`status:"no_effect"`, a `native_submit` selector and a `hint` to find and invoke that button; it
+does not guess a button or post a key. Other names, localized buttons and deeper form structures
+can still be found with `screen_elements` and invoked explicitly.
+
+Otherwise `press` calls UIA `SetFocus` on the target and posts only
+`WM_KEYDOWN`, `WM_CHAR`, `WM_KEYUP` to its own HWND. Chrome page content uses a
+`Chrome_RenderWidgetHostHWND` in the target's ancestry, or the unique renderer child containing
+the element's center; ambiguous/missing renderers are refused. Chrome's omnibox uses its top-level
+window. Other controls use their nearest native ancestor within the granted window. There is no
+global keyboard injection, modifier support, mouse movement, thread-input attachment or activation
+call. If the app changes foreground during UIA focus, or UIA cannot confirm the target's focus,
+no key is posted; the result reports it.
+The grant checks, per-window lock, revocation barrier and audit are the same as other actions.
+
+Queueing messages is not success: `posted` counts messages accepted by Windows, while `status`
+is `completed` only if the immediate read observes a value, focus, title or address-bar change.
+`observation` contains `before`, `after`, and `changed`; the baseline is taken after focus preparation,
+so SetFocus alone never counts as a key effect. Observation text is bounded in bytes (with
+`truncated:true` when shortened); comparisons use the full values. Password values are excluded. The URL observation
+uses the browser chrome's address-bar Value, never a page field (recognized English names or
+omnibox/addressEditBox automation IDs). Unsupported providers, missing HWNDs, focus/delivery failures,
+or unchanged state return `status:"no_effect"` plus `hint`. A stale element after navigation can also
+prevent immediate confirmation. Use `then` or a fresh read for delayed effects; `no_effect` describes
+the immediate observation, and `after` independently reports the later tree. Never retry automatically.
+
+**Chrome evidence and limits.** Chromium's
+[renderer keyboard handler](https://github.com/chromium/chromium/blob/main/content/browser/renderer_host/legacy_render_widget_host_win.cc)
+forwards keyboard messages to its window event target. This supports the HWND route, but does not
+establish that Chrome will accept background Enter on every version, focus state or page. Microsoft's
+[PostMessage contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew)
+confirms asynchronous delivery and integrity-level restrictions; it promises no application effect.
+No native Windows/Chrome test was available for this change. The exact live procedure is in
+[screen-press-live-check.md](screen-press-live-check.md); record observations there when run.
+
+**Compatibility.** Helper 1.2.0 announces `press: 1` in hello. A helper without that capability is
+refused before any capture or action exchange with “update the Partyline helper to use press”.
+Existing UIA actions continue to work with older helpers.
+
 **Click then read.** `then` takes the `screen_elements` read fields (`query`, `value`, `control_type`,
-`root`, `id`, `text`, `context`, `depth`). After a completed action the server waits half a second, takes a
-new snapshot and returns the answer as `after`, within the same 4 KB for the action result and the answer
+`root`, `id`, `text`, `context`, `depth`). After a completed action the server takes a
+new snapshot at an event-counter boundary and returns the answer as `after` (also for `no_effect`), within the same 4 KB for the action result and the answer
 together. The next separate `screen_elements` read recaptures again, so a delayed app update is not hidden by the immediate post-action snapshot. The client waits up to 160 s for a call with `then` (100 s without), allowing time for a multi-part pre-action snapshot and action. An empty `then` returns what is new: the topmost elements the new snapshot has that the old one
 did not (ids are stable, so a page change lists the new rows and not the unchanged chrome) and a `diff`
-count `+added -gone`. The read needs read access to the line as well as write. If the share ends meanwhile,
+count `+added -gone`, plus `~updated` for changed state on stable ids. The read needs read access to the line as well as write. If the share ends meanwhile,
 `after` says so and the action result is kept.
 
 The helper rechecks the window, element identity, containment, enabled state and supported pattern
@@ -439,8 +543,9 @@ says `window_closed` and the grant ends; if the app keeps it open (an unsaved-ch
 result says `close_requested`, the grant stays, and it ends as soon as the window disappears. The
 response includes the element's updated name, role, enabled and value, toggle, selection, expand,
 range, scroll or window state when available (and the new bounds after a move or resize). Partyline does
-not synthesize mouse or keyboard input, move the cursor, or call an activation API for these
-actions. The target application can nevertheless bring itself forward in response; classic
+not synthesize global mouse or keyboard input, move the cursor, or call an activation API for these
+actions; `press` uses only the scoped messages described above. The target application can nevertheless
+bring itself forward in response; classic
 Win32 buttons and checkboxes can do so on Invoke or Toggle, restoring a minimized window usually
 activates it, and other apps may activate or open dialogs. The response and local audit include
 `foreground_changed` and `target_came_forward` after the pattern call and the element re-read. A
@@ -459,6 +564,66 @@ process, role, name, action and outcome. For `set_value` the audit records the v
 not the submitted text; numeric and enumerated parameters (direction, amount, percentages, number,
 coordinates, size) are recorded as given. Every action uses its window grant,
 dispatch gate, rate limit, local audit and revocation, independently of pointer control.
+
+## Accessibility lab
+
+Open **`/lab/a11y`** in the normal Chrome window and share that window. This standalone page makes no API calls,
+stores nothing, and follows the browser's light or dark theme. Each card keeps its control names stable except for
+the intentional **Count** rename. The DOM state and UIA state should be compared, not assumed to agree.
+
+| Card | What it tests | Expected UIA reading |
+| --- | --- | --- |
+| 1. Sync enable | A real `disabled` attribute removed synchronously by `change` | `Sync target` starts `disabled`; selecting A removes that flag. |
+| 2. Delayed enable | Real `disabled` attributes removed at 300 ms and 2500 ms | An immediate `then` reads at its event-counter boundary; it may precede either deadline. Once both targets visibly enable, a fresh read shows neither as `disabled`. |
+| 3. Looks enabled, accessibility says disabled | Only the link's CSS class changes | **`Class-only link` remains `disabled` in UIA after selection**, even though it looks enabled. This is the deliberate KDP-style divergence. |
+| 4. aria-disabled link done right | Selection removes `aria-disabled` | `ARIA link` starts `disabled`; selecting A removes that flag. |
+| 5. Disabled ancestor | A button inherits disabled state from `<fieldset disabled>` | `Fieldset target` is `disabled` while `Fieldset disabled` is on, and enabled after toggle off. |
+| 6. Name change | The button increments its own accessible name | Invoking `Count 0` produces `Count 1`, then `Count 2`. |
+| 7. Structure change | A simulated fetch inserts three list items after 1 s | An immediate `then` can precede insertion. Once the list visibly appears, a fresh read shows `Item 1`, `Item 2`, and `Item 3`. |
+| 8. Text field | UIA Value `set_value`, with independent DOM event indicators | `Text field` has value `hello`; the visible `input fired:` and `change fired:` lines report exactly which events Chrome emitted. |
+| 9. Event log | The last 20 `change`, `input`, `click`, and `keydown` events | `Event log` is a live list with millisecond timestamps and control names; key events include `key=<key>`. |
+| 10. Reset | Initial state restoration and pending-timer cancellation | All targets return to their initial states and the event log says `No events yet.` |
+
+### Ordered live-retest script
+
+For each ID below, first call `screen_elements(query="^visible name$")` and take the matching element under the
+named card whenever that ID is not already in hand; the expected lookup line is the control line shown in the table.
+For the repeated **A** options, query `^A$` and use the `ListItem` under the named card in the `in:` path. An expected
+line shown without `disabled` means that flag must be absent.
+
+1. `screen_elements(query="^Sync target$")` → `<id> Button "Sync target" [invoke] disabled`.
+   Then `screen_elements(query="^A$")` → `<sync-a> ListItem "A" [select]` under **1. Sync enable**.
+2. `screen_element_action(element_id=<sync-a>, action="select", then={"query":"^Sync target$"})` →
+   `after: <id> Button "Sync target" [invoke]`.
+3. Select **A** under **2. Delayed enable** with
+   `screen_element_action(element_id=<delayed-a>, action="select", then={"query":"Delayed target"})` →
+   record both targets' current flags. The immediate capture may precede either deadline; once each target
+   visibly enables, its next read must omit `disabled`.
+4. Select **A** under **3. Looks enabled, accessibility says disabled** with
+   `screen_element_action(element_id=<class-a>, action="select", then={"query":"^Class-only link$"})` →
+   `after: <id> Hyperlink "Class-only link" [invoke] disabled`. The green visual state does not change this expected result.
+5. Select **A** under **4. aria-disabled link done right** with
+   `screen_element_action(element_id=<aria-a>, action="select", then={"query":"^ARIA link$"})` →
+   `after: <id> Hyperlink "ARIA link" [invoke]`.
+6. `screen_element_action(element_id=<fieldset-checkbox>, action="toggle", then={"query":"^Fieldset target$"})` →
+   `after: <id> Button "Fieldset target" [invoke]`. Toggle it again with the same `then` → the line ends in `disabled`.
+7. `screen_element_action(element_id=<count-0>, action="invoke", then={"query":"^Count 1$"})` →
+   `after: <id> Button "Count 1" [invoke]`.
+8. `screen_element_action(element_id=<load-list>, action="invoke", then={"query":"^Item 1$"})` → record the current match;
+   `then` captures immediately, so insertion may not have happened yet.
+9. `screen_element_action(element_id=<text-field>, action="set_value", value="hello", then={"query":"^Text field$"})` →
+   `after: <id> Edit "Text field" ="hello"`. Then `screen_elements(text=true, query="fired:")` → the two status lines;
+   record their yes/no values rather than treating value mutation as proof of either event.
+10. Once the page visibly enables both delayed targets and displays the loaded list, call
+    `screen_elements(query="^Delayed target 2500 ms$", refresh=true)` → the line has no `disabled`, then
+    `screen_elements(query="^Item 1$", refresh=true)` → `<id> ListItem "Item 1"`.
+11. `screen_elements(query="^Event log$")` → `<id> List "Event log"`; its latest entries include the selection,
+    value input, and invocation events with elapsed milliseconds. At most 20 entries are present.
+12. `screen_element_action(element_id=<reset-lab>, action="invoke", then={"query":"^Sync target$"})` →
+    `after: <id> Button "Sync target" [invoke] disabled`. Follow with
+    `screen_elements(query="^Count 0$", refresh=true)` → `<id> Button "Count 0" [invoke]`, and
+    `screen_elements(query="^Item 1$", refresh=true)` → no match. The text value, both event indicators, selects,
+    links, checkbox, delayed targets, and event log are back to their initial readings too.
 
 ## Platforms and troubleshooting
 
@@ -609,7 +774,7 @@ requires both. Features bump minor, fixes patch, and breaking changes major.
 
 On a green merge, CI tags changed helper versions `helper-v<version>` and builds
 the Windows installer; it publishes a latest GitHub release named Partyline Helper
-with `PartylineHelper-Setup.exe`. Pull requests touching helper paths also build a
+with `PartylineHelper-Setup-<version>.exe`. Pull requests touching helper paths also build a
 smoke-test artifact. Server `v<version>` tags do not create releases.
 
 At connection the server compares the reported version with the helper version in
@@ -617,3 +782,213 @@ its own checkout; there is no network polling. The tray shows an update and a
 notification when available. On Windows the tray item opens the installer; on other
 platforms rerun the helper install command. The Computers list also shows updates.
 Older helpers that reported a Partyline 2.x version are treated as outdated.
+
+### Dropdown options and reported-disabled controls (helper 1.2)
+
+A window snapshot includes its visible owned popups, labelled `popup: …` under the
+shared window. Win32's owner chain must reach the granted HWND, with the same process
+at every link; popup UIA ProcessId and NativeWindowHandle are checked too. Other browser
+windows and foreign-process popups are excluded. Content hosted by another process inside
+the granted HWND remains readable and actionable through that granted subtree. Popup options are action targets under the
+same grant. Hidden or closed popups add nothing to subsequent reads. UIA events are
+scoped to the granted element and each discovered popup root. PID-scoped WinEvent
+show/hide/destroy notifications invalidate reads and post messages to reconcile popup
+subscriptions outside the callbacks. Persistent UIA handlers do not inspect sender
+properties or walk desktop ancestry. Desktop scope is used only during the short Expand
+deadline. No timed popup discovery runs.
+
+Use `select` for dropdowns and `set_value` for text fields. On a ComboBox,
+`select(value="Amazon.co.uk")` expands it if needed, searches its children, then nearby
+Lists and owned popups (newly appeared lists first), uses SelectionItem.Select on the
+exact option name, and requests collapse. Chrome can expose a dropdown's List as a
+sibling under the Document rather than under the ComboBox. Ambiguous names require
+reading and selecting the option's own id. The response includes `selected_option`
+and `value_changed` (null if the provider cannot expose the value). If cleanup fails
+after selection, `collapse_failed=true` preserves the selection result; cleanup also
+never replaces an earlier selection error. Selecting an option
+directly also uses SelectionItem.Select. This is the pattern Chrome uses for a genuine
+selection and its page `change` event; setting Value is not a substitute.
+
+Expand, collapse, toggle, select and set_value return `status="completed"` with
+`effect="changed"`, `"none"` or `"unknown"`, comparing the exposed pattern state before
+and after. An unchanged value reports `none`. A provider that cannot expose state
+reports `unknown`, rather than claiming a change. Native Expand allows one structure-event deadline (up to 250 ms) before reading its
+result; there is no repeated state check. Expand also reports `options_found`,
+a bounded preview in `option_names`, and whether an option container appeared. Chrome
+may continue reporting Collapsed while its sibling List is open: in that case the
+response labels the raw state `reported_expand_state` and points to the options.
+`effect="none"` refers to the reported pattern state, which may disagree with these
+option observations. `then={root: id}` includes the root itself even when it has no
+children or the query finds none. Ordinary `screen_elements(root=id)` lists children.
+
+Disabled lines include `IsEnabled=false`, raw UIA `AriaProperties` when available,
+and a nearby disabled ancestor's id, or `self` when none was found in the captured
+ancestry. Disabled unnamed containers are retained as evidence. `ancestor=…` means
+that ancestor also reports disabled: UIA does not distinguish inheritance from an
+independently disabled child, so this is evidence of a possible cause, not proof.
+These annotations use the captured tree and do not require a second ancestor walk.
+
+If the person confirms a reported-disabled control works, `force=true` permits invoke,
+toggle, select or expand under the same grant and revocation checks. The helper tries
+the pattern; on failure for a link or button supporting LegacyIAccessible, it tries
+DoDefaultAction. It never synthesizes input. It reports `reported_disabled=true`, the
+method used, observed focus/value changes and the window title before/after (including
+whether it changed). A target removed by navigation may have no readable final state.
+An ordinary disabled refusal explains when to use force. Force does not bypass password,
+read-only, ownership, window identity, consent or action parameter checks.
+
+**Response sizes.** The deterministic Chrome-shaped fake has a window, one ComboBox,
+and a separate popup List with two options. These are compact JSON response bytes
+(UTF-8, excluding MCP envelope), with the requested estimate of bytes / 4 tokens;
+real page content and names change the sizes. `tests/test_uia_dropdown.py` measures
+the actual server read/action path with a fake clock and no elapsed-time waits.
+
+| Call | Bytes | Estimated tokens |
+| --- | ---: | ---: |
+| `screen_elements()` with the popup closed | 515 | 128.75 |
+| `screen_elements(query="marketplace")` | 279 | 69.75 |
+| Unchanged `set_value` action, without `then` | 300 | 75 |
+| `expand` action with `then={root:C, depth:2}` | 517 | 129.25 |
+| Read open popup options with `control_type="ListItem"` | 364 | 91 |
+| `screen_elements()` with popup options included | 589 | 147.25 |
+
+After collapse the same summary returns to 515 bytes: popup support adds no bytes to
+closed-popup reads. Summary and query output retain the existing 4 KB budget; expand
+previews at most eight option names rather than returning every option in the action.
+
+**Native Chrome check.** Run against a granted KDP Chrome window with the marketplace
+select and Manage A+ Content link; another Chrome window can remain open to check
+exclusion. These are MCP calls, in order. Bind `W` to the existing window grant id,
+`C` to the ComboBox id in step 1, `O` to the Amazon.co.uk ListItem id in step 3,
+and `L` to the link id in step 8. Use the returned ids, not old examples.
+
+1. `screen_elements(window=W, refresh=true, control_type="ComboBox", query="=Choose a marketplace…")`
+2. `screen_element_action(window=W, element_id=C, action="expand", then={root:C, depth:2})`
+   — root is listed; inspect effect and any option observations, including a stale reported state.
+3. `screen_elements(window=W, control_type="ListItem", query="=Amazon.co.uk")`
+   — find the sibling or popup option; no controls from the other Chrome window should appear.
+4. `screen_element_action(window=W, element_id=O, action="select", then={query:"=Manage A+ Content"})`
+   — verify the link href switches to the UK domain (the page's `change` handler ran).
+5. `screen_element_action(window=W, element_id=C, action="select", value="Amazon.com", then={root:C})`
+   — selected_option is Amazon.com; value_changed is true; select requests collapse.
+6. `screen_element_action(window=W, element_id=C, action="set_value", value="Amazon.com", then={root:C})`
+   — effect is none; the root still appears.
+7. `screen_element_action(window=W, element_id=C, action="select", value="Amazon.com", then={root:C})`
+   — value_changed is false and effect is none for an already-selected option.
+8. `screen_elements(window=W, refresh=true, query="=Manage A+ Content")`
+   — inspect disabled evidence and the restored .com href.
+9. `screen_element_action(window=W, element_id=L, action="invoke")`
+   — when reported disabled, refusal explains the force override.
+10. After the person confirms the link works:
+    `screen_element_action(window=W, element_id=L, action="invoke", force=true, then={})`
+    — inspect reported_disabled, action_method, focus/value changes and window title/navigation.
+11. `screen_elements(window=W, refresh=true)`
+    — inspect the destination and confirm a dismissed popup no longer appears.
+
+
+### Diagnose live state and snapshot races
+
+`screen_elements(inspect="<element id>")` compares the retained snapshot with a new **uncached**
+UIA read of that same identity. It deliberately bypasses refresh/TTL/invalidation: refreshing first
+would destroy the evidence of a stale snapshot. It does not click or focus the window. Live data
+includes IsEnabled, Name, Value (redacted for passwords), Toggle, SelectionItem, ExpandCollapse,
+BoundingRectangle, AriaRole/AriaProperties, LegacyIAccessible State and its
+`STATE_SYSTEM_UNAVAILABLE` bit, ClassName, FrameworkId and ProviderDescription. Unsupported live
+properties are null. Missing cached properties are null, rather than inferred values. The raw-view
+ancestor walk reports each ancestor's live name/IsEnabled through the grant root, plus whether that
+root was reached; it never walks above the grant root. The element's live/snapshot mismatch wins
+the verdict in either direction. A disabled ancestor names the source only when the element itself
+is live-disabled and there is no enabled-state mismatch.
+`events_supported`, `subscription_live`, `event_counter`, `last_event_time` (Unix time),
+`snapshot_event_counter`, `event_counter_advanced_since_snapshot`, `server_change_version` and
+`snapshot_change_version` expose the grant's subscription and both sides of invalidation. Inspect requires only the existing window read grant,
+including on a plain line with person-attached processes and no captain.
+
+The helper's thread-safe event counter advances **inside the UIA callback**, before scheduling the
+100 ms push debounce. A stored tree carries the counter sampled before its capture. Before serving
+that tree the server makes one cheap status request and requires matching counters and a confirmed
+live subscription. A failed/unconfirmed subscription never authorizes cache reuse. A status request
+never walks UIA or waits behind a capture. Helpers without counter metadata retain their previous
+expiry/push behavior. This barrier establishes truth as of its status response; it cannot predict a
+future JavaScript change or a UIA event Chrome has not delivered yet.
+
+Post-action reads capture immediately, then recapture only when an observed event crossed that capture.
+Churn is bounded by the capture deadline and eight attempts; exhaustion says `tree inconsistent`.
+The answer includes `snapshot_event_counter` and checks the helper clock again after rendering, so
+an event during that final interval sets `change_event_since_snapshot`. Observed capture races also
+set that flag on the capturing reply, even if a recapture reaches a consistent boundary; later cache hits
+report their current barrier result without repeating an already-reported capture race. The next
+ordinary read after an action recaptures, and comparisons include enabled/value/toggle/selection/expand state on stable ids,
+so late changes appear in the delta as `~updated`. Bounds, focus, offscreen status and pattern-list
+changes do not count as semantic updates, preventing layout or scrolling from burying the changed link.
+The comparison runs off the server event loop. A later event cannot retroactively alter an already
+returned reply; the next read's barrier detects it even if its debounced push is still in flight.
+A `more` across a counter change restarts from the root, or explicitly reports an inconsistent tree;
+it never silently combines epochs. A restarted continuation returns `continuation_restarted`.
+
+`uia_events.PROPERTIES` includes IsEnabled (30010), Value (30045), Toggle (30086), SelectionItem
+(30079), ExpandCollapse (30070), Name (30005), AriaRole (30101), AriaProperties (30102) and
+LegacyIAccessible State (30096). Persistent property and structure registration uses
+`TreeScope_Subtree` (7) at the granted window and visible owned-popup roots. There is no sender
+walk/filter in these callbacks, so an aria change on an ancestor or descendant reaches the counter.
+Whether the real Chrome provider emits the expected event remains part of the live retest.
+
+| Timing in the elements path | Replacement or purpose |
+| --- | --- |
+| `SETTLE_SECONDS=0.5`, `settle()`, post-action sleep | Removed. Capture immediately and recapture on observed counter changes; report races. |
+| `SNAPSHOT_TTL=3` | Retained as expiry/memory policy and old-helper fallback. New helpers additionally require a live counter barrier; TTL never proves freshness. |
+| `queue_change` 100 ms debounce | Push coalescing only. Callback increments the counter first; a status request sees in-flight changes. |
+| `uia_access.watch(sleep)` | Unused sleep parameter removed. Watch blocks on native window events/local grant changes. |
+| Expand's 250 ms structure-event wait | One event wait after Expand, bounded for providers emitting no structure event. It never proves expanded state; selection rechecks the live options/value/state and reports unknown on timeout. |
+| `CAPTURE_SECONDS=20`, eight capture attempts, `MAX_NODES`/`more` | Bound work/churn, never establish freshness. Epoch mismatch restarts or marks inconsistency. |
+| Snapshot part `BUDGET=3`, child startup `START_LIMIT=25`, `KILL_SLACK=4` | Bound a walk or hung COM provider. Child signals READY through a pipe; no readiness sleep. |
+| `WindowTask.READ_TIMEOUT=33`, server exchange 35 s, MCP read 60 s/action 100 s/then 160 s | Bound failed exchanges/operations. No elapsed interval is used to infer page state. |
+| UIA subscription ready wait / thread join, each 3 s | Bound native registration/shutdown. Cache requires a confirmed living subscription thread, not successful waiting. |
+| ActionWorker 32 s shared deadline for audit readiness and native action | Bounds failure; timeout revokes the dispatch gate and reports uncertainty. No sleep proves action success. |
+| Socket hello/binary 45 s and heartbeat receive 15 s | Bound failed helper transport; protocol liveness, never tree freshness. |
+| Picker 65 s / consent exchange 70 s | Bound independent human consent, outside snapshot correctness. |
+
+#### Exact manual retest
+
+Deploy the state-truth server **and helper** first; helper version remains 1.2.0. Share Chrome with
+the testing line using the tray, and attach an ordinary person-owned process to that line. No
+captain is required. Run from the repository with that process's existing connection JSON (or omit
+`--connection` when `PARTYLINE_MCP_CONNECTION` is set):
+
+```bash
+uv run --locked python scripts/uia-state-retest.py --connection "$PARTYLINE_MCP_CONNECTION"
+```
+
+The script sends these actual MCP `tools/call` requests over stdio, retaining the returned window
+and element id in variables rather than requiring an id to be transcribed:
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"screen_elements","arguments":{"query":"=Manage A+ Content","control_type":"Hyperlink","refresh":true}}}
+```
+
+At the prompt, choose the marketplace **by hand** in the real KDP window, observe the visible link,
+then press Enter. The next request is exactly `screen_elements({"window": before["window"],
+"inspect": link_id})`. It never refreshes between the manual change and inspect. Save the before
+and inspect JSON and the final one-line verdict. Repeat the run if the snapshot was evicted or the
+identity disappeared; do not substitute a different node silently.
+
+Also run against `/lab/a11y` once that sibling change is deployed. Use `--query '=LINK NAME'` for
+the unique hyperlink in each card (copy its exact accessible name from the lab page/docs), and
+`--window 'WINDOW GRANT OR TITLE'` if needed. At the manual prompt, trigger the matching card:
+
+1. Sync enable; delayed enable at 300 ms; delayed enable at 2.5 s. Press Enter immediately after the
+   trigger, then run inspect again on the same id after the page's DOM event log reports the change.
+   No sleep or guessed delay is required. Record both DOM-log and UIA-clock observations.
+2. Class-only enable retaining aria-disabled, correct aria-disabled enable, and disabled-fieldset
+   ancestor. Record live/snapshot/ancestor evidence; visual styling alone is not proof of enabled UIA.
+3. Name change, structure change and input/change checks: record clock advancement, use a fresh
+   `screen_elements(changes=true)` for the state/structure delta, and note if a renamed identity is gone.
+4. Finish with the default script on KDP's actual Manage A+ Content link after choosing a marketplace
+   by hand. Agree-disabled identifies Chrome's exposed state; live-enabled/snapshot-disabled identifies
+   stale Partyline state; ancestor-disabled names the source. ProviderDescription/FrameworkId distinguish
+   native Chrome UIA from an MSAA proxy.
+
+The script performs no artificial waits. A live result must include the actual JSON/verdict; fake
+provider tests establish invariants but cannot decide which side of Greg's real page reports disabled.
+Tool result sizes and image estimates can be compared in the line's Usage section;
+see [tool telemetry](telemetry.md) for estimators, privacy and retention.

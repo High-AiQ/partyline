@@ -5,6 +5,8 @@ import re
 import secrets
 import threading
 
+WINDOW_PRESS_VERSION = 1  # helper hello: element-scoped enter/tab/escape via window messages
+
 
 def bump_runtime(runtime):
     if versions := getattr(runtime, "capability_versions", None):
@@ -19,7 +21,7 @@ class CapabilityVersions:
         self._waiters = {}
         self._closed = False
         self._tables = {"attachments", "conversations", "conversation_write_grants",
-                        "task_reviews", "screen_line_window_grants"}
+                        "task_reviews", "screen_line_window_grants", "line_bridges"}
         if db is not None:
             db.events.callbacks.add(self.changed_by_sql)
 
@@ -51,7 +53,8 @@ class CapabilityVersions:
                 return
             columns = {"attachments": ("is_lead", "is_successor", "status", "conv_id", "adapter"),
                        "conversation_write_grants": ("path",),
-                       "conversations": ("parent_id", "archived_at")}.get(table, ())
+                       "conversations": ("parent_id", "archived_at"),
+                       "line_bridges": ("closed_at",)}.get(table, ())
             clause = assignments[1].split(" where ", 1)[0]
             if not any(re.search(rf"\b{column}\s*=", clause) for column in columns):
                 return

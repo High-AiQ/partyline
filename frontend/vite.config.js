@@ -39,6 +39,12 @@ export default defineConfig(({ command }) => ({
   },
   build: {
     outDir,
+    rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL("./index.html", import.meta.url)),
+        "lab/a11y/index": fileURLToPath(new URL("./lab/a11y/index.html", import.meta.url)),
+      },
+    },
     // The server serves this directory; anything stale in it is a bug waiting
     // to be served, so the build owns the directory outright.
     emptyOutDir: true,
@@ -102,6 +108,7 @@ function buildManifest() {
 function sourceBuildId() {
   const files = [
     "index.html",
+    "lab/a11y/index.html",
     "package.json",
     "package-lock.json",
     "vite.config.js",

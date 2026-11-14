@@ -32,8 +32,12 @@ class RoutingTest(TaskFixture):
         self.assertNotIn('@captain', notices[0]['body'])
         returns.note_delivered(row['reviewer_id'], notices)
         self.assertNotIn(row['reviewer_id'], returns.real_wake)
-        await returns.turn_ended(row['reviewer_id'])
+        with patch('partyline.return_path.wait_until_quiet', AsyncMock(return_value=True)):
+            await returns.turn_ended(row['reviewer_id'])
+            await returns.drain()
         self.assertFalse(returns.pending)
+        from partyline.reports import list_for_parent
+        self.assertIn('stalled: reviewer', list_for_parent(self.db, 'root')[0]['body'])
 
     async def test_structured_request_silent_reviewer_returns_to_implementer(self):
         row = await self.open_review()

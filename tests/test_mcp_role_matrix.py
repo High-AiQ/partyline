@@ -3,6 +3,7 @@
 `tests/fixtures/mcp_role_matrix.json` was frozen from the full catalog before the split: for each
 role, the capability state and every tool name it could call. Each of those names must still
 be reachable: listed itself, or run through the one door the listing names for it.
+New tools are added explicitly to the fixture, preserving its existing role coverage.
 """
 
 import json

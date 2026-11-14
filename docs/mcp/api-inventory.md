@@ -321,7 +321,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 1. **Process lifecycle (rows 4, 111, 120).** Excluded from MCP. Row 111 is loopback-only; rows 4 and 120 are gated by `attach`. Process lifecycle is not a captain tool.
 2. **Child retirement and purge (rows 20, 26, 28).** Retirement is captain op `retire_child`: a direct child only, archive only, `stop_processes` optional. Purge is excluded; hard delete is never reachable through MCP.
 3. **Lead appointment (row 45).** Captain op `appoint_lead`; an empty `attachment_id` clears the lead.
-4. **Bridges (rows 12-15).** Person-only. Machines get no bridge tool and no bridge read.
+4. **Bridges (rows 12-15).** Opening, closing and reading are person-only. The one machine bridge tool is `bridge_send` (`POST /api/conversations/<line>/bridge-send`), listed only to the ambassador of a line with an open bridge; machines get no bridge read.
 5. **Decline (rows 102, 132).** Person-only. Captains approve or deny write-set requests (131, 133) and withdraw their own (134); decline is not reachable by machines. Captains find request ids through captain op `write_set_requests` (rows 130, 135).
 6. **Presets (rows 83-86).** `list_presets` is a read-only captain op; create, update, and delete are person-only.
 7. **Terminal socket, screen, and keys (rows 122, 123, 128).** Excluded. The terminal stream is raw PTY output, not speech; screen text is debugging only; keystrokes are never sent through MCP.

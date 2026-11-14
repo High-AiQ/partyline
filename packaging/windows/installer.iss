@@ -1,9 +1,11 @@
 ; Inno Setup script: a per-user installer for the frozen helper (no administrator rights, no UAC prompt).
 ; Build: iscc /DAppVersion=2.89.0 packaging\windows\installer.iss   (after PyInstaller made dist\PartylineHelper)
-; Output: build\installer\PartylineHelper-Setup.exe  (a fixed name, so releases/latest/download/... is stable)
+; Output: build\installer\PartylineHelper-Setup-<version>.exe  (the version is in the file name and in the file's Details)
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
+; Windows version resources want four numbers: 1.2.0 -> 1.2.0.0
+#define VersionNumbers AppVersion + ".0"
 #define AppName "Partyline Helper"
 #define AppExe "PartylineHelper.exe"
 
@@ -12,6 +14,11 @@ AppId={{B6F1D2A4-5C1E-4E0B-9C57-3A7E2D0F4A61}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=Partyline
+VersionInfoVersion={#VersionNumbers}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoProductName={#AppName}
+VersionInfoDescription={#AppName} Setup
+VersionInfoCompany=Partyline
 DefaultDirName={localappdata}\Programs\Partyline Helper
 DisableProgramGroupPage=yes
 DisableDirPage=yes
@@ -19,7 +26,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\..\build\installer
-OutputBaseFilename=PartylineHelper-Setup
+OutputBaseFilename=PartylineHelper-Setup-{#AppVersion}
 SetupIconFile=..\..\build\PartylineHelper.ico
 UninstallDisplayIcon={app}\{#AppExe}
 Compression=lzma2

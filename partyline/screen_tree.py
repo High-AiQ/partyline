@@ -14,6 +14,7 @@ NAME_FIELD = 1000  # characters of a name kept; lines clip it, `id` reads it who
 VALUE_FIELD = 600
 LINE_NAME = 240  # characters of a name shown on a line
 LINE_VALUE = 80
+STATE_FIELDS = ("enabled", "value", "toggle", "selected", "expand_state", "name", "aria_properties")
 
 
 def clean(value, limit=NAME_FIELD):
@@ -28,15 +29,17 @@ def clip(text, limit):
 
 class Node:
     __slots__ = ("id", "helper", "parent", "type", "name", "value", "auto", "actions", "toggle", "flags",
-                 "bounds", "frame")
+                 "bounds", "frame", "aria", "cached")
 
     def __init__(self, item):
+        self.cached = {key: item[key] for key in STATE_FIELDS if key in item}
         self.id = self.helper = str(item.get("id", ""))  # id is replaced by the stable one on add
         self.parent = item.get("parent")
         self.type = clean(item.get("control_type") or "?", 40)
         self.name = clean(item.get("name"))
         self.value = clean(item.get("value"), VALUE_FIELD)
         self.auto = clean(item.get("automation_id"), 40)
+        self.aria = clean(item.get("aria_properties"), 160)
         self.actions = tuple(item.get("actions") or ())
         self.toggle = item.get("toggle")
         self.flags = tuple(flag for flag, on in (("off", item.get("offscreen")),
@@ -58,6 +61,7 @@ class Snapshot:
         self.by_helper, self.places = {}, {}  # the helper's id -> stable id; identical siblings seen so far
         self.space = space or IdSpace()  # the window's ids, carried from one snapshot to the next
         self.anchors = {}  # stable id -> the id of its nearest named ancestor (or itself)
+        self.updated = set()
         self.before = None  # ids of the snapshot this one replaced, to tell what a click changed
         self.cursor = None  # the helper's cursor for the unread rest of the window, if any
         self.note = ""
@@ -140,7 +144,19 @@ class Snapshot:
             parts.append("[" + ",".join(node.actions) + "]")
         if node.toggle in TOGGLE:
             parts.append("toggle:" + TOGGLE[node.toggle])
-        parts.extend(node.flags)
+        flags = list(node.flags)
+        if "disabled" in flags:
+            evidence, ancestor = ["IsEnabled=false"], self.nodes.get(node.parent)
+            for _ in range(20):
+                if ancestor is None or "disabled" in ancestor.flags:
+                    break
+                ancestor = self.nodes.get(ancestor.parent)
+            source = "ancestor=" + ancestor.id if ancestor and "disabled" in ancestor.flags else "self"
+            evidence.append(source)
+            if node.aria:
+                evidence.append("aria:" + node.aria)
+            flags[flags.index("disabled")] = "disabled(" + ";".join(evidence) + ")"
+        parts.extend(flags)
         if bounds and node.bounds:
             parts.append("@" + ",".join(str(int(v)) for v in node.bounds))
             if node.frame:

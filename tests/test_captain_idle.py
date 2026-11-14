@@ -187,19 +187,64 @@ class CaptainIdleTest(TaskFixture):
         await self.end()
         self.assertEqual(len(self.notices()), 4)
 
-    async def test_busy_turn_resets_verdict_and_captain_queue_suppresses(self):
+    async def test_worker_queue_resets_verdict(self):
         await self.setup_tree()
         await self.end()
         worker = self.worker.attachment_id
         self.presence.queue.hold(worker, [{'id': 1}])
         await self.end()
         self.presence.queue.release(worker, [{'id': 1}])
-        self.presence.queue.hold('captain', [{'id': 2}])
-        await self.end()
-        self.assertEqual(len(self.notices()), 2)
-        self.presence.queue.release('captain', [{'id': 2}])
         await self.end()
         self.assertEqual(len(self.notices()), 4)
+
+    async def test_captain_queue_suppresses_without_resetting_verdict(self):
+        await self.setup_tree()
+        await self.end()
+        self.presence.queue.hold('captain', [{'id': 2}])
+        await self.end()
+        self.presence.queue.release('captain', [{'id': 2}])
+        await self.end()
+        self.assertEqual(len(self.notices()), 2)
+
+    async def test_repeated_captain_turns_while_blocked_alert_once(self):
+        """Each answer to the alert is a captain turn; it must not make the same alert new again."""
+        await self.setup_tree()
+        self.db._exec("UPDATE task_reviews SET status='blocked' WHERE conv_id=?", (self.conv_id,))
+        await self.end()
+        self.assertEqual(len(self.notices()), 2)
+        for _ in range(3):
+            await self.presence.started(self.conv_id, 'captain')
+            self.assertTrue(self.presence.is_working('captain'))
+            await self.end()
+            await self.presence.finished(self.conv_id, 'captain')
+            await self.end()
+        self.assertEqual(len(self.notices()), 2)
+
+    async def test_changed_item_set_alerts_again_while_blocked(self):
+        await self.setup_tree()
+        self.db._exec("UPDATE task_reviews SET status='blocked' WHERE conv_id=?", (self.conv_id,))
+        await self.end()
+        self.db._exec("INSERT INTO line_reports(parent_conv_id,child_conv_id,author,body,notify,created_at) "
+                      "VALUES('root',?,'worker','ready',1,1)", (self.conv_id,))
+        await self.end()
+        self.assertEqual(len(self.notices()), 4)
+        self.assertIn('pending report', self.notices()[2]['body'])
+
+    async def test_worker_activity_resets_blocked_alert(self):
+        await self.setup_tree()
+        self.db._exec("UPDATE task_reviews SET status='blocked' WHERE conv_id=?", (self.conv_id,))
+        await self.end()
+        worker = self.worker.attachment_id
+        await self.presence.started(self.conv_id, worker)
+        await self.presence.finished(self.conv_id, worker)
+        await self.end()
+        self.assertEqual(len(self.notices()), 4)
+
+    async def test_stranded_implementing_work_still_alerts(self):
+        await self.setup_tree()
+        await self.end()
+        self.assertEqual(len(self.notices()), 2)
+        self.assertIn('(implementing)', self.notices()[0]['body'])
 
     async def test_empty_board_without_task_rows(self):
         self.presence = Presence(self.runtime)

@@ -117,9 +117,12 @@ class WindowsUIATests(unittest.TestCase):
                     self.assertEqual(pointer, cursor(), f"{action} moved the cursor")
                     self.assertIsInstance(answer.get("foreground_changed"), bool, (action, answer))
                     self.assertIsInstance(answer.get("target_came_forward"), bool, (action, answer))
-                    if answer.get("target_came_forward"):
+                    if answer.get("foreground_restored"):
+                        self.assertEqual(before, after, (action, before, after, answer))
+                    elif answer.get("target_came_forward"):
                         self.assertEqual(window["hwnd"], after, (action, before, after, answer))
-                    if before == after:
+                    # A restored round trip still counts as a foreground change.
+                    if before == after and not answer.get("foreground_restored"):
                         self.assertFalse(answer.get("foreground_changed"), (action, before, after, answer))
                     elif not answer.get("foreground_changed"):
                         print(f"{action}: test saw a foreground change outside helper samples", flush=True)

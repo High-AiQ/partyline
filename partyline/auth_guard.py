@@ -8,7 +8,7 @@ browser, `<img>` tags — as a `?token=` query parameter.
 
 Exempt, exactly: the auth endpoints themselves, `/api/version`,
 `/api/hooks/*` (guarded by its own per-activation capability token),
-`/assets/*`, and `/`. Everything else is 401 without a valid credential.
+`/assets/*`, `/`, and `/lab/a11y`. Everything else is 401 without a valid credential.
 
 Sender identity on writes derives from the credential — never from a
 client-supplied field — so an authenticated sender cannot be impersonated
@@ -37,7 +37,7 @@ _EXEMPT_PREFIXES = ("/api/auth/", "/api/hooks/", "/assets/")
 # /api/restart-plan/failure carries its own capability (the plan's
 # report_token) plus a loopback check, exactly like the hooks routes.
 # Operator approval has a one-use capability issued through local DB write access.
-_EXEMPT_PATHS = {"/", "/api/version", "/api/restart-plan/failure",
+_EXEMPT_PATHS = {"/", "/lab/a11y", "/api/version", "/api/restart-plan/failure",
                  "/api/restart-request/operator-approve", "/api/screen/pair/claim"}
 
 

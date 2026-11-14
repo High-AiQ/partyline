@@ -224,6 +224,18 @@ class MediaStore:
             return None
         return path, mime, row["filename"]
 
+    def delete_file(self, file_id: str) -> None:
+        """Remove one stored file and its tiers: for a capture whose consent ended before it was shown."""
+        rows = self._query(
+            "SELECT path, thumb_path, slim_path, readable_path FROM images WHERE id=?", (file_id,))
+        with self.db.lock:
+            self.db.conn.execute("DELETE FROM images WHERE id=?", (file_id,))
+            self.db.conn.commit()
+        for relative in (rows[0] if rows else ()):
+            path = (self.root / relative).resolve() if relative else None
+            if path and path.is_relative_to(self.root.resolve()):
+                path.unlink(missing_ok=True)
+
     def delete_conversation(self, conv_id: str) -> None:
         """Purging a line destroys its uploaded files too — that is what purge means."""
         shutil.rmtree(self._conv_dir(conv_id), ignore_errors=True)

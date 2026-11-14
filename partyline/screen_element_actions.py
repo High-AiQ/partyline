@@ -5,18 +5,19 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .auth_guard import request_principal
+from .capability_versions import WINDOW_PRESS_VERSION
 from .machine_scope import deny_unless
 from .screen_grants import resolve_window
 from .screen_tree import OUT_BYTES
 from .screen_tree_answer import size
 
 
-ACTIONS = Literal["invoke", "toggle", "set_value", "select", "add_to_selection", "remove_from_selection",
-                  "expand", "collapse", "scroll", "set_scroll_percent", "scroll_into_view",
-                  "set_range_value", "window_close", "window_minimize", "window_maximize",
+ACTIONS = Literal["invoke", "toggle", "set_value", "press", "select", "add_to_selection",
+                  "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent",
+                  "scroll_into_view", "set_range_value", "window_close", "window_minimize", "window_maximize",
                   "window_restore", "window_move", "window_resize"]
 # Parameters each action takes; "set_scroll_percent" needs at least one of its two.
-PARAMS = {"set_value": ("value",), "scroll": ("direction", "amount"),
+PARAMS = {"press": ("key",), "select": ("value",), "set_value": ("value",), "scroll": ("direction", "amount"),
           "set_scroll_percent": ("horizontal_percent", "vertical_percent"),
           "set_range_value": ("number",), "window_move": ("x", "y"), "window_resize": ("width", "height")}
 ALL_PARAMS = tuple(name for names in PARAMS.values() for name in names)
@@ -39,8 +40,10 @@ class ElementAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     element_id: str = Field(min_length=1, max_length=128)
     action: ACTIONS
+    force: bool = False
     window: str | None = Field(default=None, min_length=1, max_length=500)
     value: str | None = Field(default=None, max_length=500)
+    key: Literal["enter", "tab", "escape"] | None = None
     direction: Literal["up", "down", "left", "right"] | None = None
     amount: Literal["small", "large"] | None = None
     horizontal_percent: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
@@ -54,8 +57,12 @@ class ElementAction(BaseModel):
 
     def parameters(self):
         """Reject missing or foreign parameters, so the helper only sees what the action takes."""
+        if self.force and self.action not in ("invoke", "toggle", "select", "expand"):
+            raise ValueError("force is supported only for invoke, toggle, select and expand")
         given = {name for name in ALL_PARAMS if getattr(self, name) is not None}
         wanted = set(PARAMS.get(self.action, ()))
+        if self.action == "select":
+            wanted = given & wanted
         if self.action == "set_scroll_percent":
             if not given & wanted:
                 raise ValueError("set_scroll_percent requires horizontal_percent and/or vertical_percent")
@@ -64,7 +71,8 @@ class ElementAction(BaseModel):
             raise ValueError(f"{self.action} requires {', '.join(missing)}")
         if extra := sorted(given - wanted):
             raise ValueError(f"{self.action} does not take {', '.join(extra)}")
-        return self.model_dump(exclude_none=True, exclude={"window", "then"})
+        excluded = {"window", "then"} | ({"force"} if not self.force else set())
+        return self.model_dump(exclude_none=True, exclude=excluded)
 
 
 STALE = ("unknown element id: not in the current snapshot (the page changed or it was never read); "
@@ -73,11 +81,10 @@ REFRESH_FAILED = "could not refresh the window; read it again before acting"
 
 
 async def after(hub, principal, grant, then, result):
-    """A new snapshot taken once the page has settled, answered like screen_elements and kept in budget."""
-    options = {**then.model_dump(exclude_none=True), "refresh": True}
+    """A new snapshot taken at an event-counter boundary, answered like screen_elements and kept in budget."""
+    options = {**then.model_dump(exclude_none=True), "refresh": True, "include_root": True}
     if not any(options.get(key) for key in ("query", "value", "control_type", "root", "id", "text")):
         options["changes"] = True
-    await hub.elements.settle()
     try:
         reply = await hub.elements.read(principal, None, grant["id"], options, OUT_BYTES - size(result) - 16)
     except HTTPException as exc:  # the share ended meanwhile: the action still happened
@@ -93,6 +100,8 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
     try:
         grant, device = resolve_window(hub, principal, body.window)
         message = body.parameters()
+        if body.action == "press" and device.get("press", 0) < WINDOW_PRESS_VERSION:
+            raise ValueError("update the Partyline helper to use press")
         target, _ = await hub.elements.action_target(principal, grant, body.element_id)
         if target is None:
             return {"status": "failed", "error": REFRESH_FAILED}
@@ -106,7 +115,7 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
             response = await hub.elements.exchange(principal, grant, device, "window_element_action",
                                                    agent=principal.name, **message)
         result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
-        if result.get("status") == "completed" and not result.get("grant_ended"):
+        if result.get("status") in ("completed", "no_effect") and not result.get("grant_ended"):
             if body.then:
                 result["after"] = await after(hub, principal, grant, body.then, result)
             tree = hub.elements.snapshots.get(grant["id"])

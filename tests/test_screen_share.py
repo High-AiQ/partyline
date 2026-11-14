@@ -15,6 +15,7 @@ from PIL import Image
 from partyline import auth_store, auth_tokens
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
+from partyline.helper_release import installer_info
 from partyline.media import MediaStore
 from partyline.media_routes import media_router
 from partyline.runtime import ChatRuntime
@@ -73,6 +74,14 @@ class ScreenTest(unittest.TestCase):
         ws.send_json({"type": "hello", "protocol": 1, "device_name": "desk", "os": "test",
                       "helper_version": "1", "monitors": FakeDesktop().monitors(), **extra})
         self.sync(ws)
+
+    def test_press_capability_is_retained_from_hello_and_absent_means_unsupported(self):
+        device = self.pair()
+        headers = {"Authorization": "Bearer " + device["token"]}
+        for capability in ({}, {"press": 1}):
+            with self.client.websocket_connect("/api/screen/helper", headers=headers) as ws:
+                self.hello(ws, **capability)
+                self.assertEqual(capability.get("press", 0), self.hub.devices[device["device_id"]]["press"])
 
     def test_account_computer_is_available_for_local_tools_on_accessible_lines(self):
         self.db.create_conversation("other", "Other")
@@ -486,7 +495,16 @@ class ScreenTest(unittest.TestCase):
             self.assertEqual(message["type"], "ping")
             self.assertTrue(message["helper_update"]["available"])
             self.assertEqual(message["helper_update"]["version"], helper_version())
-            self.assertIn("PartylineHelper-Setup.exe", message["helper_update"]["url"])
+            self.assertEqual(message["helper_update"]["url"], installer_info(helper_version())["url"])
+            self.assertIn(f"/helper-v{helper_version()}/PartylineHelper-Setup-{helper_version()}.exe",
+                          message["helper_update"]["url"])
+
+    def test_the_installer_endpoint_gives_the_web_ui_the_same_link(self):
+        body = self.client.get("/api/screen/helper-installer").json()
+        self.assertEqual(body, installer_info())
+        self.assertEqual(body["version"], helper_version())
+        self.assertEqual(self.client.get("/api/screen/helper-installer",
+                                         headers={"Authorization": "Bearer nope"}).status_code, 401)
 
     def test_live_revoke_and_invalid_region(self):
         from starlette.websockets import WebSocketDisconnect

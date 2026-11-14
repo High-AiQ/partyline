@@ -52,6 +52,8 @@ class WindowAccess:
         self.paths = {}
         self.epoch = None  # snapshot ID of the walk whose IDs are valid; parts of one walk share it
         self.walks = {}  # cursor -> the unread rest of that walk
+        self.event_status = None
+        self.event_counter = None
         self.deep = True  # prefetch the whole tree in one cache request until a read times out
 
     async def check(self, grant):
@@ -124,12 +126,17 @@ class WindowAccess:
         if self.platform != "win32":
             return {"elements_unavailable": "not Windows"}
         grant, generation = self.grant, self.generation
+        status = self.event_status() if self.event_status else {}
+        counter = status.get("event_counter")
         cursor = (options or {}).get("cursor")
         state = self.walks.get(cursor) if cursor else None
+        if cursor and self.event_counter != counter:
+            return {"elements_unavailable": "tree inconsistent: event during continuation; refresh"}
         if cursor and state is None:
             return {"elements_unavailable": "cursor expired; start a new snapshot"}
-        if not cursor:
+        if not cursor and not (options or {}).get("inspect"):
             self.forget()
+            self.event_counter = counter
         if not grant:
             return {"elements_unavailable": self.unavailable}
         reason = await self.check(grant)
@@ -145,7 +152,14 @@ class WindowAccess:
         share = self.session.share
         if share and self.session.accepted:
             frame = self.session.last_uia_frame
-        result = await asyncio.to_thread(self.reader, grant["hwnd"], frame, state, self.deep)
+        if (options or {}).get("inspect"):
+            target = options["inspect"]
+            result = await asyncio.to_thread(self.reader, grant["hwnd"], probe={
+                "id": target, "path": self.paths.get(target)})
+        else:
+            result = await asyncio.to_thread(self.reader, grant["hwnd"], frame, state, self.deep)
+        if self.event_status:
+            result.update(self.event_status(), captured_event_counter=counter)
         if generation != self.generation or self.grant is not grant:
             return {"elements_unavailable": "consent revoked"}
         reason = await self.check(grant)
@@ -185,7 +199,7 @@ class WindowAccess:
                 del self.walks[next(iter(self.walks))]
             result["next_cursor"] = token
 
-    async def watch(self, sleep=asyncio.sleep):
+    async def watch(self):
         async with WindowEvents(self._changes) as events:
             while True:
                 grant = self.grant

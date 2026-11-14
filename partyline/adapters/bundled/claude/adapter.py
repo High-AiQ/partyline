@@ -15,13 +15,16 @@ from partyline.adapters.bundled.claude.watch import ClaudeWatch, projects_glob
 from partyline.adapters.compaction import compaction_hooks_declared, is_compaction_record
 from partyline.adapters.session_seed import seed_claude_home
 from partyline.adapters.session_pin import pinned_session
+from partyline.adapters.turn_usage import TurnUsage
+from partyline.turn_usage_parse import ClaudeTurns
 from partyline.mcp_attach import claude_command
 
 LATER_LOOK_SECONDS = 1.0
 
 
-class PartylineAdapter(ClaudeWatch, ClaudeSession, BaseAdapter):
+class PartylineAdapter(TurnUsage, ClaudeWatch, ClaudeSession, BaseAdapter):
     kind = "claude"
+    turn_parser = ClaudeTurns
     jsonl_paste_receipts = True
 
     # Transcripts currently being tailed, mapped to their claimant, so two
@@ -254,6 +257,7 @@ class PartylineAdapter(ClaudeWatch, ClaudeSession, BaseAdapter):
         seen: set[str] = set()
 
         async def handle(obj):
+            await self.note_turn_usage(obj)
             if is_compaction_record("claude", obj):
                 return
             if obj.get("isSidechain") or obj.get("type") != "assistant" or self.harness_filler(obj):

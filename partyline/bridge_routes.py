@@ -1,12 +1,14 @@
 """Line-bridge API: a person opens and closes; anyone on a line may read its bridge."""
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import bridge_store as store
 from .auth_guard import request_principal
+from .bridge_send import send
 from .bridge_service import close_bridge, open_bridge
 from .contracts import MessageResponse
+from .hierarchy_contracts import MAX_MESSAGE_BODY
 from .machine_scope import deny_unless, is_human
 
 
@@ -18,6 +20,11 @@ class BridgeEnd(BaseModel):
 class BridgeIn(BaseModel):
     a: BridgeEnd
     b: BridgeEnd
+
+
+class BridgeSendIn(BaseModel):
+    text: str = Field(min_length=1, max_length=MAX_MESSAGE_BODY)
+    client_key: str | None = Field(default=None, max_length=64)
 
 
 def bridge_router(runtime) -> APIRouter:
@@ -62,5 +69,9 @@ def bridge_router(runtime) -> APIRouter:
         known(bridge_id)
         return [MessageResponse.model_validate(row)
                 for row in store.audit_log(runtime.db, bridge_id)]
+
+    @router.post("/api/conversations/{conv_id}/bridge-send")
+    async def post_bridge_send(request: Request, conv_id: str, body: BridgeSendIn):
+        return await send(runtime, request_principal(request), conv_id, body.text, body.client_key)
 
     return router

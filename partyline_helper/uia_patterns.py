@@ -1,7 +1,7 @@
 """UIA action catalogue: pattern requirements, argument validation and per-element refusals."""
 import math
 
-PATTERN = {"invoke": "Invoke", "toggle": "Toggle", "set_value": "Value",
+PATTERN = {"invoke": "Invoke", "toggle": "Toggle", "set_value": "Value", "press": None,
            "select": "SelectionItem", "add_to_selection": "SelectionItem",
            "remove_from_selection": "SelectionItem", "expand": "ExpandCollapse",
            "collapse": "ExpandCollapse", "scroll": "Scroll", "set_scroll_percent": "Scroll",
@@ -9,7 +9,8 @@ PATTERN = {"invoke": "Invoke", "toggle": "Toggle", "set_value": "Value",
            "window_close": "Window", "window_minimize": "Window", "window_maximize": "Window",
            "window_restore": "Window", "window_move": "Transform", "window_resize": "Transform"}
 WINDOW_ACTIONS = tuple(name for name in PATTERN if name.startswith("window_"))
-PARAMS = {"scroll": ("direction", "amount"), "set_scroll_percent": ("horizontal_percent", "vertical_percent"),
+PARAMS = {"press": ("key",), "scroll": ("direction", "amount"),
+          "set_scroll_percent": ("horizontal_percent", "vertical_percent"),
           "set_range_value": ("number",), "window_move": ("x", "y"), "window_resize": ("width", "height")}
 FIELDS = tuple(name for names in PARAMS.values() for name in names)
 DIRECTIONS = ("up", "down", "left", "right")
@@ -31,7 +32,8 @@ def integer(value, low, high):
 
 def argument(message):
     """The raw action argument: set_value text, or the dict of parameters other actions take."""
-    if message.get("action") == "set_value":
+    if message.get("action") == "set_value" or (message.get("action") == "select"
+                                                 and message.get("value") is not None):
         return message.get("value")
     return {key: message[key] for key in FIELDS if message.get(key) is not None}
 
@@ -43,11 +45,18 @@ def check_argument(action, arg):
         if not isinstance(arg, str):
             raise ActionRefused("set_value requires a text value")
         return
+    if action == "select" and isinstance(arg, str):
+        if not arg:
+            raise ActionRefused("select requires a nonempty option name")
+        return
     arg = arg or {}
     allowed = PARAMS.get(action, ())
     if extra := sorted(set(arg) - set(allowed)):
         raise ActionRefused(f"{action} does not take {', '.join(extra)}")
-    if action == "scroll":
+    if action == "press":
+        if arg.get("key") not in ("enter", "tab", "escape"):
+            raise ActionRefused("press requires key enter, tab or escape")
+    elif action == "scroll":
         if arg.get("direction") not in DIRECTIONS or arg.get("amount") not in AMOUNTS:
             raise ActionRefused("scroll requires direction up, down, left or right and amount small or large")
     elif action == "set_scroll_percent":
@@ -69,7 +78,9 @@ def supported(props, is_window):
     """Actions the element's patterns allow; window actions apply only to the shared window."""
     patterns = props.get("patterns", [])
     return [name for name, pattern in PATTERN.items()
-            if pattern in patterns and (is_window or name not in WINDOW_ACTIONS)]
+            if (pattern in patterns or (name == "select" and combo(props))
+                or (name == "press" and props.get("focusable")))
+            and (is_window or name not in WINDOW_ACTIONS)]
 
 
 def refuse_unsupported(action, props, is_window):
@@ -108,3 +119,7 @@ def refuse_state(action, props, arg):
         raise ActionRefused("window cannot be moved")
     elif action == "window_resize" and not props.get("can_resize"):
         raise ActionRefused("window cannot be resized")
+
+
+def combo(props):
+    return props.get("control_type") == "ComboBox" and "ExpandCollapse" in props.get("patterns", [])

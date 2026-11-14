@@ -19,6 +19,7 @@ from .window_shares import WINDOWS_VERSION
 from .transport import CertificateError, certificate_failure
 from .version import helper_version
 from .uia_access import WindowAccess
+from .uia_press import PRESS_VERSION
 from .uia_task import WindowTask, read_options
 from .session_transport import SessionTransport
 from .window_shares import MESSAGES as WINDOW_MESSAGES, WindowShares
@@ -178,7 +179,8 @@ class Session(SessionTransport):
             await self.tools.dispatch(message)
         elif kind in WINDOW_MESSAGES:
             await self.windows.receive(message)
-        elif kind in ("read_window_elements", "window_element_action") and "grant_id" in message:
+        elif kind in ("read_window_elements", "window_element_action", "snapshot_window") \
+                and "grant_id" in message:
             await self.windows.dispatch(message)
         elif kind == "read_window_elements":
             await self.window_task.submit(message["request_id"], read_options(message))
@@ -205,7 +207,7 @@ class Session(SessionTransport):
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
                         helper_version=helper_version(), monitors=self.desktop.monitors(),
                         control=CONTROL_VERSION, tools=TOOLS_VERSION, windows=WINDOWS_VERSION,
-                        update_check=True)
+                        press=PRESS_VERSION, update_check=True)
         self.status.set("paired")
         loop = asyncio.get_running_loop()
         # The tray's Stop sharing runs on another thread: hand the stop to this loop.

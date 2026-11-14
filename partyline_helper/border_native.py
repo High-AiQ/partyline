@@ -84,6 +84,16 @@ class TkBackend(ThreadBackend):
                     command = self.commands.get(timeout=.02)
                 except queue.Empty:
                     command = (None,)
+                closed = command[0] == "close"
+                while True:
+                    try:
+                        newer = self.commands.get_nowait()
+                    except queue.Empty:
+                        break
+                    if newer[0] == "close":
+                        command, closed = newer, True
+                    elif not closed:
+                        command = newer
                 if command[0] == "show":
                     clear()
                     for rectangle in command[1]:

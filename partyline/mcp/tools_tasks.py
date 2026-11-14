@@ -19,6 +19,7 @@ _PATHS = {'env_gap': ('POST', 'env-gap'), 'blocked': ('POST', 'blocked'), 'deliv
           'restart_reviewer': ('POST', 'task/reviewer'),
           'restart_implementer': ('POST', 'task/implementer'), 'resume_work': ('POST', 'task/resume'),
           'reopen_task': ('POST', 'task/reopen'), 'message_task': ('POST', 'task/message'),
+          'nudge_reviewer': ('POST', 'task/nudge-reviewer'),
           'waiting': ('POST', 'waiting'), 'set_task_goal': ('POST', 'task/goal')}
 OPERATIONS = tuple(_PATHS)
 
@@ -28,7 +29,8 @@ _WHO = {'env_gap': "the task's reviewer", 'deliver': 'the implementer of an expr
         'blocked': "the task's implementer", 'request_review': "the task's implementer",
         'review_verdict': "the task's reviewer, or the root captain under captain review "
                           'or with an explicit override',
-        'waiting': "the task's implementer"}
+        'waiting': "the task's implementer or reviewer",
+        'nudge_reviewer': "the task's implementer"}
 
 
 _DESCRIBE = {
@@ -56,6 +58,7 @@ _DESCRIBE = {
                       'create_task or tasks), never your root id. Does not start work or create anything; '
                       'refused for approved or done tasks (use reopen_task).'),
     'reopen_task': 'CONTINUE an approved or done EXISTING task with a new goal; conv_id is the task line id.',
+    'nudge_reviewer': 'Ask your reviewer to continue, once per round, with fixed text and no arguments.',
     'message_task': 'Message an existing task participant privately; it does not change the goal.',
 }
 

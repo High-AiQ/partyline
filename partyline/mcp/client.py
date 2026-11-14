@@ -241,7 +241,8 @@ class PartylineClient:
                     if total > MAX_DOWNLOAD:
                         raise ApiError(f"download exceeds the {MAX_DOWNLOAD}-byte MCP limit")
                     output.write(chunk)
-            return {"path": str(target), "bytes": total,
+            from .image_dimensions import image_dimensions
+            return {**image_dimensions(target), "path": str(target), "bytes": total,
                     "content_type": response.getheader("Content-Type") or "application/octet-stream"}
         except Exception:
             if created:

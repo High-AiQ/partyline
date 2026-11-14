@@ -19,7 +19,8 @@ def frame_bounds(rect, frame):
 
 def is_wrapper(props):
     """An unnamed, patternless container: it organises the tree but tells an agent nothing."""
-    return (props.get("control_type") in WRAPPERS and not props.get("patterns")
+    return (props.get("control_type") in WRAPPERS and props.get("enabled") is not False
+            and not props.get("patterns")
             and not any(props.get(key) for key in ("name", "automation_id", "value")))
 
 

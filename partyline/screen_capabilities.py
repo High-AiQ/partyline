@@ -25,6 +25,8 @@ def for_attachment(runtime, principal, conv_id, state):
         return state
     # Only clients with measured list_changed support may hide access-bound tools.
     state["dynamic_screen_tools"] = att.get("adapter") in {"claude", "opencode-v2"}
+    from .bridge_store import open_bridge_for_attachment
+    state["bridge_open"] = open_bridge_for_attachment(runtime.db, principal.attachment_id) is not None
     hub = getattr(runtime, "screen_hub", None)
     if hub is None:
         return state
@@ -33,7 +35,6 @@ def for_attachment(runtime, principal, conv_id, state):
     grant = hub.control.grants.get(share.share_id) if share and share.status == "active" else None
     state["screen_control"] = bool(
         grant and grant.status == "active" and grant.holder in (None, principal.name))
-    from .screen_grants import GRANTS
-    state["screen_windows"] = runtime.db._exec(
-        GRANTS + " AND g.conv_id=?", (principal.conv_id,)).fetchone() is not None
+    from .screen_grants import line_grants
+    state["screen_windows"] = bool(line_grants(runtime.db, principal.conv_id))
     return state
