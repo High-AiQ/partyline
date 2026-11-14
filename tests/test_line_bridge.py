@@ -189,7 +189,7 @@ class LineBridgeTest(unittest.TestCase):
             self.assertEqual([p for p in sockets[conv].sent if p.get("type") == "message"
                               and p["message"].get("bridge_id")], [])
         log = self.client.get(f"/api/bridges/{bridge['id']}/messages", headers=self.person)
-        self.assertEqual(len(log.json()), 4)  # two originals, two copies
+        self.assertEqual(len(log.json()), 2)  # two crossings, each shown once
 
     def test_other_processes_digests_exclude_bridge_rows(self):
         self.opened()

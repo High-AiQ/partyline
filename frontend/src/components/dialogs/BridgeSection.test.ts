@@ -8,6 +8,8 @@ import { hierarchyApi } from "../../lib/hierarchy-api";
 import { ConversationDetailSchema } from "../../lib/contracts";
 import type { Attachment } from "../../lib/contracts";
 import { room } from "../../state/room.svelte";
+import { dialogs } from "../../state/dialogs.svelte";
+import BridgeLog from "./BridgeLog.svelte";
 
 const line = (id: string, name: string, parent_id: string | null = null) => ({
   id,
@@ -63,6 +65,7 @@ const button = (label: string) =>
 
 afterEach(() => {
   vi.restoreAllMocks();
+  dialogs.closeAll();
   room.conversations = [];
   room.attachments = [];
 });
@@ -261,13 +264,8 @@ describe("bridge section", () => {
     }
   });
 
-  it("closes an open bridge and reads its log on demand", async () => {
+  it("opens the log view for an open bridge, and closes the bridge", async () => {
     vi.spyOn(bridgeApi, "forLine").mockResolvedValue(opened);
-    const log = vi
-      .spyOn(bridgeApi, "log")
-      .mockResolvedValue([
-        { id: 5, conv_id: "x", sender: "sonnet", body: "the schema changed", created_at: 1_700_000_001 },
-      ]);
     const close = vi
       .spyOn(bridgeApi, "close")
       .mockResolvedValue({ ...opened, closed_at: 2, closed_by: "greg" });
@@ -277,14 +275,11 @@ describe("bridge section", () => {
         expect(button("close bridge")).toBeDefined();
       });
       expect(document.body.textContent).toContain("sonnet on «3d game»");
-      const details = document.querySelector("details");
-      if (!details) throw new Error("no log disclosure");
-      details.open = true;
-      details.dispatchEvent(new Event("toggle"));
-      await vi.waitFor(() => {
-        expect(document.body.textContent).toContain("the schema changed");
-      });
-      expect(log).toHaveBeenCalledWith("b1");
+      expect(document.querySelector("details")).toBeNull();
+      button("view log")?.click();
+      expect(dialogs.stack).toHaveLength(1);
+      expect(dialogs.stack[0]?.component).toBe(BridgeLog);
+      expect(dialogs.stack[0]?.props).toEqual({ bridge: opened, lineId: "x" });
       button("close bridge")?.click();
       await vi.waitFor(() => {
         expect(close).toHaveBeenCalledWith("b1");
@@ -292,6 +287,7 @@ describe("bridge section", () => {
       await vi.waitFor(() => {
         expect(document.body.textContent).toContain("bridge closed");
       });
+      expect(button("view log")).toBeUndefined();
       expect(document.getElementById("bridgeLine")).toBeNull();
       expect(document.body.textContent).toContain("no other line has a running process");
     } finally {

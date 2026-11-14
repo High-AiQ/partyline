@@ -38,7 +38,25 @@ class BridgeSpeechTest(unittest.TestCase):
         for other in ("x-other", "y-other"):
             self.assertEqual(self.adapters[other].delivered, [])
         log = self.client.get(f"/api/bridges/{bridge['id']}/messages", headers=self.person)
-        self.assertEqual([m["body"] for m in log.json()], [ANSWER, ANSWER])
+        self.assertEqual([m["body"] for m in log.json()], [ANSWER])
+
+    def test_the_log_shows_each_crossing_once_in_order_and_from_both_sides(self):
+        bridge = self.opened()
+        self.say("x", "x-amb", "@[bridge]fable same words")
+        self.say("y", "y-amb", "@[bridge]sonnet same words")
+        self.say("x", "x-amb", "@[bridge]fable same words")
+        log = self.client.get(f"/api/bridges/{bridge['id']}/messages", headers=self.person).json()
+        self.assertEqual([m["conv_id"] for m in log], ["x", "y", "x"])
+        self.assertTrue(all(not m.get("audience_attachment_id") for m in log))
+        self.assertEqual([m["id"] for m in log], sorted(m["id"] for m in log))
+
+    def test_a_copy_without_its_original_is_kept(self):
+        bridge = self.opened()
+        self.say("x", "x-amb", "@[bridge]fable only the copy remains")
+        original = [r for r in self.rows("x") if r["bridge_id"]][-1]
+        self.db._exec("DELETE FROM messages WHERE id=?", (original["id"],))
+        log = self.client.get(f"/api/bridges/{bridge['id']}/messages", headers=self.person).json()
+        self.assertEqual([(m["conv_id"], m["source_conv_id"]) for m in log], [("y", "x")])
 
     def test_a_pty_spoken_bridge_message_is_not_fanned_out_to_people(self):
         bridge = self.opened()
@@ -49,7 +67,7 @@ class BridgeSpeechTest(unittest.TestCase):
         asyncio.run(post("sonnet", "agent", "@[bridge]fable via the pty"))
         self.assertEqual(socket.sent, [])
         log = self.client.get(f"/api/bridges/{bridge['id']}/messages", headers=self.person)
-        self.assertEqual(len(log.json()), 2)
+        self.assertEqual(len(log.json()), 1)
 
     def test_a_reaction_on_a_bridge_row_does_not_resurface_it(self):
         self.opened()
@@ -66,7 +84,7 @@ class BridgeSpeechTest(unittest.TestCase):
         self.say("x", "x-amb", "@[bridge]fable done")
         mark_closed(self.db, bridge["id"], "greg", "test")
         log = self.client.get(f"/api/bridges/{bridge['id']}/messages", headers=self.person)
-        self.assertEqual(len(log.json()), 2)
+        self.assertEqual(len(log.json()), 1)
         page = self.client.get("/api/conversations/x/messages", headers=self.person)
         self.assertFalse(any("done" in m["body"] for m in page.json()["messages"]))
 

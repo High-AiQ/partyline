@@ -19,7 +19,7 @@ export const BridgeSchema = z.object({
   closed_at: z.number().nullish(),
   closed_by: z.string().nullish(),
   close_reason: z.string().nullish(),
-  sides: z.array(BridgeSideSchema).length(2),
+  sides: z.tuple([BridgeSideSchema, BridgeSideSchema]),
 });
 export type Bridge = z.infer<typeof BridgeSchema>;
 
@@ -29,6 +29,7 @@ export const BridgeLogEntrySchema = z.object({
   sender: z.string(),
   body: z.string(),
   created_at: z.number(),
+  source_conv_id: z.string().nullish(),
   source_conv_name: z.string().nullish(),
 });
 export type BridgeLogEntry = z.infer<typeof BridgeLogEntrySchema>;

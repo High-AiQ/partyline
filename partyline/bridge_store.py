@@ -149,11 +149,28 @@ def attachment_ref(db, att_id: str) -> dict | None:
 
 
 def audit_log(db, bridge_id: str) -> list[dict]:
+    """What crossed, once per crossing: the sender's original in id order.
+
+    Delivery stores a second row, the counterpart's copy. When a copy's original
+    is present it is dropped; a copy without one stays, so no message is lost.
+    """
     rows = db._exec(
         "SELECT m.*, c.name AS source_conv_name FROM messages m"
         " LEFT JOIN conversations c ON c.id = m.source_conv_id"
         " WHERE m.bridge_id=? ORDER BY m.id", (bridge_id,)).fetchall()
-    return [dict(r) for r in rows]
+    unmatched: dict[tuple, int] = {}
+    for row in rows:
+        if not row["audience_attachment_id"]:
+            key = (row["conv_id"], row["sender"], row["body"])
+            unmatched[key] = unmatched.get(key, 0) + 1
+    log = []
+    for row in rows:
+        key = (row["source_conv_id"], row["sender"], row["body"])
+        if row["audience_attachment_id"] and unmatched.get(key):
+            unmatched[key] -= 1
+            continue
+        log.append(dict(row))
+    return log
 
 
 def sent_in_window(db, bridge_id: str, att_id: str, now: float) -> int:

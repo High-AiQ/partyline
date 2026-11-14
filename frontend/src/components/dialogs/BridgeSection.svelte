@@ -2,7 +2,9 @@
   /** A person opens and closes the line's bridge here; processes cannot. */
   import { untrack } from "svelte";
   import { ApiError, api } from "../../lib/api";
-  import { bridgeApi, type Bridge, type BridgeLogEntry } from "../../lib/bridge-api";
+  import { bridgeApi, type Bridge } from "../../lib/bridge-api";
+  import BridgeLog from "./BridgeLog.svelte";
+  import { dialogs } from "../../state/dialogs.svelte.js";
   import type { Attachment, Conversation } from "../../lib/contracts";
   import { isLive } from "../../lib/attachments";
   import { hierarchyApi } from "../../lib/hierarchy-api";
@@ -24,7 +26,6 @@
   let otherLineId = $state("");
   let theirId = $state("");
   let theirProcesses = $state<Attachment[]>([]);
-  let log = $state<BridgeLogEntry[] | null>(null);
   let loadedLineId = "";
 
   const mine = $derived(room.attachments.filter((a) => a.conv_id === conversation.id && isLive(a)));
@@ -137,21 +138,11 @@
     try {
       await bridgeApi.close(bridge.id);
       bridge = null;
-      log = null;
       status = "bridge closed";
     } catch (error) {
       fail(error, "could not close the bridge");
     } finally {
       busy = false;
-    }
-  }
-
-  async function toggleLog(event: Event): Promise<void> {
-    if (!(event.currentTarget as HTMLDetailsElement).open || !bridge) return;
-    try {
-      log = await bridgeApi.log(bridge.id);
-    } catch (error) {
-      fail(error, "could not load the bridge log");
     }
   }
 
@@ -164,27 +155,21 @@
   {#if loading}
     <p class="py-2 text-cream-faint">loading bridge…</p>
   {:else if bridge}
+    {@const openBridge = bridge}
     <p class="dialog-note">
-      {bridge.sides[0]?.name} on «{bridge.sides[0]?.conv_name}» ⇄ {bridge.sides[1]?.name} on «{bridge.sides[1]
-        ?.conv_name}» · opened {when(bridge.opened_at)} by {bridge.opened_by}
+      {bridge.sides[0].name} on «{bridge.sides[0].conv_name}» ⇄ {bridge.sides[1].name} on «{bridge.sides[1]
+        .conv_name}» · opened {when(bridge.opened_at)} by {bridge.opened_by}
     </p>
     <div class="line-actions">
       <button type="button" disabled={busy} onclick={close}>close bridge</button>
     </div>
-    <details class="bridge-log" ontoggle={toggleLog}>
-      <summary>view log</summary>
-      {#if log === null}
-        <p class="text-cream-faint">loading…</p>
-      {:else if log.length === 0}
-        <p class="text-cream-faint">nothing has crossed yet</p>
-      {:else}
-        <ul class="text-[11px]">
-          {#each log as entry (entry.id)}
-            <li><strong>{entry.sender}</strong> · {when(entry.created_at)} — {entry.body}</li>
-          {/each}
-        </ul>
-      {/if}
-    </details>
+    <div class="line-actions">
+      <button
+        type="button"
+        onclick={() => dialogs.open(BridgeLog, { bridge: openBridge, lineId: conversation.id })}
+        >view log</button
+      >
+    </div>
   {:else}
     <div class="line-form">
       <label for="bridgeMine">this line's ambassador</label>
