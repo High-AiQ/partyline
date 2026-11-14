@@ -5,6 +5,8 @@ import re
 import secrets
 import threading
 
+WINDOW_PRESS_VERSION = 1  # helper hello: element-scoped enter/tab/escape via window messages
+
 
 def bump_runtime(runtime):
     if versions := getattr(runtime, "capability_versions", None):

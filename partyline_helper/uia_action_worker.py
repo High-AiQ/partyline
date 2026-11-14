@@ -5,11 +5,12 @@ import threading
 
 from .uia_action import prepare
 from .uia_patterns import ActionRefused, argument, number
+from .uia_press import press
 from .uia_snapshot import MAX_TEXT
 from .uia_window_identity import live
 
 
-STATE_KEYS = ("name", "value", "toggle", "enabled", "selected", "expand_state", "range_value",
+STATE_KEYS = ("name", "value", "toggle", "enabled", "focused", "selected", "expand_state", "range_value",
               "h_scroll_percent", "v_scroll_percent", "window_state")
 
 
@@ -21,7 +22,7 @@ def provider_factory(hwnd):  # pragma: no cover - Windows COM provider
 
 
 def run_action(access, grant, generation, message, factory=provider_factory):
-    observed, foreground_samples = {}, []
+    observed, foreground_samples, delivery = {}, [], {}
     try:
         provider = factory(grant["hwnd"])
         arg = argument(message)
@@ -36,7 +37,11 @@ def run_action(access, grant, generation, message, factory=provider_factory):
         if grant.get("marker") and not live(grant):
             raise ValueError("window closed")
         fresh, _ = prepare(provider, message["element_id"], message["action"], arg, path)
-        call = provider.action_call(fresh, message["action"], arg)
+        if message["action"] == "press":
+            def call():
+                return press(provider, fresh, arg["key"], active=lambda: not access.gate.revoked.is_set())
+        else:
+            call = provider.action_call(fresh, message["action"], arg)
         windows = access.list_windows()
         if windows is None:
             raise ValueError("secure desktop active")
@@ -64,7 +69,9 @@ def run_action(access, grant, generation, message, factory=provider_factory):
                 observed.update(foreground_changed=changed,
                                 target_came_forward=bool(changed and after == grant["hwnd"]))
 
-        _, revoked_during = access.gate.dispatch(generation, invoke)
+        outcome, revoked_during = access.gate.dispatch(generation, invoke)
+        if message["action"] == "press" and isinstance(outcome, dict):
+            delivery = outcome
         if revoked_during or access.gate.revoked.is_set() or access.gate.generation != generation:
             return {"status": "completed", "revoked_during": True, "state_unavailable": "consent revoked",
                     **observed}
@@ -94,10 +101,11 @@ def run_action(access, grant, generation, message, factory=provider_factory):
             changed = before != immediate or before != late
             observed.update(foreground_changed=changed,
                             target_came_forward=bool(changed and grant["hwnd"] in (immediate, late)))
-            return {"status": "completed", "revoked_during": revoked_during, "element": element, **observed}
+            return {"status": "completed", "revoked_during": revoked_during, "element": element,
+                    **observed, **delivery}
         except Exception:
             return {"status": "completed", "revoked_during": revoked_during,
-                    "state_unavailable": "could not re-read element", **observed}
+                    "state_unavailable": "could not re-read element", **observed, **delivery}
     except ValueError as exc:
         reason = str(exc)
         allowed = ("revoked", "secure desktop active", "window closed")

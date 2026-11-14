@@ -88,7 +88,7 @@ class ScreenHub:
                 return
             current = {**device, "socket": ws, "name": hello.device_name,
                        "os": hello.os, "helper_version": hello.helper_version, "control": hello.control,
-                       "tools": hello.tools, "windows": hello.windows,
+                       "tools": hello.tools, "windows": hello.windows, "press": hello.press,
                        "monitors": [item.model_dump() for item in hello.monitors],
                        "last_seen": time.monotonic()}
             old = self.devices.get(ident)

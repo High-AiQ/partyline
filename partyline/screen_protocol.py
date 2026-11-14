@@ -70,6 +70,7 @@ class HelperHello(HelperMessage):
     control: int = 0  # agent-control protocol version; absent on helpers that predate it
     tools: int = 0  # local-tools protocol version; absent on helpers that predate it
     windows: int = 0  # window-grant protocol; 1 shares a window with a line, absent before helper 1.1.0
+    press: int = 0  # element-scoped key messages; absent before helper 1.2.0
     update_check: bool = False
 
 

@@ -16,6 +16,7 @@ def usage(grant_id, title, computer, shared_by):
             "content. Use element ids with screen_element_action "
             "(extras(op=\"screen_element_action\", args) if unlisted) to act; page long results "
             "with offset/next_offset and refresh after page changes because ids may become stale. "
+            "Commit a field with press key=enter (also tab/escape); prefer invoke on submit buttons. "
             "Every process on this line can use this window; actions run one at a time. UIA changes "
             "invalidate snapshots; pass refresh=true for a fresh read.")
 

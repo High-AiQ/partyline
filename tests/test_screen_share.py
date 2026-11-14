@@ -74,6 +74,14 @@ class ScreenTest(unittest.TestCase):
                       "helper_version": "1", "monitors": FakeDesktop().monitors(), **extra})
         self.sync(ws)
 
+    def test_press_capability_is_retained_from_hello_and_absent_means_unsupported(self):
+        device = self.pair()
+        headers = {"Authorization": "Bearer " + device["token"]}
+        for capability in ({}, {"press": 1}):
+            with self.client.websocket_connect("/api/screen/helper", headers=headers) as ws:
+                self.hello(ws, **capability)
+                self.assertEqual(capability.get("press", 0), self.hub.devices[device["device_id"]]["press"])
+
     def test_account_computer_is_available_for_local_tools_on_accessible_lines(self):
         self.db.create_conversation("other", "Other")
         device = self.pair()

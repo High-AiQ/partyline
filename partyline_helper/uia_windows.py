@@ -12,6 +12,7 @@ AVAILABLE = {10000: 30031, 10015: 30041, 10002: 30043, 10010: 30036, 10005: 3002
              10004: 30034, 10017: 30035, 10009: 30044, 10016: 30042}
 # Properties a snapshot reads for every node, fetched with it so each node costs no further round trips.
 CACHED = {"BoundingRectangle": 30001, "ControlType": 30003, "Name": 30005, "HasKeyboardFocus": 30008,
+          "IsKeyboardFocusable": 30009,
           "IsEnabled": 30010, "AutomationId": 30011, "IsPassword": 30019, "NativeWindowHandle": 30020,
           "IsOffscreen": 30022}
 # Cached too, so a Value or Toggle element costs no live pattern call: ValueValue, ToggleToggleState.
@@ -156,6 +157,7 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
                   "automation_id": self.prop(node, "AutomationId"),
                   "enabled": bool(self.prop(node, "IsEnabled")),
                   "focused": bool(self.prop(node, "HasKeyboardFocus")),
+                  "focusable": bool(self.prop(node, "IsKeyboardFocusable")),
                   "offscreen": bool(self.prop(node, "IsOffscreen")), "patterns": patterns}
         if "Value" in patterns and not self.prop(node, "IsPassword"):
             result["value"] = self.state_value(node, "value", 10002, "Value", "CurrentValue")

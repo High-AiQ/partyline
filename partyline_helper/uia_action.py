@@ -50,7 +50,8 @@ def prepare(provider, target, action, arg=None, path=None):
     if not props.get("enabled"):
         raise ActionRefused("element is disabled")
     is_window = target == element_id(provider, provider.root(), [])
-    if PATTERN[action] not in props.get("patterns", []) or (action in WINDOW_ACTIONS and not is_window):
+    if ((action != "press" and PATTERN[action] not in props.get("patterns", []))
+            or (action in WINDOW_ACTIONS and not is_window)):
         refuse_unsupported(action, props, is_window)
     if action == "set_value" and provider.password(node):
         raise ActionRefused("password fields cannot be set")

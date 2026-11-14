@@ -410,6 +410,7 @@ helper reads pattern state (range, scroll axes, window abilities) only for the a
 | --- | --- | --- |
 | `invoke`, `toggle` | Invoke, Toggle | none |
 | `set_value` | Value | `value` (text) |
+| `press` | UIA focus, then window messages | `key`: `enter`, `tab`, or `escape` only |
 | `select`, `add_to_selection`, `remove_from_selection` | SelectionItem | none |
 | `expand`, `collapse` | ExpandCollapse | none |
 | `scroll` | Scroll | `direction` (`up`, `down`, `left`, `right`), `amount` (`small`, `large`) |
@@ -419,9 +420,51 @@ helper reads pattern state (range, scroll axes, window abilities) only for the a
 | `window_close`, `window_minimize`, `window_maximize`, `window_restore` | Window | none |
 | `window_move`, `window_resize` | Transform | `x`, `y` (screen pixels) / `width`, `height` |
 
+**Commit a field.** After `set_value`, use `press` with `key="enter"` to request navigation or
+submission. Prefer `invoke` on a submit/default button when the UIA tree exposes one: UIA has no
+general Enter/submit pattern. For Enter, the helper first checks the field's immediate container
+for enabled Invoke buttons named Submit, Search or Go (case insensitive). A match returns
+`status:"no_effect"`, a `native_submit` selector and a `hint` to find and invoke that button; it
+does not guess a button or post a key. Other names, localized buttons and deeper form structures
+can still be found with `screen_elements` and invoked explicitly.
+
+Otherwise `press` calls UIA `SetFocus` on the target and posts only
+`WM_KEYDOWN`, `WM_CHAR`, `WM_KEYUP` to its own HWND. Chrome page content uses a
+`Chrome_RenderWidgetHostHWND` in the target's ancestry, or the unique renderer child containing
+the element's center; ambiguous/missing renderers are refused. Chrome's omnibox uses its top-level
+window. Other controls use their nearest native ancestor within the granted window. There is no
+global keyboard injection, modifier support, mouse movement, thread-input attachment or activation
+call. If the app changes foreground during UIA focus, or UIA cannot confirm the target's focus,
+no key is posted; the result reports it.
+The grant checks, per-window lock, revocation barrier and audit are the same as other actions.
+
+Queueing messages is not success: `posted` counts messages accepted by Windows, while `status`
+is `completed` only if the immediate read observes a value, focus, title or address-bar change.
+`observation` contains `before`, `after`, and `changed`; the baseline is taken after focus preparation,
+so SetFocus alone never counts as a key effect. Observation text is bounded in bytes (with
+`truncated:true` when shortened); comparisons use the full values. Password values are excluded. The URL observation
+uses the browser chrome's address-bar Value, never a page field (recognized English names or
+omnibox/addressEditBox automation IDs). Unsupported providers, missing HWNDs, focus/delivery failures,
+or unchanged state return `status:"no_effect"` plus `hint`. A stale element after navigation can also
+prevent immediate confirmation. Use `then` or a fresh read for delayed effects; `no_effect` describes
+the immediate observation, and `after` independently reports the later tree. Never retry automatically.
+
+**Chrome evidence and limits.** Chromium's
+[renderer keyboard handler](https://github.com/chromium/chromium/blob/main/content/browser/renderer_host/legacy_render_widget_host_win.cc)
+forwards keyboard messages to its window event target. This supports the HWND route, but does not
+establish that Chrome will accept background Enter on every version, focus state or page. Microsoft's
+[PostMessage contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew)
+confirms asynchronous delivery and integrity-level restrictions; it promises no application effect.
+No native Windows/Chrome test was available for this change. The exact live procedure is in
+[screen-press-live-check.md](screen-press-live-check.md); record observations there when run.
+
+**Compatibility.** Helper 1.2.0 announces `press: 1` in hello. A helper without that capability is
+refused before any capture or action exchange with “update the Partyline helper to use press”.
+Existing UIA actions continue to work with older helpers.
+
 **Click then read.** `then` takes the `screen_elements` read fields (`query`, `value`, `control_type`,
 `root`, `id`, `text`, `context`, `depth`). After a completed action the server waits half a second, takes a
-new snapshot and returns the answer as `after`, within the same 4 KB for the action result and the answer
+new snapshot and returns the answer as `after` (also for `no_effect`), within the same 4 KB for the action result and the answer
 together. The next separate `screen_elements` read recaptures again, so a delayed app update is not hidden by the immediate post-action snapshot. The client waits up to 160 s for a call with `then` (100 s without), allowing time for a multi-part pre-action snapshot and action. An empty `then` returns what is new: the topmost elements the new snapshot has that the old one
 did not (ids are stable, so a page change lists the new rows and not the unchanged chrome) and a `diff`
 count `+added -gone`. The read needs read access to the line as well as write. If the share ends meanwhile,
@@ -439,8 +482,9 @@ says `window_closed` and the grant ends; if the app keeps it open (an unsaved-ch
 result says `close_requested`, the grant stays, and it ends as soon as the window disappears. The
 response includes the element's updated name, role, enabled and value, toggle, selection, expand,
 range, scroll or window state when available (and the new bounds after a move or resize). Partyline does
-not synthesize mouse or keyboard input, move the cursor, or call an activation API for these
-actions. The target application can nevertheless bring itself forward in response; classic
+not synthesize global mouse or keyboard input, move the cursor, or call an activation API for these
+actions; `press` uses only the scoped messages described above. The target application can nevertheless
+bring itself forward in response; classic
 Win32 buttons and checkboxes can do so on Invoke or Toggle, restoring a minimized window usually
 activates it, and other apps may activate or open dialogs. The response and local audit include
 `foreground_changed` and `target_came_forward` after the pattern call and the element re-read. A
