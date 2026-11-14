@@ -23,8 +23,10 @@ class TurnUsage:
             parser = parser or self.__dict__.get("_turn_parser") or self.__dict__.setdefault(
                 "_turn_parser", self.turn_parser())
             turn = parser.feed(record)
-            # A resumed CLI can show an older session's history; only this process's responses count.
-            if turn is not None and turn["timestamp"] >= self.spawned_at - 5:
+            # A resumed CLI replays an older session's history; only responses after this spawn count.
+            # A fresh process keeps a few seconds of clock slack, a resume none: its history is not new.
+            slack = 0 if getattr(self, "resume", False) else 5
+            if turn is not None and turn["timestamp"] >= self.spawned_at - slack:
                 await noted(turn)
         except Exception:
             logger.debug("turn usage not recorded", exc_info=True)

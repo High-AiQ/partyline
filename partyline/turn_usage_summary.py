@@ -9,7 +9,9 @@ from .turn_usage import RETENTION_SECONDS
 from .turn_usage_contracts import AttachmentTotals, LineTotals, ToolRow, Totals, TurnSummary
 
 BASIS = ("Actual model usage per response: input + cache read + cache write + output (output includes "
-         "reasoning). A response is charged in full to every tool it called.")
+         "reasoning). A response is charged in full to every tool it called. Model time is the gap from "
+         "the previous tool result or user message to the response's completion, where the transcript "
+         "has timestamps; tool time is in the tool-call telemetry.")
 NONE = "(no tool)"
 
 
@@ -19,8 +21,15 @@ def percentile(values, fraction):
     return ordered[max(0, math.ceil(len(ordered) * fraction) - 1)]
 
 
+def model_time(rows) -> dict:
+    """Nearest-rank p50/p95 of the model time of the rows that have one; nothing is invented."""
+    times = [r["model_ms"] for r in rows if r["model_ms"] is not None]
+    return {"model_time_turns": len(times), "p50_model_ms": percentile(times, .5) if times else None,
+            "p95_model_ms": percentile(times, .95) if times else None}
+
+
 def _totals(rows) -> dict:
-    return {"turns": len(rows), "input_tokens": sum(r["input_tokens"] for r in rows),
+    return {"turns": len(rows), **model_time(rows), "input_tokens": sum(r["input_tokens"] for r in rows),
             "cache_read_tokens": sum(r["cache_read_tokens"] for r in rows),
             "cache_write_tokens": sum(r["cache_write_tokens"] for r in rows),
             "output_tokens": sum(r["output_tokens"] for r in rows),
@@ -46,10 +55,11 @@ def tool_rows(rows, group="sub_op") -> list[ToolRow]:
         if group == "sub_op":
             keys |= {(label.partition(":")[0], "") for label in labels}
         for key in keys:
-            groups[key].append(row["total_tokens"])
-    result = [ToolRow(tool=tool, sub_op=sub, turns=len(tokens), p50_total_tokens=percentile(tokens, .5),
+            groups[key].append(row)
+    result = [ToolRow(tool=tool, sub_op=sub, turns=len(found), p50_total_tokens=percentile(tokens, .5),
                       p95_total_tokens=percentile(tokens, .95), max_total_tokens=max(tokens),
-                      total_tokens=sum(tokens)) for (tool, sub), tokens in groups.items()]
+                      total_tokens=sum(tokens), **model_time(found))
+              for (tool, sub), found in groups.items() if (tokens := [r["total_tokens"] for r in found])]
     return sorted(result, key=lambda r: (-r.total_tokens, r.tool, r.sub_op))
 
 

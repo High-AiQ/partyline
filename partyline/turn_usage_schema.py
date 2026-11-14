@@ -19,6 +19,9 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_turn_usage_line_time ON turn_usage(conv_id, timestamp)",
     "CREATE INDEX IF NOT EXISTS idx_turn_usage_attachment_time ON turn_usage(attachment_id, timestamp)",
     "CREATE INDEX IF NOT EXISTS idx_turn_usage_time ON turn_usage(timestamp)",
+    # Milliseconds the model took: the gap from the previous tool result or user message to this
+    # response's completion. NULL where the transcript cannot say (never guessed).
+    "ALTER TABLE turn_usage ADD COLUMN model_ms INTEGER",
     """CREATE TRIGGER IF NOT EXISTS delete_turn_usage AFTER DELETE ON conversations
         BEGIN DELETE FROM turn_usage WHERE conv_id=OLD.id; END""",
 ]

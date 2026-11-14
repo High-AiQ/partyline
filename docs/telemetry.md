@@ -78,6 +78,23 @@ All three adapters are normalised to one meaning:
 | total | input + cache read + cache write + output |
 | context | the prompt size of that response: input + cache read + cache write (Codex: `input_tokens`) |
 
+### Model time
+
+Each response also records how long the model took: the gap from the previous tool result or user
+message to the response's completion, in milliseconds. The summary reports its nearest-rank p50 and
+p95 (`p50_model_ms`, `p95_model_ms`, over `model_time_turns` responses) on every row and total, so
+a slow run reads as model thinking or, by comparison with the tool-call telemetry, tool time. Only
+a transcript that can say records it, and the others record nothing rather than a guess:
+
+- **Claude Code**: from the latest non-sidechain `user` record before the message's first line to
+  the message's last line, since its lines are written as each block completes.
+- **Codex**: from the latest tool output or user message to the `token_usage_record`. A rollout with
+  only `token_count` events records none.
+- **OpenCode v2**: none. A row spans its tool executions, so its created-to-completed time is not
+  model time.
+
+A gap longer than an hour is dropped (a stopped process or a replay, not a model thinking).
+
 ### What each adapter measures
 
 | adapter | source | notes |
@@ -93,7 +110,8 @@ Not measured:
 - **Codex tool operations.** Codex runs tools through one `exec` code tool, so the tool is named
   `exec` and its operations are not visible; named calls (`wait`, `sleep`) are.
 - **Anything before the process started.** A resumed CLI can show earlier history; only responses
-  newer than this process's spawn count, so a session is never charged twice.
+  newer than this process's spawn count (a resume or restart-plan reattachment allows no clock slack,
+  a fresh spawn five seconds), so a session is never charged twice. Resumed processes record like fresh ones.
 - **Cost in money, and other adapters.**
 
 ### Reading it

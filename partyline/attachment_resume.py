@@ -23,6 +23,7 @@ from .fence import FenceUnavailable
 from .fence_protect import database_paths
 from .hook_routes import surface_attention
 from .process_incidents import exit_callback
+from .turn_usage import turn_usage_callback
 from .hierarchy import tree_live_name_conflict
 from .role_delivery import bind_role_delivery
 from . import fence_workspaces
@@ -61,11 +62,7 @@ def delivered_history(db, attachment: dict) -> DeliveryHistory:
             "FROM messages m LEFT JOIN transcript_delivery_records t "
             "ON t.attachment_id=? AND t.message_id=m.id "
             "WHERE m.conv_id=? AND m.created_at>=? ORDER BY m.id",
-            (
-                attachment["id"],
-                attachment["conv_id"],
-                attachment["created_at"],
-            ),
+            (attachment["id"], attachment["conv_id"], attachment["created_at"]),
         ).fetchall()
     bodies: list[str] = []
     transcript_records: list[TranscriptDeliveryRecord] = []
@@ -255,6 +252,7 @@ async def _resume_adapter_locked(
         )
         att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
         att["on_process_exit"] = exit_callback(runtime, att)
+        att["on_turn_usage"] = turn_usage_callback(runtime, att)  # a resume records too
         adapter = make_adapter(
             att["adapter"],
             att,

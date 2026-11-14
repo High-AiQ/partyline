@@ -14,6 +14,7 @@ import time
 
 from .turn_usage_labels import tool_label
 
+OUTPUTS = ("function_call_output", "custom_tool_call_output")
 NUMBERS = ("input", "cache_read", "cache_write", "output", "reasoning")
 
 
@@ -28,9 +29,28 @@ def epoch(stamp) -> float:
         return time.time()
 
 
+def stamp(value) -> float | None:
+    """A transcript timestamp as epoch seconds, or None; unlike ``epoch`` it never invents one."""
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+MAX_MODEL_MS = 3600 * 1000  # a longer gap is a stopped process or a replay, not a model thinking
+
+
+def model_ms(started, ended) -> int | None:
+    """The gap between the input a response answered and its completion, when both are known."""
+    if started is None or ended is None:
+        return None
+    gap = round((ended - started) * 1000)
+    return gap if 0 <= gap <= MAX_MODEL_MS else None
+
+
 def make_turn(response_id, timestamp, *, model=None, input=0, cache_read=0, cache_write=0,
-              output=0, reasoning=0, context=None, window=None, calls=()) -> dict:
-    return {"response_id": str(response_id), "timestamp": timestamp,
+              output=0, reasoning=0, context=None, window=None, calls=(), model_ms=None) -> dict:
+    return {"response_id": str(response_id), "timestamp": timestamp, "model_ms": model_ms,
             "model": model if isinstance(model, str) and model != "<synthetic>" else None,
             "input": count(input), "cache_read": count(cache_read), "cache_write": count(cache_write),
             "output": count(output), "reasoning": min(count(reasoning), count(output)),
@@ -47,8 +67,12 @@ class ClaudeTurns:
     def __init__(self, keep: int = 64):
         self._seen: OrderedDict[str, dict] = OrderedDict()
         self._keep = keep
+        self._input_at = None
 
     def feed(self, record) -> dict | None:
+        if isinstance(record, dict) and record.get("type") == "user" and not record.get("isSidechain"):
+            self._input_at = stamp(record.get("timestamp"))  # a tool result or a person's message
+            return None
         message = record.get("message") if isinstance(record, dict) else None
         if not isinstance(message, dict) or record.get("type") != "assistant":
             return None
@@ -65,7 +89,12 @@ class ClaudeTurns:
             cache_write=usage.get("cache_creation_input_tokens"), output=usage.get("output_tokens"),
             reasoning=details.get("thinking_tokens") if isinstance(details, dict) else 0,
             calls=calls)
+        # The input is fixed when the message's first line lands: its own tool results interleave later.
         earlier = self._seen.pop(ident, None)
+        started, ended = (earlier["_input"], earlier["_end"]) if earlier else (self._input_at, None)
+        written = stamp(record.get("timestamp"))
+        turn["_input"], turn["_end"] = started, max(filter(None, (ended, written)), default=None)
+        turn["model_ms"] = model_ms(started, turn["_end"])
         if earlier:
             for key in NUMBERS:
                 turn[key] = max(turn[key], earlier[key])
@@ -75,9 +104,9 @@ class ClaudeTurns:
         self._seen[ident] = turn
         while len(self._seen) > self._keep:
             self._seen.popitem(last=False)
-        if earlier and all(earlier[key] == turn[key] for key in (*NUMBERS, "calls")):
+        if earlier and all(earlier[key] == turn[key] for key in (*NUMBERS, "calls", "model_ms")):
             return None
-        return dict(turn)
+        return {key: value for key, value in turn.items() if not key.startswith("_")}
 
 
 def _arguments(raw) -> dict | None:
@@ -106,6 +135,7 @@ class CodexTurns:
         self._window = None
         self._records = False
         self._total = None
+        self._input_at = None  # the last tool output or user message: where the model's turn began
 
     def feed(self, record) -> dict | None:
         payload = record.get("payload") if isinstance(record, dict) else None
@@ -117,29 +147,38 @@ class CodexTurns:
         elif kind == "response_item" and payload.get("type") in ("function_call", "custom_tool_call"):
             if label := tool_label(payload.get("name"), _arguments(payload.get("arguments"))):
                 self._calls.append(label)
+        elif kind == "response_item" and payload.get("type") in OUTPUTS:
+            self._input_at = stamp(when)
+        elif kind == "event_msg" and (payload.get("type") == "user_message" or (
+                payload.get("type") == "item_completed"
+                and (payload.get("item") or {}).get("type") == "UserMessage")):
+            self._input_at = stamp(when)
         elif kind == "event_msg" and payload.get("type") == "task_started":
             self._window = payload.get("model_context_window")
         elif kind == "token_usage_record" and isinstance(payload.get("usage"), dict):
             self._records = True
-            return self._turn(payload.get("response_id"), epoch(when), payload["usage"], self._window)
+            return self._turn(payload.get("response_id"), when, payload["usage"], self._window)
         elif kind == "event_msg" and payload.get("type") == "token_count" and not self._records:
             info = payload.get("info")
             last = info.get("last_token_usage") if isinstance(info, dict) else None
             total = (info.get("total_token_usage") or {}).get("total_tokens") if last else None
             if isinstance(last, dict) and total != self._total:
                 self._total = total
-                return self._turn(f"total-{total}", epoch(when), last, info.get("model_context_window"))
+                return self._turn(f"total-{total}", when, last, info.get("model_context_window"))
         return None
 
-    def _turn(self, response_id, when, usage, window) -> dict | None:
+    def _turn(self, response_id, written, usage, window) -> dict | None:
         calls, self._calls = self._calls, []
+        started, self._input_at = self._input_at, None
         if not response_id:
             return None
         prompt, cached = count(usage.get("input_tokens")), count(usage.get("cached_input_tokens"))
         return make_turn(
-            response_id, when, model=self._model, input=max(0, prompt - cached), cache_read=cached,
+            response_id, epoch(written), model=self._model, input=max(0, prompt - cached), cache_read=cached,
             cache_write=usage.get("cache_write_input_tokens"), output=usage.get("output_tokens"),
-            reasoning=usage.get("reasoning_output_tokens"), context=prompt, window=window, calls=calls)
+            reasoning=usage.get("reasoning_output_tokens"), context=prompt, window=window, calls=calls,
+            # token_count-only rollouts carry no response boundary worth trusting.
+            model_ms=model_ms(started, stamp(written)) if self._records else None)
 
 
 def _state(part: dict) -> dict:
