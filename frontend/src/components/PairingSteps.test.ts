@@ -1,6 +1,15 @@
 import { mount, tick, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import PairingSteps from "./PairingSteps.svelte";
+import { screenApi } from "../lib/screen-api";
+import { helperInstaller } from "../state/helper-installer.svelte.js";
+
+const INSTALLER = {
+  version: "1.2.0",
+  filename: "PartylineHelper-Setup-1.2.0.exe",
+  releases_url: "https://github.com/High-AiQ/partyline/releases",
+  url: "https://github.com/High-AiQ/partyline/releases/download/helper-v1.2.0/PartylineHelper-Setup-1.2.0.exe",
+};
 
 const UVX = "uvx --from 'partyline[helper] @ git+https://github.com/High-AiQ/partyline.git' partyline-helper";
 const CHECKOUT = "uv run --extra helper partyline-helper";
@@ -21,6 +30,7 @@ function copyButton(name: string): HTMLButtonElement {
 }
 
 afterEach(() => {
+  helperInstaller.info = null;
   setClipboard(undefined);
   delete (document as { execCommand?: unknown }).execCommand;
   vi.restoreAllMocks();
@@ -156,16 +166,25 @@ describe("PairingSteps", () => {
   it("offers the installer only to a visitor on Windows, with the SmartScreen steps", async () => {
     const agent = vi.spyOn(navigator, "userAgent", "get");
     agent.mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130");
+    let answer: (info: typeof INSTALLER) => void = () => undefined;
+    const installer = vi.spyOn(screenApi, "installer").mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
     const windows = mount(PairingSteps, {
       target: document.body,
       props: { origin: "http://lan:1", code: "ABCDEF12" },
     });
     await tick();
+    expect(document.querySelector("[data-testid=download-windows]")).toBeNull(); // nothing guessed before the API answers
+    answer(INSTALLER);
+    await settle();
     const link = document.querySelector<HTMLAnchorElement>("[data-testid=download-windows]");
-    expect(link?.textContent).toBe("Download for Windows");
-    expect(link?.href).toBe(
-      "https://github.com/High-AiQ/partyline/releases/latest/download/PartylineHelper-Setup.exe",
-    );
+    expect(installer).toHaveBeenCalledTimes(1);
+    expect(link?.textContent).toBe("Download for Windows (1.2.0)");
+    expect(link?.href).toBe(INSTALLER.url); // from the API, never hardcoded in the web UI
+    expect(document.body.textContent).toContain("PartylineHelper-Setup-1.2.0.exe");
     const text = document.body.textContent.replace(/\s+/g, " ");
     expect(text).toContain("More info");
     expect(text).toContain("Run anyway");
@@ -174,6 +193,7 @@ describe("PairingSteps", () => {
     await unmount(windows);
     document.body.replaceChildren();
     agent.mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) Firefox/130");
+    installer.mockClear();
     const linux = mount(PairingSteps, {
       target: document.body,
       props: { origin: "http://lan:1", code: "C" },
@@ -181,6 +201,7 @@ describe("PairingSteps", () => {
     await tick();
     expect(document.querySelector("[data-testid=download-windows]")).toBeNull();
     expect(document.querySelector("[data-testid=windows-installer]")).toBeNull();
+    expect(installer).not.toHaveBeenCalled(); // other systems never ask for the Windows link
     await unmount(linux);
   });
 });

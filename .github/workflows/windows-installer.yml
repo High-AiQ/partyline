@@ -119,7 +119,7 @@ jobs:
         shell: pwsh
         run: |
           $app = "$env:LOCALAPPDATA\Programs\Partyline Helper"
-          $setup = Start-Process build\installer\PartylineHelper-Setup.exe -Wait -PassThru `
+          $setup = Start-Process "build\installer\PartylineHelper-Setup-$env:VERSION.exe" -Wait -PassThru `
             -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$PWD\install.log"
           if ($setup.ExitCode -ne 0) { Get-Content install.log; throw "setup exited $($setup.ExitCode)" }
           if (-not (Test-Path "$app\PartylineHelper.exe")) { throw "not installed to $app" }
@@ -136,7 +136,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: PartylineHelper-Setup-${{ env.VERSION }}-${{ github.sha }}
-          path: build/installer/PartylineHelper-Setup.exe
+          path: build/installer/PartylineHelper-Setup-${{ env.VERSION }}.exe
           if-no-files-found: error
 
       - name: attach to the release
@@ -147,8 +147,8 @@ jobs:
         run: |
           gh release view $env:TAG 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:TAG --latest --title "Partyline Helper $env:VERSION" --notes "Partyline Helper $env:VERSION. The Windows screen-helper installer is attached (unsigned: see docs/screen-helper.md)."
+            gh release create $env:TAG --latest --title "Partyline Helper $env:VERSION" --notes "Partyline Helper $env:VERSION. PartylineHelper-Setup-$env:VERSION.exe, the Windows screen-helper installer, is attached (unsigned: see docs/screen-helper.md)."
             if ($LASTEXITCODE -ne 0) { throw "cannot create the release" }
           }
-          gh release upload $env:TAG build/installer/PartylineHelper-Setup.exe --clobber
+          gh release upload $env:TAG "build/installer/PartylineHelper-Setup-$env:VERSION.exe" --clobber
           if ($LASTEXITCODE -ne 0) { throw "cannot upload the installer" }

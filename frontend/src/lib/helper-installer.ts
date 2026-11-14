@@ -1,7 +1,3 @@
-/** The prototype Windows installer is a GitHub release asset with a fixed name, so "latest" never goes stale. */
-export const HELPER_WINDOWS_INSTALLER_URL =
-  "https://github.com/High-AiQ/partyline/releases/latest/download/PartylineHelper-Setup.exe";
-
 interface NavigatorLike {
   userAgent: string;
   userAgentData?: { platform?: string };

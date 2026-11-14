@@ -29,6 +29,21 @@ class HelperReleaseTests(unittest.TestCase):
         from partyline_helper import __version__
         self.assertFalse(helper_release.update_available(__version__))
 
+    def test_the_installer_url_names_the_exact_version_in_tag_and_file(self):
+        info = helper_release.installer_info("1.2.0")
+        self.assertEqual(info["filename"], "PartylineHelper-Setup-1.2.0.exe")
+        self.assertEqual(info["url"], "https://github.com/High-AiQ/partyline/releases/download/"
+                                      "helper-v1.2.0/PartylineHelper-Setup-1.2.0.exe")
+        self.assertEqual((info["version"], info["releases_url"]),
+                         ("1.2.0", "https://github.com/High-AiQ/partyline/releases"))
+        self.assertNotIn("latest", info["url"])
+
+    def test_the_installer_defaults_to_the_shipped_helper_version(self):
+        from partyline_helper import __version__
+        info = helper_release.installer_info()
+        self.assertEqual(info["version"], __version__)
+        self.assertTrue(info["url"].endswith(f"/helper-v{__version__}/PartylineHelper-Setup-{__version__}.exe"))
+
 
 if __name__ == "__main__":
     unittest.main()

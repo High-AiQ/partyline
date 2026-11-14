@@ -15,6 +15,7 @@ from PIL import Image
 from partyline import auth_store, auth_tokens
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
+from partyline.helper_release import installer_info
 from partyline.media import MediaStore
 from partyline.media_routes import media_router
 from partyline.runtime import ChatRuntime
@@ -494,7 +495,16 @@ class ScreenTest(unittest.TestCase):
             self.assertEqual(message["type"], "ping")
             self.assertTrue(message["helper_update"]["available"])
             self.assertEqual(message["helper_update"]["version"], helper_version())
-            self.assertIn("PartylineHelper-Setup.exe", message["helper_update"]["url"])
+            self.assertEqual(message["helper_update"]["url"], installer_info(helper_version())["url"])
+            self.assertIn(f"/helper-v{helper_version()}/PartylineHelper-Setup-{helper_version()}.exe",
+                          message["helper_update"]["url"])
+
+    def test_the_installer_endpoint_gives_the_web_ui_the_same_link(self):
+        body = self.client.get("/api/screen/helper-installer").json()
+        self.assertEqual(body, installer_info())
+        self.assertEqual(body["version"], helper_version())
+        self.assertEqual(self.client.get("/api/screen/helper-installer",
+                                         headers={"Authorization": "Bearer nope"}).status_code, 401)
 
     def test_live_revoke_and_invalid_region(self):
         from starlette.websockets import WebSocketDisconnect

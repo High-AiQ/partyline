@@ -42,11 +42,16 @@ for both forms below. Keep the `run` terminal open and answer `y` to each share 
 
 For a person who should never open a terminal: one download, one double-click, then only native dialogs.
 In Partyline's **Computers** dialog, a visitor on Windows sees **Download for Windows**
-(`https://github.com/High-AiQ/partyline/releases/latest/download/PartylineHelper-Setup.exe`; the
-release asset has a fixed name so that link stays valid). Linux and macOS visitors keep the `uvx`
+(the link points at the exact helper version this server ships). Installers are listed on the
+[releases page](https://github.com/High-AiQ/partyline/releases). Each is named `PartylineHelper-Setup-<helper version>.exe`
+and attached to the `helper-v<helper version>` release, for example
+`releases/download/helper-v1.2.0/PartylineHelper-Setup-1.2.0.exe`; there is no fixed-name or `latest` alias, and the
+version also shows in the file's Properties → Details. The server builds that URL in one place
+(`installer_info` in `partyline/helper_release.py`); the web UI reads it from `GET /api/screen/helper-installer` and a
+connecting helper gets the same link in its update message. Linux and macOS visitors keep the `uvx`
 commands described below.
 
-1. Open `PartylineHelper-Setup.exe`. It installs for the current user only (no administrator rights, no UAC
+1. Open `PartylineHelper-Setup-<version>.exe`. It installs for the current user only (no administrator rights, no UAC
    prompt) to `%LOCALAPPDATA%\Programs\Partyline Helper`, adds a Start-menu entry and an uninstaller
    (Settings → Apps), registers `partyline://` and start-at-login (the same `install` logic as the `uvx`
    route, pointed at the installed exe) and starts the helper.
@@ -109,11 +114,14 @@ Computers list show available updates; unknown versions are not flagged.
 **Building.** `.github/workflows/windows-installer.yml` runs on `windows-latest`: it freezes the helper with
 PyInstaller (`packaging/windows/PartylineHelper.spec`), checks the frozen exe (`selfcheck`), builds the installer
 with Inno Setup (`packaging/windows/installer.iss`), installs and uninstalls it silently as a smoke test and
-uploads `PartylineHelper-Setup.exe` as an artifact for helper pull requests. A `helper-v*` tag publishes
-it to the helper release. The tag-version job dispatches the workflow for tags created with `GITHUB_TOKEN`.
+uploads `PartylineHelper-Setup-<version>.exe` as an artifact for helper pull requests. A `helper-v*` tag publishes
+only that versioned file to the helper release. The spec runs `packaging/windows/make_version_info.py` to write the exe's Windows
+version resource from `partyline_helper.__version__`, and the workflow passes the same version to Inno Setup
+(`/DAppVersion`) for the installer's file name and version resource. The tag-version job dispatches the workflow for tags created with `GITHUB_TOKEN`.
 Locally on Windows, with uv:
 `uv run --extra helper python packaging/windows/make_icon.py build/PartylineHelper.ico`, then
-`uv run --extra helper --with pyinstaller==6.14.2 pyinstaller packaging/windows/PartylineHelper.spec`, then
+`uv run --extra helper --with pyinstaller==6.14.2 pyinstaller packaging/windows/PartylineHelper.spec` (the spec itself
+writes the exe's version resource, so no build path can omit it), then
 `iscc /DAppVersion=<version> packaging\windows\installer.iss`.
 
 Choices: **PyInstaller, onedir, windowed** (mature hooks for tkinter, Pillow, ctypes users; a onefile build would
@@ -706,7 +714,7 @@ requires both. Features bump minor, fixes patch, and breaking changes major.
 
 On a green merge, CI tags changed helper versions `helper-v<version>` and builds
 the Windows installer; it publishes a latest GitHub release named Partyline Helper
-with `PartylineHelper-Setup.exe`. Pull requests touching helper paths also build a
+with `PartylineHelper-Setup-<version>.exe`. Pull requests touching helper paths also build a
 smoke-test artifact. Server `v<version>` tags do not create releases.
 
 At connection the server compares the reported version with the helper version in

@@ -5,6 +5,14 @@ import { screenApi } from "../../lib/screen-api";
 import { ApiError } from "../../lib/http";
 import { screenStatus } from "../../state/screen-status.svelte.js";
 import { room } from "../../state/room.svelte.js";
+import { helperInstaller } from "../../state/helper-installer.svelte.js";
+
+const INSTALLER = {
+  version: "1.2.0",
+  filename: "PartylineHelper-Setup-1.2.0.exe",
+  releases_url: "https://github.com/High-AiQ/partyline/releases",
+  url: "https://github.com/High-AiQ/partyline/releases/download/helper-v1.2.0/PartylineHelper-Setup-1.2.0.exe",
+};
 
 /** Drains the promise chains a click starts; no clock involved. */
 async function settle(): Promise<void> {
@@ -13,6 +21,7 @@ async function settle(): Promise<void> {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  helperInstaller.info = null;
   screenStatus.devices = [];
   room.leave({ clearRoute: false });
   document.body.replaceChildren();
@@ -131,6 +140,7 @@ describe("pairing instructions", () => {
 
 describe("helper update notice", () => {
   const open = async (devices: Awaited<ReturnType<typeof screenApi.devices>>["devices"]) => {
+    vi.spyOn(screenApi, "installer").mockResolvedValue(INSTALLER);
     vi.spyOn(screenApi, "current").mockResolvedValue({ share: null });
     screenStatus.devices = devices;
     room.conversation = {
@@ -163,7 +173,8 @@ describe("helper update notice", () => {
     const notice = document.querySelector("[data-testid=helper-update]");
     expect(notice?.textContent).toContain("Helper update available (running 2.80.0)");
     const link = document.querySelector<HTMLAnchorElement>("[data-testid=helper-update-download]");
-    expect(link?.href).toContain("/releases/latest/download/PartylineHelper-Setup.exe");
+    expect(link?.href).toBe(INSTALLER.url); // the server's exact-version link, not a built or "latest" one
+    expect(link?.textContent).toContain("1.2.0");
     await unmount(component);
   });
 
