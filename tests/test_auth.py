@@ -180,7 +180,7 @@ class GuardTest(DbBackedTest):
         return self.register().json()["access_token"]
 
     def test_exemptions_are_exact(self):
-        for path in ("/", "/api/version", "/api/auth/login", "/api/hooks/a/b",
+        for path in ("/", "/lab/a11y", "/api/version", "/api/auth/login", "/api/hooks/a/b",
                      "/assets/app.js"):
             self.assertTrue(exempt(path), path)
         for path in ("/api/conversations", "/api/probe", "/docs", "/api/authx"):

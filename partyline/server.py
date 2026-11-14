@@ -259,14 +259,14 @@ app.include_router(forward_router(runtime))
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
 
-# The frontend is built by Vite into `static/`, which emits content-hashed
-# bundles under `assets/`. Hashed names are why these can be cached hard: a new
-# build is a new filename, so nothing served from here is ever stale.
-#
-# The directory is committed, so it is present in a fresh clone and in a wheel
-# without Node ever running. It can still be missing if someone has cleaned it,
-# and `StaticFiles` would answer that with an opaque traceback at import time —
-# so say what actually needs doing instead.
+
+@app.get("/lab/a11y")
+async def accessibility_lab():
+    return FileResponse(STATIC_DIR / "lab" / "a11y" / "index.html")
+
+# Vite emits content-hashed assets: a new build is a new filename, never a stale asset.
+# The committed directory works without Node. If cleaned away, fail with the build command
+# instead of letting `StaticFiles` raise an opaque import-time traceback.
 if not ASSETS_DIR.is_dir():  # pragma: no cover - only reachable with a cleaned tree
     raise RuntimeError(
         f"no built frontend at {ASSETS_DIR}. Run `npm install && npm run build` in frontend/."

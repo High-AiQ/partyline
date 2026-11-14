@@ -565,6 +565,66 @@ not the submitted text; numeric and enumerated parameters (direction, amount, pe
 coordinates, size) are recorded as given. Every action uses its window grant,
 dispatch gate, rate limit, local audit and revocation, independently of pointer control.
 
+## Accessibility lab
+
+Open **`/lab/a11y`** in the normal Chrome window and share that window. This standalone page makes no API calls,
+stores nothing, and follows the browser's light or dark theme. Each card keeps its control names stable except for
+the intentional **Count** rename. The DOM state and UIA state should be compared, not assumed to agree.
+
+| Card | What it tests | Expected UIA reading |
+| --- | --- | --- |
+| 1. Sync enable | A real `disabled` attribute removed synchronously by `change` | `Sync target` starts `disabled`; selecting A removes that flag. |
+| 2. Delayed enable | Real `disabled` attributes removed at 300 ms and 2500 ms | An immediate `then` reads at its event-counter boundary; it may precede either deadline. Once both targets visibly enable, a fresh read shows neither as `disabled`. |
+| 3. Looks enabled, accessibility says disabled | Only the link's CSS class changes | **`Class-only link` remains `disabled` in UIA after selection**, even though it looks enabled. This is the deliberate KDP-style divergence. |
+| 4. aria-disabled link done right | Selection removes `aria-disabled` | `ARIA link` starts `disabled`; selecting A removes that flag. |
+| 5. Disabled ancestor | A button inherits disabled state from `<fieldset disabled>` | `Fieldset target` is `disabled` while `Fieldset disabled` is on, and enabled after toggle off. |
+| 6. Name change | The button increments its own accessible name | Invoking `Count 0` produces `Count 1`, then `Count 2`. |
+| 7. Structure change | A simulated fetch inserts three list items after 1 s | An immediate `then` can precede insertion. Once the list visibly appears, a fresh read shows `Item 1`, `Item 2`, and `Item 3`. |
+| 8. Text field | UIA Value `set_value`, with independent DOM event indicators | `Text field` has value `hello`; the visible `input fired:` and `change fired:` lines report exactly which events Chrome emitted. |
+| 9. Event log | The last 20 `change`, `input`, `click`, and `keydown` events | `Event log` is a live list with millisecond timestamps and control names; key events include `key=<key>`. |
+| 10. Reset | Initial state restoration and pending-timer cancellation | All targets return to their initial states and the event log says `No events yet.` |
+
+### Ordered live-retest script
+
+For each ID below, first call `screen_elements(query="^visible name$")` and take the matching element under the
+named card whenever that ID is not already in hand; the expected lookup line is the control line shown in the table.
+For the repeated **A** options, query `^A$` and use the `ListItem` under the named card in the `in:` path. An expected
+line shown without `disabled` means that flag must be absent.
+
+1. `screen_elements(query="^Sync target$")` → `<id> Button "Sync target" [invoke] disabled`.
+   Then `screen_elements(query="^A$")` → `<sync-a> ListItem "A" [select]` under **1. Sync enable**.
+2. `screen_element_action(element_id=<sync-a>, action="select", then={"query":"^Sync target$"})` →
+   `after: <id> Button "Sync target" [invoke]`.
+3. Select **A** under **2. Delayed enable** with
+   `screen_element_action(element_id=<delayed-a>, action="select", then={"query":"Delayed target"})` →
+   record both targets' current flags. The immediate capture may precede either deadline; once each target
+   visibly enables, its next read must omit `disabled`.
+4. Select **A** under **3. Looks enabled, accessibility says disabled** with
+   `screen_element_action(element_id=<class-a>, action="select", then={"query":"^Class-only link$"})` →
+   `after: <id> Hyperlink "Class-only link" [invoke] disabled`. The green visual state does not change this expected result.
+5. Select **A** under **4. aria-disabled link done right** with
+   `screen_element_action(element_id=<aria-a>, action="select", then={"query":"^ARIA link$"})` →
+   `after: <id> Hyperlink "ARIA link" [invoke]`.
+6. `screen_element_action(element_id=<fieldset-checkbox>, action="toggle", then={"query":"^Fieldset target$"})` →
+   `after: <id> Button "Fieldset target" [invoke]`. Toggle it again with the same `then` → the line ends in `disabled`.
+7. `screen_element_action(element_id=<count-0>, action="invoke", then={"query":"^Count 1$"})` →
+   `after: <id> Button "Count 1" [invoke]`.
+8. `screen_element_action(element_id=<load-list>, action="invoke", then={"query":"^Item 1$"})` → record the current match;
+   `then` captures immediately, so insertion may not have happened yet.
+9. `screen_element_action(element_id=<text-field>, action="set_value", value="hello", then={"query":"^Text field$"})` →
+   `after: <id> Edit "Text field" ="hello"`. Then `screen_elements(text=true, query="fired:")` → the two status lines;
+   record their yes/no values rather than treating value mutation as proof of either event.
+10. Once the page visibly enables both delayed targets and displays the loaded list, call
+    `screen_elements(query="^Delayed target 2500 ms$", refresh=true)` → the line has no `disabled`, then
+    `screen_elements(query="^Item 1$", refresh=true)` → `<id> ListItem "Item 1"`.
+11. `screen_elements(query="^Event log$")` → `<id> List "Event log"`; its latest entries include the selection,
+    value input, and invocation events with elapsed milliseconds. At most 20 entries are present.
+12. `screen_element_action(element_id=<reset-lab>, action="invoke", then={"query":"^Sync target$"})` →
+    `after: <id> Button "Sync target" [invoke] disabled`. Follow with
+    `screen_elements(query="^Count 0$", refresh=true)` → `<id> Button "Count 0" [invoke]`, and
+    `screen_elements(query="^Item 1$", refresh=true)` → no match. The text value, both event indicators, selects,
+    links, checkbox, delayed targets, and event log are back to their initial readings too.
+
 ## Platforms and troubleshooting
 
 - **Windows:** no administrator access required. Per-monitor DPI awareness is set
