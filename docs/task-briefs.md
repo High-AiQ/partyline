@@ -55,11 +55,13 @@ under the same task and attachment identity. A conflicting assignment or an
 unfinished child without a task record returns 409 with the existing line ID;
 inspect it before choosing a different name. Archived names may be reused.
 
-Once the task exists, a staffing or notification failure returns its task record
-with `creation_error` describing the failure. A lost HTTP response can still leave
+Once the task exists, a staffing or notification failure returns its status
+(`TaskStatus`, without the goal or findings) with `creation_error` describing the failure. A lost HTTP response can still leave
 the result unknown to the caller; retry with the same name and assignment or use
-`tasks()`, rather than changing the name. Task responses expose `goal` from the
-conversation's durable goal column; there is no separate task-row goal to reconcile.
+`tasks()`, rather than changing the name. Task reads (`GET .../task`, `tasks()`) expose
+`goal` from the conversation's durable goal column; there is no separate task-row goal to
+reconcile. Task write replies are status objects that leave the goal out: a goal write
+answers `goal_chars`, and `goal` reads it back.
 The joining task pack includes that goal. Wake riders repeat it until the
 transcript is claimed and the delivery cursor proves the pending batch, including
 its assignment or goal update. Later wakes omit an unchanged proven goal. A goal

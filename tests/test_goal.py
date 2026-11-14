@@ -47,7 +47,8 @@ class GoalRouteTest(unittest.TestCase):
         response = self.put("ship the helper with tests", self.human)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["goal"], "ship the helper with tests")
+        self.assertNotIn("goal", response.json())  # a status reply; the goal reads from the line
+        self.assertEqual(response.json()["goal_chars"], len("ship the helper with tests"))
         self.assertEqual(self.db.get_conversation("line")["goal"], "ship the helper with tests")
         [notice] = self.db.list_messages("line")
         self.assertEqual(notice["body"], "☏ goal set by @person: ship the helper with tests")

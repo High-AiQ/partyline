@@ -15,7 +15,8 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from .auth_guard import request_principal
-from .contracts import ConversationEvent, ConversationResponse
+from .contracts import ConversationEvent
+from .conversation_contracts import LineStatus
 from .line_depth import may_create_children, staffed_split_reason
 from .machine_scope import deny_unless
 from .system_notice import post_system_notice
@@ -67,7 +68,7 @@ def task_goal_rider(db, conv_id: str) -> str:
 
 
 def register_goal_route(app: FastAPI, runtime) -> None:
-    @app.put("/api/conversations/{conv_id}/goal", response_model=ConversationResponse)
+    @app.put("/api/conversations/{conv_id}/goal", response_model=LineStatus)
     async def put_goal(request: Request, conv_id: str, body: GoalIn):
         db = runtime.db
         principal = request_principal(request)
@@ -85,7 +86,7 @@ def register_goal_route(app: FastAPI, runtime) -> None:
         if len(goal) > MAX_GOAL:
             raise HTTPException(400, f"goal is capped at {MAX_GOAL} characters")
         if goal == (conv.get("goal") or ""):
-            return conv
+            return LineStatus.of(conv)
         conv = set_goal(db, conv_id, goal)
         if getattr(runtime, "presence", None) is not None:
             runtime.presence.goal_stall.activity(conv_id, principal.attachment_id)
@@ -95,4 +96,4 @@ def register_goal_route(app: FastAPI, runtime) -> None:
         if goal and getattr(runtime, "presence", None) is not None:
             await runtime.presence.goal_stall.check(conv_id, principal.attachment_id)
         await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
-        return conv
+        return LineStatus.of(conv)

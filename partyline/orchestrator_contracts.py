@@ -151,6 +151,34 @@ class TaskReview(BaseModel):
     creation_error: str | None = None
 
 
+class TaskStatus(BaseModel):
+    """A task write's reply: the line's identity and state, never its prose.
+
+    The goal, findings, previous findings, report body and workspace detail stay on the
+    read tools (`tasks(conv_id)`, `goal`, `reports get`). `goal_chars` acknowledges a goal write.
+    """
+
+    conv_id: str
+    root_id: str
+    implementer_id: str
+    reviewer_id: str | None = None
+    tag: str | None = None
+    implementer_handle: str | None = None
+    reviewer_handle: str | None = None
+    policy: str
+    mode: Literal['full', 'light', 'express'] = 'full'
+    status: Literal['implementing', 'idle', 'in_review', 'approved', 'done', 'blocked']
+    round: int
+    sha: str | None = None
+    repositories: list[ReviewedRepository] = Field(default_factory=list)
+    merged: bool
+    report_id: int | None = None
+    wait_until: float | None = None
+    overridden_by: str | None = None
+    creation_error: str | None = None
+    goal_chars: int | None = None
+
+
 class NudgeReviewerIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

@@ -795,7 +795,7 @@ contained no goal, so its hello could ask for work while its assignment waited
 for the claim and turn-end retry. Include the goal in the joining pack and repeat it in
 task digests until transcript claim and the cursor prove the pending assignment.
 Then omit the unchanged goal; reset the proof boundary on goal change or restart. Store a child's goal in its initial conversation INSERT, before
-awaiting placement or notices, and read task response goals from that same column.
+awaiting placement or notices, and read goals on task reads (not write replies) from that same column.
 A Codex history snapshot also processed turn ends before user-input receipts.
 That could flush a held claim retry before crediting the original paste in the
 same snapshot. Settle user-input proofs before emitting turn boundaries;

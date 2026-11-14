@@ -22,7 +22,7 @@ class CreationDeliveryTest(TaskFixture):
             'name': 'large', 'goal': goal, 'implementer': 'builder'})
         self.assertEqual(result.status_code, 201, result.text)
         row = result.json()
-        self.assertEqual(row['goal'], goal.strip())
+        self.assertNotIn('goal', row)  # a status reply; the goal reads back below
         reopened = Db(self.db.path)
         self.addCleanup(reopened.close)
         att = {'id': row['implementer_id'], 'digest_rider': lambda: ''}
@@ -147,7 +147,8 @@ class CreationDeliveryTest(TaskFixture):
                 self.assertEqual(len(client.request.call_args.args[2]['goal']), size)
         result = self.client.post('/api/conversations/root/tasks', json=arguments)
         self.assertEqual(result.status_code, 201, result.text)
-        self.assertEqual(result.json()['goal'], arguments['goal'])
+        self.assertNotIn('goal', result.json())
+        self.assertEqual(self.db.get_conversation(result.json()['conv_id'])['goal'], arguments['goal'])
 
     async def test_notification_failure_still_returns_created_line(self):
         from unittest.mock import AsyncMock

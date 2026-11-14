@@ -358,7 +358,7 @@ class HierarchyApiTest(unittest.TestCase):
             "/api/conversations/parent/children",
             json={"name": "Long", "topic": "x" * 19000}, headers=self.lead)
         self.assertEqual(made.status_code, 201, made.text)
-        self.assertEqual(made.json()["conversation"]["topic"], "x" * 19000)
+        self.assertEqual(self.db.get_conversation(made.json()["conversation"]["id"])["topic"], "x" * 19000)
         refused = self.client.post(
             "/api/conversations/parent/children",
             json={"name": "TooLong", "topic": "x" * 20001}, headers=self.lead)
@@ -598,7 +598,7 @@ class HierarchyApiTest(unittest.TestCase):
             headers=self.lead,
         )
         self.assertEqual(created.status_code, 201)
-        child = created.json()["conversation"]
+        child = self.db.get_conversation(created.json()["conversation"]["id"])
         self.assertEqual(child["goal"], "render spreads 1-3")
         self.assertEqual(child["topic"], "cwd /tmp/book; budget $1; no upscale")
         notices = [m["body"] for m in self.db.list_messages(child["id"])]
@@ -729,7 +729,7 @@ class HierarchyApiTest(unittest.TestCase):
         stored = self._notify(child, headers, "blocked on the shared fix")
 
         self.assertEqual(stored.status_code, 201)
-        self.assertEqual(stored.json()["body"], "blocked on the shared fix")
+        self.assertEqual(reports.get(self.db, stored.json()["id"])["body"], "blocked on the shared fix")
         self.assertIsNone(
             stored.json()["notified_at"],
             "no manager was woken, so the report must not claim it was",
@@ -762,7 +762,7 @@ class HierarchyApiTest(unittest.TestCase):
 
         self.assertEqual(second.status_code, 201)
         self.assertIsNotNone(second.json()["notified_at"])
-        self.assertEqual(second.json()["body"], "second, please read")
+        self.assertEqual(reports.get(self.db, second.json()["id"])["body"], "second, please read")
         self.assertGreater(second.json()["revision"], 1, "it coalesced rather than stacking")
         self.assertTrue(deliveries, "the manager was finally woken")
 
@@ -789,7 +789,8 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertIsNotNone(first.json()["notified_at"])
         self.assertEqual(len(deliveries), after_first, "no second wake before the ack")
         self.assertEqual(second.json()["notified_at"], first.json()["notified_at"])
-        self.assertEqual(second.json()["body"], "two", "the newest text is what waits")
+        self.assertEqual(reports.get(self.db, second.json()["id"])["body"], "two",
+                         "the newest text is what waits")
 
     def test_one_wake_while_the_first_is_still_being_delivered(self):
         """Concurrent escalations must not each wake the manager.
@@ -902,7 +903,7 @@ class HierarchyApiTest(unittest.TestCase):
                     "an unreachable manager must not count as notified",
                 )
                 self.assertIsNone(
-                    stored.json()["notifying_at"],
+                    reports.get(self.db, stored.json()["id"])["notifying_at"],
                     "and the claim must be handed back for the next attempt",
                 )
 

@@ -66,3 +66,21 @@ class ConversationResponse(BaseModel):
     chapter_of: str | None = None
     chapter: int = Field(default=1, ge=1)
     starred: bool = False
+
+
+class LineStatus(BaseModel):
+    """A line write's reply: where the line is and how long its goal is, never the goal or topic.
+
+    The goal and topic are read on the line's conversation record (``GET /api/conversations/{id}``).
+    """
+
+    id: str
+    name: str
+    parent_id: str | None = None
+    cwd: str | None = None
+    goal_chars: int = Field(default=0, ge=0)
+
+    @classmethod
+    def of(cls, conv: dict) -> "LineStatus":
+        return cls(id=conv["id"], name=conv["name"], parent_id=conv.get("parent_id"),
+                   cwd=conv.get("cwd"), goal_chars=len(conv.get("goal") or ""))

@@ -71,7 +71,8 @@ class ApiTest(TaskFixture):
             'name': 'http slice', 'goal': 'test HTTP', 'implementer': 'builder', 'review': 'inspector'})
         self.assertEqual(response.status_code, 201, response.text)
         row = response.json()
-        self.assertEqual(self.client.get('/api/conversations/root/tasks').json(), [row])
+        listed = self.client.get('/api/conversations/root/tasks').json()
+        self.assertEqual([item['conv_id'] for item in listed], [row['conv_id']])
         conv = row['conv_id']
         self.conv_id = conv
         worker = self.principal(row['implementer_id'])
@@ -79,8 +80,8 @@ class ApiTest(TaskFixture):
         # (not persisted, so request_review's primary guard still sees none yet).
         self.assertTrue(row['repositories'])
         detail = self.client.get(f'/api/conversations/{conv}/task').json()
-        self.assertEqual({key: value for key, value in detail.items() if key != 'repositories'},
-                         {key: value for key, value in row.items() if key != 'repositories'})
+        shared = [key for key in row if key in detail and key != 'repositories']
+        self.assertEqual({key: detail[key] for key in shared}, {key: row[key] for key in shared})
         self.assertEqual(self.client.get('/api/conversations/root/task').status_code, 404)
         request = f'/api/conversations/{conv}/request-review'
         data = {'what': 'feature', 'where': 'code'}

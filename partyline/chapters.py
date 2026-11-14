@@ -14,7 +14,7 @@ import uuid
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
-from .conversation_contracts import ConversationResponse
+from .conversation_contracts import LineStatus
 from .hierarchy import lead_attachment, parent_id_of
 from .line_notes import read_notes, write_notes
 from .line_worktree import line_cwd
@@ -46,8 +46,8 @@ class ChapterPreview(BaseModel):
 
 
 class ChapterResponse(BaseModel):
-    conversation: ConversationResponse
-    previous: ConversationResponse
+    conversation: LineStatus
+    previous: LineStatus
     captain_preset: CaptainPreset | None = None
 
 

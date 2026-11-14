@@ -443,7 +443,9 @@ class GuardrailTest(unittest.TestCase):
         put = self.client.put(f"/api/conversations/{leaf['id']}/goal", json={"goal": "prove it"},
                               headers=self.captain(leaf["id"], "luna"))
         self.assertEqual(put.status_code, 200, put.text)
-        self.assertEqual(put.json()["goal"], "prove it")
+        self.assertNotIn("goal", put.json())
+        self.assertEqual(put.json()["goal_chars"], len("prove it"))
+        self.assertEqual(self.db.get_conversation(leaf["id"])["goal"], "prove it")
 
     # -- helper errors -----------------------------------------------------------
 

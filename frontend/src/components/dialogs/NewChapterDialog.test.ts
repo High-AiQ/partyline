@@ -10,6 +10,14 @@ import { room } from "../../state/room.svelte";
 
 const line = (id: string, extra: Record<string, unknown> = {}) =>
   ConversationSchema.parse({ id, name: id, topic: "", created_at: 1, ...extra });
+const status = (id: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  name: id,
+  parent_id: null,
+  cwd: null,
+  goal_chars: 0,
+  ...extra,
+});
 const preset = { name: "astra", title: "Astra", adapter: "claude", command: "claude-sub" };
 const preview = (extra: Record<string, unknown> = {}) =>
   ChapterPreviewSchema.parse({
@@ -72,11 +80,14 @@ describe("new chapter dialog", () => {
 
   it("starts the chapter with the edited name, staffs the captain, and opens the new line", async () => {
     const created = line("new", { name: "Act two", chapter_of: "old", chapter: 2 });
-    const start = vi
-      .spyOn(chapterApi, "start")
-      .mockResolvedValue(
-        ChapterResponseSchema.parse({ conversation: created, previous: line("old"), captain_preset: preset }),
-      );
+    const start = vi.spyOn(chapterApi, "start").mockResolvedValue(
+      ChapterResponseSchema.parse({
+        conversation: status("new", { name: "Act two" }),
+        previous: status("old"),
+        captain_preset: preset,
+      }),
+    );
+    const read = vi.spyOn(api, "conversation").mockResolvedValue({ conversation: created } as never);
     const attach = vi.spyOn(api, "attach").mockResolvedValue({ id: "att-1" } as never);
     const appoint = vi.spyOn(hierarchyApi, "appoint").mockResolvedValue({ attachment_id: "att-1" });
     vi.spyOn(room, "loadConversations").mockResolvedValue(undefined);
@@ -92,6 +103,7 @@ describe("new chapter dialog", () => {
         expect(opened).toHaveBeenCalledWith(created);
       });
       expect(start).toHaveBeenCalledWith("old", "Act two");
+      expect(read).toHaveBeenCalledWith("new", false);
       expect(attach).toHaveBeenCalledWith("new", {
         name: "astra",
         adapter: "claude",
@@ -108,12 +120,13 @@ describe("new chapter dialog", () => {
   it("starts no captain when the box is unticked", async () => {
     vi.spyOn(chapterApi, "start").mockResolvedValue(
       ChapterResponseSchema.parse({
-        conversation: line("new"),
-        previous: line("old"),
+        conversation: status("new"),
+        previous: status("old"),
         captain_preset: preset,
       }),
     );
     const attach = vi.spyOn(api, "attach");
+    vi.spyOn(api, "conversation").mockResolvedValue({ conversation: line("new") } as never);
     vi.spyOn(room, "loadConversations").mockResolvedValue(undefined);
     const opened = vi.spyOn(room, "open").mockResolvedValue(undefined);
     const { dialog } = await open();
@@ -146,8 +159,13 @@ describe("new chapter dialog", () => {
   it("still opens the new line when its captain cannot be staffed, and says so", async () => {
     const created = line("new");
     vi.spyOn(chapterApi, "start").mockResolvedValue(
-      ChapterResponseSchema.parse({ conversation: created, previous: line("old"), captain_preset: preset }),
+      ChapterResponseSchema.parse({
+        conversation: status("new", { name: "Act two" }),
+        previous: status("old"),
+        captain_preset: preset,
+      }),
     );
+    vi.spyOn(api, "conversation").mockResolvedValue({ conversation: created } as never);
     vi.spyOn(api, "attach").mockRejectedValue(new ApiError("no memory budget", 409));
     vi.spyOn(room, "loadConversations").mockResolvedValue(undefined);
     const opened = vi.spyOn(room, "open").mockResolvedValue(undefined);

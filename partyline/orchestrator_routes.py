@@ -8,7 +8,7 @@ from .machine_scope import deny_unless
 from .orchestrator_contracts import (
     BlockedIn, EnvGapIn, CaptainStyleIn, DeliverIn, MessageTaskIn, NudgeReviewerIn, ReopenIn, ResumeIn,
     ReviewRequestIn, ShareRefIn,
-    ShareRefOut, TaskIn, TaskReview, VerdictIn, WaitingIn)
+    ShareRefOut, TaskIn, TaskReview, TaskStatus, VerdictIn, WaitingIn)
 from .orchestrator_handles import message_task, task_line
 from .orchestrator_stall import blocked, resume_work
 from .orchestrator_wait import waiting as declare_wait
@@ -34,7 +34,7 @@ def orchestrator_router(runtime):
         await runtime.broadcast_all(ConversationsChangedEvent())
         return conv
 
-    @router.post('/api/conversations/{conv_id}/tasks', response_model=TaskReview, status_code=201)
+    @router.post('/api/conversations/{conv_id}/tasks', response_model=TaskStatus, status_code=201)
     async def create(request: Request, conv_id: str, body: TaskIn):
         return await create_task(runtime, request_principal(request), conv_id, body)
 
@@ -58,41 +58,43 @@ def orchestrator_router(runtime):
             raise HTTPException(404, 'task not found')
         return row
 
-    @router.post('/api/conversations/{conv_id}/request-review', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/request-review', response_model=TaskStatus)
     async def review(request: Request, conv_id: str, body: ReviewRequestIn):
         return await request_review(runtime, request_principal(request), conv_id, body)
 
-    @router.post('/api/conversations/{conv_id}/deliver', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/deliver', response_model=TaskStatus)
     async def deliver(request: Request, conv_id: str, body: DeliverIn):
         return await deliver_task(runtime, request_principal(request), conv_id, body)
 
-    @router.post('/api/conversations/{conv_id}/task/reviewer', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/task/reviewer', response_model=TaskStatus)
     async def reviewer(request: Request, conv_id: str):
         actor = request_principal(request)
         return await restart_reviewer(runtime, actor, task_line(db, actor, conv_id))
 
-    @router.post('/api/conversations/{conv_id}/task/implementer', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/task/implementer', response_model=TaskStatus)
     async def implementer(request: Request, conv_id: str):
         actor = request_principal(request)
         return await restart_implementer(runtime, actor, task_line(db, actor, conv_id))
 
-    @router.post('/api/conversations/{conv_id}/task/reopen', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/task/reopen', response_model=TaskStatus)
     async def reopen(request: Request, conv_id: str, body: ReopenIn):
         actor = request_principal(request)
-        return await reopen_task(runtime, actor, task_line(db, actor, conv_id), body)
+        row = await reopen_task(runtime, actor, task_line(db, actor, conv_id), body)
+        return {**row, 'goal_chars': len(body.goal.strip())}
 
-    @router.post('/api/conversations/{conv_id}/task/goal', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/task/goal', response_model=TaskStatus)
     async def task_goal(request: Request, conv_id: str, body: ReopenIn):
         from .orchestrator_goal import set_task_goal
         actor = request_principal(request)
-        return await set_task_goal(runtime, actor, task_line(db, actor, conv_id), body.goal)
+        row = await set_task_goal(runtime, actor, task_line(db, actor, conv_id), body.goal)
+        return {**row, 'goal_chars': len(body.goal.strip())}
 
-    @router.post('/api/conversations/{conv_id}/task/message', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/task/message', response_model=TaskStatus)
     async def message(request: Request, conv_id: str, body: MessageTaskIn):
         actor = request_principal(request)
         return await message_task(runtime, actor, task_line(db, actor, conv_id), body)
 
-    @router.post('/api/conversations/{conv_id}/task/nudge-reviewer', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/task/nudge-reviewer', response_model=TaskStatus)
     async def nudge(request: Request, conv_id: str, body: NudgeReviewerIn | None = None):
         return await nudge_reviewer(runtime, request_principal(request), conv_id)
 
@@ -101,23 +103,23 @@ def orchestrator_router(runtime):
         actor = request_principal(request)
         return await publish_shared_ref(runtime, actor, task_line(db, actor, conv_id), body)
 
-    @router.post('/api/conversations/{conv_id}/review-verdict', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/review-verdict', response_model=TaskStatus)
     async def verdict(request: Request, conv_id: str, body: VerdictIn):
         return await review_verdict(runtime, request_principal(request), conv_id, body)
 
-    @router.post('/api/conversations/{conv_id}/env-gap', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/env-gap', response_model=TaskStatus)
     async def env_gap(request: Request, conv_id: str, body: EnvGapIn):
         return await report_env_gap(runtime, request_principal(request), conv_id, body)
 
-    @router.post('/api/conversations/{conv_id}/blocked', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/blocked', response_model=TaskStatus)
     async def block(request: Request, conv_id: str, body: BlockedIn):
         return await blocked(runtime, request_principal(request), conv_id, body)
 
-    @router.post('/api/conversations/{conv_id}/waiting', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/waiting', response_model=TaskStatus)
     async def waiting(request: Request, conv_id: str, body: WaitingIn):
         return await declare_wait(runtime, request_principal(request), conv_id, body)
 
-    @router.post('/api/conversations/{conv_id}/task/resume', response_model=TaskReview)
+    @router.post('/api/conversations/{conv_id}/task/resume', response_model=TaskStatus)
     async def resume(request: Request, conv_id: str, body: ResumeIn):
         actor = request_principal(request)
         return await resume_work(runtime, actor, task_line(db, actor, conv_id), body)
