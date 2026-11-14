@@ -121,7 +121,9 @@ def cleanup(db, *, attachment_id=None, line=None, purging=False, retry_failed=Fa
             storage_kept.prune(db)
         ids = ([attachment_id] if attachment_id else
                [att['id'] for att in db.list_attachments(line['id'])] if line else [None])
-        steps = [lambda ident=ident: clean_attachments(db, report, ident) for ident in ids]
+        from .tool_telemetry import prune
+        steps = [lambda: prune(db)]
+        steps += [lambda ident=ident: clean_attachments(db, report, ident) for ident in ids]
         if attachment_id is None:
             from .storage_worktrees import clean_worktrees
             from .storage_fences import clean_fences

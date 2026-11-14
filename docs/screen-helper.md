@@ -930,3 +930,5 @@ the unique hyperlink in each card (copy its exact accessible name from the lab p
 
 The script performs no artificial waits. A live result must include the actual JSON/verdict; fake
 provider tests establish invariants but cannot decide which side of Greg's real page reports disabled.
+Tool result sizes and image estimates can be compared in the line's Usage section;
+see [tool telemetry](telemetry.md) for estimators, privacy and retention.

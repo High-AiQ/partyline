@@ -6,11 +6,13 @@ import json
 import logging
 import sys
 import threading
+import time
 
 from .. import __version__
 from .client import ApiError, PartylineClient
 from .render import render
 from . import catalog
+from .telemetry import Telemetry, record
 
 logger = logging.getLogger(__name__)
 MAX_LINE = 1_000_000
@@ -24,6 +26,7 @@ class MCPServer:
         self.client = client
         self.output = output or sys.stdout
         self._write_lock = threading.Lock()
+        self.telemetry = Telemetry(client)
         self._state_signature = None
         self._revoked = False
         self._dynamic_screen_tools = None
@@ -148,9 +151,29 @@ class MCPServer:
         return self.response(ident, error={"code": -32601, "message": "method not found"})
 
     def _call(self, ident, params):
+        started = time.perf_counter()
+        name, arguments = params.get("name"), params.get("arguments", {})
+        invalid = not isinstance(name, str) or not isinstance(arguments, dict)
+        result = self._execute(params)
+        try:
+            args = params.get("arguments", {})
+            args = args if isinstance(args, dict) else {}
+            self.telemetry.enqueue(record(
+                params.get("name"), args, result["content"][0]["text"],
+                self._telemetry_value, bool(result.get("isError")), started))
+        except Exception:
+            logger.debug("dropping invalid tool telemetry", exc_info=True)
+        finally:
+            self._telemetry_value = None
+        if invalid:
+            return self.response(ident, error={"code": -32602, "message": "invalid tool arguments"})
+        return self.response(ident, result)
+
+    def _execute(self, params):
+        self._telemetry_value = None
         name, args = params.get("name"), params.get("arguments", {})
         if not isinstance(name, str) or not isinstance(args, dict):
-            return self.response(ident, error={"code": -32602, "message": "invalid tool arguments"})
+            return {"content": [{"type": "text", "text": "invalid tool arguments"}], "isError": True}
         try:
             state = self._state()  # Each call checks the live attachment capability.
             signature = self._signature(state)
@@ -163,8 +186,9 @@ class MCPServer:
                 if changed:
                     self.send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
             value = catalog.dispatch(self.client, name, args, state)
+            self._telemetry_value = value
             text = render(value, self.client.connection["api"].rstrip("/"))
-            return self.response(ident, {"content": [{"type": "text", "text": text}]})
+            return {"content": [{"type": "text", "text": text}]}
         except (ApiError, ValueError, KeyError, TypeError, OSError) as exc:
             self._revoked = self._revoked or (
                 isinstance(exc, ApiError) and "HTTP 401" in str(exc))
@@ -175,13 +199,13 @@ class MCPServer:
             else:
                 message = (str(exc) if isinstance(exc, (ApiError, ValueError))
                            else "invalid tool arguments or local file")
-            return self.response(ident, {
-                "content": [{"type": "text", "text": message}], "isError": True})
+            return {
+                "content": [{"type": "text", "text": message}], "isError": True}
         except Exception:
             logger.exception("MCP tool call failed")
-            return self.response(ident, {
+            return {
                 "content": [{"type": "text", "text": "Partyline MCP operation failed"}],
-                "isError": True})
+                "isError": True}
 
     def run(self, input_stream=None):
         stream = input_stream or sys.stdin
@@ -210,6 +234,7 @@ class MCPServer:
                     continue
                 self.handle(message)
         finally:
+            self.telemetry.close()
             self._poll_stop.set()
             self._watch_ready.set()
             interrupt = getattr(self.client, "interrupt", None)

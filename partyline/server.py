@@ -13,7 +13,6 @@ from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
-
 from . import __version__
 from .attachment_commands import validated_attachment_command
 from .attachment_resume import resume_adapter
@@ -114,6 +113,7 @@ from .staffing_routes import staffing_router
 from .line_notes import notes_router
 from .settings_routes import settings_router
 from .storage_routes import storage_router
+from .tool_telemetry_routes import telemetry_router
 from .orchestrator_routes import orchestrator_router
 from .orchestrator_cleanup import run as run_task_maintenance
 from . import docker_relay
@@ -240,6 +240,7 @@ app.include_router(message_router(runtime, media))
 app.include_router(reaction_router(runtime))
 app.include_router(pin_router(runtime))
 app.include_router(bridge_router(runtime))
+app.include_router(telemetry_router(runtime))
 app.include_router(hierarchy_router(runtime))
 app.include_router(write_set_router(runtime, lambda *a, **k: _resume_adapter(*a, **k)))
 app.include_router(heartbeat_router(runtime))
@@ -320,7 +321,6 @@ def request_exit(db_path: str | None = None):
         _uvicorn_server.should_exit = True
     else:
         os.kill(os.getpid(), signal.SIGTERM)
-
 
 @app.get("/api/running", response_model=list[RunningProcessResponse])
 async def running(request: Request):

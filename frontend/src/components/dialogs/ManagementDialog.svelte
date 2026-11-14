@@ -1,6 +1,7 @@
 <script lang="ts">
   import Modal from "../Modal.svelte";
   import CaptainStyleSection from "./CaptainStyleSection.svelte";
+  import UsageSection from "./UsageSection.svelte";
   import BridgeSection from "./BridgeSection.svelte";
   import { ApiError, api } from "../../lib/api";
   import { hierarchyApi } from "../../lib/hierarchy-api";
@@ -176,5 +177,6 @@
   {/if}
   {#if ready}
     <BridgeSection {conversation} />
+    <UsageSection convId={conversation.id} />
   {/if}
 </Modal>
