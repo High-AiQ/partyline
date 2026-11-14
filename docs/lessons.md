@@ -20,6 +20,16 @@ unfiltered desktop subscription is not a cheap substitute. Selection cleanup mus
 replace the result after Select has already run, or mask an earlier refusal. Hosted
 subtree, popup-root lifecycle and failed-collapse regressions cover these boundaries.
 
+## 2026-11-14 — Line grants must cover the work delegated below them
+
+The false assumption was that sharing with a line meant excluding its sublines. A task
+implementer then received a 403 for a window shared with its project. Window grants now
+flow down live parent links, with inherited notices, attach briefings and MCP capability
+flags using the same scope. Ancestors, siblings and unrelated lines cannot use the grant;
+archiving a subline preserves its parent’s consent. Seeing ancestor names must not widen
+operational access: Docker workload scopes explicitly exclude ancestors. Plain-tree regressions:
+`tests/test_window_grant_subtree.py`.
+
 ## 2026-11-14 — A failed worktree add can leave a locked registration
 
 The false assumption was that an unsuccessful `git worktree add` creates nothing and

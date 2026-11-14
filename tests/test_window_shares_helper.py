@@ -82,7 +82,7 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(outline.started)
         self.assertNotIn("attachment_id", fields)
         ident = next(iter(self.manager.grants))
-        self.assertEqual("Editor → «Alpha»", self.session.status.window_grants[ident])
+        self.assertEqual("Editor → «Alpha» (and its sublines)", self.session.status.window_grants[ident])
         self.session.tools.audit.append.assert_called_with(
             "event", "window", "local", "window_read", "granted: Editor (editor.exe) to line «Alpha»")
 
@@ -262,6 +262,27 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
 class TargetPickerTests(unittest.TestCase):
     LINES = [{"line_id": "alpha", "line_name": "Alpha", "processes": [PROCESS]},
              {"line_id": "quiet", "line_name": "Quiet", "processes": []}]
+
+    def test_plain_tree_is_parent_first_and_indented_without_hidden_ancestors(self):
+        from partyline_helper.window_target_picker import line_text, public_lines
+
+        lines = [
+            {"line_id": "grandchild", "line_name": "Grandchild", "parent_id": "child"},
+            {"line_id": "child", "line_name": "Child", "parent_id": "alpha"},
+            *self.LINES,
+            {"line_id": "orphan", "line_name": "Orphan", "parent_id": "hidden"},
+        ]
+        shown = public_lines(lines)
+        self.assertEqual(["alpha", "child", "grandchild", "quiet", "orphan"],
+                         [line["line_id"] for line in shown])
+        self.assertTrue(line_text(shown[1]).startswith("    «Child»"))
+        self.assertTrue(line_text(shown[2]).startswith("        «Grandchild»"))
+        self.assertNotIn("depth", shown[-1])
+        self.assertNotIn("hidden", json.dumps(shown))
+        self.assertEqual(2, len(public_lines([
+            {"line_id": "a", "line_name": "A", "parent_id": "b"},
+            {"line_id": "b", "line_name": "B", "parent_id": "a"},
+        ])))
 
     def test_native_subprocess_selection_cancel_and_failure(self):
         def select(command, **kwargs):

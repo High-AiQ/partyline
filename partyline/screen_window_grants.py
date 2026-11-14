@@ -75,7 +75,8 @@ def share_targets(db, owner_id, *, offered=None, window_lines=True):
             processes.append({"attachment_id": att["id"], "name": att["name"],
                               "preset": preset["title"] if preset else att["adapter"]})
         if processes or window_lines:
-            groups.append({"line_id": line["id"], "line_name": line["name"], "processes": processes})
+            groups.append({"line_id": line["id"], "line_name": line["name"],
+                           "parent_id": line.get("parent_id"), "processes": processes})
     return groups
 
 

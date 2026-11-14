@@ -33,7 +33,6 @@ def for_attachment(runtime, principal, conv_id, state):
     grant = hub.control.grants.get(share.share_id) if share and share.status == "active" else None
     state["screen_control"] = bool(
         grant and grant.status == "active" and grant.holder in (None, principal.name))
-    from .screen_grants import GRANTS
-    state["screen_windows"] = runtime.db._exec(
-        GRANTS + " AND g.conv_id=?", (principal.conv_id,)).fetchone() is not None
+    from .screen_grants import line_grants
+    state["screen_windows"] = bool(line_grants(runtime.db, principal.conv_id))
     return state

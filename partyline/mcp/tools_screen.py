@@ -18,7 +18,8 @@ def screen_frame_tool():
 
 
 ELEMENTS_NOTE = (
-    "Read a window shared with this line (Windows UI Automation, not DOM; ~4 KB). No arguments: "
+    "Read a window shared with this line or inherited from an ancestor (Windows UI Automation, "
+    "not DOM; ~4 KB). No arguments: "
     "summary. find by query/name, value, control_type; root=<id> lists children; text=true reads text; "
     "id=<id> reads one element; inspect=<id> compares live UIA with the stored snapshot and event clock. "
     "Use screen_element_action on ids. Cache reuse requires a live event-counter barrier on new "

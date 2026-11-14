@@ -77,7 +77,8 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
         await self.ask()
         self.assertEqual("alice", self.entry["last_screenshot"]["by"])
         label = self.session.status.window_grants["g1"]
-        self.assertRegex(label, r"Editor → «Alpha» \(last screenshot \d\d:\d\d by @alice\)$")
+        self.assertRegex(label, r"Editor → «Alpha» \(and its sublines\) "
+                                r"\(last screenshot \d\d:\d\d by @alice\)$")
 
     async def test_a_minimised_window_is_refused_and_never_captured(self):
         self.backend.is_minimized = True

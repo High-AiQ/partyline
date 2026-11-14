@@ -1,11 +1,11 @@
 """Process-facing notices for changes in screen access."""
 
 from .screen_connections import notice
-from .screen_grants import GRANTS
+from .screen_grants import line_grants
 
 
 def _window_share_on_line(hub, conv_id):
-    grants = hub.runtime.db._exec(GRANTS + " AND g.conv_id=?", (conv_id,)).fetchall()
+    grants = line_grants(hub.runtime.db, conv_id)
     return any(grant["device_id"] in hub.devices for grant in grants)
 
 

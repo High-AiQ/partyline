@@ -83,7 +83,8 @@ class WindowShares:
 
     def changed(self):
         self._changes.notify()
-        labels = {ident: f"{entry['title']} → «{entry['target']['line_name']}»" + shot(entry)
+        labels = {ident: f"{entry['title']} → «{entry['target']['line_name']}» (and its sublines)"
+                  + shot(entry)
                   for ident, entry in self.grants.items()}
         self.session.status.window_grants = labels
         self.session.status.window_title = "; ".join(labels.values()) or None

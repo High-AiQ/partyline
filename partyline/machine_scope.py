@@ -40,7 +40,11 @@ def is_human(principal: Principal) -> bool:
 
 
 def visible_conversation_ids(db: Db, principal: Principal) -> set[str] | None:
-    """None means every line (humans). Machines see home plus descendants."""
+    """None means every line (humans). Machines see home plus descendants.
+
+    Ancestors are not visible here. Window grants reach a line's live ancestors through
+    ``screen_grants.window_line_ids``, which is the only place their names are needed.
+    """
     if is_human(principal):
         return None
     home = principal.conv_id

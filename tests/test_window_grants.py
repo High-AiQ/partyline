@@ -207,15 +207,6 @@ class WindowGrantTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(["g1"], [g["id"] for g in device_grants(self.db, self.device["id"])])
         self.assertNotIn({"type": "revoke_window", "grant_id": "g1"}, self.sent)
 
-    async def test_sublines_do_not_inherit_the_grant(self):
-        await self.grant("a")
-        self.db.create_conversation("child", "Child")
-        self.db._exec("UPDATE conversations SET parent_id=? WHERE id=?", ("alpha", "child"))
-        self.db.add_attachment("kid", "child", "kid", "raw", ["shell"], "/tmp", "activation-kid")
-        response = await self.read("kid")
-        self.assertEqual(403, response.status_code)
-        self.assertNotIn("Alpha", response.text)
-
     async def test_archiving_the_line_ends_the_grant(self):
         from partyline.line_subtree import archive_line
 
@@ -301,7 +292,7 @@ class WindowGrantTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("g1", self.hub.window_grants.known)
         indicators = window_share_indicators(self.db, self.owner["id"])
         self.assertEqual([{"conv_id": "beta", "device_name": "Computer", "kind": "window",
-                           "label": "window → «Beta» (Editor)"}], indicators)
+                           "label": "window → «Beta» (and its sublines): Editor"}], indicators)
         self.assertEqual([], window_share_indicators(self.db, self.other_user["id"]))
         principal = Principal(kind="user", name="other", user_id=self.other_user["id"])
         from fastapi import HTTPException
@@ -317,7 +308,10 @@ class WindowGrantTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(409, response.status_code)
         self.assertIn("rate limit", response.text)
 
-    async def test_actions_on_one_window_are_serialized_across_processes(self):
+    async def test_actions_on_one_window_are_serialized_across_lines(self):
+        self.db.create_conversation("child", "Child")
+        self.db._exec("UPDATE conversations SET parent_id='alpha' WHERE id='child'")
+        self.db._exec("UPDATE attachments SET conv_id='child' WHERE id='peer'")
         await self.grant("a")
         dispatched = []
 

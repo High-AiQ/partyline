@@ -20,7 +20,7 @@ ELEMENT_ACTION_TIMEOUT = 100  # a 20s capture deadline may be followed by a 35s 
 ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and event barrier
 ELEMENT_ACTION_PROPERTIES = {
     "window": {"type": "string",
-               "description": "Window grant id or title when several windows are shared with this line."},
+               "description": "Window grant id or title; includes grants inherited from ancestors."},
     "force": {"type": "boolean", "description": "Try a reported-disabled control the person confirms works."},
     "element_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "action": {"type": "string", "enum": [

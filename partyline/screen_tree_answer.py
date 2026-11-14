@@ -86,6 +86,9 @@ def answer(tree, grant, options, budget=OUT_BYTES):
             body["lines"].insert(0, tree.line(tree.nodes[root]))
             body["total"] = body.get("total", 0) + 1
             body["resume"] = [0, *body.get("resume", ())]
+
+    if "inherited_from" in grant:
+        body["inherited_from"] = grant["inherited_from"]
     if options.get("changes") and "diff" not in body:
         body["diff"] = changes(tree)["diff"]
     key = next((name for name in ("lines", "outline") if name in body), None)

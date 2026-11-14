@@ -314,8 +314,9 @@ class WindowSnapshotToolTests(unittest.TestCase):
         self.assertIn("Read elements first, and the deltas after each action", text)
         self.assertIn('extras(op="screen_window_snapshot", args={"window": "g1"})', text)
         self.assertIn("screen_window_snapshot", line_window_text(
-            SimpleNamespace(_exec=lambda *a: SimpleNamespace(fetchall=lambda: [
-                {"title": "T", "id": "g1", "device_name": "PC"}])), "c"))
+            SimpleNamespace(get_conversation=lambda ident: {"id": ident, "parent_id": None},
+                            _exec=lambda *a: SimpleNamespace(fetchall=lambda: [
+                {"title": "T", "id": "g1", "device_name": "PC", "conv_id": "c"}])), "c"))
 
 
 class MonitorRefusalTests(SnapshotFixture, unittest.IsolatedAsyncioTestCase):

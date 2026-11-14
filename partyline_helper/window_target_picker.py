@@ -11,8 +11,23 @@ def public_selection(line):
 
 
 def public_lines(lines):
-    return [{"line_id": line["line_id"], "line_name": line["line_name"],
-             "processes": len(line.get("processes", ()))} for line in lines]
+    """Stable parent-first order, indenting only under parents offered to this person."""
+    offered = {line["line_id"] for line in lines}
+    children = {}
+    for line in lines:
+        parent = line.get("parent_id")
+        children.setdefault(parent if parent in offered else None, []).append(line)
+    result, seen = [], set()
+    pending = [(line, 0) for line in reversed([*children.get(None, ()), *lines])]
+    while pending:
+        line, depth = pending.pop()
+        if line["line_id"] in seen:
+            continue
+        seen.add(line["line_id"])
+        result.append({"line_id": line["line_id"], "line_name": line["line_name"],
+                       "processes": len(line.get("processes", ())), **({"depth": depth} if depth else {})})
+        pending.extend((child, depth + 1) for child in reversed(children.get(line["line_id"], ())))
+    return result
 
 
 def select_target(lines, run=subprocess.run):
@@ -35,8 +50,9 @@ def select_target(lines, run=subprocess.run):
 
 def line_text(line):
     count = line["processes"]
-    return f"«{line['line_name']}» — " + (f"{count} attached process{'es' if count != 1 else ''}"
-                                           if count else "no process attached yet")
+    processes = (f"{count} attached process{'es' if count != 1 else ''}" if count
+                 else "no process attached yet")
+    return "    " * line.get("depth", 0) + f"«{line['line_name']}» — {processes}"
 
 
 def dialog(root, lines, accept):  # pragma: no cover - native picker, verified with a real capture
@@ -44,8 +60,8 @@ def dialog(root, lines, accept):  # pragma: no cover - native picker, verified w
     from tkinter import ttk
     root.title("Share this window with which line?")
     root.minsize(540, 340)
-    tk.Label(root, text="Choose one line. Every process attached to it, now or later, may read and act "
-                       "on this window until you stop sharing.\nNothing is selected by default.",
+    tk.Label(root, text="Choose one line. Every process on it and its sublines, now or later, may read "
+                       "and act on this window until you stop sharing.\nNothing is selected by default.",
              wraplength=550, justify="left").pack(padx=16, pady=12, anchor="w")
     tree = ttk.Treeview(root, show="tree", selectmode="browse", height=12)
     options = {}

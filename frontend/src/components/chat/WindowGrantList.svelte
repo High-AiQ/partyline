@@ -15,7 +15,7 @@
   <ul class="flex flex-col gap-2 text-sm">
     {#each grants as grant (grant.id)}
       <li class="flex flex-wrap items-center gap-2">
-        <span>{grant.title} → «{grant.line_name}»</span>
+        <span>{grant.title} → «{grant.line_name}» (and its sublines)</span>
         <button type="button" onclick={() => void stop(grant.id)}>Stop sharing window</button>
       </li>
     {/each}

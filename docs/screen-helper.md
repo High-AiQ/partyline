@@ -272,46 +272,48 @@ require a new request and fresh consent. Backoff reaches at most 60 seconds.
 
 ### Read a Windows window's UI elements
 
-In the helper tray, choose **Share a window…**, select a visible window by title and
-executable, then choose exactly one line in **Share this window with which line?** The
-second picker lists every line visible to the paired computer's owner, with a count of the
-processes attached to it. Lines with no process are listed too, so you can share first and
-let a process attach later. Nothing is selected by default; cancelling either picker grants
-no access. The line can be any line the computer's owner can open. Window grants need no
-captain, task or subline: a plain line with a few person-attached processes is the primary
-case.
+In the helper tray, choose **Share a window…**, select a visible window by title and executable,
+then choose exactly one line in **Share this window with which line?** The second picker lists every
+line visible to the paired computer's owner, with a count of the processes attached to it, with
+sublines indented beneath their parent. Lines with no process are listed too, so you can share first
+and let a process attach later. Nothing is selected by default; cancelling either picker grants no
+access. The line can be any line the computer's owner can open. Window grants need no captain, task
+or subline: a plain line with a few person-attached processes is the primary case.
 
-A grant belongs to the line, not to one process. Every live process attached to that line
-can call `screen_elements` and `screen_element_action` on its windows, including processes
-that attach later and processes started by a compaction rotation. Processes on other
-lines are refused, and when the holding line is one the caller may see (its own line, or a
-descendant for a captain) the refusal names it so the caller can ask the person; a hidden
-line is never named, and an id or title held there answers like a missing window. Sublines do not inherit a grant. When a grant starts or ends, the line sees
-one brief system message and every live process on the line receives a private terminal
-notice with the window ID and usage instructions (an ending names its reason). A process
-that attaches to, or is re-briefed on, a line with live grants hears about them in its
-briefing.
+A grant belongs to the line, not to one process. Every live process attached to that line or any
+live, non-archived subline can call `screen_elements` and `screen_element_action` on its windows,
+including processes that attach later and processes started by a compaction rotation. Ancestors,
+siblings and unrelated lines cannot use the grant. When the holding line is one the caller may see
+(its own line, an ancestor, or a descendant for a captain) the refusal names it so the caller can
+ask the person; a hidden line is never named, and an id or title held there answers like a missing
+window. Inheritance works in plain line trees and captain/task trees alike. When a grant starts or
+ends, the owning line sees one brief system message and every live process on that line and its live
+sublines receives a private terminal notice with the window ID and usage instructions (an ending
+names its reason). A process that attaches to, or is re-briefed on, a line with live grants hears
+about them in its briefing, with inherited grants naming the owning line.
 
-You can share several windows with the same line, or different windows with different
-lines. The tray lists each as **window → «line»**, with its own **Stop**;
-**Stop all sharing** ends every grant and the screen share. An item appears when its grant starts and disappears when
-it ends, including when the web or the server revokes it. The web computer list also shows each
-target line and offers **Stop sharing window**. Your sidebar marks each target line with
-a computer icon; its tooltip names the shared windows and their lines. A grant ends when you stop it (tray **Stop**,
-**Stop all sharing**, or the web **Stop sharing window**), the window closes, the helper disconnects, the server
-restarts, or the line is archived or deleted. A process detaching, exiting, resuming or being replaced
-by a compaction rotation does not end it. Ending one grant leaves other windows alone. Consent is never
-restored after a restart. Grants and revocations are recorded in the helper's local audit.
+You can share several windows with the same line, or different windows with different lines. The
+tray lists each as **window → «line» (and its sublines)**, with its own **Stop**; **Stop all
+sharing** ends every grant and the screen share. An item appears when its grant starts and
+disappears when it ends, including when the web or the server revokes it. The web computer list also
+shows each target line and offers **Stop sharing window**. Your sidebar marks each target line with
+a computer icon; its tooltip names the shared windows and their lines. A grant ends when you stop it
+(tray **Stop**, **Stop all sharing**, or the web **Stop sharing window**), the window closes, the
+helper disconnects, the server restarts, or the owning line is archived or deleted. Archiving or
+retiring a subline keeps its parent’s grant. A process detaching, exiting, resuming or being
+replaced by a compaction rotation does not end it. Ending one grant leaves other windows alone.
+Consent is never restored after a restart. Grants and revocations are recorded in the helper's local
+audit.
 
-Window grants cover `screen_elements`, `screen_element_action` and `screen_window_snapshot`. With one window the
-target is unambiguous. With several, pass `window` as the grant ID or title; an ambiguous
-call lists the choices, and each snapshot returns its grant ID as `window`. Snapshots and
-element caches are per grant, shared by the processes on the line, so a second process reads
-the stored tree. Actions on one window run one at a time, so two processes on the line never
-interleave dispatches. These grants are independent of line-based pixel sharing and
-mouse/keyboard control:
-`screen_frame`, `screen_click`, `screen_type`, `screen_key`, `screen_scroll`, `screen_drag`
-and `screen_move` keep their existing pixel-share permissions.
+Window grants cover `screen_elements`, `screen_element_action` and `screen_window_snapshot`. With one window the target is
+unambiguous. With several, pass `window` as the grant ID or title; an ambiguous call lists every
+choice with its owning line, and each snapshot returns its grant ID as `window`. Inherited reads
+also name the owning line in `inherited_from`. Snapshots and element caches are per grant, shared by
+the processes on the line and its sublines, so a second process reads the stored tree. Actions on
+one window run one at a time, so processes across the subtree never interleave dispatches. These
+grants are independent of line-based pixel sharing and mouse/keyboard control: `screen_frame`,
+`screen_click`, `screen_type`, `screen_key`, `screen_scroll`, `screen_drag` and `screen_move` keep
+their existing pixel-share permissions.
 
 The server stores live grants in `screen_line_window_grants`, keyed by line. The earlier
 per-process table and its detach, exit and activation triggers are dropped when the database

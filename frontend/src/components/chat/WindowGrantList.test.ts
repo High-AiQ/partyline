@@ -16,8 +16,8 @@ afterEach(() => {
 it("names each window's line and revokes only the chosen grant", async () => {
   const revoke = vi.spyOn(screenApi, "revokeWindow").mockResolvedValue({ ok: true });
   const component = mount(WindowGrantList, { target: document.body, props: { grants } });
-  expect(document.body.textContent).toContain("Editor → «Development»");
-  expect(document.body.textContent).toContain("Browser → «Design»");
+  expect(document.body.textContent).toContain("Editor → «Development» (and its sublines)");
+  expect(document.body.textContent).toContain("Browser → «Design» (and its sublines)");
   document.querySelectorAll("button")[1]?.click();
   await tick();
   expect(revoke).toHaveBeenCalledExactlyOnceWith("g2");
