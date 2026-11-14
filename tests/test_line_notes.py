@@ -169,7 +169,7 @@ class LineNotesTest(unittest.TestCase):
         self.assertIn("(full text: GET /api/conversations/line)", text)  # the pointer
 
     def test_an_eight_thousand_char_assignment_still_fits_and_ends_with_the_reminder(self):
-        # Messages may be 8,000 characters: an unbounded quote is the one part
+        # Messages may be 10,000 characters: an unbounded quote is the one part
         # that alone can blow the cap and evict everything after it.
         self.db.add_message("line", "greg", "human", "@haiku " + "W" * 7990)
         write_notes(self.db, "line", "line", "L" * NOTE_LIMIT)

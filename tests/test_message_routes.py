@@ -138,6 +138,14 @@ class MessageRoutesTest(unittest.TestCase):
         self.assertEqual(body["sender_type"], "human")
         self.assertEqual(body["body"], "hello from REST")
 
+    def test_message_body_accepts_ten_thousand_characters_and_rejects_one_more(self):
+        url = "/api/conversations/line/messages"
+        at_limit = self.client.post(url, json={"body": "x" * 10_000})
+        over_limit = self.client.post(url, json={"body": "x" * 10_001})
+        self.assertEqual(at_limit.status_code, 200, at_limit.text)
+        self.assertEqual(len(at_limit.json()["body"]), 10_000)
+        self.assertEqual(over_limit.status_code, 422)
+
     def test_human_post_is_blocked_when_only_stopped_or_exited_processes_remain(self):
         self.db.set_attachment_status("worker", "exited", "owner")
         self.db.add_attachment("old-worker", "line", "terra", "fake", ["fake"], "/tmp")

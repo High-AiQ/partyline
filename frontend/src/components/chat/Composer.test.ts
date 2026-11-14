@@ -336,3 +336,63 @@ describe("screen and voice controls", () => {
     }
   });
 });
+
+describe("composer length cap and counter", () => {
+  const withLiveLine = (text: string) => {
+    room.conversation = conversation;
+    room.attachments = [liveAttachment];
+    draft.openLine(conversation.id);
+    draft.text = text;
+  };
+
+  it("caps the textarea at ten thousand characters", async () => {
+    withLiveLine("");
+    const component = mount(Composer, { target: document.body });
+    try {
+      await tick();
+      expect(document.querySelector<HTMLTextAreaElement>("#input")?.maxLength).toBe(10_000);
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it("shows no counter for a short draft, then a faint one, a warning, and a limit state", async () => {
+    withLiveLine("short");
+    const component = mount(Composer, { target: document.body });
+    try {
+      await tick();
+      expect(document.querySelector(".hint .count")?.textContent).toBe("");
+      for (const [length, text, tone] of [
+        [1_234, "1,234 / 10,000", null],
+        [9_500, "9,500 / 10,000", "text-gold"],
+        [10_000, "10,000 / 10,000", "text-red"],
+      ] as const) {
+        draft.text = "x".repeat(length);
+        await tick();
+        const count = document.querySelector(".hint .count");
+        expect(count?.textContent).toBe(text);
+        expect(count?.classList.contains("text-gold")).toBe(tone === "text-gold");
+        expect(count?.classList.contains("text-red")).toBe(tone === "text-red");
+      }
+      draft.text = "y".repeat(20_000);
+      await tick();
+      expect(document.querySelector(".hint .count")?.textContent).toBe("10,000 / 10,000");
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it("keeps the counter on the narrow layout, where the keyboard advice is hidden", async () => {
+    layout.narrow = true;
+    withLiveLine("z".repeat(2_000));
+    const component = mount(Composer, { target: document.body });
+    try {
+      await tick();
+      const hint = document.querySelector(".hint");
+      expect(hint?.classList.contains("counting")).toBe(true);
+      expect(hint?.querySelector(".count")?.textContent).toBe("2,000 / 10,000");
+    } finally {
+      await unmount(component);
+    }
+  });
+});
