@@ -121,6 +121,11 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
         if result.get("status") in ("completed", "no_effect") and not result.get("grant_ended"):
             if body.then:
                 result["after"] = await after(hub, principal, grant, body.then, result)
+                if result.get("source") == "cdp" and result.get("settle") == "quiet":
+                    observed = result["after"].get("snapshot_event_counter")
+                    if (observed != result.get("settled_event_counter")
+                            or result["after"].get("change_event_since_snapshot")):
+                        result["settle"] = "changing"
             tree = hub.elements.snapshots.get(grant["id"])
             hub.elements.action_completed(grant["id"], bool(body.then and tree))
         return result

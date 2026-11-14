@@ -1000,3 +1000,148 @@ The script performs no artificial waits. A live result must include the actual J
 provider tests establish invariants but cannot decide which side of Greg's real page reports disabled.
 Tool result sizes and image estimates can be compared in the line's Usage section;
 see [tool telemetry](telemetry.md) for estimators, privacy and retention.
+
+### Chrome page state without an extension (helper 1.3.0)
+
+In an already running **Chrome 144 or newer**, open `chrome://inspect/#remote-debugging`
+and enable remote debugging once. Share the Chrome window from the helper tray. Chrome asks whether to allow the debugging connection as soon as the window is shared;
+choose **Allow**. Reads use UIA with an awaiting-approval reason while that prompt is open,
+so slow approval does not block a read or require sharing again.
+The helper keeps one browser connection until it disconnects or exits. It never starts
+Chrome, changes its command line, copies a profile, or installs an extension. Denying or
+closing the prompt leaves UIA available. Share again to retry a refused connection.
+
+The tray and server device snapshot report `not_enabled` (with the setting instruction),
+`awaiting_approval`, `connected`, or `refused`. `screen_elements` includes `source: cdp|uia`
+and an explanation when Chrome mapping falls back to UIA. Chrome discovery follows
+[Chrome's approved-session flow](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session)
+and the `DevToolsActivePort` reader in
+[Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/src/BrowserManager.ts).
+This attaches to the ordinary signed-in session; the old command-line debugging restriction
+on default profiles is a different mechanism.
+
+The grant covers **all tabs of the selected HWND**, following its active tab. Mapping checks
+the browser process, CDP window bounds against the DWM frame (with DPI conversion), the
+active tab's title against the current HWND title; visibility only breaks duplicate-title
+ties. A uniquely matched tab stays on CDP when its HWND is covered and Chrome reports all
+tabs hidden. Missing or
+ambiguous evidence uses UIA; another Chrome window needs its own grant. Page actions are
+on by default. Ignored AX nodes are omitted before chunking; exposed descendants attach
+to the nearest exposed ancestor. Reads use Chrome AX plus live DOM native disabled, ARIA disabled, readonly,
+inert, value, checked and selected state. With `bounds=true`, CDP adds `viewport@` rectangles
+in CSS pixels; it does not infer screen/frame coordinates from browser decorations. A class-only link can look enabled while reporting
+`disabled(aria_disabled)`; that provenance is retained. Password values are omitted.
+
+`screen_element_action` sends page-scoped mouse/keyboard input, focuses the actual DOM node,
+and edits through `Input.insertText`. `select value=<label or value>` reads the native options,
+then uses trusted `Input.dispatchKeyEvent` navigation from the **current** option. For a
+native dropdown it opens the picker with Alt+Down, moves with arrow keys, and commits with
+Enter. `selection_mode: keyboard_popup` should commit only the requested option once. If the
+native picker ignores CDP keys, it cancels the picker and falls back to current-option arrow
+steps plus Tab (`keyboard_steps`). It never resets through Home/End. The fallback can emit
+one native change per step; results include `trusted_input_events` and `trusted_change_events`
+so its behavior is explicit. It verifies the selected option, never sets the value or
+constructs DOM input/change events, and reports `none (already selected)` for the current
+sole option. Document navigation stops further input and returns an unconfirmed outcome.
+The picker-open probe uses Chrome's
+[`:open` support](https://developer.chrome.com/release-notes/133), and keys use the
+[CDP Input protocol](https://chromedevtools.github.io/devtools-protocol/tot/Input/).
+Unsupported CDP actions report an error; they never also run a UIA action.
+
+`screen_eval(expression=<JavaScript>, window=<grant>)` runs agent JavaScript in the active
+page and returns bounded JSON (a truncated preview for large results). It has the same
+window grant and write authorization as page actions. It can access the page's signed-in
+session. Calls are audited with grant, calling line/process, operation and input length;
+code and typed text are not placed in this audit. The helper keeps its local chained audit,
+and the server records calls including cached reads. Ending the grant synchronously gates
+page commands and stops subscriptions; disconnect and helper exit close the browser socket.
+An already dispatched action cannot be undone; an interrupted command is unconfirmed and
+must not be retried automatically.
+
+DOM/AX/lifecycle events and an isolated-world MutationObserver advance the same monotonic
+counter used by the UIA state-truth barrier. CDP action settling uses an event-reset 100 ms
+quiet deadline and an absolute 2 s failure deadline, without periodic page checks. Results
+say `settle: quiet|changing|deadline`. A renderer round trip and counter comparison detect
+events during capture. Quiet describes the observed boundary; later application work can
+still change the page and invalidates the cache through events. Only the selected tab
+advances the CDP grant counter; switching tabs detaches the previous page, so background
+mutations cannot break continuations or settling.
+Iframe navigation/removal advances the counter without resetting page-wide element IDs or
+interrupting input. Main-frame navigation and `DOM.documentUpdated` invalidate those IDs.
+When a link invoke reaches mouse release and main-frame navigation is observed, the result
+is `completed` with `navigated: true` and `settle: changing`, without reading the old element.
+This confirms the click/navigation boundary; it does not assert the destination finished loading.
+Navigation before mouse release, document replacement without observed navigation, and
+revocation remain interrupted outcomes.
+
+#### Windows live comparison checklist (Greg)
+
+This implementation is tested against a fake CDP websocket and fake HWND lists on Linux.
+**Live Windows connection, DPI/window matching and website behavior remain to be run.**
+Record Chrome/helper versions, each card's CDP line and UIA line, DOM state, page event log,
+and any difference. Upload sanitized evidence to the line; keep host/account details out.
+
+1. Open `/lab/a11y` in the existing signed-in Chrome window. Disable remote debugging and
+   share it. Run `screen_elements(refresh=true)`; expect `source: uia` and the Chrome setting
+   instruction. Enable the setting, read again, approve Chrome's prompt, and expect `source: cdp`.
+   Verify tray/device states through not enabled, awaiting approval and connected. On a separate
+   session deny once, confirm refused/UIA, then share again and approve.
+2. **Sync enable:** find the select and Sync target. Select B with `then={}`. Check the page
+   logged trusted input/change and the target's native disabled flag cleared. Verify
+   `isTrusted` in a temporary lab event listener installed/read through `screen_eval`. Count
+   trusted change events: moving from a middle option to an adjacent and a distant option
+   should produce one commit in `keyboard_popup` mode, with no intermediate values. Record
+   `selection_mode` and `trusted_change_events`. If the popup does not accept keys, verify
+   fallback starts at the current option; an adjacent move must commit only its target,
+   while a multi-step fallback may emit one change per step. Compare with UIA after
+   disconnecting debugging; restore CDP and refresh before the next card.
+3. **Delayed enable:** select B, record `settle`, read each delayed target before and after its
+   page-side change. Expect a new event counter and fresh enabled state after each transition;
+   a quiet result before delayed work is allowed. Compare UIA card by card.
+4. **Class-only link:** select B, then find Class-only link. Its style looks enabled, but CDP
+   must show `disabled(aria_disabled)` with DOM `aria_disabled=true`; record UIA's disabled
+   provenance too. **ARIA done right:** its parallel link becomes enabled after ARIA removal.
+5. **Disabled ancestor:** toggle the fieldset checkbox. Compare native disabled state on its
+   child before/after. **Name change:** invoke Count 0; record stable identity and the new label.
+   **Structure change:** invoke Load list; read again after the page inserts its three items.
+6. **Text field:** set a value, then press Tab or Enter. Compare its value and input/change/key
+   events with UIA set_value. **Reset/event log:** reset the lab and verify event/counter changes.
+7. Evaluate `({title:document.title, cards:document.querySelectorAll('select').length})` with
+   `screen_eval`; check bounded JSON. Return a very long Unicode string and confirm truncation.
+   Inspect audits for calling grant/line/process/operation/length and absence of supplied text.
+8. Open another Chrome window, including an identical-title/overlapping-window case. Confirm
+   it is excluded, or mapping explicitly refuses with UIA fallback. Fully cover the shared
+   window: a unique title must remain on CDP even if every tab reports hidden; duplicate
+   titles with no visible tiebreaker must refuse. Switch tabs in the granted
+   window; the next read follows that tab and old page IDs fail. Leave the old tab changing
+   in the background: the selected tab's counter, `more` cursor and quiet settle must remain stable. Move a tab to the other window;
+   verify it is no longer read through this grant. Repeat at Windows display scaling 100%/150%.
+9. On KDP, find **Manage A+ Content** and record its CDP AX disabled state, DOM native/ARIA/
+   readonly/inert state (use `screen_elements(inspect=<id>)`), and the matching UIA inspect.
+   Count native `change` events and log selected marketplace values during the operation;
+   record popup/fallback mode and verify that no unintended marketplace was committed.
+   Change the marketplace, repeat all readings, then invoke only the intended link. Record
+   actual navigation and discrepancies between style, AX/UIA and DOM. Do not infer success
+   from an input dispatch acknowledgement. While an iframe navigates or is removed, verify
+   that main-page IDs remain usable and clicks/selects finish. A link navigating the main page
+   should report `completed`, `navigated: true`, invalidate old IDs and require a fresh read.
+10. Record capture and event-status latency on the lab and KDP pages. DOM observation now
+    uses two calls per exposed DOM node plus one object-group release per capture chunk;
+    event-status checks still remap the HWND. Revoke while a read/eval/action or tab attach is in flight; expect no subsequent page command/result
+    disclosure, stale IDs refused, and another separately shared window unaffected. Disconnect
+    the helper and quit Chrome; verify the browser socket closes and UIA fallback is explicit.
+
+
+#### Windows foundations source audit
+
+Read alongside the helper changes: `tests/test_windows_uia.py::test_background_tk_window`,
+`tests/windows_uia_window.py` (native controls and separate foreground window), and
+`tests/windows_uia_patterns.py` (selection, expand/collapse, range, scroll and window actions).
+The foreground assertions now accept a transient activation followed by restoration while
+still requiring the foreground fixture and cursor to remain unchanged after the basic actions.
+The same assertion helper has a Linux regression in `tests/test_cdp_active_select.py`.
+Also read `tests/test_windows_capture_events.py` including its native Tk capture smoke test,
+`tests/test_windows_packaging.py`, `tests/test_windows_startup.py`, and
+`tests/test_windows_platform.py`. Their capture, packaging and startup contracts remain
+applicable. This is a source audit; native Windows execution is still required by CI, and
+these UIA fixtures do not establish Chrome popup/event-trust behavior for the checklist above.

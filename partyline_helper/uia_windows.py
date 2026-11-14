@@ -23,7 +23,6 @@ PATTERN_STATE = {"value": 30045, "toggle": 30086, "selected": 30079, "expand_sta
 SUBTREE, SHALLOW = 7, 3  # TreeScope_Subtree; TreeScope_Element | TreeScope_Children
 MAX_CHILDREN = 20000  # runaway guard for one node's children; far beyond any real list
 EXPAND_STATES = {0: "collapsed", 1: "expanded", 2: "partial", 3: "leaf"}
-WINDOW_STATES = {0: "normal", 1: "maximized", 2: "minimized"}
 SCROLL_AMOUNT = {("up", "small"): (2, 1), ("up", "large"): (2, 0), ("down", "small"): (2, 4),
                  ("down", "large"): (2, 3), ("left", "small"): (1, 2), ("left", "large"): (0, 2),
                  ("right", "small"): (4, 2), ("right", "large"): (3, 2)}

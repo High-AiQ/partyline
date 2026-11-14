@@ -85,7 +85,7 @@ class WorkerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         session.tools.audit.append.assert_called_once()
         finish.set()
         await worker.task
-        session.send.assert_awaited_with("window_elements", request_id="read", elements=[],
+        session.send.assert_awaited_with("window_elements", request_id="read", elements=[], source="uia",
                                          timing=session.send.await_args.kwargs["timing"])
         worker.actions.task.cancel()
         await worker.close()

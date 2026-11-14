@@ -26,7 +26,9 @@ def elements_options(refresh: bool = False, more: bool = False,
 
 
 def state(tree):
-    result = {}
+    result = {"source": getattr(tree, "source", "uia")}
+    if reason := getattr(tree, "source_reason", None):
+        result["source_reason"] = reason
     if tree.partial:
         result["partial"] = tree.note or "the window is larger than one capture; call with more=true"
     if tree.old_helper:

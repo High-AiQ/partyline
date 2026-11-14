@@ -6,6 +6,7 @@ from contextvars import ContextVar
 from functools import wraps
 
 from .screen_timing_contract import HELPER, STOP
+from .screen_bounded import bounded
 
 clock = time.perf_counter
 current = ContextVar('screen_timing', default=None)
@@ -48,7 +49,7 @@ def timed(function):
             result = await function(*args, **kwargs)
             values['server_total_ms'] = round(max(0, clock() - start) * 1000, 3)
             result['timing'] = values
-            return result
+            return bounded(result) if result.get("source") == "cdp" else result
         finally:
             current.reset(token)
     return run

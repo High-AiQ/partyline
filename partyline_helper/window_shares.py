@@ -15,6 +15,7 @@ from .uia_window_identity import unmark
 from .window_target_picker import select_target
 from .uia_events import UIAEventSubscription
 from .uia_event_state import EventState
+from .cdp import Chrome
 from .window_outline import WindowOutline
 from .window_snapshot import SNAPSHOT_VERSION, WindowSnapshots
 
@@ -48,6 +49,7 @@ class WindowShares:
         self.event_factory = event_factory
         self.outline_factory = outline_factory
         self.grants, self.waiters, self.tasks = {}, {}, set()
+        self.chrome = Chrome(self)
         self.event_timers = {}
         self.picking, self.generation = False, 0
         self.snapshots = WindowSnapshots(self)
@@ -107,6 +109,7 @@ class WindowShares:
             access_session = WindowSession(self.session, ident, self.changed)
             access = WindowAccess(access_session, on_revoke=lambda reason: self.revoke(ident, reason=reason))
             access_session.window = access
+            access_session.chrome = self.chrome
             if await access.check(selected) or generation != self.generation:
                 return
             self.session.tools.audit.append("event", "window", "local", "window_read",
@@ -134,6 +137,9 @@ class WindowShares:
             outline = self.outline_factory(selected["hwnd"], pid=selected["pid"])
             self.grants[ident]["outline"] = outline
             self.grants[ident]["outline_task"] = self.spawn(outline.start())
+            if self.chrome.browser.state == "refused":
+                self.chrome.browser.state = "not_enabled"  # a new local share explicitly retries approval
+            self.chrome.start(access)
             self.spawn(self.start_events(ident, selected["hwnd"]))
             selected, registered = None, None
             self.changed()
@@ -152,6 +158,7 @@ class WindowShares:
             timer = self.event_timers.pop(ident, None)
             if timer:
                 timer.cancel()
+            self.chrome.revoke(entry["access"])
             entry["access"].revoke()
             if outline := entry.get("outline"):
                 outline.close()
@@ -194,7 +201,7 @@ class WindowShares:
     async def send_changed(self, ident):
         self.event_timers.pop(ident, None)
         entry = self.grants.get(ident)
-        if not entry or not entry.get("events_supported"):
+        if not entry:
             return
         with contextlib.suppress(ConnectionClosed, OSError):
             await self.session.send("window_changed", grant_id=ident)
@@ -214,12 +221,16 @@ class WindowShares:
                                     elements_unavailable="consent revoked",
                                     status="failed", error="consent revoked")
         elif message.get("event_status"):
-            state = entry.get("event_state")
-            await self.session.send("window_elements", request_id=message["request_id"],
-                                    **(state.status() if state else {"event_counter": 0,
-                                       "events_supported": False, "subscription_live": False}))
+            access = entry["access"]
+            if getattr(access, "grant", None) and access.grant.get("process", "").lower() == "chrome.exe":
+                await self.chrome.page(access)
+                status = self.chrome.status(access)
+            else:
+                state = entry.get("event_state")
+                status = state.status() if state else {}
+            await self.session.send("window_elements", request_id=message["request_id"], **status)
         elif message["type"] == "read_window_elements":
-            await entry["worker"].submit(message["request_id"], read_options(message))
+            await entry["worker"].submit(message["request_id"], read_options(message), message)
         else:
             await entry["worker"].submit_action(message)
 
@@ -244,6 +255,7 @@ class WindowShares:
 
     async def close(self):
         self.revoke_all(notify=False)
+        await self.chrome.close()
         for future in list(self.waiters.values()):
             if not future.done():
                 future.cancel()

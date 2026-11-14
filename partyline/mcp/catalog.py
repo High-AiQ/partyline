@@ -37,7 +37,7 @@ EXTRAS_OPS = frozenset({
 # Clients that never re-list cannot gain a screen tool when a share starts, so the
 # whole control set is reached through extras there; the others list it while shared.
 SCREEN_CONTROL = frozenset({
-    "screen_element_action", "screen_control_request", "screen_click", "screen_move",
+    "screen_eval", "screen_element_action", "screen_control_request", "screen_click", "screen_move",
     "screen_drag", "screen_scroll", "screen_type", "screen_key",
 })
 SCREEN = SCREEN_CONTROL | {"screen_frame", "screen_elements", "screen_window_snapshot"}

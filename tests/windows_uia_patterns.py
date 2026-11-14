@@ -9,11 +9,26 @@ def near(actual, expected, slack=3):
     return all(abs(a - b) <= slack for a, b in zip(actual, expected, strict=True))
 
 
+def foreground_observation(case, answer, before, after, target):
+    """Before/after equality cannot disprove a transient activation that the helper restored."""
+    for field in ("foreground_changed", "target_came_forward", "foreground_restored"):
+        case.assertIsInstance(answer.get(field), bool, (field, answer))
+    if answer["foreground_restored"]:
+        case.assertTrue(answer["foreground_changed"], answer)
+        case.assertTrue(answer["target_came_forward"], answer)
+        case.assertEqual(before, after, answer)
+    elif answer["target_came_forward"]:
+        case.assertEqual(target, after, answer)
+    if before == after and not answer["foreground_restored"]:
+        case.assertFalse(answer["foreground_changed"], answer)
+
+
 class Driver:  # pragma: no cover - runs only in the Windows foundations job
     def __init__(self, case, worker, access, window, process, lines):
         self.case, self.worker, self.access = case, worker, access
         self.window, self.process, self.lines = window, process, lines
         self.user32 = ctypes.windll.user32
+        self.user32.GetForegroundWindow.restype = wintypes.HWND
         self.user32.IsIconic.argtypes = self.user32.IsZoomed.argtypes = [wintypes.HWND]
         self.user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
         self.user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
@@ -36,12 +51,13 @@ class Driver:  # pragma: no cover - runs only in the Windows foundations job
 
     async def act(self, item, action, **fields):
         before = self.cursor()
+        foreground = self.user32.GetForegroundWindow()
         message = {"element_id": item["id"], "action": action, "share_id": "share", "agent": "test", **fields}
         answer = await self.worker.perform(message)
         self.case.assertEqual(before, self.cursor(), f"{action} moved the cursor")
         if answer.get("status") == "completed" and action != "window_close":
-            self.case.assertIsInstance(answer.get("foreground_changed"), bool, (action, answer))
-            self.case.assertIsInstance(answer.get("target_came_forward"), bool, (action, answer))
+            foreground_observation(self.case, answer, foreground, self.user32.GetForegroundWindow(),
+                                   self.window["hwnd"])
         return answer
 
     def require(self, item, action):

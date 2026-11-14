@@ -605,8 +605,9 @@ class McpControlToolsTest(unittest.TestCase):
     def test_tools_gate_validate_and_route(self):
         self.assertEqual(tools_control.tool_list({"actions": ["read"]}), [])
         names = [tool["name"] for tool in tools_control.tool_list({"actions": ["write"]})]
-        self.assertEqual(names, ["screen_element_action", "screen_control_request", "screen_click",
-                                 "screen_move", "screen_drag", "screen_scroll", "screen_type", "screen_key"])
+        self.assertEqual(names, ["screen_eval", "screen_element_action", "screen_control_request",
+                                 "screen_click", "screen_move", "screen_drag", "screen_scroll",
+                                 "screen_type", "screen_key"])
         calls = []
         client = SimpleNamespace(home="line/1", request=lambda *args: calls.append(args) or {"ok": 1})
         state = {"actions": ["write"]}

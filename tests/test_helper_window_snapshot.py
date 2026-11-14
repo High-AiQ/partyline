@@ -41,6 +41,7 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.session.tools.audit = SimpleNamespace(append=Mock(), ensure_writable=Mock())
         self.shares = WindowShares(self.session)
         self.session.windows = self.shares
+        self.shares.chrome.revoke = Mock()  # snapshot fixture has no CDP sessions
         self.backend = FakeBackend()
         self.shares.snapshots.backend = self.backend
         self.shares.snapshots.clock = lambda: 1_700_000_000.0
@@ -220,7 +221,7 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_hello_announces_screenshots_and_the_minor_version_moved(self):
         self.assertEqual(2, WINDOWS_VERSION)
         self.assertEqual(SNAPSHOT_VERSION, WINDOWS_VERSION)
-        self.assertTrue(__version__.startswith("1.3."))
+        self.assertEqual("1.3.0", __version__)
 
 
 class WindowGrabTests(unittest.TestCase):

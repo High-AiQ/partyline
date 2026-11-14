@@ -33,12 +33,12 @@ class WindowTask:
     def busy(self):
         return any(task and not task.done() for task in (self.task, self.read_task))
 
-    async def submit(self, request_id, options=None):
+    async def submit(self, request_id, options=None, message=None):
         if self.busy():
             await self.session.send("window_elements", request_id=request_id,
                                     elements_unavailable="window read already in progress")
             return
-        self.task = asyncio.create_task(self._read(request_id, options, Timing()))
+        self.task = asyncio.create_task(self._read(request_id, options, message, Timing()))
 
     async def submit_action(self, message):
         previous = self.actions.task and not self.actions.task.done()
@@ -60,21 +60,41 @@ class WindowTask:
         timing = queued or Timing()
         timing.values["task_queue_ms"] = timing.elapsed(timing.started)
         try:
-            result = await self.actions.perform(message)
+            chrome = getattr(self.session, "chrome", None)
+            result = await chrome.action(self.session.window, message) if chrome else None
+            if result is None:
+                result = await self.actions.perform(message)
+                result.setdefault("source", "uia")
             result.setdefault("timing", {}).update(timing.values)
             await self.session.send("window_element_result", request_id=message["request_id"], **result)
         except ConnectionClosed:
             pass
+        except (ValueError, OSError):
+            await self.session.send("window_element_result", request_id=message["request_id"],
+                                    status="unconfirmed", error="Chrome command interrupted")
 
-    async def _read(self, request_id, options=None, queued=None):
+    async def snapshot(self, options, message):
+        chrome = getattr(self.session, "chrome", None)
+        result = await chrome.read(self.session.window, options, message or {}) if chrome else None
+        if result is None:
+            result = await self.session.window.snapshot(options)
+            result["source"] = "uia"
+            if chrome and self.session.window in chrome.reasons:
+                result["source_reason"] = chrome.reasons[self.session.window]
+        return result
+
+    async def _read(self, request_id, options=None, message=None, queued=None):
         timing = queued or Timing()
         timing.values["task_queue_ms"] = timing.elapsed(timing.started)
         try:
             try:
-                self.read_task = asyncio.create_task(self.session.window.snapshot(options))
+                self.read_task = asyncio.create_task(self.snapshot(options, message))
                 result = await asyncio.wait_for(asyncio.shield(self.read_task), READ_TIMEOUT)
             except TimeoutError:
                 self.session.window.abandon_read()
+                chrome = getattr(self.session, "chrome", None)
+                if chrome and chrome.sources.get(self.session.window) == "cdp":
+                    self.read_task.cancel()  # CDP is cancellable; a UIA COM thread is not
                 result = {"elements_unavailable": "timeout", "truncated": True}
             except (ValueError, KeyError, TypeError, RuntimeError, OSError):
                 result = {"elements_unavailable": "window read failed"}

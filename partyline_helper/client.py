@@ -179,7 +179,7 @@ class Session(SessionTransport):
             await self.tools.dispatch(message)
         elif kind in WINDOW_MESSAGES:
             await self.windows.receive(message)
-        elif kind in ("read_window_elements", "window_element_action", "snapshot_window") \
+        elif kind in ("read_window_elements", "window_element_action", "window_eval", "snapshot_window") \
                 and "grant_id" in message:
             await self.windows.dispatch(message)
         elif kind == "read_window_elements":
@@ -207,7 +207,9 @@ class Session(SessionTransport):
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
                         helper_version=helper_version(), monitors=self.desktop.monitors(),
                         control=CONTROL_VERSION, tools=TOOLS_VERSION, windows=WINDOWS_VERSION,
-                        press=PRESS_VERSION, update_check=True)
+                        press=PRESS_VERSION, chrome_dom=1, chrome={"state": "not_enabled",
+                        "detail": self.windows.chrome.browser.detail}, update_check=True)
+        self.status.chrome = "Chrome: not enabled — " + self.windows.chrome.browser.detail
         self.status.set("paired")
         loop = asyncio.get_running_loop()
         # The tray's Stop sharing runs on another thread: hand the stop to this loop.
@@ -232,6 +234,8 @@ class Session(SessionTransport):
                     await self.send("error", request_id=request_id,
                                     message="Invalid request or capture failed; see local terminal")
         finally:
+            self.windows.revoke_all(notify=False)  # disconnect gates every page before any awaited teardown
+            await self.windows.chrome.close()
             heartbeat.cancel()
             window_watch.cancel()
             with contextlib.suppress(asyncio.CancelledError):

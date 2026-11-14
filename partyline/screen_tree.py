@@ -14,7 +14,8 @@ NAME_FIELD = 1000  # characters of a name kept; lines clip it, `id` reads it who
 VALUE_FIELD = 600
 LINE_NAME = 240  # characters of a name shown on a line
 LINE_VALUE = 80
-STATE_FIELDS = ("enabled", "value", "toggle", "selected", "expand_state", "name", "aria_properties")
+STATE_FIELDS = ("enabled", "value", "toggle", "selected", "expand_state", "name", "aria_properties",
+                "source", "provider_identity", "disabled_provenance", "readonly", "inert", "viewport_bounds")
 
 
 def clean(value, limit=NAME_FIELD):
@@ -159,6 +160,9 @@ class Snapshot:
         if node.toggle in TOGGLE:
             parts.append("toggle:" + TOGGLE[node.toggle])
         flags = list(node.flags)
+        if "disabled" in flags and node.cached.get("source") == "cdp":
+            evidence = node.cached.get("disabled_provenance", [])
+            flags[flags.index("disabled")] = "disabled(" + ";".join(evidence) + ")"
         if "disabled" in flags:
             evidence, ancestor = ["IsEnabled=false"], self.nodes.get(node.parent)
             for _ in range(20):
@@ -170,11 +174,18 @@ class Snapshot:
             if node.aria:
                 evidence.append("aria:" + node.aria)
             flags[flags.index("disabled")] = "disabled(" + ";".join(evidence) + ")"
+        if node.cached.get("source") == "cdp" and "selected" in node.cached:
+            flags.append("selected:" + str(node.cached["selected"]).lower())
+        for flag in ("readonly", "inert"):
+            if node.cached.get(flag):
+                flags.append(flag)
         parts.extend(flags)
         if bounds and node.bounds:
             parts.append("@" + ",".join(str(int(v)) for v in node.bounds))
             if node.frame:
                 parts.append("frame@" + ",".join(str(int(v)) for v in node.frame))
+        if bounds and (viewport := node.cached.get("viewport_bounds")):
+            parts.append("viewport@" + ",".join(str(round(v, 2)) for v in viewport))
         if extra:
             parts.append(extra)
         return " ".join(parts)

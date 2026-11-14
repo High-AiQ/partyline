@@ -467,6 +467,7 @@ class WindowIdentityTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(status=SimpleNamespace(window_grants={}, window_title=None,
                                                            changed=Mock()), send=AsyncMock())
         shares = WindowShares(session, event_factory=Subscription)
+        shares.chrome.revoke = Mock()  # this fixture isolates UIA subscription cleanup
         entry = {"access": SimpleNamespace(revoke=Mock()), "worker": SimpleNamespace(close=AsyncMock())}
         shares.grants["grant"] = entry
         await shares.start_events("grant", 42)

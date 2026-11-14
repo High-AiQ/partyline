@@ -75,7 +75,7 @@ class Chrome(WindowsProvider):
         return next((parent for parent in roots if node in parent.kids), None)
 
     def prop(self, node, name):
-        return node.props[name]
+        return node.props.get(name, False)
 
     def available(self, node, ident):
         from partyline_helper.uia_windows import PATTERNS

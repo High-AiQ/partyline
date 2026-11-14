@@ -3,6 +3,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from .screen_chrome_state import ChromeState
 
 PROTOCOL_VERSION = 1
 MAX_FRAME_BYTES = 4 * 1024 * 1024
@@ -71,6 +72,8 @@ class HelperHello(HelperMessage):
     tools: int = 0  # local-tools protocol version; absent on helpers that predate it
     windows: int = 0  # window-grant protocol; 1 shares a window with a line, absent before helper 1.1.0
     press: int = 0  # element-scoped key messages; absent before helper 1.2.0
+    chrome_dom: int = 0
+    chrome: ChromeState | None = None
     update_check: bool = False
 
 

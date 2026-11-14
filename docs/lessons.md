@@ -10,6 +10,62 @@ full walk's epoch/cursors. A full refresh or revocation resets them; every retai
 still needs live runtime/path identity and consent validation. Server and helper regressions in
 `tests/test_screen_latency.py` and `tests/test_uia_latency.py` cover the two-field sequence.
 
+## 2026-11-14 — Reply budgets include timing metadata
+
+The false assumption when combining CDP replies with phase timings was that bounding a result
+before the outer timing wrapper also bounded the final reply. A diagnostic just under 4 KiB
+could overflow after timings were attached. The outer wrapper now applies the shared CDP bound
+once, retaining only allowlisted timing fields when truncation is required. The near-limit and
+large-Unicode action regression in `tests/test_screen_eval.py` checks both size and timings.
+
+## 2026-11-14 — CDP frame boundaries
+
+Iframe navigation/removal is an observed page change, not replacement of the top-level
+document. Resetting the page epoch for every frame event clears unrelated element IDs and
+aborts input on pages with ad/analytics iframes. Only main-frame navigation (a frame without
+`parentId`) and `DOM.documentUpdated` reset the epoch. Regressions must exercise child-frame
+events during mouse input and popup selection. A main navigation after a link's mouse
+release is a completed invoke with a navigation marker; it must never override revocation
+or justify continuing input in the replacement document.
+
+## 2026-11-14 — Tab and native-input state must describe the selected page
+
+Removing visibility-based detach fixed covered windows but left old tabs advancing the
+active page's change counter. Detach the former page on selection changes and scope its
+callback to the selected target; background mutations must not break `more` or settling.
+Home/End on a closed native select commits intermediate choices. Plan from the live current
+option, prefer an open picker and one Enter commit, cancel an unresponsive picker before
+fallback, and report trusted change counts. Stop input across document replacement.
+Linux gates skip real Windows UIA assertions: read the native tests and fixtures too. A
+restored foreground round trip still reports `foreground_changed=true` even when its
+outer before/after HWNDs match. Shared assertion coverage now protects that contract on
+Linux as well. Regressions: `tests/test_cdp_active_select.py`; Windows source audit in
+`docs/screen-helper.md`.
+
+## 2026-11-14 — Chrome AX exposure and visibility are separate facts
+
+The false assumptions were that full AX trees contain only exposed nodes and that the
+active tab must report visible. Ignored AX nodes include hidden/unrendered content and
+must be removed before chunking, with exposed children reparented. Windows occlusion can
+make every tab in a covered HWND report hidden: a unique HWND title match identifies its
+active tab; visibility only breaks duplicate-title ties. Approval belongs in a background
+connection started by sharing, so a person considering Chrome's prompt cannot stall reads.
+Native select setters emit synthetic events, so select now plans without changing the DOM
+and drives trusted keyboard input instead. Attach replies register ownership before waking
+the caller; late replies after revoke/cancel are detached. Bounded result previews must
+also bound their metadata, otherwise trimming the preview cannot ever satisfy the budget. Regressions:
+`tests/test_cdp_revision.py`, `tests/test_cdp.py`, `tests/test_cdp_commands.py`.
+
+## 2026-11-14 — Initial helper state belongs in the hello envelope
+
+The false assumption was that every helper consumer skips unsolicited messages before
+reading a request's response. Adding Chrome status immediately after hello shifted that
+response boundary and stranded test peers. Initial Chrome state now travels inside hello;
+only subsequent connection transitions are pushed. Keep the first-request error, preview,
+share and disconnect checks in `tests/test_screen_helper.py` as protocol regressions.
+Audit metadata also needs defaults in internal exchanges used with legacy test principals;
+authenticated route calls still supply the actual calling line and process.
+
 ## 2026-11-14 — Dropdown options need not be children of the ComboBox
 
 The false assumptions were that a granted HWND subtree contains every dropdown popup,

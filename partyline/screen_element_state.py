@@ -68,6 +68,10 @@ class ElementState:
         result["event_counter_advanced_since_snapshot"] = (
             result.get("event_counter", tree.event_counter) > tree.event_counter)
         result["verdict"] = verdict(result["live"], cached, result.get("ancestors", []))
+        if result.get("source") == "cdp":
+            evidence = ",".join(result["live"].get("disabled_provenance", []))
+            result["verdict"] = ("CDP live disabled: " + evidence
+                                 if result["live"].get("enabled") is False else "CDP live enabled")
         return result
 
     async def capture(self, principal, grant, device, tree):
@@ -113,6 +117,8 @@ class ElementState:
                             **({"truncated": True} if response.get("truncated") else {})}
                 tree.note = "capture stopped: " + str(response["elements_unavailable"])[:100]
                 return tree
+            tree.source = response.get("source", "uia")
+            tree.source_reason = response.get("source_reason")
             counter = response.get("captured_event_counter")
             if not started:
                 tree.event_counter = counter

@@ -19,6 +19,7 @@ class Status:
         self.listeners, self.attention_listeners = [], []
         self.stop_share = self.quit = self.stop_tools = None
         self.tools_active = False
+        self.chrome = ""
         self.window_title = None
         self.window_grants = {}
         self.stop_window_grant = None
@@ -28,6 +29,7 @@ class Status:
     @property
     def label(self):
         label = LABELS[self.state]
+        label += "; " + self.chrome if self.chrome else ""
         return label + f"; reading {self.window_title}" if self.window_title else label
 
     def set(self, state):

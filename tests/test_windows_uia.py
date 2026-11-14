@@ -122,19 +122,11 @@ class WindowsUIATests(unittest.TestCase):
                     answer = await worker.perform(message)
                     after = user32.GetForegroundWindow()
                     self.assertEqual(pointer, cursor(), f"{action} moved the cursor")
-                    self.assertIsInstance(answer.get("foreground_changed"), bool, (action, answer))
-                    self.assertIsInstance(answer.get("target_came_forward"), bool, (action, answer))
-                    if answer.get("foreground_restored"):
-                        self.assertEqual(before, after, (action, before, after, answer))
-                    elif answer.get("target_came_forward"):
-                        self.assertEqual(window["hwnd"], after, (action, before, after, answer))
-                    # A restored round trip still counts as a foreground change.
-                    if before == after and not answer.get("foreground_restored"):
-                        self.assertFalse(answer.get("foreground_changed"), (action, before, after, answer))
-                    elif not answer.get("foreground_changed"):
-                        print(f"{action}: test saw a foreground change outside helper samples", flush=True)
+                    from tests.windows_uia_patterns import foreground_observation
+                    foreground_observation(self, answer, before, after, window["hwnd"])
                     if action == "set_value":
                         print(f"SetValue foreground changed: {answer.get('foreground_changed')}", flush=True)
+                    assert_foreground()  # includes a transient activation followed by restoration
                     answers.append(answer)
                 return answers
             answers = asyncio.run(act())

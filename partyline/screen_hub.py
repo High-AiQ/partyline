@@ -91,6 +91,8 @@ class ScreenHub:
             current = {**device, "socket": ws, "name": hello.device_name,
                        "os": hello.os, "helper_version": hello.helper_version, "control": hello.control,
                        "tools": hello.tools, "windows": hello.windows, "press": hello.press,
+                       "chrome_dom": hello.chrome_dom,
+                       "chrome": hello.chrome.model_dump() if hello.chrome else None,
                        "monitors": [item.model_dump() for item in hello.monitors],
                        "last_seen": time.monotonic()}
             old = self.devices.get(ident)
@@ -139,6 +141,9 @@ class ScreenHub:
                                             "message": "frame exceeds 4 MB"}))
                         continue
                     await self._frame(current, meta, data)
+                elif kind == "chrome_state":
+                    from .screen_chrome_state import receive
+                    await receive(self, current, message)
                 elif kind == "preview":
                     meta = HelperPreview.model_validate(message)
                     data = await asyncio.wait_for(ws.receive_bytes(), HEARTBEAT_TIMEOUT)
