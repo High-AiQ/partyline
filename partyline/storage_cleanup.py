@@ -12,7 +12,7 @@ from .mcp_attach import CONFIG_SUFFIX
 from .storage_removal import RetainedEntries, remove_contents
 from .storage_recovery_accounting import RecoveryAccounting
 from .storage_recovery_space import RecoverySpaceError
-from . import storage_kept
+from . import storage_kept, turn_usage
 
 logger = logging.getLogger(__name__)
 _lock = threading.Lock()
@@ -119,6 +119,7 @@ def cleanup(db, *, attachment_id=None, line=None, purging=False, retry_failed=Fa
         recovery = RecoveryAccounting()
         if full_sweep:
             storage_kept.prune(db)
+            turn_usage.prune(db)  # model usage records expire after about 30 days
         ids = ([attachment_id] if attachment_id else
                [att['id'] for att in db.list_attachments(line['id'])] if line else [None])
         from .tool_telemetry import prune

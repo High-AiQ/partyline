@@ -3,6 +3,7 @@
   import CaptainStyleSection from "./CaptainStyleSection.svelte";
   import UsageSection from "./UsageSection.svelte";
   import BridgeSection from "./BridgeSection.svelte";
+  import TurnUsageSection from "./TurnUsageSection.svelte";
   import { ApiError, api } from "../../lib/api";
   import { hierarchyApi } from "../../lib/hierarchy-api";
   import type { Conversation } from "../../lib/contracts";
@@ -178,5 +179,6 @@
   {#if ready}
     <BridgeSection {conversation} />
     <UsageSection convId={conversation.id} />
+    <TurnUsageSection convId={conversation.id} />
   {/if}
 </Modal>

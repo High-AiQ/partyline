@@ -21,14 +21,17 @@ from partyline.adapters.bundled.opencode.store import SessionStore
 from partyline.adapters.bundled.opencode.wakes import WakeSettlement
 from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
+from partyline.adapters.turn_usage import TurnUsage
+from partyline.turn_usage_parse import OpenCodeTurns
 
 logger = logging.getLogger(__name__)
 RESUME_READY_TIMEOUT_SECONDS = 30.0
 RECHECK_SECONDS = 0.05
 
 
-class PartylineAdapter(Command, SessionStore, WakeSettlement, Adapter):
+class PartylineAdapter(TurnUsage, Command, SessionStore, WakeSettlement, Adapter):
     kind = "opencode-v2"
+    turn_parser = OpenCodeTurns
     _CLAIMED: dict[tuple[str, str], str] = {}
 
     def __init__(self, *args, **kwargs):
@@ -146,6 +149,7 @@ class PartylineAdapter(Command, SessionStore, WakeSettlement, Adapter):
                 timing = data.get("time")
                 if not isinstance(timing, dict) or timing.get("completed") is None:
                     continue
+                await self.note_turn_usage((ident, data))
                 content = data.get("content", [])
                 if isinstance(content, list):
                     for part in content:

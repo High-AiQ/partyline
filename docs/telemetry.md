@@ -1,4 +1,6 @@
-# Tool usage telemetry
+# Telemetry
+
+## Tool usage telemetry
 
 Partyline measures the rendered text returned by every MCP tool call, including
 errors and refused operations. This measures estimated context added by tools,
@@ -45,3 +47,74 @@ allows a person any line and a process its own line and descendants, including
 on plain lines without a captain. Records expire after about 30 days, pruned
 on ingestion and by the existing storage retention cleanup. Reads always
 exclude expired records. Deleting a line deletes its records.
+## Model usage per response
+
+Alongside the estimated size of each tool result, Partyline records what the model actually
+used for every response, because each turn re-sends the whole context and cache reads, cache
+writes and output all count. The numbers come only from the structured transcripts partyline
+already tails, never from the screen, and only for **Claude Code**, **Codex** and **OpenCode v2**.
+Every other adapter records nothing and is untouched.
+
+### What one record holds
+
+Attachment, line and adapter; the model id when the transcript names one; uncached input, cache
+read, cache write, output and reasoning tokens; the context size; the response's own timestamp; and
+the **names** of the tools it called, with the operation for `extras` and `captain` and the
+element action for `screen_element_action` (`extras:invoke`), the same labelling the tool-result
+telemetry uses so the two tables join on (tool, operation); an operation outside the fixed
+vocabulary is dropped. Tools that are not Partyline's keep a safe name (`Bash`, `exec`). No prompt, reply,
+argument value, result, path or file name is stored; tool names with unsafe characters become
+`unknown`. A response is one row, keyed by the transcript's response id, so a repeated line
+updates it instead of adding another.
+
+All three adapters are normalised to one meaning:
+
+| column | meaning |
+| --- | --- |
+| input | prompt tokens that were not cached (Codex: its `input_tokens` minus `cached_input_tokens`) |
+| cache read / cache write | cached prompt tokens read, and written to the cache |
+| output | everything the model generated, reasoning included (OpenCode: its `output` plus `reasoning`) |
+| reasoning | a breakdown of output, never added again |
+| total | input + cache read + cache write + output |
+| context | the prompt size of that response: input + cache read + cache write (Codex: `input_tokens`) |
+
+### What each adapter measures
+
+| adapter | source | notes |
+| --- | --- | --- |
+| Claude Code | JSONL `message.usage` (`input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens`, `output_tokens_details.thinking_tokens`) | One line is written per content block and each repeats the message's usage; they are merged by message id (largest counts, all tool calls). Synthetic harness replies and compaction records do not. |
+| Codex | rollout `token_usage_record` (its response id and per-response `usage`), else `token_count` `last_token_usage` | Tool calls since the previous record belong to the next one. Native calls have their JSON arguments decoded only to pick an allowlisted operation. A resumed process is relayed from its thread-history store, which holds no token counts, so its own rollout is read alongside for usage only. A `token_count` only counts when no record was seen, once per change of its cumulative total. Cache writes are recorded as reported, which has always been zero in observed rollouts. |
+| OpenCode v2 | the completed assistant row's `tokens` (`input`, `output`, `reasoning`, `cache.read`, `cache.write`) | Each completed row is one response; an unfinished row waits. Partyline tool names are assumed to carry the `partyline_` prefix; without it the tool is still named, but extras and captain operations are not. |
+
+Not measured:
+
+- **Sub-agents and child sessions.** Claude Code writes sub-agent responses to separate files
+  that are not tailed, and OpenCode child sessions are not read, so their spend is not counted.
+- **Codex tool operations.** Codex runs tools through one `exec` code tool, so the tool is named
+  `exec` and its operations are not visible; named calls (`wait`, `sleep`) are.
+- **Anything before the process started.** A resumed CLI can show earlier history; only responses
+  newer than this process's spawn count, so a session is never charged twice.
+- **Cost in money, and other adapters.**
+
+### Reading it
+
+`GET /api/telemetry/turns/summary?conv_id=...&since=...&group=sub_op&include_descendants=false`.
+A person may read any line; a process its own line and descendants, with or without a captain.
+`extras(op="turn_usage", args={})` calls the same route. The management dialog's **Model usage**
+section shows it under the estimated results, with the same `tool · operation` label.
+
+It returns:
+
+- `rows`: per tool, and per operation of a tool, the **turns** that called it with the median and
+  p95 (nearest rank) of their total tokens, plus the maximum and the sum. A turn that called
+  three tools is counted whole in each of them, so rows say what a tool's turns cost, not what
+  the tool itself cost, and rows must not be added together. Turns with no tool appear as
+  `(no tool)`.
+- `lines` and `attachments`: totals over the window, summed over responses, so they never
+  double-count a multi-tool turn.
+- `totals` and `basis` (the definition above).
+
+### Retention
+
+Records expire after about 30 days. They are pruned whenever a new response is stored and by the
+storage retention cleanup, reads always exclude expired rows, and deleting a line deletes them.

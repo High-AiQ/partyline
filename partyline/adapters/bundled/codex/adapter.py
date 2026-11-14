@@ -32,7 +32,10 @@ from partyline.adapters.events import watch_files
 
 from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.session_seed import seed, seed_private_file
-from partyline.adapters.bundled.codex.thread_history import tail_thread_history
+from partyline.adapters.bundled.codex.resume_usage import tail_history_with_usage
+from partyline.adapters.bundled.codex.thread_history import user_text as _item_text
+from partyline.adapters.turn_usage import TurnUsage
+from partyline.turn_usage_parse import CodexTurns
 from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 from partyline.mcp_attach import codex_overrides
@@ -45,14 +48,9 @@ SHARED_HOME = os.path.expanduser("~/.codex")
 SHARED = ("auth.json", "config.toml", "plugins", "skills")
 
 
-def _item_text(item: dict) -> str:
-    """Flatten a completed item's content parts into their concatenated text."""
-    parts = item.get("content") or []
-    return "".join(part.get("text") or "" for part in parts if isinstance(part, dict))
-
-
-class PartylineAdapter(BaseAdapter):
+class PartylineAdapter(TurnUsage, BaseAdapter):
     kind = "codex"
+    turn_parser = CodexTurns
     jsonl_paste_receipts = True
 
     def codex_home(self) -> str:
@@ -205,7 +203,7 @@ class PartylineAdapter(BaseAdapter):
             home = getattr(self, "_home", "") or (
                 self.codex_home() if self.att.get("id") else ""
             )
-            if home and await tail_thread_history(self, home, thread_id):
+            if home and await tail_history_with_usage(self, home, thread_id):
                 return
 
         # No cross-adapter lock: the claim token means no two adapters can
@@ -243,6 +241,7 @@ class PartylineAdapter(BaseAdapter):
             pass
 
         async def handle(obj):
+            await self.note_turn_usage(obj)
             if is_compaction_record("codex", obj):
                 # The rollout records no trigger; codex compactions are the
                 # context-limit kind, so they count as auto. The freshness

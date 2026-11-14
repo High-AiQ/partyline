@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from . import (
     tools_blender, tools_captain, tools_check, tools_control, tools_core, tools_handover,
-    tools_resources, tools_tasks, tools_usage,
+    tools_resources, tools_tasks, tools_turn_usage, tools_usage,
 )
 from .captain_schemas import ACK_HINT
 from .client import ApiError
@@ -20,15 +20,15 @@ from .validation import validate_arguments
 from .descriptions import one_line, slim_schema
 
 # The order a name is looked up in; the first module serving it handles the call.
-DISPATCH = (tools_usage, tools_blender, tools_check, tools_control, tools_handover, tools_resources,
+DISPATCH = (tools_usage, tools_turn_usage, tools_blender, tools_check, tools_control, tools_handover, tools_resources,
             tools_tasks, tools_core, tools_captain)
 # The order tools are shown in.
-LISTING = (tools_usage, tools_core, tools_captain, tools_tasks, tools_resources, tools_handover,
+LISTING = (tools_usage, tools_turn_usage, tools_core, tools_captain, tools_tasks, tools_resources, tools_handover,
            tools_control, tools_blender, tools_check)
 
 # Reached through extras(op, args): rare errands, or tools a client cannot be given later.
 EXTRAS_OPS = frozenset({
-    "tool_usage",
+    "tool_usage", "turn_usage",
     "blender_request", "blender_exec", "blender_scene_info", "blender_render", "blender_screenshot",
     "blender_end", "render_check", "upload_3d_model", "upload_file",
     "offer_handover", "cancel_handover", "accept_handover", "complete_handover",

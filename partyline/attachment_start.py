@@ -24,6 +24,7 @@ from .role_delivery import bind_role_delivery
 from .write_set_routes import load_write_grants
 from .resume_backlog import addressed_backlog
 from .resource_budget import format_limit, settings
+from .turn_usage import turn_usage_callback
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ def prepare_attachment(att, runtime, hook_url, checkpoint):
     att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
     att["on_process_exit"] = exit_callback(runtime, att)
     att["on_provider_error"] = provider_error_callback(runtime, att)
+    att["on_turn_usage"] = turn_usage_callback(runtime, att)  # a no-op for adapters that never call it
     # The preset's explicit auto-compact threshold (§2.13), re-read on every
     # start so a resume picks up a changed preset; 0 lets the CLI default.
     att["auto_compact_tokens"] = auto_compact_tokens_for(runtime.db, att)
