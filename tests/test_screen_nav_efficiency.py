@@ -362,7 +362,9 @@ class ClickThenReadTests(unittest.IsolatedAsyncioTestCase):
         await self.hub.read(self.principal, options={"refresh": True})
         self.actions.clear()
         result = await self.act(element_id=row)
-        self.assertEqual({"status": "failed", "error": STALE}, result)
+        self.assertIn("timing", result)
+        self.assertEqual({"status": "failed", "error": STALE},
+                         {key: value for key, value in result.items() if key != "timing"})
         self.assertEqual([], self.actions)
 
     async def test_without_a_stored_tree_the_id_goes_to_the_helper_as_given(self):

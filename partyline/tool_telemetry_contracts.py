@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .screen_timing_contract import TimingKey, TimingValue
+
 
 class ImageUsage(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -28,6 +30,7 @@ class ToolCall(BaseModel):
     is_error: bool
     latency_ms: float = Field(ge=0, le=86400000)
     timestamp: float = Field(ge=0)
+    timing: dict[TimingKey, TimingValue] = Field(default_factory=dict, max_length=64)
     images: list[ImageUsage] = Field(default_factory=list, max_length=32)
 
 

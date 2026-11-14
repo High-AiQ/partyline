@@ -130,6 +130,7 @@ class WindowShares:
             state = EventState()
             self.grants[ident]["event_state"] = state
             access.event_status = state.status
+            access.event_state = state
             outline = self.outline_factory(selected["hwnd"], pid=selected["pid"])
             self.grants[ident]["outline"] = outline
             self.grants[ident]["outline_task"] = self.spawn(outline.start())
@@ -170,6 +171,7 @@ class WindowShares:
             return
         state = entry.setdefault("event_state", EventState())
         entry["access"].event_status = state.status
+        entry["access"].event_state = state
         def changed():
             state.changed()  # UIA thread advances the barrier before scheduling any push
             loop.call_soon_threadsafe(self.queue_change, ident)

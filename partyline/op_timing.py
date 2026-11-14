@@ -153,6 +153,7 @@ class OpTimingMiddleware:
             await self.app(scope, receive, send)
             return
         began = clock()
+        scope["screen_received_at"] = time.perf_counter()
         done = False
 
         def finish():

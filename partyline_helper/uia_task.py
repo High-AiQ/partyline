@@ -5,6 +5,7 @@ import contextlib
 from websockets.exceptions import ConnectionClosed
 
 from .uia_action_worker import ActionWorker, audit
+from .timing import Timing
 
 
 READ_TIMEOUT = 33  # seconds; START_LIMIT + BUDGET + KILL_SLACK must stay below it
@@ -14,6 +15,10 @@ def read_options(message):
     """The only fields of a read request the helper honours."""
     if isinstance(message.get("inspect"), str):
         return {"inspect": message["inspect"][:128]}
+    scope = message.get("query_scope")
+    if isinstance(scope, dict):
+        return {"query_scope": {key: value[:200] for key, value in scope.items()
+                                if key in ("query", "control_type") and isinstance(value, str)}}
     cursor = message.get("cursor")
     return {"cursor": cursor[:64]} if isinstance(cursor, str) and cursor else {}
 
@@ -33,7 +38,7 @@ class WindowTask:
             await self.session.send("window_elements", request_id=request_id,
                                     elements_unavailable="window read already in progress")
             return
-        self.task = asyncio.create_task(self._read(request_id, options))
+        self.task = asyncio.create_task(self._read(request_id, options, Timing()))
 
     async def submit_action(self, message):
         previous = self.actions.task and not self.actions.task.done()
@@ -49,16 +54,21 @@ class WindowTask:
                 result = {"status": "failed", "error": "audit unavailable"}
             await self.session.send("window_element_result", request_id=message["request_id"], **result)
             return
-        self.task = asyncio.create_task(self._action(message))
+        self.task = asyncio.create_task(self._action(message, Timing()))
 
-    async def _action(self, message):
+    async def _action(self, message, queued=None):
+        timing = queued or Timing()
+        timing.values["task_queue_ms"] = timing.elapsed(timing.started)
         try:
             result = await self.actions.perform(message)
+            result.setdefault("timing", {}).update(timing.values)
             await self.session.send("window_element_result", request_id=message["request_id"], **result)
         except ConnectionClosed:
             pass
 
-    async def _read(self, request_id, options=None):
+    async def _read(self, request_id, options=None, queued=None):
+        timing = queued or Timing()
+        timing.values["task_queue_ms"] = timing.elapsed(timing.started)
         try:
             try:
                 self.read_task = asyncio.create_task(self.session.window.snapshot(options))
@@ -68,6 +78,7 @@ class WindowTask:
                 result = {"elements_unavailable": "timeout", "truncated": True}
             except (ValueError, KeyError, TypeError, RuntimeError, OSError):
                 result = {"elements_unavailable": "window read failed"}
+            result.setdefault("timing", {}).update(timing.values)
             await self.session.send("window_elements", request_id=request_id, **result)
         except ConnectionClosed:
             pass

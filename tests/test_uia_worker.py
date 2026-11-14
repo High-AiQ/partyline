@@ -340,7 +340,7 @@ class NativeForegroundRestoreTests(unittest.IsolatedAsyncioTestCase):
         reads = [0]
         def read(node):
             reads[0] += 1
-            if reads[0] == 3:
+            if reads[0] == 2:
                 provider.foreground_hwnd = 1
             return properties(node)
         provider.properties = read
@@ -362,7 +362,7 @@ class NativeForegroundRestoreTests(unittest.IsolatedAsyncioTestCase):
         reads = [0]
         def read(node):
             reads[0] += 1
-            if reads[0] == 3:
+            if reads[0] == 2:
                 provider.foreground_hwnd = 1
                 gate.invalidate()
             return properties(node)

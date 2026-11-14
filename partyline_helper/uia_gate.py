@@ -1,5 +1,6 @@
 """Dispatch barrier for a single consent generation, independent of the message loop."""
 import threading
+from contextlib import nullcontext
 
 
 class DispatchGate:
@@ -28,8 +29,10 @@ class DispatchGate:
             finally:
                 self.lock.release()
 
-    def dispatch(self, generation, call):
-        with self.lock:
+    def dispatch(self, generation, call, timing=None):
+        with timing.phase("gate_lock_ms") if timing else nullcontext():
+            self.lock.acquire()
+        try:
             if self.revoked.is_set() or self.generation != generation:
                 raise ValueError("revoked")
             try:
@@ -38,3 +41,5 @@ class DispatchGate:
                 if self.revoked.is_set():
                     self.generation += 1
             return result, self.revoked.is_set()
+        finally:
+            self.lock.release()

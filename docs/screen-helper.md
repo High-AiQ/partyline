@@ -504,8 +504,11 @@ is `completed` only if the immediate read observes a value, focus, title or addr
 `observation` contains `before`, `after`, and `changed`; the baseline is taken after focus preparation,
 so SetFocus alone never counts as a key effect. Observation text is bounded in bytes (with
 `truncated:true` when shortened); comparisons use the full values. Password values are excluded. The URL observation
-uses the browser chrome's address-bar Value, never a page field (recognized English names or
-omnibox/addressEditBox automation IDs). Unsupported providers, missing HWNDs, focus/delivery failures,
+is available only when the action target itself is a recognized address control (English names or
+omnibox/addressEditBox automation IDs), using its Value, never a page field. Helper 1.3.0 no longer
+walks browser chrome to find a separate address bar for a page-field target; use `then` to read the page
+after a key, and do not treat a missing URL observation as proof that navigation did not happen.
+Unsupported providers, missing HWNDs, focus/delivery failures,
 or unchanged state return `status:"no_effect"` plus `hint`. A stale element after navigation can also
 prevent immediate confirmation. Use `then` or a fresh read for delayed effects; `no_effect` describes
 the immediate observation, and `after` independently reports the later tree. Never retry automatically.
@@ -955,9 +958,9 @@ Whether the real Chrome provider emits the expected event remains part of the li
 
 #### Exact manual retest
 
-Deploy the state-truth server **and helper** first; helper version remains 1.2.0. Share Chrome with
-the testing line using the tray, and attach an ordinary person-owned process to that line. No
-captain is required. Run from the repository with that process's existing connection JSON (or omit
+Deploy the state-truth server **and helper** first; use helper 1.3.0 or newer for the latency timings
+and filtered captures. Share Chrome with the testing line using the tray, and attach an ordinary
+person-owned process to that line. No captain is required. Run from the repository with that process's existing connection JSON (or omit
 `--connection` when `PARTYLINE_MCP_CONNECTION` is set):
 
 ```bash

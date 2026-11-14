@@ -103,7 +103,7 @@ class RequestTests(unittest.TestCase):
                                    poll=lambda: 0, returncode=0)
 
         state = {"stack": [[[n], None] for n in range(20_000)]}
-        self.assertEqual({"elements": []}, read(1, None, state, False, popen=popen, platform="win32"))
+        self.assertEqual([], read(1, None, state, False, popen=popen, platform="win32")["elements"])
         self.assertEqual(state, seen["state"])
         self.assertLess(len(json.dumps(seen["payload"])), 400)
         self.assertEqual(False, seen["payload"][5])

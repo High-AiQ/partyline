@@ -339,7 +339,9 @@ class DropdownTransportTests(unittest.IsolatedAsyncioTestCase):
         opened_summary = await self.elements.read(self.principal)
         await self.act("collapse")
         again = await self.elements.read(self.principal)
-        self.assertEqual(size(closed), size(again))  # a closed popup adds no bytes to subsequent reads
+        # Timing digits vary; a closed popup adds no content bytes to subsequent reads.
+        self.assertEqual(size({k: v for k, v in closed.items() if k != "timing"}),
+                         size({k: v for k, v in again.items() if k != "timing"}))
         self.assertLess(size(filtered), size(closed))
         self.assertLess(size(rooted), 4096)
         self.metrics = {key: (size(value), size(value) / 4) for key, value in (

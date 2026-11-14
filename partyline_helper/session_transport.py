@@ -5,13 +5,21 @@ import json
 
 from websockets.exceptions import ConnectionClosed
 
+from .timing import Timing
+
 
 class SessionTransport:
     async def send(self, kind, binary=None, before=None, **fields):
         """Send one message and its bytes (or a list of byte chunks); `before` runs under the lock, last."""
+        timing = Timing(fields.setdefault("timing", {})) if kind in (
+            "window_elements", "window_element_result", "window_snapshot") else None
+
         async def write():
             if before:
                 await before()  # the final gate, as the write's first step: only the check precedes the bytes
+            if timing:
+                # Preparation through the writer lock; a packet cannot report its own completed send.
+                timing.values["reply_ms"] = timing.elapsed(timing.started)
             await self.socket.send(json.dumps(dict(type=kind, **fields)))
             for chunk in ([] if binary is None else binary if isinstance(binary, list) else [binary]):
                 await self.socket.send(chunk)

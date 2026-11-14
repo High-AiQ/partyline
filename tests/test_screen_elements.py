@@ -405,8 +405,11 @@ class ElementActionTransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(task.done())
             elements.receive(device, {"request_id": request["request_id"], "status": "completed",
                                       "foreground_changed": True, "target_came_forward": True})
+            result = await task
+            self.assertIn("timing", result)
             self.assertEqual({"status": "completed", "foreground_changed": True,
-                              "target_came_forward": True}, await task)
+                              "target_came_forward": True},
+                             {k: v for k, v in result.items() if k != "timing"})
             self.assertFalse(elements.waiters)
             body.value = "foreign parameter"
             with self.assertRaises(HTTPException) as error:

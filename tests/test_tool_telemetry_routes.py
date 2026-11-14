@@ -55,6 +55,13 @@ class RouteTests(unittest.TestCase):
         return self.client.get("/api/telemetry/tool-calls/summary", params={"conv_id": conv, **query},
                                headers=headers or self.machine())
 
+    def test_phase_timings_persist_without_content_and_reject_unknown_fields(self):
+        timing = {"helper_uia_ms": 14, "helper_barrier_stop": "quiet", "server_total_ms": 40}
+        self.assertEqual(200, self.ingest([self.record(timing=timing)]).status_code)
+        saved = json.loads(self.db._exec("SELECT metrics FROM tool_calls").fetchone()[0])
+        self.assertEqual(timing, saved["timing"])
+        self.assertEqual(422, self.ingest([self.record(timing={"private title": 1})]).status_code)
+
     def test_percentiles_flags_groups_filters_and_attribution(self):
         records = [self.record(n, is_error=n == 20) for n in range(1, 21)]
         self.assertEqual(self.ingest(records).json(), {"stored": 20})

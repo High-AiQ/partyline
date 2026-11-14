@@ -2,6 +2,9 @@
 import ctypes
 
 from .uia_patterns import PATTERN
+from .uia_pattern_state import PatternState
+from .uia_press_state import PressState
+from .uia_com_timing import track
 from .uia_popups import WindowScope, configure, popup_name
 from .uia_expand_events import structure_call
 
@@ -12,7 +15,8 @@ PATTERNS = {10000: "Invoke", 10015: "Toggle", 10002: "Value", 10010: "SelectionI
 AVAILABLE = {10000: 30031, 10015: 30041, 10002: 30043, 10010: 30036, 10005: 30028, 10003: 30033,
              10004: 30034, 10017: 30035, 10009: 30044, 10016: 30042, 10018: 30090}
 # Properties a snapshot reads for every node, fetched with it so each node costs no further round trips.
-CACHED = {"BoundingRectangle": 30001, "ControlType": 30003, "Name": 30005, "HasKeyboardFocus": 30008,
+CACHED = {"RuntimeId": 30000, "BoundingRectangle": 30001, "ControlType": 30003, "Name": 30005,
+          "HasKeyboardFocus": 30008,
           "IsEnabled": 30010, "AutomationId": 30011, "IsPassword": 30019, "NativeWindowHandle": 30020,
           "IsOffscreen": 30022, "ProcessId": 30002, "AriaProperties": 30102, "IsKeyboardFocusable": 30009}
 PATTERN_STATE = {"value": 30045, "toggle": 30086, "selected": 30079, "expand_state": 30070}
@@ -33,14 +37,18 @@ TYPES = {50000: "Button", 50002: "CheckBox", 50003: "ComboBox", 50004: "Edit", 5
          50037: "TitleBar"}
 
 
-class WindowsProvider:  # pragma: no cover - exercised in the Windows foundations job
+class WindowsProvider(PatternState, PressState):  # pragma: no cover - Windows foundations job
+    com_calls = 0
+
     def __init__(self, hwnd, cached=False, deep=False):
         import comtypes.client
         ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
         comtypes.client.GetModule("UIAutomationCore.dll")
         from comtypes.gen import UIAutomationClient as uia
+        self.com_calls = 0
         self.uia = uia
-        self.automation = comtypes.client.CreateObject(uia.CUIAutomation, interface=uia.IUIAutomation)
+        self.automation = track(comtypes.client.CreateObject(
+            uia.CUIAutomation, interface=uia.IUIAutomation), self)
         self.user32 = ctypes.windll.user32
         self.user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
         self.user32.GetAncestor.restype = ctypes.c_void_p
@@ -120,6 +128,11 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
         return self.top
 
     def runtime_id(self, node):
+        if self.cached:
+            try:
+                return node.GetCachedPropertyValue(30000)
+            except Exception:
+                pass  # live ancestor supplied by a walker rather than a cache request
         return node.GetRuntimeId()
 
     def same_window(self, node):
@@ -266,35 +279,3 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
             return bool(node.GetCachedPropertyValue(AVAILABLE[ident]))
         except Exception:  # not a cached element: ask the provider directly
             return bool(node.GetCurrentPattern(ident))
-
-    def state(self, node, props):
-        """Add the state the extra patterns expose, for an action target only (never a snapshot)."""
-        try:
-            self.pattern_state(node, props["patterns"], props)
-        except Exception:  # a misbehaving provider only loses extra state; actions then fail closed
-            pass
-
-    def pattern_state(self, node, patterns, result):
-        if "SelectionItem" in patterns:
-            result["selected"] = bool(self.pattern(node, 10010, "SelectionItem").CurrentIsSelected)
-        if "ExpandCollapse" in patterns:
-            state = self.pattern(node, 10005, "ExpandCollapse").CurrentExpandCollapseState
-            result["expand_state"] = EXPAND_STATES.get(int(state), "unknown")
-        if "RangeValue" in patterns:
-            pattern = self.pattern(node, 10003, "RangeValue")
-            result.update(range_value=pattern.CurrentValue, range_min=pattern.CurrentMinimum,
-                          range_max=pattern.CurrentMaximum, range_read_only=bool(pattern.CurrentIsReadOnly))
-        if "Scroll" in patterns:
-            pattern = self.pattern(node, 10004, "Scroll")
-            result.update(h_scrollable=bool(pattern.CurrentHorizontallyScrollable),
-                          v_scrollable=bool(pattern.CurrentVerticallyScrollable),
-                          h_scroll_percent=pattern.CurrentHorizontalScrollPercent,
-                          v_scroll_percent=pattern.CurrentVerticalScrollPercent)
-        if "Window" in patterns:
-            pattern = self.pattern(node, 10009, "Window")
-            result.update(can_minimize=bool(pattern.CurrentCanMinimize),
-                          can_maximize=bool(pattern.CurrentCanMaximize),
-                          window_state=WINDOW_STATES.get(int(pattern.CurrentWindowVisualState), "unknown"))
-        if "Transform" in patterns:
-            pattern = self.pattern(node, 10016, "Transform")
-            result.update(can_move=bool(pattern.CurrentCanMove), can_resize=bool(pattern.CurrentCanResize))

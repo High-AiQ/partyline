@@ -7,6 +7,7 @@ import math
 import threading
 import time
 
+from ..screen_timing_contract import extract
 from . import catalog, tools_captain, tools_control, tools_tasks
 
 
@@ -79,7 +80,7 @@ def record(name, args, text, value, error, started, adapter=""):
     return {"tool": tool, "sub_op": sub_op, "action": action, **flags, "result_bytes": size,
             "result_chars": len(text), "estimated_tokens": estimate_text_tokens(size),
             "is_error": error, "latency_ms": max(0, (time.perf_counter() - started) * 1000),
-            "timestamp": time.time(), "images": images}
+            "timestamp": time.time(), "images": images, "timing": extract(value)}
 
 
 class Telemetry:

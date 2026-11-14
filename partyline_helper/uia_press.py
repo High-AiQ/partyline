@@ -4,6 +4,7 @@ import json
 from ctypes import wintypes
 
 from .uia_patterns import check_argument
+from .uia_press_state import kind, observation as observe
 
 PRESS_VERSION = 1
 KEYS = {"enter": (13, 0x1C), "tab": (9, 0x0F), "escape": (27, 0x01)}
@@ -86,8 +87,8 @@ def ancestry(provider, node):
     return []
 
 
-def target_hwnd(provider, node, messages):
-    chain = ancestry(provider, node)
+def target_hwnd(provider, node, messages, chain=None):
+    chain = ancestry(provider, node) if chain is None else chain
     if not chain:
         return None
     root = provider.prop(chain[-1], "NativeWindowHandle")
@@ -95,7 +96,7 @@ def target_hwnd(provider, node, messages):
         return next((handle for handle in (provider.prop(item, "NativeWindowHandle") for item in chain)
                      if messages.belongs(handle, root) and provider.scope.accepts(handle)), None)
     chrome = messages.class_name(provider.hwnd).startswith("Chrome_WidgetWin")
-    page = any(provider.properties(item).get("control_type") == "Document" for item in chain)
+    page = chrome and any(kind(provider, item) == "Document" for item in chain)
     handles = [provider.prop(item, "NativeWindowHandle") for item in chain]
     if chrome and page:
         candidates = [handle for handle in handles if handle and messages.belongs(handle, provider.hwnd)
@@ -108,13 +109,15 @@ def target_hwnd(provider, node, messages):
                                               if messages.belongs(handle, provider.hwnd)), None)
 
 
-def submit_hint(provider, node):
+def submit_hint(provider, node, chain=None):
     """Offer nearby explicit submit controls, without guessing which button to invoke."""
-    chain = ancestry(provider, node)
+    chain = ancestry(provider, node) if chain is None else chain
     if not chain:
         return None
     scope = chain[1] if len(chain) > 1 else chain[0]
     for child in provider.children(scope)[:80]:
+        if kind(provider, child) != "Button":
+            continue
         props = provider.properties(child)
         name = str(props.get("name", ""))[:100]
         if (provider.same_window(child) and props.get("enabled") and "Invoke" in props.get("patterns", [])
@@ -123,49 +126,18 @@ def submit_hint(provider, node):
     return None
 
 
-def observe(provider, node):
-    try:
-        state = provider.properties(node)
-    except Exception:  # navigation may have removed the field; title/address can still be read
-        state = {}
-    result = {key: state[key] for key in ("focused", "value") if key in state}
-    if state and provider.password(node):
-        result.pop("value", None)
-    result["window_title"] = provider.properties(provider.root()).get("name", "")
-    # Browser chrome only: never inspect page fields to infer a URL.
-    stack = [provider.root()]
-    for _ in range(256):
-        if not stack:
-            break
-        item = stack.pop()
-        try:
-            props = provider.properties(item)
-        except Exception:  # stale children must not hide a fresh window title
-            continue
-        if not provider.same_window(item) or props.get("control_type") == "Document":
-            continue
-        if (props.get("control_type") == "Edit" and not provider.password(item)
-                and (props.get("automation_id") in ("omnibox", "addressEditBox")
-                     or str(props.get("name", "")).casefold() in
-                     ("address and search bar", "search or enter web address"))):
-            if "value" in props:
-                result["url"] = props["value"]
-            break
-        stack.extend(reversed(provider.children(item)))
-    return result
-
-
 def press(provider, node, key, messages=None, active=lambda: True):
     check_argument("press", {"key": key})
     result = {"status": "no_effect", "hint": NO_EFFECT, "posted": 0}
     try:
         if not active():
             return result
-        if key == "enter" and (candidate := submit_hint(provider, node)):
+        chain = ancestry(provider, node)
+        if key == "enter" and (candidate := submit_hint(provider, node, chain)):
             return {**result, "native_submit": candidate,
                     "hint": "UIA submit candidate found; find it with screen_elements and invoke its id."}
         messages = messages or WindowMessages(provider.user32)
-        hwnd = target_hwnd(provider, node, messages)
+        hwnd = target_hwnd(provider, node, messages, chain)
         top = provider.user32.GetAncestor(hwnd, 2) if hwnd else None
         def belongs():
             return bool(top and messages.belongs(hwnd, top) and

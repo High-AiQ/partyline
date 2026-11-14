@@ -7,6 +7,7 @@ from io import BytesIO
 from websockets.exceptions import ConnectionClosed
 
 from .window_grab import GrabError, WindowGrab
+from .timing import Timing
 
 SNAPSHOT_VERSION = 2  # the `windows` hello value that includes window screenshots
 MAX_BYTES = 20 * 1024 * 1024  # the media store's own image limit: a larger one loses quality, never size
@@ -55,6 +56,7 @@ class WindowSnapshots:
             await self.reply(request_id, ok=False, error="the screenshot failed; see the helper's terminal")
 
     async def take(self, entry, message, request_id):
+        timing = Timing()
         access = entry["access"] if entry else None
         grant = access.grant if access else None
         if not grant:
@@ -63,8 +65,10 @@ class WindowSnapshots:
         await self.check(access, grant, generation)
         if await asyncio.to_thread(self.backend.minimized, grant["hwnd"]):
             raise GrabError(MINIMIZED)
-        image = await asyncio.to_thread(self.backend.grab, grant["hwnd"])
-        binary, mime, black = await asyncio.to_thread(prepare, image)
+        with timing.phase("capture_ms"):
+            image = await asyncio.to_thread(self.backend.grab, grant["hwnd"])
+        with timing.phase("encode_ms"):
+            binary, mime, black = await asyncio.to_thread(prepare, image)
         agent = str(message.get("agent") or "an agent")[:80]
 
         async def gate():
@@ -83,7 +87,7 @@ class WindowSnapshots:
                 raise GrabError("the helper could not write its audit log") from exc
         chunks = [binary[i:i + CHUNK] for i in range(0, len(binary), CHUNK)]
         await self.reply(request_id, chunks, gate, ok=True, mime=mime, width=image.width,
-                         height=image.height, media=True, chunks=len(chunks),
+                         height=image.height, media=True, chunks=len(chunks), timing=timing.values,
                          **({"blank": True} if black else {}))
 
     @staticmethod

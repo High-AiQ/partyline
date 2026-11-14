@@ -1,6 +1,7 @@
 """Snapshot event barriers, bounded capture and live diagnostics."""
 import asyncio
 
+from .screen_timing import phase
 from .screen_tree import MAX_NODES, MAX_TREE, STATE_FIELDS, Snapshot
 
 CAPTURE_SECONDS = 20  # bounds work; never establishes that a page finished changing
@@ -36,14 +37,16 @@ class ElementState:
     async def barrier(self, principal, grant, device, tree):
         if getattr(tree, "event_counter", None) is None:
             return True  # older helpers retain their TTL and pushed-event behavior
-        status = await self.exchange(principal, grant, device, "read_window_elements", event_status=True)
+        with phase("barrier_ms"):
+            status = await self.exchange(principal, grant, device, "read_window_elements", event_status=True)
         return (status.get("events_supported") is True and status.get("subscription_live") is True
                 and status.get("event_counter") == tree.event_counter)
 
     async def capture_status(self, principal, grant, device, tree):
         if getattr(tree, "event_counter", None) is None:
             return False
-        status = await self.exchange(principal, grant, device, "read_window_elements", event_status=True)
+        with phase("barrier_ms"):
+            status = await self.exchange(principal, grant, device, "read_window_elements", event_status=True)
         return status.get("event_counter") != tree.event_counter
 
     async def inspect(self, principal, grant, device, ident):
@@ -85,7 +88,9 @@ class ElementState:
                 tree.note = "tree inconsistent: events during capture; refresh"
                 return tree
             tree.space.renew()
+            scope, prior_helpers, action_ids = tree.scope, tree.prior_helpers, tree.action_ids
             tree = Snapshot(None, self.clock(), tree.space)
+            tree.scope, tree.prior_helpers, tree.action_ids = scope, prior_helpers, action_ids
             tree.event_version = self.change_versions.get(grant["id"], 0)
         return tree
 
@@ -94,6 +99,8 @@ class ElementState:
         started = tree.snapshot_id is not None
         while True:
             fields = {"cursor": tree.cursor} if tree.cursor else {}
+            if tree.scope:
+                fields["query_scope"] = tree.scope
             try:
                 response = await self.exchange(principal, grant, device, "read_window_elements", **fields)
             except TimeoutError:
@@ -114,14 +121,21 @@ class ElementState:
                 tree.changed = True
             tree.snapshot_id = tree.snapshot_id or response.get("snapshot_id")
             started = True
-            await asyncio.to_thread(tree.add, response.get("elements", []))
+            tree.scoped = response.get("scoped", False)
+            if tree.scope and not tree.scoped:
+                tree.scope = None  # legacy helper returns a complete snapshot
+                tree.action_ids.clear()
+                tree.prior_helpers.clear()
+            with phase("snapshot_store_ms"):
+                await asyncio.to_thread(tree.add, response.get("elements", []))
             if any(len(str(item.get("id", ""))) > OLD_ID for item in response.get("elements", ())):
                 tree.old_helper = True
             tree.cursor = response.get("next_cursor")
             tree.changed = tree.changed or bool(response.get("changed"))
             tree.note = ""
             if response.get("truncated") and not tree.cursor:
-                tree.note = "the helper cannot continue reading; update it"
+                tree.note = ("query result limit; narrow the name/type query" if tree.scoped else
+                             "the helper cannot continue reading; update it")
             if len(tree.order) >= MAX_TREE:
                 tree.cursor = None
                 tree.note = f"the window has more than the {MAX_TREE} elements one snapshot keeps"

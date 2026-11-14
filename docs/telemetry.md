@@ -136,3 +136,6 @@ It returns:
 
 Records expire after about 30 days. They are pruned whenever a new response is stored and by the
 storage retention cleanup, reads always exclude expired rows, and deleting a line deletes them.
+
+Screen calls also store their compact, content-free `timing` object in tool-call metrics. See
+[the UIA latency audit](screen-action-latency.md) for phase definitions and the ranked cost hypotheses.

@@ -2,6 +2,7 @@
 import time
 import uuid
 
+from .timing import Timing
 from .uia_identity import element_id
 from .uia_patterns import supported
 from .uia_walk_parts import Resolver, frame_bounds, is_wrapper
@@ -49,6 +50,7 @@ def next_unread(provider, resolver, stack, parents):
 def snapshot(provider, frame=None, clock=time.monotonic, limit=MAX_ELEMENTS, budget=BUDGET,
              state=None, max_visits=MAX_VISITS):
     """Depth-first walk in tree order. A stopped walk returns `state`, the stack still to read."""
+    timing = Timing()
     resolver = Resolver(provider)  # fetches the root: that first read does not count against the budget
     deadline = clock() + budget
     stack = [(tuple(path), parent) for path, parent in state["stack"]] if state else [((), None)]
@@ -97,4 +99,6 @@ def snapshot(provider, frame=None, clock=time.monotonic, limit=MAX_ELEMENTS, bud
                            "parents": next_unread(provider, resolver, stack, parents)}
     if changed:
         result["changed"] = True
-    return result
+    timing.values.update(walk_ms=timing.elapsed(timing.started), nodes=visited,
+                         com_calls=getattr(provider, "com_calls", 0))
+    return timing.finish(result)

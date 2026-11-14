@@ -68,6 +68,19 @@ class Snapshot:
         self.old_helper = False  # ids from a helper that predates cursors: it reads one 200-element part
         self.changed = False  # a resumed read found the page different: elements may be missing or repeated
         self.counts = None
+        self.scope, self.scoped = None, False
+        self.prior_helpers = {}
+        self.action_ids = {}  # older IDs are for live action validation, never cached query answers
+
+    def retain_actions(self, previous):
+        """A filtered capture cannot say that an earlier action target disappeared."""
+        if previous is None:
+            return
+        self.action_ids = dict(previous.action_ids) if previous.scoped else {}
+        self.action_ids.update((node.id, node.helper) for node in previous.nodes.values())
+        while len(self.action_ids) > MAX_TREE:
+            del self.action_ids[next(iter(self.action_ids))]
+        self.prior_helpers = {helper: ident for ident, helper in self.action_ids.items()}
 
     def add(self, items):
         for item in items:
@@ -84,7 +97,8 @@ class Snapshot:
             base = above if named(node) else node.parent
             place = (base, fingerprint(node))
             self.places[place] = self.places.get(place, -1) + 1
-            node.id = self.space.give(identity(base, node, self.places[place]))
+            node.id = (self.prior_helpers.get(node.helper, node.helper) if self.scoped else
+                       self.space.give(identity(base, node, self.places[place])))
             self.anchors[node.id] = node.id if named(node) else above
             self.by_helper[node.helper] = node.id
             self.nodes[node.id] = node

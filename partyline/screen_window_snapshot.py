@@ -20,6 +20,7 @@ from .screen_errors import screen_error
 from .screen_frame_store import frame_reference
 from .screen_grants import require_window, resolve_window
 from .screen_protocol import HEARTBEAT_TIMEOUT
+from .screen_timing import timed, phase, locked
 
 MAX_CHUNKS = 8  # binary messages one screenshot may travel in; the image itself is capped by the media store
 MIN_WINDOWS = 2  # the helper's `windows` hello value that can take window screenshots
@@ -71,11 +72,12 @@ class WindowSnapshots:
             data = b"".join(parts) if sum(map(len, parts)) <= MAX_IMAGE_BYTES else None
         self.hub.elements.receive(device, {**message, "data": data})
 
+    @timed
     async def take(self, principal, store, window=None, device_name=None):
         grant, device = resolve_window(self.hub, principal, window, device_name)
         if device.get("windows", 0) < MIN_WINDOWS:
             raise HTTPException(409, OLD_HELPER)
-        async with self.locks.setdefault(grant["id"], asyncio.Lock()):
+        async with locked(self.locks.setdefault(grant["id"], asyncio.Lock())):
             try:
                 answer = await self.hub.elements.exchange(principal, grant, device, "snapshot_window",
                                                           agent=principal.name)
@@ -85,7 +87,8 @@ class WindowSnapshots:
             if answer.get("ok") is not True:
                 reason = answer.get("error") or "the computer could not take the screenshot"
                 raise HTTPException(409, str(reason)[:300])
-            return await self.keep(store, principal, grant, answer)
+            with phase("image_store_ms"):
+                return await self.keep(store, principal, grant, answer)
 
     async def keep(self, store, principal, grant, answer):
         data, mime = answer.get("data"), answer.get("mime")
@@ -135,6 +138,7 @@ def snapshot_router(runtime, hub, store):
     router = APIRouter()
 
     @router.post("/api/conversations/{conv_id}/screen-window-snapshot")
+    @timed
     async def window_snapshot(conv_id: str, request: Request, device: str | None = None,
                               window: str | None = None):
         principal = request_principal(request)

@@ -1,5 +1,15 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-14 — A filtered read must not invalidate unrelated action targets
+
+The false assumption was that replacing a full snapshot with a selective query could also replace
+its target-ID set. After acting on field A with `then query`, field B's previously issued ID failed
+as stale even when the control had not changed, forcing another full capture. Scoped answers now
+retain bounded action-only ID mappings, and the helper merges element paths while preserving the
+full walk's epoch/cursors. A full refresh or revocation resets them; every retained action target
+still needs live runtime/path identity and consent validation. Server and helper regressions in
+`tests/test_screen_latency.py` and `tests/test_uia_latency.py` cover the two-field sequence.
+
 ## 2026-11-14 — Dropdown options need not be children of the ComboBox
 
 The false assumptions were that a granted HWND subtree contains every dropdown popup,

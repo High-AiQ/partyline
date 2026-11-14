@@ -10,6 +10,7 @@ from .machine_scope import deny_unless
 from .screen_grants import resolve_window
 from .screen_tree import OUT_BYTES
 from .screen_tree_answer import size
+from .screen_timing import timed, phase
 
 
 ACTIONS = Literal["invoke", "toggle", "set_value", "press", "select", "add_to_selection",
@@ -92,6 +93,7 @@ async def after(hub, principal, grant, then, result):
     return {key: item for key, item in reply.items() if key not in ("window", "snapshot_id")}
 
 
+@timed
 async def element_action(runtime, hub, conv_id: str, body: ElementAction, request: Request):
     principal = request_principal(request)
     deny_unless(runtime.db, principal, conv_id, "write")
@@ -102,7 +104,8 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
         message = body.parameters()
         if body.action == "press" and device.get("press", 0) < WINDOW_PRESS_VERSION:
             raise ValueError("update the Partyline helper to use press")
-        target, _ = await hub.elements.action_target(principal, grant, body.element_id)
+        with phase("target_ms"):
+            target, _ = await hub.elements.action_target(principal, grant, body.element_id)
         if target is None:
             return {"status": "failed", "error": REFRESH_FAILED}
         async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window

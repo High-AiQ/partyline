@@ -83,6 +83,13 @@ class WindowsUIATests(unittest.TestCase):
                            for item in result["elements"])
                 self.assertTrue(any(matches), (expected, result))
             assert_foreground()
+            from partyline_helper.uia_process import read
+            filtered = read(window["hwnd"], query={"query": "=Snapshot button"})
+            self.assertTrue(filtered.get("scoped"), filtered)
+            self.assertEqual(1, sum(item["name"] == "Snapshot button" for item in filtered["elements"]))
+            self.assertFalse(any(item["name"] == "Snapshot checkbox" for item in filtered["elements"]))
+            self.assertIn("walk_ms", filtered["timing"])
+            assert_foreground()
             # Read the same window in tiny parts: a first deep part, then per-parent resumed parts.
             import comtypes  # noqa: F401 - initialises COM for this thread
             from partyline_helper.uia_snapshot import snapshot as walk
