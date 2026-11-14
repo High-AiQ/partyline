@@ -19,6 +19,7 @@ from .git_fence import mirror_branch_ref
 from .hierarchy import parent_id_of
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_root
 from .worktree_paths import branch_name, managed_root
+from .worktree_recovery import locked_paths
 from .retirement_worktree import remove_directory
 from .retirement_orphan import empty_merged, empty_task, remove_empty, remove_task
 from .storage_ignored import ignored_reason
@@ -57,7 +58,7 @@ def remove_for_line(conv: dict | None, db=None) -> None:
         if ignored_reason(cwd):
             return
         remove_directory(cwd, root)
-        _git("worktree", "remove", "--force", cwd, cwd=root)
+        _git("worktree", "remove", "--force", "--force", cwd, cwd=root)
     except (OSError, subprocess.SubprocessError):
         pass
 
@@ -254,9 +255,11 @@ def sweep_orphaned_worktrees(db) -> None:
 
     Archive and purge remove a worktree as part of the same request, but a
     server stopped mid-request, or a database edited by hand, can leave one
-    behind. This never touches a worktree that still belongs to a line —
-    live or archived.
+    behind. Existing checkouts belonging to live or archived lines stay untouched;
+    missing initializing registrations are recovered separately.
     """
+    from .worktree_recovery import heal_initializing
+    heal_initializing(db)
     conversations = db.list_conversations(archived=False) + db.list_conversations(archived=True)
     known_cwds = {row["cwd"] for row in conversations if row.get("cwd")}
     # A line's cwd column is written once it is placed, but a root line's own
@@ -267,8 +270,7 @@ def sweep_orphaned_worktrees(db) -> None:
         "SELECT DISTINCT cwd FROM attachments WHERE cwd IS NOT NULL AND cwd != ''"
     ).fetchall()
     known_cwds |= {row["cwd"] for row in attachment_cwds}
-    # Ask git for the repo, not string-splitting on WORKTREES_DIR: every known
-    # cwd — a repo's own root as much as a worktree under it — names a root.
+    # Every known cwd, including a root attachment's, names a repository.
     roots = {root for cwd in known_cwds if (root := repo_root(cwd))}
     for root in sorted(roots):
         _sweep_repo(root, known_cwds, db)
@@ -279,9 +281,10 @@ def sweep_orphaned_worktrees(db) -> None:
 def _sweep_repo(root: str, known_cwds: set[str], db=None) -> None:
     worktrees_dir = os.path.join(root, WORKTREES_DIR)
     if os.path.isdir(worktrees_dir):
+        locked = locked_paths(root)
         for name in sorted(os.listdir(worktrees_dir)):
             path = os.path.join(worktrees_dir, name)
-            if os.path.islink(path) or not os.path.isdir(path) or path in known_cwds:
+            if path in locked or os.path.islink(path) or not os.path.isdir(path) or path in known_cwds:
                 continue
             bases = [base for base in (_default_branch(root),) if base]
             merged = bool(bases) and _in_history(path, "HEAD", bases)

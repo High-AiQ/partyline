@@ -61,10 +61,12 @@ def pin_router(runtime) -> APIRouter:
         writable(principal)
         alias = body.alias.strip() if body.alias else None
         alias = alias or None
-        if not set_alias(runtime.db, conv_id, message_id, alias):
+        # A pin the line lists is the only one that can be edited (bridge rows stay hidden).
+        if not any(pin["message_id"] == message_id for pin in list_pins(runtime.db, conv_id)):
             raise HTTPException(404, "pin not found")
-        await publish(conv_id)
-        return next(pin for pin in list_pins(runtime.db, conv_id) if pin["message_id"] == message_id)
+        set_alias(runtime.db, conv_id, message_id, alias)
+        pins = await publish(conv_id)
+        return next(pin for pin in pins if pin["message_id"] == message_id)
 
     @router.delete(
         "/api/conversations/{conv_id}/pins/{message_id}", response_model=list[PinResponse]

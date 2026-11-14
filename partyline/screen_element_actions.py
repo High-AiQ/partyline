@@ -1,4 +1,4 @@
-"""Route element actions to the window granted to the calling attachment."""
+"""Route element actions to a window granted to the calling process's line, one at a time per window."""
 from typing import Literal
 
 from fastapi import HTTPException, Request
@@ -69,6 +69,7 @@ class ElementAction(BaseModel):
 
 STALE = ("unknown element id: not in the current snapshot (the page changed or it was never read); "
          "find it again, or pass then to see the page after a click")
+REFRESH_FAILED = "could not refresh the window; read it again before acting"
 
 
 async def after(hub, principal, grant, then, result):
@@ -92,15 +93,24 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
     try:
         grant, device = resolve_window(hub, principal, body.window)
         message = body.parameters()
-        message["element_id"], known = hub.elements.helper_id(grant["id"], body.element_id)
-        if not known:
-            return {"status": "failed", "error": STALE}
-        hub.window_grants.spend(grant)
-        response = await hub.elements.exchange(principal, grant, device, "window_element_action",
-                                               agent=principal.name, **message)
+        target, _ = await hub.elements.action_target(principal, grant, body.element_id)
+        if target is None:
+            return {"status": "failed", "error": REFRESH_FAILED}
+        async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window
+            message["element_id"], known = hub.elements.locked_target(grant["id"], body.element_id)
+            if message["element_id"] is None:
+                return {"status": "failed", "error": REFRESH_FAILED}
+            if not known:
+                return {"status": "failed", "error": STALE}
+            hub.window_grants.spend(grant)
+            response = await hub.elements.exchange(principal, grant, device, "window_element_action",
+                                                   agent=principal.name, **message)
         result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
-        if body.then and result.get("status") == "completed" and not result.get("grant_ended"):
-            result["after"] = await after(hub, principal, grant, body.then, result)
+        if result.get("status") == "completed" and not result.get("grant_ended"):
+            if body.then:
+                result["after"] = await after(hub, principal, grant, body.then, result)
+            tree = hub.elements.snapshots.get(grant["id"])
+            hub.elements.action_completed(grant["id"], bool(body.then and tree))
         return result
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc

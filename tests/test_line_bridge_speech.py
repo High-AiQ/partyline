@@ -1,9 +1,9 @@
-"""An ambassador's bridge message is said on its own line, and only its copy stays off the chat."""
+"""An ambassador's bridge message never reaches the chat; only the bridge log shows it."""
 
+import asyncio
 import unittest
 
 from partyline.bridge_store import mark_closed
-from partyline.message_queries import select_message_by_id
 from tests import test_line_bridge as _bridge_tests
 
 Base = _bridge_tests.LineBridgeTest
@@ -21,34 +21,64 @@ class BridgeSpeechTest(unittest.TestCase):
     rows = Base.rows
     opened = Base.opened
 
-    def test_an_answer_with_a_bridge_message_stays_in_the_chat_and_the_peer_gets_the_copy(self):
-        self.opened()
+    def test_a_bridge_message_stays_out_of_the_chat_on_both_lines_and_in_the_log(self):
+        bridge = self.opened()
+        sockets = {"x": _bridge_tests.Socket(), "y": _bridge_tests.Socket()}
+        self.runtime.sockets["x"], self.runtime.sockets["y"] = {sockets["x"]}, {sockets["y"]}
         self.assertEqual(self.say("x", "x-amb", ANSWER).status_code, 200)
-        page = self.client.get("/api/conversations/x/messages", headers=self.person)
-        shown = [m for m in page.json()["messages"] if m["body"] == ANSWER]
-        self.assertEqual(len(shown), 1)
-        self.assertIsNotNone(shown[0]["bridge_id"])
-        self.assertEqual(shown[0]["bridge_peer_conv_name"], "tool")
+        for conv in ("x", "y"):
+            page = self.client.get(f"/api/conversations/{conv}/messages", headers=self.person)
+            self.assertFalse(any(m["body"] == ANSWER for m in page.json()["messages"]), conv)
+            self.assertFalse(any(m.get("bridge_id") for m in page.json()["messages"]), conv)
+            self.assertEqual([p for p in sockets[conv].sent if p.get("type") == "message"
+                              and p["message"]["body"] == ANSWER], [], conv)
         woken = self.adapters["y-amb"].delivered
         self.assertEqual([m["body"] for m in woken], [ANSWER])
         self.assertEqual(woken[0]["audience_attachment_id"], "y-amb")
         for other in ("x-other", "y-other"):
             self.assertEqual(self.adapters[other].delivered, [])
-        peer_page = self.client.get("/api/conversations/y/messages", headers=self.person)
-        self.assertFalse(any(m["body"] == ANSWER for m in peer_page.json()["messages"]))
+        log = self.client.get(f"/api/bridges/{bridge['id']}/messages", headers=self.person)
+        self.assertEqual([m["body"] for m in log.json()], [ANSWER, ANSWER])
 
-    def test_the_peer_name_on_the_tag_survives_the_bridge_closing(self):
+    def test_a_pty_spoken_bridge_message_is_not_fanned_out_to_people(self):
+        bridge = self.opened()
+        socket = _bridge_tests.Socket()
+        self.runtime.sockets["x"] = {socket}
+        att = self.db.get_attachment("x-amb")
+        post = self.runtime.post_callback("x-amb", "x", att["runtime_owner"])
+        asyncio.run(post("sonnet", "agent", "@[bridge]fable via the pty"))
+        self.assertEqual(socket.sent, [])
+        log = self.client.get(f"/api/bridges/{bridge['id']}/messages", headers=self.person)
+        self.assertEqual(len(log.json()), 2)
+
+    def test_a_reaction_on_a_bridge_row_does_not_resurface_it(self):
+        self.opened()
+        self.say("x", "x-amb", "@[bridge]fable secret plan")
+        original = [r for r in self.rows("x") if r["bridge_id"]][-1]
+        reacted = self.client.post(f"/api/messages/{original['id']}/reactions",
+                                   json={"emoji": "👍"}, headers=self.person)
+        self.assertEqual(reacted.status_code, 404)
+        page = self.client.get("/api/conversations/x/messages", headers=self.person)
+        self.assertFalse(any("secret plan" in m["body"] for m in page.json()["messages"]))
+
+    def test_the_log_stays_readable_after_the_bridge_closes(self):
         bridge = self.opened()
         self.say("x", "x-amb", "@[bridge]fable done")
         mark_closed(self.db, bridge["id"], "greg", "test")
+        log = self.client.get(f"/api/bridges/{bridge['id']}/messages", headers=self.person)
+        self.assertEqual(len(log.json()), 2)
         page = self.client.get("/api/conversations/x/messages", headers=self.person)
-        tagged = [m for m in page.json()["messages"] if m["body"] == "@[bridge]fable done"]
-        self.assertEqual(tagged[0]["bridge_peer_conv_name"], "tool")
+        self.assertFalse(any("done" in m["body"] for m in page.json()["messages"]))
 
-    def test_the_counterpart_copy_names_the_line_it_came_from(self):
+    def test_the_open_notice_points_to_the_bridge_log(self):
         self.opened()
-        self.say("x", "x-amb", "@[bridge]fable hi")
-        copy = [r for r in self.rows("y") if r["bridge_id"]][-1]
-        self.assertEqual(self.db.message_by_id("y", copy["id"]), None)
-        raw = select_message_by_id(self.db._exec, "y", copy["id"])
-        self.assertEqual(raw["bridge_peer_conv_name"], "3d game")
+        notices = [r["body"] for r in self.rows("x") if r["sender_type"] == "system"
+                   and r["audience_attachment_id"] is None and r["body"].startswith("⇄ bridge opened")]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("Manage → Bridges → view log", notices[0])
+
+    def test_the_close_notice_does_not_promise_a_log_that_is_gone(self):
+        bridge = self.opened()
+        mark_closed(self.db, bridge["id"], "greg", "test")
+        from partyline.bridge_pack import close_line_notice
+        self.assertNotIn("view log", close_line_notice("a", "b", "line", "greg"))

@@ -1,5 +1,17 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-14 — A failed worktree add can leave a locked registration
+
+The false assumption was that an unsuccessful `git worktree add` creates nothing and
+that `worktree prune` clears every missing checkout. Git's transient `initializing`
+lock can survive an interrupted checkout; prune skips locked entries, and removal
+requires two force flags. Failed adds now undo their own registration, newly created
+branch and partial directory, including the repository whose add failed. Retirement
+removes its own locked worktrees; archive and startup recovery remove only missing
+managed registrations with the exact `initializing` reason and no live line owner.
+Other lock reasons and external paths are preserved. Real Git regressions:
+`tests/test_worktree_recovery.py`.
+
 ## 2026-11-13 — Rotation is not staffing
 
 The false assumption was that restarting an existing process for context hygiene must

@@ -109,6 +109,66 @@ class CaptureReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.desktop.grabs), 3)
         self.assertEqual(self.socket.sent[-2]["type"], "preview")
 
+    async def test_unknown_monitor_is_answered_with_the_request_id(self):
+        await self.session.dispatch(dict(type="get_preview", request_id="gone", monitor_id=99))
+        self.assertEqual(self.socket.sent, [dict(type="error", request_id="gone",
+                                                 message="monitor 99 is not connected to this computer")])
+        self.assertEqual(self.desktop.grabs, [])
+
+    async def test_failed_grab_or_encode_is_answered_and_does_not_lock_out_the_retry(self):
+        preview = dict(type="get_preview", request_id="p", monitor_id=1, long_edge=80)
+        for failure in (RuntimeError("capture did not start"), LookupError(), MemoryError("4K")):
+            with self.subTest(failure=repr(failure)):
+                self.socket.sent.clear()
+                with patch.object(self.desktop, "grab", side_effect=failure):
+                    await self.session.dispatch(preview)
+                reply = self.socket.sent[-1]
+                self.assertEqual((reply["type"], reply["request_id"]), ("error", "p"))
+                self.assertIn("could not capture monitor 1", reply["message"])
+                self.assertNotIn(1, self.session.preview_times)
+        await self.session.dispatch(preview)  # same clock: only the cleared rate limit lets this through
+        self.assertEqual(self.socket.sent[-2]["type"], "preview")
+        with patch("partyline_helper.preview.encode", side_effect=ValueError("too big")):
+            self.clock.advance(3)
+            await self.session.dispatch(dict(preview, request_id="e"))
+        self.assertEqual(self.socket.sent[-1]["request_id"], "e")
+        self.assertIn("too big", self.socket.sent[-1]["message"])
+
+    async def test_a_capture_that_never_returns_is_reported_and_later_requests_still_work(self):
+        import threading
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        preview = dict(type="get_preview", request_id="stuck", monitor_id=1, long_edge=80)
+        def stuck(_monitor):
+            gate.wait()
+            return self.desktop.image
+
+        with patch.object(self.desktop, "grab", side_effect=stuck), \
+                patch("partyline_helper.preview.GRAB_SECONDS", 0):
+            await self.session.dispatch(preview)
+            self.assertEqual(self.socket.sent[-1]["request_id"], "stuck")
+            self.assertIn("did not finish", self.socket.sent[-1]["message"])
+            await self.session.dispatch(dict(preview, request_id="second"))
+            self.assertEqual(self.socket.sent[-1]["request_id"], "second")
+            self.assertIn("has not finished", self.socket.sent[-1]["message"])
+            await self.session.dispatch(dict(type="ping"))  # the message loop is not stuck behind it
+            self.assertEqual(self.socket.sent[-1]["type"], "pong")
+            self.session.share, self.session.accepted, self.session.started = request(long_edge=80), True, 0
+            self.session.last_capture_image = Image.new("RGB", (200, 100), "white")
+            await self.session.dispatch(dict(type="snap", share_id="share", request_id="snap"))
+            self.assertEqual(self.socket.sent[-2]["type"], "frame")  # snaps use the share's own capture
+        gate.set()
+        await self.session.grab_task
+        await self.session.dispatch(dict(preview, request_id="third"))
+        self.assertEqual(self.socket.sent[-2]["type"], "preview")
+        self.assertEqual(self.socket.sent[-2]["request_id"], "third")
+
+    async def test_a_closed_socket_is_not_answered_twice(self):
+        from websockets.exceptions import ConnectionClosed
+        with patch.object(self.session, "send", side_effect=ConnectionClosed(None, None)):
+            with self.assertRaises(ConnectionClosed):
+                await self.session.dispatch(dict(type="get_preview", request_id="p", monitor_id=1))
+
     async def test_snap_refusal_precedes_capture_and_serializes_concurrent_requests(self):
         req = request()
         req["max_fps"] = 1

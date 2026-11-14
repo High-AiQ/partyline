@@ -12,6 +12,7 @@ def _pin_row(row) -> dict:
 
 
 def list_pins(db, conv_id: str) -> list[dict]:
+    """A line's pins; a pin on a bridge row (saved before bridge traffic left the chat) stays hidden."""
     has_images = db._exec(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='images'"
     ).fetchone() is not None
@@ -25,7 +26,7 @@ def list_pins(db, conv_id: str) -> list[dict]:
         f"{file_count} AS file_count "
         "FROM message_pins p LEFT JOIN messages m "
         "ON m.id=p.message_id AND m.conv_id=p.conv_id "
-        "WHERE p.conv_id=? ORDER BY p.created_at, p.message_id",
+        "WHERE p.conv_id=? AND m.bridge_id IS NULL ORDER BY p.created_at, p.message_id",
         (conv_id,),
     )
     return [_pin_row(row) for row in rows.fetchall()]

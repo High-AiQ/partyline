@@ -2,6 +2,7 @@ import { mount, tick, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ScreenControls from "./ScreenControls.svelte";
 import { screenApi } from "../../lib/screen-api";
+import { ApiError } from "../../lib/http";
 import { screenStatus } from "../../state/screen-status.svelte.js";
 import { room } from "../../state/room.svelte.js";
 
@@ -192,6 +193,89 @@ describe("helper update notice", () => {
     expect(notices).toHaveLength(1);
     expect(notices[0]?.textContent).toContain("install command");
     expect(document.querySelector("[data-testid=helper-update-download]")).toBeNull();
+    await unmount(component);
+  });
+});
+
+describe("monitor preview failure", () => {
+  const monitor = { id: 1, x: 0, y: 0, width: 3840, height: 2160, scale: 1, primary: true };
+  const open = async () => {
+    vi.spyOn(screenApi, "current").mockResolvedValue({ share: null });
+    screenStatus.devices = [{ id: "d", name: "Desk", os: "Windows", online: true, monitors: [monitor] }];
+    room.conversation = {
+      id: "line",
+      name: "Line",
+      topic: "",
+      created_at: 1,
+      archived_at: null,
+      live_count: 0,
+    };
+    const component = mount(ScreenControls, { target: document.body });
+    await tick();
+    screenStatus.openPicker++;
+    await settle();
+    const press = (label: string) => {
+      const button = [...document.querySelectorAll("button")].find((item) =>
+        item.textContent.includes(label),
+      );
+      if (!button) throw new Error(`no button: ${label}`);
+      button.click();
+    };
+    press("Desk (online)");
+    await settle();
+    return { component, press };
+  };
+
+  it("shows the server's reason, never a bare status, and still shares the full monitor", async () => {
+    const reason = "Desk did not send a preview within 10 s; the helper may be busy or outdated";
+    vi.spyOn(screenApi, "preview").mockRejectedValue(new ApiError(reason, 504));
+    const start = vi.spyOn(screenApi, "start").mockResolvedValue({ share_id: "s", status: "waiting" });
+    const { component, press } = await open();
+    const note = document.querySelector("[data-testid=preview-unavailable]");
+    expect(note?.textContent).toContain(`Preview unavailable: ${reason}`);
+    expect(document.body.textContent).not.toContain("request failed");
+    press("1 (3840 × 2160)");
+    await settle();
+    expect(document.body.textContent).toContain("The full monitor can still be shared");
+    press("Share screen");
+    await settle();
+    expect(start).toHaveBeenCalledWith("line", "d", { x: 0, y: 0, width: 3840, height: 2160 }, false);
+    await unmount(component);
+  });
+
+  it("keeps the other monitors' previews when one fails", async () => {
+    vi.spyOn(screenApi, "preview").mockImplementation((_device, id) =>
+      id === 1
+        ? Promise.reject(new ApiError("Preview rate limit", 409))
+        : Promise.resolve({ out_width: 1, out_height: 1, mime: "image/webp", data: "AAAA" }),
+    );
+    screenStatus.devices = [];
+    vi.spyOn(screenApi, "current").mockResolvedValue({ share: null });
+    screenStatus.devices = [
+      {
+        id: "d",
+        name: "Desk",
+        os: "Windows",
+        online: true,
+        monitors: [monitor, { ...monitor, id: 2 }],
+      },
+    ];
+    room.conversation = {
+      id: "line",
+      name: "Line",
+      topic: "",
+      created_at: 1,
+      archived_at: null,
+      live_count: 0,
+    };
+    const component = mount(ScreenControls, { target: document.body });
+    await tick();
+    screenStatus.openPicker++;
+    await settle();
+    [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Desk (online)"))?.click();
+    await settle();
+    expect(document.querySelectorAll("[data-testid=preview-unavailable]")).toHaveLength(1);
+    expect(document.querySelectorAll("button img")).toHaveLength(1);
     await unmount(component);
   });
 });

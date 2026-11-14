@@ -247,6 +247,48 @@ class WindowsCaptureBindingContractTests(unittest.TestCase):
         self.assertEqual(second.getpixel((1, 0)), (0, 255, 0))
 
 
+    def test_a_capture_that_never_finishes_does_not_hold_the_preview(self):
+        import threading
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self.addCleanup(setattr, desktop_module.Desktop, "_cleanup", None)
+        desktop = desktop_module.Desktop.__new__(desktop_module.Desktop)
+        for emits in (True, False):
+            StrictFakeWindowsCapture.emit_frame_on_start = emits
+            with self.subTest(frame_arrives=emits), \
+                    patch.object(desktop_module.Desktop, "supports_capture", new_callable=PropertyMock,
+                                 return_value=True), \
+                    patch.dict(sys.modules, {"windows_capture": self.binding}), \
+                    patch.object(FakeCaptureControl, "wait", lambda _self: gate.wait()), \
+                    patch.object(desktop_module, "RELEASE_SECONDS", 0), \
+                    patch.object(desktop_module, "FRAME_SECONDS", 0):
+                gate.set()
+                if desktop_module.Desktop._cleanup:
+                    desktop_module.Desktop._cleanup.join()  # released by the gate, not by a deadline
+                gate.clear()
+                StrictFakeWindowsCapture.instances.clear()
+                if emits:
+                    self.assertEqual(desktop.grab({"id": 1}).size, (2, 1))
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "did not deliver"):
+                        desktop.grab({"id": 1})
+                self.assertEqual(len(StrictFakeWindowsCapture.instances), 1)
+                # Retries, and a reconnected session's fresh Desktop, start nothing while cleanup hangs.
+                for again in (desktop, desktop_module.Desktop.__new__(desktop_module.Desktop)) * 2:
+                    with self.assertRaisesRegex(RuntimeError, "still shutting down"):
+                        again.grab({"id": 1})
+                self.assertEqual(len(StrictFakeWindowsCapture.instances), 1)
+                with desktop_module.Desktop._grab_lock:
+                    with self.assertRaisesRegex(RuntimeError, "still running"):
+                        desktop.grab({"id": 1})
+                gate.set()
+                desktop_module.Desktop._cleanup.join()
+                gate.clear()
+                StrictFakeWindowsCapture.emit_frame_on_start = True
+                self.assertEqual(desktop.grab({"id": 1}).size, (2, 1))  # recovers once cleanup ends
+                self.assertEqual(len(StrictFakeWindowsCapture.instances), 2)
+
+
 @unittest.skipUnless(__import__("sys").platform == "win32", "Windows Graphics Capture is Windows only")
 class NativeWindowsCaptureTests(unittest.TestCase):
     def test_captures_a_real_tk_window(self):

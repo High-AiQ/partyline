@@ -21,6 +21,7 @@ import tempfile
 
 from .hierarchy import lead_attachment, parent_id_of
 from .worktree_paths import branch_name, managed_root
+from .worktree_recovery import add_worktree
 
 WORKTREES_DIR = ".partyline-worktrees"
 REVIEW_DIR = ".review"
@@ -239,17 +240,16 @@ def place_child(
         os.makedirs(os.path.dirname(path), exist_ok=True)
         _exclude(root)
         if base:
-            done = _git("worktree", "add", "-b", branch, path, base, cwd=root)
+            done = add_worktree(root, path, "-b", branch, path, base, git=_git, branch=branch)
             if done.returncode != 0:
-                # Belt and braces: a fresh branch should always add cleanly; if
-                # git still refuses, fail — the caller rolls the birth back.
+                # The failed add has been undone; the caller rolls the birth back.
                 _forget_worktrees_dir(root)
                 placed = {"cwd": parent_cwd, "branch": None, "base": None}
                 return placed
         else:
-            done = _git("worktree", "add", "-b", branch, path, cwd=root)
+            done = add_worktree(root, path, "-b", branch, path, git=_git, branch=branch)
             if done.returncode != 0:  # belt and braces: adopt the branch as a last resort
-                done = _git("worktree", "add", path, branch, cwd=root)
+                done = add_worktree(root, path, path, branch, git=_git)
         if done.returncode == 0:
             placed = {"cwd": path, "branch": branch, "base": base}
     if placed["cwd"]:

@@ -53,13 +53,12 @@ processes, opened and closed only by a person.
    - **No relaying onward:** bridge copies are foreign-sourced, so they are never relayed again
      (`is_foreign`). A copy only moves if its recipient replies with its own `@[bridge]` mention,
      so nothing ping-pongs on its own.
-4. **People see the ambassador's own speech, never the copy.**
-   - The sender's original (`bridge_id`, no audience) is an ordinary message on its own line: it is
-     in human transcript reads and the human WebSocket fan-out, marked with a `⇄ «peer line»` tag.
-   - The copy delivered to the counterpart (`bridge_id` and an audience) is excluded from human
-     transcript reads and the human fan-out on both lines, the same way reaction notices already are
-     (`message_visibility.py`). Processes never see either row through their digests, except the
-     copy's addressee: the original is hidden from the line's other processes' digests.
+4. **People don't see bridge traffic in the chat.**
+   - Messages carrying `bridge_id` are excluded from human transcript reads and from the human
+     WebSocket fan-out on both lines, the same way reaction notices already are
+     (`message_visibility.py`). Processes on the line other than the ambassador are not shown them
+     either: the copy has an audience, and the sender's original is hidden from the line's other
+     processes' digests.
    - The rows stay in the database as an audit log, readable by a person at
      `GET /api/bridges/<id>/messages`.
 5. **Rate limit:** 30 bridge messages per side per 10 minutes.
@@ -85,7 +84,9 @@ processes, opened and closed only by a person.
      notice: "bridge to @x on «line» closed by <person | reason>; @[bridge] no longer delivers;
      disregard the bridge pack".
    - **Notice to people:** one ordinary system notice on each line records the open and the close,
-     with who did it and when, so people see that the bridge existed.
+     with who did it and when, so people see that the bridge existed. The open notice also points to
+     the audit log: "people read bridge messages under Manage → Bridges → view log". The log is
+     read while the bridge is open; the close notice does not promise it.
 7. **The pack follows the bridge.**
    - **While open:** the bridge pack is part of the ambassador's startup and resume briefing and its
      post-compaction re-briefing.
@@ -95,9 +96,9 @@ processes, opened and closed only by a person.
 ## The bridge pack (text injected to each ambassador)
 
 > **Bridge open.** You are this line's ambassador to @<peer> on «<peer line>», a separate project.
-> - Address it with `@[bridge]<peer>`. That whole message goes to @<peer>, and your line's people
->   see it in the chat, marked as bridge speech. Processes on your line don't see it, so report
->   anything they need in a separate, normal message.
+> - Address it with `@[bridge]<peer>`. That whole message goes only to @<peer>. The people on your
+>   line don't see bridge messages (they can read the bridge log), so report anything they or your
+>   line's processes need in a separate, normal message, never inside an @[bridge] message.
 > - Its replies reach you as private messages marked as coming over the bridge.
 > - Only text crosses: no files, tokens, credentials or secrets. Its line's checkout, fence and
 >   people are not yours, and yours are not its.
@@ -140,8 +141,8 @@ processes, opened and closed only by a person.
     Lines in the same tree aren't offered.
   - **Open bridge:** shows both sides and the time it opened, with **Close bridge**.
   - **Audit log:** a "view log" disclosure lists the bridge messages, read-only.
-- **Transcript.** An ambassador's own bridge message appears in its line's transcript, tagged
-  `⇄ «peer line»`. The copy the counterpart receives never does. The open and close notices do.
+- **Transcript.** Bridge traffic never appears in either line's transcript. The open and close
+  notices do.
 
 ## Out of scope for v1
 

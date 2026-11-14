@@ -1,4 +1,5 @@
 """Cheap window navigation: exact queries, whole-name text, stable ids, patterns and click-then-read."""
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -453,7 +454,76 @@ class SchemaTests(unittest.TestCase):
         action = {"element_id": "a", "action": "invoke"}
         tools_control.call(client, "screen_element_action", action, {"actions": ["write"]})
         tools_control.call(client, "screen_element_action", {**action, "then": {}}, {"actions": ["write"]})
-        self.assertEqual([{"timeout": 40}, {"timeout": 100}], calls)
+        self.assertEqual([{"timeout": 100}, {"timeout": 160}], calls)
+
+    def test_action_deadline_covers_paged_recapture_action_and_optional_then_read(self):
+        from partyline.screen_element_actions import ElementAction, element_action
+
+        principal = SimpleNamespace(name="agent", kind="machine", attachment_id="a")
+        grant = {**GRANT, "hwnd": 42}
+        device = {"id": "d"}
+        durations = []
+
+        def operation(with_then):
+            now = [3.1]  # start with an expired snapshot so the action must recapture
+            hub = ElementsHub(SimpleNamespace(devices={"d": device}), clock=lambda: now[0])
+            space = IdSpace()
+            old = Snapshot("old", 0, space)
+            old.add([{"id": "old-window", "control_type": "Window", "name": "Bookshelf"},
+                     {"id": "old-button", "parent": "old-window", "control_type": "Button",
+                      "name": "Continue", "enabled": True, "actions": ["invoke"]}])
+            old.event_version = 0
+            hub.spaces["g"] = space
+            hub.remember("g", old)
+            stable_id = next(key for key, node in old.nodes.items() if node.name == "Continue")
+            hub.window_grants = SimpleNamespace(spend=lambda _grant: None)
+
+            async def exchange(_principal, _grant, _device, kind, **fields):
+                if kind == "read_window_elements":
+                    if not fields.get("cursor"):
+                        now[0] += 19
+                        return {"snapshot_id": "live", "next_cursor": "next", "elements": [
+                            {"id": "window", "control_type": "Window", "name": "Bookshelf"}]}
+                    now[0] += 32  # permitted helper exchange started just before capture's 20s deadline
+                    return {"elements": [{"id": "button-live", "parent": "window",
+                                           "control_type": "Button", "name": "Continue",
+                                           "enabled": True, "actions": ["invoke"]}]}
+                now[0] += 30
+                return {"status": "completed"}
+
+            hub.exchange = exchange
+
+            async def settle():
+                now[0] += 0.5
+
+            hub.settle = settle
+            runtime = SimpleNamespace(db=None)
+            action_hub = SimpleNamespace(elements=hub, window_grants=hub.window_grants)
+            body = {"element_id": stable_id, "action": "invoke"}
+            if with_then:
+                body["then"] = {}
+
+            def request(_method, _path, _args, *, timeout):
+                started = now[0]
+                deadline = started + timeout
+                result = asyncio.run(element_action(runtime, action_hub, "line",
+                                                    ElementAction(**body), None))
+                if now[0] > deadline:
+                    raise TimeoutError("MCP response deadline elapsed")
+                durations.append(now[0] - started)
+                return result
+
+            client = SimpleNamespace(home="line", request=request)
+            with patch("partyline.screen_element_actions.request_principal", return_value=principal), \
+                 patch("partyline.screen_element_actions.deny_unless"), \
+                 patch("partyline.screen_element_actions.resolve_window", return_value=(grant, device)), \
+                 patch("partyline.screen_elements.resolve_window", return_value=(grant, device)), \
+                 patch("partyline.screen_elements.require_window"):
+                return tools_control.call(client, "screen_element_action", body, {"actions": ["write"]})
+
+        self.assertEqual("completed", operation(False)["status"])
+        self.assertEqual("completed", operation(True)["status"])
+        self.assertEqual([81, 132.5], durations)
 
     def test_descriptions_stay_short(self):
         from partyline.mcp.tools_screen import ELEMENTS_NOTE

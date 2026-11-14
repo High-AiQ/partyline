@@ -88,7 +88,8 @@ class ScreenHub:
                 return
             current = {**device, "socket": ws, "name": hello.device_name,
                        "os": hello.os, "helper_version": hello.helper_version, "control": hello.control,
-                       "tools": hello.tools, "monitors": [item.model_dump() for item in hello.monitors],
+                       "tools": hello.tools, "windows": hello.windows,
+                       "monitors": [item.model_dump() for item in hello.monitors],
                        "last_seen": time.monotonic()}
             old = self.devices.get(ident)
             if old:
@@ -166,7 +167,7 @@ class ScreenHub:
                 elif kind == "error":
                     request_id = message.get("request_id")
                     entry = self.snap_waiters.get(request_id)
-                    error = ValueError(str(message.get("message", "helper error")))
+                    error = ValueError(str(message.get("message") or "the computer reported an error"))
                     if entry and entry[0].device_id == ident and not entry[1].done():
                         entry[1].set_exception(error)
                     entry = self.preview_waiters.get(request_id)

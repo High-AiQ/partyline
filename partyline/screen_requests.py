@@ -5,9 +5,12 @@ import uuid
 
 from fastapi import WebSocketDisconnect
 from .op_timing import pushed
+from .screen_errors import HelperTimeout
 
 SNAP_TIMEOUT_SECONDS = 3
-PREVIEW_TIMEOUT_SECONDS = 3
+# A 4K monitor grab plus encode takes seconds on a cold capture backend, and the helper
+# answers one preview at a time, so the last of several monitors waits for the others.
+PREVIEW_TIMEOUT_SECONDS = 10
 
 
 def active(hub, share) -> bool:
@@ -86,7 +89,8 @@ async def preview(hub, device_id, owner_id, monitor_id):
                                                "monitor_id": actual_id, "long_edge": 640}))
             return await future
     except TimeoutError:
-        raise
+        raise HelperTimeout(f"{device['name']} did not send a preview within "
+                            f"{PREVIEW_TIMEOUT_SECONDS} s; the helper may be busy or outdated") from None
     except (OSError, RuntimeError, WebSocketDisconnect) as exc:
         raise ValueError("computer disconnected during preview") from exc
     finally:

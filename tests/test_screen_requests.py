@@ -62,7 +62,7 @@ class ScreenRequestTest(unittest.IsolatedAsyncioTestCase):
 
     def device(self, socket):
         self.hub.devices["device"] = {"id": "device", "owner_id": self.share.owner_id,
-                                      "socket": socket, "monitors": [{"id": 1}]}
+                                      "socket": socket, "monitors": [{"id": 1}], "name": "Desk"}
 
     async def test_screen_elements_route(self):
         with patch.object(self.hub.elements, "read",
@@ -107,6 +107,42 @@ class ScreenRequestTest(unittest.IsolatedAsyncioTestCase):
                 await task
             self.assertEqual(self.hub.snap_waiters, {})
             self.assertEqual(self.hub.preview_waiters, {})
+
+    async def test_preview_timeout_is_a_504_that_names_the_computer(self):
+        self.device(Socket())
+        with patch("partyline.screen_requests.PREVIEW_TIMEOUT_SECONDS", 0):
+            response = await self.client.post("/api/screen/preview?device_id=device&monitor_id=1")
+        self.assertEqual(504, response.status_code)
+        self.assertEqual("Desk did not send a preview within 0 s; the helper may be busy or outdated",
+                         response.json()["detail"])
+        self.assertEqual(self.hub.preview_waiters, {})
+
+    async def test_cold_4k_capture_has_headroom(self):
+        from partyline.screen_requests import PREVIEW_TIMEOUT_SECONDS
+        self.assertGreaterEqual(PREVIEW_TIMEOUT_SECONDS, 10)
+
+    async def test_empty_exception_text_still_gives_a_reason(self):
+        from partyline.screen_errors import screen_error
+        timeout, refused = screen_error(TimeoutError(), "Desk"), screen_error(ValueError(""))
+        self.assertEqual(504, timeout.status_code)
+        self.assertIn("Desk did not answer in time", timeout.detail)
+        self.assertEqual(409, refused.status_code)
+        self.assertTrue(refused.detail)
+        self.assertEqual("bad region", screen_error(ValueError("bad region")).detail)
+
+    async def test_snap_and_control_routes_never_return_an_empty_detail(self):
+        for path, name in (("/api/conversations/line/screen-frame", "capture"),
+                           ("/api/conversations/line/screen-control/request", "request"),
+                           ("/api/conversations/line/screen-control/action", "action")):
+            body = {"kind": "click", "x": 1, "y": 1} if name == "action" else None
+            target = (self.hub, name) if name == "capture" else (self.hub.control, name)
+            for failure in (TimeoutError(), ValueError("")):
+                with self.subTest(path=path, failure=repr(failure)), \
+                        patch.object(*target, side_effect=failure):
+                    response = await self.client.post(path, json=body)
+                    self.assertIn(response.status_code, (409, 422, 504), response.text)
+                    if response.status_code != 422:
+                        self.assertTrue(response.json()["detail"])
 
     async def test_send_deadlines_are_bounded(self):
         self.device(Socket(block=True))

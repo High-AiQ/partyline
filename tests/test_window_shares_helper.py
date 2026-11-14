@@ -13,8 +13,8 @@ from partyline_helper.window_target_picker import select_target
 from tests.screen_helper_fakes import FakeDesktop, FakeSocket, FakeTerminal
 
 
-TARGET = {"attachment_id": "a", "name": "agent", "preset": "Codex",
-          "line_id": "alpha", "line_name": "Alpha"}
+PROCESS = {"attachment_id": "a", "name": "agent", "preset": "Codex"}
+TARGET = {"line_id": "alpha", "line_name": "Alpha"}
 WINDOW = {"hwnd": 10, "pid": 42, "title": "Editor", "process": "editor.exe"}
 
 
@@ -27,7 +27,8 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
                                     target_picker=lambda _: TARGET)
         self.session.windows = self.manager
         self.targets = {"request_id": "targets", "lines": [
-            {"line_id": "alpha", "line_name": "Alpha", "processes": [TARGET]}]}
+            {"line_id": "alpha", "line_name": "Alpha", "processes": [PROCESS]},
+            {"line_id": "quiet", "line_name": "Quiet", "processes": []}]}
         self.manager.request = AsyncMock(side_effect=[self.targets, {"ok": True, "target": TARGET}])
         checking = patch("partyline_helper.window_shares.WindowAccess.check",
                          new=AsyncMock(return_value=None))
@@ -53,6 +54,18 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.manager.grants)
         self.assertFalse(self.session.status.window_grants)
 
+    async def test_a_window_is_registered_with_the_chosen_line_never_a_process(self):
+        await self.manager.choose()
+        call = self.manager.request.await_args_list[1]
+        kind, fields = call.args[0], call.kwargs
+        self.assertEqual("window_grant", kind)
+        self.assertEqual("alpha", fields["line_id"])
+        self.assertNotIn("attachment_id", fields)
+        ident = next(iter(self.manager.grants))
+        self.assertEqual("Editor → «Alpha»", self.session.status.window_grants[ident])
+        self.session.tools.audit.append.assert_called_with(
+            "event", "window", "local", "window_read", "granted: Editor (editor.exe) to line «Alpha»")
+
     async def test_two_windows_have_independent_elements_workers_and_revoke(self):
         self.manager.request = AsyncMock(side_effect=[self.targets, {"ok": True, "target": TARGET}] * 2)
         await self.manager.choose()
@@ -73,7 +86,7 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
         await self.manager.receive({"type": "revoke_window", "grant_id": first})
         self.assertTrue(first_access.gate.revoked.is_set())
         self.assertEqual([second], list(self.manager.grants))
-        self.assertIn("Browser → @agent «Alpha»", self.session.status.label)
+        self.assertIn("Browser → «Alpha»", self.session.status.label)
         self.manager.revoke_all()
         self.assertFalse(self.manager.grants)
         self.assertIsNone(self.session.status.window_title)
@@ -182,29 +195,45 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TargetPickerTests(unittest.TestCase):
+    LINES = [{"line_id": "alpha", "line_name": "Alpha", "processes": [PROCESS]},
+             {"line_id": "quiet", "line_name": "Quiet", "processes": []}]
+
     def test_native_subprocess_selection_cancel_and_failure(self):
-        lines = [{"line_id": "alpha", "line_name": "Alpha", "processes": [TARGET]}]
         def select(command, **kwargs):
             path = Path(command[-1])
-            self.assertEqual(lines, json.loads(path.read_text())["lines"])
+            self.assertEqual([{"line_id": "alpha", "line_name": "Alpha", "processes": 1},
+                              {"line_id": "quiet", "line_name": "Quiet", "processes": 0}],
+                             json.loads(path.read_text())["lines"])
             path.write_text(json.dumps({"selected": TARGET}))
-        self.assertEqual(TARGET, select_target(lines, run=select))
-        self.assertIsNone(select_target(lines, run=lambda *_, **__: None))
+        self.assertEqual(TARGET, select_target(self.LINES, run=select))
+        self.assertIsNone(select_target(self.LINES, run=lambda *_, **__: None))
         self.assertIsNone(select_target([], run=Mock(side_effect=AssertionError)))
         with patch("partyline_helper.window_target_picker.sys.frozen", True, create=True):
-            self.assertEqual(TARGET, select_target(lines, run=select))
-        self.assertIsNone(select_target(lines, run=Mock(side_effect=OSError)))
-        self.assertIsNone(select_target(lines, run=Mock(side_effect=subprocess.TimeoutExpired("picker", 65))))
+            self.assertEqual(TARGET, select_target(self.LINES, run=select))
+        self.assertIsNone(select_target(self.LINES, run=Mock(side_effect=OSError)))
+        self.assertIsNone(select_target(self.LINES,
+                                        run=Mock(side_effect=subprocess.TimeoutExpired("picker", 65))))
+
+    def test_a_line_with_no_process_can_be_chosen_and_is_labelled_for_the_person(self):
+        from partyline_helper.window_target_picker import line_text
+
+        def choose(command, **kwargs):
+            path = Path(command[-1])
+            path.write_text(json.dumps({"selected": {"line_id": "quiet", "line_name": "Quiet"}}))
+        self.assertEqual({"line_id": "quiet", "line_name": "Quiet"}, select_target(self.LINES, run=choose))
+        self.assertEqual("«Quiet» — no process attached yet",
+                         line_text({"line_name": "Quiet", "processes": 0}))
+        self.assertEqual("«Alpha» — 1 attached process", line_text({"line_name": "Alpha", "processes": 1}))
+        self.assertEqual("«Alpha» — 3 attached processes", line_text({"line_name": "Alpha", "processes": 3}))
 
     def test_picker_temp_file_and_selection_strip_private_server_fields(self):
         secret = "private-hook-secret"
-        target = {**TARGET, "runtime_owner": secret}
-        lines = [{"line_id": "alpha", "line_name": "Alpha", "runtime_owner": secret,
-                  "processes": [target]}]
+        lines = [{**line, "runtime_owner": secret} for line in self.LINES]
         def choose(command, **kwargs):
             path = Path(command[-1])
             content = path.read_text()
             self.assertNotIn(secret, content)
             self.assertNotIn("runtime_owner", content)
-            path.write_text(json.dumps({"selected": target}))
+            self.assertNotIn("attachment_id", content)  # a line is chosen, never a process
+            path.write_text(json.dumps({"selected": {**TARGET, "runtime_owner": secret}}))
         self.assertEqual(TARGET, select_target(lines, run=choose))

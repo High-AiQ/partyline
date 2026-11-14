@@ -6,6 +6,7 @@ from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 from .media import MediaError
 from .screen_control_actions import ControlAction, describe
+from .screen_errors import screen_error
 from .screen_frame_store import frame_reference
 
 
@@ -19,8 +20,8 @@ def control_router(runtime, hub, store) -> APIRouter:
         conv = runtime.db.get_conversation(conv_id)
         try:
             return await hub.control.request(conv_id, principal.name, conv["name"])
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+        except (ValueError, TimeoutError) as exc:
+            raise screen_error(exc) from exc
 
     @router.post("/api/conversations/{conv_id}/screen-control/action")
     async def act(conv_id: str, body: ControlAction, request: Request):
@@ -34,7 +35,7 @@ def control_router(runtime, hub, store) -> APIRouter:
                 ref, unchanged = await frame_reference(
                     store, share, principal.name, frame, frame.data, frame.mime)
         except (ValueError, TimeoutError) as exc:
-            raise HTTPException(409, str(exc)) from exc
+            raise screen_error(exc) from exc
         except MediaError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         note = " The frame may predate the action; call screen_frame." if stale else ""

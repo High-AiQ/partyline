@@ -49,7 +49,7 @@ def remove_nested(db, conv_id: str, cwd: str) -> list[str]:
                 kept.append(path)
                 continue
             remove_directory(path, item["repository"])
-            _git("worktree", "remove", "--force", path, cwd=item["repository"])
+            _git("worktree", "remove", "--force", "--force", path, cwd=item["repository"])
         except (OSError, subprocess.SubprocessError):
             kept.append(path)
             continue

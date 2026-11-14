@@ -2,7 +2,7 @@
 import asyncio
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -59,7 +59,8 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                    return_value=SimpleNamespace(name="agent")), \
              patch("partyline.screen_element_actions.deny_unless"), \
              patch("partyline.screen_element_actions.resolve_window", return_value=(grant, device)), \
-             patch("partyline.screen_elements.require_window"):
+             patch("partyline.screen_elements.require_window"), \
+             patch.object(elements, "action_target", new=AsyncMock(return_value=("target", True))):
             with self.assertRaises(HTTPException) as error:
                 await element_action(SimpleNamespace(db=None), hub, "line", body("scroll"), None)
             self.assertEqual(409, error.exception.status_code)

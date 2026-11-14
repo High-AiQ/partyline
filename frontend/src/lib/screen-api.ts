@@ -77,7 +77,7 @@ export const screenApi = {
         encodeURIComponent(deviceId) +
         "&monitor_id=" +
         encodeURIComponent(String(monitorId)),
-      { schema: PreviewSchema, method: "POST" },
+      { schema: PreviewSchema, method: "POST", fallback: "the computer did not send a preview" },
     ),
   start: (
     convId: string,
@@ -88,6 +88,7 @@ export const screenApi = {
     request("/api/screen/shares?conv_id=" + encodeURIComponent(convId), {
       schema: StartSchema,
       method: "POST",
+      fallback: "the computer could not start sharing",
       body: { device_id, region, walkthrough },
     }),
   stop: (shareId: string) =>

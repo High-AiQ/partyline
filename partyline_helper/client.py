@@ -2,19 +2,20 @@
 import asyncio
 import contextlib
 import json
-import math
 import platform
 import time
 
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
-from .bounds import MAX_MESSAGE_BYTES, bounded, validate_request
+from .bounds import MAX_MESSAGE_BYTES, validate_request
 from .control import CONTROL_VERSION, Control
 from .desktop import pointer_state
 from .images import encode
+from .preview import get_preview
 from .status import Status
 from .tools import MESSAGES as TOOL_MESSAGES, TOOLS_VERSION, Tools
+from .window_shares import WINDOWS_VERSION
 from .transport import CertificateError, certificate_failure
 from .version import helper_version
 from .uia_access import WindowAccess
@@ -38,6 +39,7 @@ class Session(SessionTransport):
         self.lock = asyncio.Lock()
         self.frame_lock = asyncio.Lock()
         self.preview_times = preview_times if preview_times is not None else {}
+        self.grab_task = None
         self.accepted = False
         self.last_frame_at = None
         self.share = None
@@ -169,19 +171,7 @@ class Session(SessionTransport):
         elif kind == "snap" and self.share and message["share_id"] == self.share["share_id"]:
             await self.frame(message["request_id"])
         elif kind == "get_preview":
-            monitor = next(m for m in self.desktop.monitors() if m["id"] == message["monitor_id"])
-            now = self.clock()
-            if now - self.preview_times.get(monitor["id"], -math.inf) < 3:
-                await self.send("error", request_id=message["request_id"],
-                                message="Preview rate limit: one per monitor every 3 seconds")
-                return
-            self.preview_times[monitor["id"]] = now
-            print(f"Taking preview of monitor {monitor['id']}", flush=True)
-            edge = min(480, int(bounded(message.get("long_edge"), 480, 1, 32768)))
-            image = await asyncio.to_thread(self.desktop.grab, monitor)
-            binary, width, height, mime = encode(image, edge)
-            await self.send("preview", binary, request_id=message["request_id"], monitor_id=monitor["id"],
-                            out_width=width, out_height=height, mime=mime)
+            await get_preview(self, message)
         elif kind in ("control_request", "control_revoked", "action"):
             await self.control.dispatch(message)
         elif kind in TOOL_MESSAGES:
@@ -214,7 +204,8 @@ class Session(SessionTransport):
     async def run(self):
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
                         helper_version=helper_version(), monitors=self.desktop.monitors(),
-                        control=CONTROL_VERSION, tools=TOOLS_VERSION, update_check=True)
+                        control=CONTROL_VERSION, tools=TOOLS_VERSION, windows=WINDOWS_VERSION,
+                        update_check=True)
         self.status.set("paired")
         loop = asyncio.get_running_loop()
         # The tray's Stop sharing runs on another thread: hand the stop to this loop.
@@ -231,8 +222,10 @@ class Session(SessionTransport):
                 try:
                     message = json.loads(raw)
                     await self.dispatch(message)
-                except (ValueError, KeyError, TypeError, StopIteration, RuntimeError, OSError) as exc:
-                    print(f"Helper request failed: {exc}", flush=True)
+                except ConnectionClosed:
+                    raise
+                except Exception as exc:  # whatever fails, the caller must get an answer, not a timeout
+                    print(f"Helper request failed: {exc!r}", flush=True)
                     request_id = message.get("request_id") if isinstance(message, dict) else None
                     await self.send("error", request_id=request_id,
                                     message="Invalid request or capture failed; see local terminal")

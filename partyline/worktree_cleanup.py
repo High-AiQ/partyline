@@ -79,7 +79,7 @@ def cleanup(db, root: str, path: str, merged: bool, *, force: bool = False) -> t
                         return False, ignored
                     remove_directory(path, root)
                 try:
-                    _git("worktree", "remove", "--force", path, cwd=root)
+                    _git("worktree", "remove", "--force", "--force", path, cwd=root)
                 except (OSError, subprocess.SubprocessError):
                     pass  # Never report failure after successful removal.
                 return not os.path.isdir(path), None

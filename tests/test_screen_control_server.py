@@ -634,6 +634,6 @@ class McpControlToolsTest(unittest.TestCase):
         self.assertEqual("completed", result["status"])
         self.assertEqual(("POST", "/api/conversations/line/screen-control/element-action", action),
                          calls[0][0])
-        self.assertEqual({"timeout": 40}, calls[0][1])
+        self.assertEqual({"timeout": 100}, calls[0][1])
         with self.assertRaises(ApiError):
             tools_control.call(client, "screen_element_action", action, {"actions": ["read"]})

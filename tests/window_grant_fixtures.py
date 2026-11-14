@@ -1,4 +1,4 @@
-"""Attachment-scoped, cross-line window grants use real routes and no real-time waits."""
+"""Line-scoped window grants use real routes and no real-time waits."""
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -35,7 +35,7 @@ class WindowGrantFixture:
         device_id, _, _, _ = self.hub.claim_pair_code(code, "Computer", "test")
         self.sent = []
         self.device = {"id": device_id, "owner_id": self.owner["id"],
-                       "name": "Computer", "monitors": [], "helper_version": "1",
+                       "name": "Computer", "monitors": [], "helper_version": "1.1.0", "windows": 1,
                        "socket": SimpleNamespace(send_json=self.receive)}
         self.hub.devices[device_id] = self.device
 
@@ -60,13 +60,22 @@ class WindowGrantFixture:
         return {"Authorization": "Bearer " + auth_tokens.create_access_token(
             auth_tokens.signing_secret(self.db), user["id"])}
 
-    async def grant(self, ident, title="Editor", grant_id="g1", hwnd=10, **extra):
+    async def offer(self, request_id="targets"):
         await self.hub.window_grants.from_helper(
-            self.device, {"type": "list_share_targets", "request_id": "targets"})
+            self.device, {"type": "list_share_targets", "request_id": request_id})
+        return self.sent[-1]
+
+    async def grant_line(self, line, title="Editor", grant_id="g1", hwnd=10, **extra):
+        """A helper that shares a window with a line, as the picker does."""
+        await self.offer()
         await self.hub.window_grants.from_helper(self.device, {"type": "window_grant", "request_id": "req",
-            "grant_id": grant_id, "attachment_id": ident, "targets_request_id": "targets",
+            "grant_id": grant_id, "line_id": line, "targets_request_id": "targets",
             "title": title, "process": "editor.exe", "hwnd": hwnd, **extra})
         return self.sent[-1]
+
+    async def grant(self, ident, title="Editor", grant_id="g1", hwnd=10, **extra):
+        """Share with the line `ident` is attached to."""
+        return await self.grant_line(self.db.get_attachment(ident)["conv_id"], title, grant_id, hwnd, **extra)
 
     async def read(self, ident, window=None):
         line = self.db.get_attachment(ident)["conv_id"]
