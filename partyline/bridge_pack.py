@@ -7,9 +7,10 @@ def pack_text(peer: str, peer_line: str) -> str:
     return (
         f"**Bridge open.** You are this line's ambassador to @{peer} on «{peer_line}», "
         "a separate project.\n"
-        f"- Address it with `@[bridge]{peer}`. That whole message goes to @{peer}, and your "
-        "line's people see it in the chat, marked as bridge speech. Processes on your line "
-        "don't see it, so report anything they need in a separate, normal message.\n"
+        f"- Address it with `@[bridge]{peer}`. That whole message goes only to @{peer}. "
+        "The people on your line don't see bridge messages (they can read the bridge log), so "
+        "report anything they or your line's processes need in a separate, normal message, "
+        "never inside an @[bridge] message.\n"
         "- Its replies reach you as private messages marked as coming over the bridge.\n"
         "- Only text crosses: no files, tokens, credentials or secrets. Its line's checkout, "
         "fence and people are not yours, and yours are not its.\n"
@@ -38,8 +39,9 @@ def close_notice(peer: str, peer_line: str, by: str) -> str:
 
 def open_line_notice(me: str, peer: str, peer_line: str, by: str) -> str:
     return (f"⇄ bridge opened by {by}: {me} is this line's ambassador to {peer} on «{peer_line}»; "
-            f"address it by writing @[bridge]{peer} in a normal chat message — there is no bridge tool")
+            f"address it by writing @[bridge]{peer} in a normal chat message — there is no bridge tool; "
+            "people read bridge messages under Manage → Bridges → view log")
 
 
 def close_line_notice(me: str, peer: str, peer_line: str, by: str) -> str:
-    return f"⇄ bridge closed by {by}: {me} and {peer} on «{peer_line}» are no longer bridged"
+    return (f"⇄ bridge closed by {by}: {me} and {peer} on «{peer_line}» are no longer bridged")
