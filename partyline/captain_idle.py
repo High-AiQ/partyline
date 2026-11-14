@@ -110,11 +110,13 @@ async def check(runtime, presence, captain):
     row = db._exec('SELECT items FROM captain_idle_verdicts WHERE attachment_id=?',
                    (captain['id'],)).fetchone()
     previous = row['items'] if row else None
-    busy = (presence.is_working(captain['id']) or presence.queue.held_count(captain['id'])
-            or _busy(runtime, presence, captain, lines))
-    if previous != key or busy:
+    # The captain's own turn is the answer to the alert, not progress: it suppresses without
+    # resetting the verdict, or every answer would make the same alert fire again.
+    own = bool(presence.is_working(captain['id']) or presence.queue.held_count(captain['id']))
+    others = _busy(runtime, presence, captain, lines)
+    if previous != key or others:
         db._exec('DELETE FROM captain_idle_verdicts WHERE attachment_id=?', (captain['id'],))
-    if not items or busy or previous == key:
+    if not items or own or others or previous == key:
         return
     db._exec('INSERT OR REPLACE INTO captain_idle_verdicts(attachment_id,items) VALUES(?,?)',
              (captain['id'], key))
