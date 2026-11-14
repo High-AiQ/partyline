@@ -12,7 +12,7 @@ from partyline_helper.uia_action_worker import run_action
 from partyline_helper.uia_snapshot import snapshot
 from tests.test_uia_page_content import Browser
 
-GRANT = {"hwnd": 10, "pid": 42, "title": "KDP Bookshelf", "process": "chrome.exe"}
+GRANT = {"hwnd": 10, "pid": 42, "title": "Catalog Dashboard", "process": "chrome.exe"}
 
 
 def rows(lines):
@@ -110,7 +110,7 @@ class NavigationTests(PageCase):
         self.assertNotIn("partial", summary)
         self.assertLess(len(summary["outline"]), 40)
         self.assertIn("Hyperlink", summary["types"])
-        self.assertEqual("KDP Bookshelf", summary["window_title"])
+        self.assertEqual("Catalog Dashboard", summary["window_title"])
         self.assertIn("Document", "\n".join(summary["outline"]))
 
     async def test_ls_find_and_text_use_the_stored_snapshot_without_another_helper_read(self):

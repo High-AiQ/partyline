@@ -8,6 +8,7 @@ file — including this one — contains a full identifier.
 """
 
 import os
+import re
 import subprocess
 import unittest
 from unittest import mock
@@ -28,7 +29,7 @@ def denylist_terms() -> set[str]:
     return {term.lower() for term in DENYLIST} | extras
 
 
-def tracked_files() -> list[str]:
+def tracked_files(skip_files=SKIP_FILES) -> list[str]:
     listed = subprocess.run(
         ["git", "ls-files", "-z"], check=True, capture_output=True
     ).stdout
@@ -36,7 +37,7 @@ def tracked_files() -> list[str]:
     return [
         path
         for path in paths
-        if path not in SKIP_FILES and not path.startswith(SKIP_PREFIXES)
+        if path not in skip_files and not path.startswith(SKIP_PREFIXES)
     ]
 
 
@@ -67,4 +68,33 @@ class RepoHygieneTest(unittest.TestCase):
             offenders.extend(
                 f"{path}: {term}" for term in sorted(terms) if term in text
             )
+        self.assertEqual(offenders, [])
+
+
+CLIENT_NAMES = re.compile(
+    r"\b(?:" + "|".join(("K" + "DP", "Kindle " + "Direct", "A\\+ " + "Content", "Ama" + "zon")) + r")\b"
+)
+CLIENT_SKIP_PREFIXES = SKIP_PREFIXES + ("docs/",)
+
+
+class NoClientNamesTest(unittest.TestCase):
+    """The public repo names no client site or product workflow; fixtures use neutral examples."""
+
+    def test_the_pattern_matches_the_names_it_guards(self):
+        samples = ("K" + "DP Bookshelf", "A+ " + "Content", "Ama" + "zon.com", "Kindle " + "Direct Pub")
+        for sample in samples:
+            self.assertTrue(CLIENT_NAMES.search(sample), sample)
+        self.assertIsNone(CLIENT_NAMES.search("Catalog Dashboard, Manage listing content"))
+
+    def test_no_tracked_file_outside_docs_names_a_client(self):
+        offenders = []
+        for path in tracked_files(skip_files=()):
+            if path.startswith(CLIENT_SKIP_PREFIXES):
+                continue
+            with open(path, "rb") as handle:
+                data = handle.read()
+            if b"\0" in data:
+                continue
+            text = data.decode("utf-8", errors="replace")
+            offenders.extend(f"{path}: {match}" for match in sorted(set(CLIENT_NAMES.findall(text))))
         self.assertEqual(offenders, [])

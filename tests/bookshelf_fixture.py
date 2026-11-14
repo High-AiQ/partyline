@@ -3,7 +3,7 @@ import hashlib
 
 SERIES = ["Harbor Lights", "The Quiet Orchard", "Salt and Ember", "Paper Kingdoms", "Lantern Row",
           "Winter Atlas", "Copper Sky", "River of Glass", "Northbound", "The Long Dusk"]
-URL = "https://kdp.example.com/en_US/bookshelf"
+URL = "https://catalog.example.com/en_US/bookshelf"
 
 
 def helper_id(snapshot, number):
@@ -29,7 +29,7 @@ class Builder:
 def title(page, row):
     return (f"Book in {SERIES[row]} A Very Long Title Number {page * 10 + row}: the second part of a "
             f"series, with a subtitle that runs well past the old cap and says what the story is about "
-            f"in many more words, Kindle eBook, Live")
+            f"in many more words, Paperback ed, Live")
 
 
 def bookshelf(page=1, snapshot=None, nodes=425, shifted=False):
@@ -45,7 +45,7 @@ def bookshelf(page=1, snapshot=None, nodes=425, shifted=False):
     for button in ("Back", "Forward", "Reload", "Extensions", "Profile", "Menu"):
         out.add(chrome, "Button", button, actions=["invoke"])
     out.add(chrome, "Edit", "Address", URL + f"#{page}", ["set_value"])
-    document = out.add(window, "Document", "Amazon Kindle Direct Publishing", URL + f"#{page}")
+    document = out.add(window, "Document", "Catalog Dashboard", URL + f"#{page}")
     banner = out.add(document, "Group", "")
     menu = out.add(banner, "List", "Main menu")
     for number, label in enumerate(("Bookshelf", "Reports", "Community", "Marketing", "Help", "Sign out")):
@@ -59,7 +59,7 @@ def bookshelf(page=1, snapshot=None, nodes=425, shifted=False):
     for row in range(10):
         item = out.add(table, "DataItem", title(page, row), actions=["scroll_into_view"])
         out.add(item, "Text", SERIES[row])
-        out.add(item, "Text", "Kindle eBook")
+        out.add(item, "Text", "Paperback ed")
         out.add(item, "Text", "Live")
         for label in ("Edit eBook", "Promote and advertise", "Order author copies"):
             button = out.add(item, "Button", label, actions=["invoke", "scroll_into_view"])

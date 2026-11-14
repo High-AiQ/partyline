@@ -69,7 +69,7 @@ class FindLinesTests(unittest.TestCase):
     def test_unnamed_wrappers_are_left_out_of_a_path(self):
         stored = load()
         link = named(stored, "Hyperlink", "Reports")
-        self.assertEqual("Document Amazon Kindle Direct Pub > List Main menu > ListItem", stored.path(link))
+        self.assertEqual("Document Catalog Dashboard > List Main menu > ListItem", stored.path(link))
 
     def test_a_lone_scroll_into_view_is_dropped_but_other_actions_stay(self):
         stored = Snapshot("s", 0)
@@ -88,7 +88,7 @@ class NamesAndTextTests(unittest.TestCase):
         self.assertIn("Harbor Lights", lines)
         self.assertTrue(lines[0].startswith("Book in Harbor Lights"))
         self.assertEqual("Harbor Lights", lines[1])
-        self.assertEqual(len(lines), len([line for line in lines if line != "Kindle eBook"]) + 10)
+        self.assertEqual(len(lines), len([line for line in lines if line != "Paperback ed"]) + 10)
 
     def test_a_name_that_text_below_already_says_is_not_repeated(self):
         stored = load()
