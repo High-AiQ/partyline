@@ -36,6 +36,8 @@ class PressProvider(PatternProvider):
         self.focus_ignored = False
         self.after_focus = lambda: None
         self.user32 = Mock()
+        self.user32.GetAncestor.return_value = 1
+        self.scope = SimpleNamespace(accepts=lambda handle: True)
         self.handles = {0: 1, 1: 0}
         self.parents = {1: 0}
         self.kinds = {0: "Window", 1: "Edit"}

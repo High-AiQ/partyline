@@ -73,10 +73,12 @@ class WindowSnapshots:
             entry["last_screenshot"] = {"at": self.clock(), "by": agent}
             self.shares.changed()
             try:
+                names = image.info.get("scoped_popups", [])
+                popup_info = f", owned popups: {', '.join(names)}" if names else ""
                 self.shares.session.tools.audit.append(
                     "event", "window", agent, "window_snapshot",
                     f"{grant['title']} ({grant['process']}): {image.width}x{image.height}, "
-                    f"{len(binary)} bytes")
+                    f"{len(binary)} bytes{popup_info}")
             except OSError as exc:  # the person's record comes first: no entry, no image
                 raise GrabError("the helper could not write its audit log") from exc
         chunks = [binary[i:i + CHUNK] for i in range(0, len(binary), CHUNK)]

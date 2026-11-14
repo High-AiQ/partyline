@@ -2,7 +2,7 @@
 import ctypes
 
 from .uia_patterns import PATTERN
-from .uia_popups import WindowScope, configure
+from .uia_popups import WindowScope, configure, popup_name
 from .uia_expand_events import structure_call
 
 PATTERNS = {10000: "Invoke", 10015: "Toggle", 10002: "Value", 10010: "SelectionItem",
@@ -126,25 +126,22 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
         handle = self.prop(node, "NativeWindowHandle")
         popup = self.popup_nodes.get(tuple(self.runtime_id(node)))
         if popup is not None:
-            return (self.prop(node, "ProcessId") == self.scope.pid and self.scope.accepts(popup)
+            return (self.prop(node, "ProcessId") == self.scope.process(popup) and self.scope.accepts(popup)
                     and (not handle or self.scope.accepts(handle)))
         if not handle or self.user32.GetAncestor(handle, 2) == self.hwnd:
             return True  # granted subtree can contain hosted content from another process
-        accepted = self.prop(node, "ProcessId") == self.scope.pid and self.scope.accepts(handle)
+        accepted = self.prop(node, "ProcessId") == self.scope.process(handle) and self.scope.accepts(handle)
         if accepted:
             self.popup_nodes[tuple(self.runtime_id(node))] = self.user32.GetAncestor(handle, 2)
         return accepted
 
     def offscreen(self, node):
         return bool(self.prop(node, "IsOffscreen"))
-
     def password(self, node):
         return bool(self.prop(node, "IsPassword"))
-
     def read_only(self, node):
         pattern = node.GetCurrentPattern(10002).QueryInterface(self.uia.IUIAutomationValuePattern)
         return bool(pattern.CurrentIsReadOnly)
-
     def pattern(self, node, ident, name):
         return node.GetCurrentPattern(ident).QueryInterface(getattr(self.uia, f"IUIAutomation{name}Pattern"))
 
@@ -205,6 +202,7 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
 
     def refresh(self):
         self.top, self.popup_roots = None, None
+        self.__dict__.pop("_popup_names", None)
 
     def children(self, node):
         """Control-view children by index; the snapshot and the action recheck both use this."""
@@ -235,6 +233,8 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
                   "focused": bool(self.prop(node, "HasKeyboardFocus")),
                   "focusable": bool(self.prop(node, "IsKeyboardFocusable")),
                   "offscreen": bool(self.prop(node, "IsOffscreen")), "patterns": patterns}
+        if name := popup_name(self, node):
+            result["scope_window"] = name
         if not result["enabled"]:
             result["aria_properties"] = str(self.prop(node, "AriaProperties") or "")[:160]
         handle = self.prop(node, "NativeWindowHandle")

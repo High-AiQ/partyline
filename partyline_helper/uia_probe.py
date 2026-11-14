@@ -32,6 +32,10 @@ class LiveProvider(WindowsProvider):  # pragma: no cover - native Windows walker
         while child and len(children) < 20000:
             children.append(child)
             child = self.walker.GetNextSiblingElement(child)
+        popup = self.popup_nodes.get(tuple(self.runtime_id(node)))
+        if popup is not None:
+            for child in children:
+                self.popup_nodes[tuple(self.runtime_id(child))] = popup
         if self.prop(node, "NativeWindowHandle") == self.hwnd:
             known = {self.prop(child, "NativeWindowHandle") for child in children}
             children.extend(popup for popup in self.popups()

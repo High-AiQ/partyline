@@ -78,7 +78,9 @@ def ancestry(provider, node):
         if not node or not provider.same_window(node):
             break
         chain.append(node)
-        if provider.prop(node, "NativeWindowHandle") == provider.hwnd:
+        handle = provider.prop(node, "NativeWindowHandle")
+        if handle == provider.hwnd or (handle and provider.scope.accepts(handle) and
+                                       provider.user32.GetAncestor(handle, 2) == handle):
             return chain
         node = provider.walker.GetParentElement(node)
     return []
@@ -88,6 +90,10 @@ def target_hwnd(provider, node, messages):
     chain = ancestry(provider, node)
     if not chain:
         return None
+    root = provider.prop(chain[-1], "NativeWindowHandle")
+    if root != provider.hwnd:
+        return next((handle for handle in (provider.prop(item, "NativeWindowHandle") for item in chain)
+                     if messages.belongs(handle, root) and provider.scope.accepts(handle)), None)
     chrome = messages.class_name(provider.hwnd).startswith("Chrome_WidgetWin")
     page = any(provider.properties(item).get("control_type") == "Document" for item in chain)
     handles = [provider.prop(item, "NativeWindowHandle") for item in chain]
@@ -160,7 +166,11 @@ def press(provider, node, key, messages=None, active=lambda: True):
                     "hint": "UIA submit candidate found; find it with screen_elements and invoke its id."}
         messages = messages or WindowMessages(provider.user32)
         hwnd = target_hwnd(provider, node, messages)
-        if not hwnd or not messages.belongs(hwnd, provider.hwnd):
+        top = provider.user32.GetAncestor(hwnd, 2) if hwnd else None
+        def belongs():
+            return bool(top and messages.belongs(hwnd, top) and
+                        (top == provider.hwnd or provider.scope.accepts(hwnd)))
+        if not belongs():
             return {**result, "hint": "No unambiguous HWND in this grant; invoke a UIA control instead."}
         foreground = provider.foreground()
         if not active():
@@ -171,13 +181,13 @@ def press(provider, node, key, messages=None, active=lambda: True):
         before = observe(provider, node)  # focus preparation is not a key effect
         if not before.get("focused"):
             return {**result, "hint": "UIA did not confirm target focus; no key was posted."}
-        if not messages.belongs(hwnd, provider.hwnd) or target_hwnd(provider, node, messages) != hwnd:
+        if not belongs() or target_hwnd(provider, node, messages) != hwnd:
             return {**result, "hint": "The target HWND changed; read the window again."}
         code, scan = KEYS[key]
         flags = 1 | (scan << 16)
         # No TranslateMessage dependency: explicitly post the character as well as down/up.
         for message, bits in ((0x100, flags), (0x102, flags), (0x101, flags | (3 << 30))):
-            if (not active() or not messages.belongs(hwnd, provider.hwnd)
+            if (not active() or not belongs()
                     or not messages.post(hwnd, message, code, bits)):
                 result["hint"] = "Window message delivery failed; re-read before deciding what to do next."
                 break

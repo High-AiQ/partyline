@@ -170,6 +170,8 @@ def audit(session, grant, message, props, result):
             "foreground_changed": result.get("foreground_changed"),
             "target_came_forward": result.get("target_came_forward"),
             "foreground_restored": result.get("foreground_restored", False)}
+    if props.get("scope_window"):
+        info["scope_window"] = props["scope_window"]
     if message.get("force"):
         info["force"] = True
         info["reported_disabled"] = result.get("reported_disabled", False)
@@ -187,7 +189,9 @@ def audit(session, grant, message, props, result):
         value = message.get("value")
         info["value_length"] = len(value) if isinstance(value, str) else 0
         if isinstance(value, str) and value:
-            for key in ("process", "role", "name"):
+            for key in ("process", "role", "name", "scope_window"):
+                if key not in info:
+                    continue
                 info[key] = str(info[key]).replace(value, "[redacted]")
     session.tools.audit.append("action", "window", str(message.get("agent", ""))[:120], "window_action",
                                json.dumps(info, ensure_ascii=False, separators=(",", ":")))

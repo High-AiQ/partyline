@@ -786,12 +786,17 @@ Older helpers that reported a Partyline 2.x version are treated as outdated.
 ### Dropdown options and reported-disabled controls (helper 1.2)
 
 A window snapshot includes its visible owned popups, labelled `popup: …` under the
-shared window. Win32's owner chain must reach the granted HWND, with the same process
-at every link; popup UIA ProcessId and NativeWindowHandle are checked too. Other browser
-windows and foreign-process popups are excluded. Content hosted by another process inside
-the granted HWND remains readable and actionable through that granted subtree. Popup options are action targets under the
-same grant. Hidden or closed popups add nothing to subsequent reads. UIA events are
-scoped to the granted element and each discovered popup root. PID-scoped WinEvent
+shared window. Win32's owner chain must reach the granted HWND. Same-process popups
+remain in scope; a popup in another process must be a top-level `#32770` dialog,
+and every foreign process on its owner chain must have the same executable image path
+as the granted process. Image lookup failures deny access. Popup UIA ProcessId and
+NativeWindowHandle are checked too. An unrelated window, even from the same browser
+image, cannot join without that owner chain. Content hosted by another process inside
+the granted HWND remains readable and actionable through that granted subtree. Popup
+controls are action targets under the same grant; actions identify their popup in the
+local audit. Screenshots compose pixels captured from the granted window and its scoped
+popups, with blank space between them. Hidden or closed popups add nothing to subsequent
+reads. UIA events are scoped to the granted element and each discovered popup root. WinEvent
 show/hide/destroy notifications invalidate reads and post messages to reconcile popup
 subscriptions outside the callbacks. Persistent UIA handlers do not inspect sender
 properties or walk desktop ancestry. Desktop scope is used only during the short Expand

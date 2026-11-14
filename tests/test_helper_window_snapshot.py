@@ -220,7 +220,7 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_hello_announces_screenshots_and_the_minor_version_moved(self):
         self.assertEqual(2, WINDOWS_VERSION)
         self.assertEqual(SNAPSHOT_VERSION, WINDOWS_VERSION)
-        self.assertTrue(__version__.startswith("1.2."))
+        self.assertTrue(__version__.startswith("1.3."))
 
 
 class WindowGrabTests(unittest.TestCase):
@@ -236,7 +236,9 @@ class WindowGrabTests(unittest.TestCase):
         grab.wgc = Mock(return_value=image)
         grab.print_window = Mock(return_value="printed")
         grab.iconic = Mock(return_value=True)
-        with patch("partyline_helper.window_grab.sys.platform", "win32"):
+        passthrough = lambda hwnd, capture: capture(hwnd)  # noqa: E731
+        with (patch("partyline_helper.window_grab.sys.platform", "win32"),
+              patch("partyline_helper.window_grab_owned.grab_owned", side_effect=passthrough)):
             self.assertIs(image, grab.grab(10))
             self.assertTrue(grab.minimized(10))
             grab.wgc.side_effect = GrabError("no frame")

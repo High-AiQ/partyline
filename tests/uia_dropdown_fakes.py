@@ -49,7 +49,9 @@ class Chrome(WindowsProvider):
     """Exercise the production scope, children, popup labelling and property reads with fake COM."""
     def __init__(self):
         self.user32, self.hwnd = User(), 1
-        self.scope = WindowScope(self.user32, 1, lambda: list(self.user32.pids))
+        self.scope = WindowScope(self.user32, 1, lambda: list(self.user32.pids),
+                                 image_path=lambda pid: {10: "chrome", 20: "other"}.get(pid),
+                                 class_name=lambda hwnd: "#32770")
         self.cached, self.deep, self.cache, self.shallow = False, False, None, None
         self.top, self.popup_roots = None, None
         self.popup_nodes = {}
