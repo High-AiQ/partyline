@@ -14,6 +14,7 @@ from __future__ import annotations
 from .bridge_pack import pack_for
 from .mentions import addresses
 from .role_briefing import WORKER_REMINDER
+from .screen_window_notices import line_window_text
 
 REBRIEF_LIMIT = 4000
 # The assignment is quoted verbatim but bounded: a message may be 10,000
@@ -135,6 +136,9 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "",
     from .line_notes import NUDGE
 
     bridge = pack_for(db, att["id"])
+    windows = line_window_text(db, conv_id)
+    if windows:
+        bridge = f"{bridge}\n\n{windows}" if bridge else windows
     if handoff:  # the predecessor's whole note is reserved before anything repeated is kept
         from .line_notes import read_notes
 

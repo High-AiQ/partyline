@@ -68,9 +68,9 @@ class ScreenTest(unittest.TestCase):
         ws.send_json({"type": "ping"})
         self.assertEqual(ws.receive_json()["type"], "pong")
 
-    def hello(self, ws):
+    def hello(self, ws, **extra):
         ws.send_json({"type": "hello", "protocol": 1, "device_name": "desk", "os": "test",
-                      "helper_version": "1", "monitors": FakeDesktop().monitors()})
+                      "helper_version": "1", "monitors": FakeDesktop().monitors(), **extra})
         self.sync(ws)
 
     def test_account_computer_is_available_for_local_tools_on_accessible_lines(self):
@@ -95,7 +95,7 @@ class ScreenTest(unittest.TestCase):
             self.hub.tools.device("line")
         self.assertEqual(self.hub.tools.device("line", "laptop")["id"], "second")
 
-    def test_new_account_device_can_read_window_from_another_line(self):
+    def test_helper_before_line_grants_still_shares_by_process_and_the_whole_line_gets_it(self):
         self.db.create_conversation("other", "Other")
         self.db.add_attachment("reader", "other", "reader", "raw", ["shell"], "/tmp", "private-activation")
         machine = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "reader")}
@@ -471,7 +471,7 @@ class ScreenTest(unittest.TestCase):
             message = ws.receive_json()
             self.assertEqual(message["type"], "ping")
             self.assertTrue(message["helper_update"]["available"])
-            self.assertEqual(message["helper_update"]["version"], "1.0.0")
+            self.assertEqual(message["helper_update"]["version"], "1.1.0")
             self.assertIn("PartylineHelper-Setup.exe", message["helper_update"]["url"])
 
     def test_live_revoke_and_invalid_region(self):

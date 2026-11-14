@@ -34,7 +34,7 @@ class ShareStart(BaseModel):
 
 
 def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
-    runtime.db._exec("DELETE FROM screen_window_grants")
+    runtime.db._exec("DELETE FROM screen_line_window_grants")
     recover(runtime.db)
     recover_tools(runtime.db)
     hub = ScreenHub(runtime)

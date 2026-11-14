@@ -4,6 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from partyline.screen_grants import device_grants
+from partyline.screen_window_notices import line_window_text
 from tests.window_grant_fixtures import WindowGrantFixture
 
 
@@ -24,53 +26,70 @@ class WindowNoticeTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
             "type": "window_revoked", "grant_id": grant_id,
             **({"reason": reason} if reason else {})})
 
-    async def test_grant_is_delivered_once_only_to_target_without_secrets(self):
+    async def test_grant_is_delivered_once_to_every_process_on_the_line_without_secrets(self):
         await self.grant("a", "Chrome\nA tab @peer")
         await self.grant("a", "Chrome\nA tab @peer")  # duplicate cannot notify again
         await self.hub.window_grants.expire()
         await self.hub.window_grants.changed(self.device["id"])
-        notice, = self.notices("a")
-        for expected in ("granted", "Chrome A tab @peer", "g1", "Computer", "owner"):
-            self.assertIn(expected, notice["body"])
-        notice_text = notice["body"].splitlines()[-1]
-        self.assertIn('screen_elements(window="g1")', notice_text)
-        self.assertIn("summary", notice_text)
-        self.assertIn("find, ls, or text", notice_text)
-        self.assertIn("screen_element_action", notice_text)
-        self.assertIn("refresh", notice_text)
+        first, = self.notices("a")
+        second, = self.notices("peer")
+        for notice in (first, second):
+            for expected in ("granted", "Chrome A tab @peer", "g1", "Computer", "owner", "this line"):
+                self.assertIn(expected, notice["body"])
+            notice_text = notice["body"].splitlines()[-1]
+            self.assertIn('screen_elements(window="g1")', first["body"])
+            self.assertIn("summary", first["body"])
+            self.assertIn("find, ls, or text", first["body"])
+            self.assertIn("screen_element_action", first["body"])
+            self.assertIn("refresh", first["body"])
+            self.assertIn("Every process on this line", notice["body"])
+            self.assertTrue(notice_text)
         self.runtime.live["b"].deliver.assert_not_awaited()
-        self.runtime.live["peer"].deliver.assert_not_awaited()
         for ident in ("a", "b", "peer"):
             pending = self.db.messages_after(self.db.get_attachment(ident)["conv_id"], 0, ident, ident)
-            self.assertEqual(1 if ident == "a" else 0,
-                             sum(bool(m["audience_attachment_id"]) for m in pending))
-        serialized = json.dumps(notice)
+            private = sum(bool(m["audience_attachment_id"]) for m in pending)
+            self.assertEqual(0 if ident == "b" else 1, private)
+        serialized = json.dumps([first, second])
         self.assertNotIn("runtime_owner", serialized)
         self.assertNotIn("activation-", serialized)
         visible = self.db.list_messages("alpha")
-        self.assertEqual(["🪟 owner shared «Chrome A tab @peer» with @a"], [m["body"] for m in visible])
+        self.assertEqual(["🪟 owner shared «Chrome A tab @peer» with this line"],
+                         [m["body"] for m in visible])
         self.assertEqual("system", visible[0]["sender_type"])
         self.assertEqual([], self.db.list_messages("beta"))
 
-    async def test_replacement_tells_old_holder_then_grants_new_holder(self):
+    async def test_a_plain_line_with_one_person_attached_process_is_told(self):
+        self.db.create_conversation("plain", "Plain", captain_mode="off")
+        self.db.add_attachment("solo", "plain", "solo", "raw", ["shell"], "/tmp", "activation-solo")
+        self.db.set_attachment_status("solo", "running", "activation-solo")
+        self.runtime.live["solo"] = SimpleNamespace(att=self.db.get_attachment("solo"),
+                                                    deliver=AsyncMock(return_value=True))
+        await self.grant("solo")
+        self.assertEqual(1, len(self.notices("solo")))
+        self.assertEqual(200, (await self.read("solo")).status_code)
+
+    async def test_replacement_tells_the_old_line_then_grants_the_new_line(self):
         await self.grant("a")
         await self.grant("b", grant_id="g2")
         await self.helper_end(grant_id="g1")  # stale helper acknowledgement
-        old = self.notices("a")
-        self.assertEqual(2, len(old))
-        self.assertIn("no longer shared: replaced by another grant", old[-1]["body"])
+        for ident in ("a", "peer"):
+            old = self.notices(ident)
+            self.assertEqual(2, len(old))
+            self.assertIn("no longer shared with this line: replaced by another grant", old[-1]["body"])
         new, = self.notices("b")
         self.assertIn("granted", new["body"])
         self.assertIn('window="g2"', new["body"])
-        self.assertLess(old[-1]["id"], new["id"])
-        self.assertEqual(["🪟 owner shared «Editor» with @b"],
+        self.assertLess(self.notices("a")[-1]["id"], new["id"])
+        self.assertEqual(["🪟 owner shared «Editor» with this line"],
                          [m["body"] for m in self.db.list_messages("beta")])
+        self.assertEqual(2, len(self.db.list_messages("alpha")))
 
     async def test_web_revoke_close_and_disconnect_each_notify_once(self):
+        ending_seen = [0]
         for ending in ("web", "device", "revoked by the person", "window closed", "helper disconnected"):
             with self.subTest(ending=ending):
                 await self.grant("a")
-                before = len(self.notices("a"))
+                before, peer_before = len(self.notices("a")), len(self.notices("peer"))
                 if ending in ("web", "device"):
                     url = ("/api/screen/window-grants/g1" if ending == "web" else
                            f"/api/screen/devices/{self.device['id']}")
@@ -88,22 +107,24 @@ class WindowNoticeTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
                 await self.helper_end()
                 await self.hub.window_grants.expire()
                 notices = self.notices("a")[before:]
+                self.assertEqual(1, len(self.notices("peer")) - peer_before)
                 self.assertEqual(1, len(notices))
                 self.assertIn("no longer shared", notices[0]["body"])
                 self.assertIn("revoked by the person" if ending in ("web", "device") else ending,
                               notices[0]["body"])
                 self.assertEqual(1, len(notices[0]["body"].splitlines()))
+                ended = sum("no longer shared" in m["body"] for m in self.db.list_messages("alpha"))
+                self.assertEqual(1, ended - ending_seen[0])
+                ending_seen[0] += 1
                 if ending == "device":
                     self.db._exec("UPDATE screen_devices SET revoked_at=NULL WHERE id=?",
                                   (self.device["id"],))
                     self.hub.devices[self.device["id"]] = self.device
-        self.runtime.live["peer"].deliver.assert_not_awaited()
 
-    async def test_detach_exit_and_reactivation_do_not_receive_end_notices(self):
+    async def test_detach_exit_rotation_and_deletion_of_a_process_do_not_end_the_grant(self):
+        await self.grant("a")
         for status in ("detached", "exited", "reactivated", "deleted"):
             with self.subTest(status=status):
-                await self.grant("a")
-                before = self.runtime.live["a"].deliver.await_count
                 if status == "reactivated":
                     self.db._exec("UPDATE attachments SET runtime_owner='new-secret' WHERE id='a'")
                 elif status == "deleted":
@@ -111,21 +132,49 @@ class WindowNoticeTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
                 else:
                     self.db.set_attachment_status("a", status, "activation-a")
                 await self.hub.window_grants.expire()
-                await self.hub.window_grants.disconnected(self.device["id"])
-                self.assertEqual(before, self.runtime.live["a"].deliver.await_count)
-                if status != "deleted":
-                    self.db._exec("UPDATE attachments SET status='running',runtime_owner='activation-a' "
-                                  "WHERE id='a'")
+                self.assertIn("g1", self.hub.window_grants.known)
+                self.assertEqual(["g1"], [g["id"] for g in device_grants(self.db, self.device["id"])])
+                self.assertEqual(1, len(self.notices("peer")))  # nothing new
+                self.assertNotIn({"type": "revoke_window", "grant_id": "g1"}, self.sent)
+                self.assertEqual(200, (await self.read("peer")).status_code)
+
+    async def test_archiving_the_line_ends_the_grant_without_noise_on_the_archived_line(self):
+        await self.grant("a")
+        before = len(self.db.list_messages("alpha"))
+        self.db.archive_conversation("alpha")
+        await self.hub.window_grants.expire()
+        self.assertEqual([], device_grants(self.db, self.device["id"]))
+        self.assertIn({"type": "revoke_window", "grant_id": "g1"}, self.sent)
+        self.assertEqual(before, len(self.db.list_messages("alpha")))
+        self.assertEqual(1, len(self.notices("peer")))
+
+    async def test_a_process_that_attaches_later_learns_of_live_grants_in_its_briefing(self):
+        from partyline.rebrief import render_rebrief
+        from partyline.role_delivery import bind_role_delivery
+
+        self.assertEqual("", line_window_text(self.db, "alpha"))
+        await self.grant("a", "Chrome tab")
+        self.db.add_attachment("late", "alpha", "late", "raw", ["shell"], "/tmp", "activation-late")
+        late = self.db.get_attachment("late")
+        late["digest_rider"] = lambda: ""
+        bind_role_delivery(self.db, late)
+        for text in (late["role_briefing"], render_rebrief(self.db, late)):
+            self.assertIn("«Chrome tab»", text)
+            self.assertIn('window="g1"', text)
+            self.assertIn("Computer", text)
+            self.assertIn("any process here", text)
+        self.assertEqual("", line_window_text(self.db, "beta"))
+        self.assertEqual("", line_window_text(object(), "alpha"))
 
     async def test_failed_replacement_preserves_grant_and_sends_no_notices(self):
         await self.grant("a")
-        self.db._exec("CREATE TRIGGER reject_notice_replacement BEFORE INSERT ON screen_window_grants "
+        self.db._exec("CREATE TRIGGER reject_notice_replacement BEFORE INSERT ON screen_line_window_grants "
                       "WHEN NEW.id='g2' BEGIN SELECT RAISE(ABORT,'failed insert'); END")
         self.assertFalse((await self.grant("b", grant_id="g2"))["ok"])
         self.assertEqual(1, len(self.notices("a")))
         self.assertEqual([], self.notices("b"))
 
-    async def test_helper_receives_success_before_process_is_notified(self):
+    async def test_helper_receives_success_before_a_process_is_notified(self):
         async def deliver(messages):
             self.assertTrue(self.sent[-1]["ok"])
             self.assertEqual("window_grant_result", self.sent[-1]["type"])

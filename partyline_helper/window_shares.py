@@ -13,6 +13,7 @@ from .uia_task import WindowTask, read_options
 from .uia_window_identity import unmark
 from .window_target_picker import select_target
 
+WINDOWS_VERSION = 1  # 1: a window is shared with a line, not with one process
 MESSAGES = ("share_targets", "window_grant_result", "revoke_window")
 
 
@@ -63,7 +64,7 @@ class WindowShares:
 
     def changed(self):
         self._changes.notify()
-        labels = {ident: f"{entry['title']} → @{entry['target']['name']} «{entry['target']['line_name']}»"
+        labels = {ident: f"{entry['title']} → «{entry['target']['line_name']}»"
                   for ident, entry in self.grants.items()}
         self.session.status.window_grants = labels
         self.session.status.window_title = "; ".join(labels.values()) or None
@@ -90,10 +91,10 @@ class WindowShares:
                 return
             self.session.tools.audit.append("event", "window", "local", "window_read",
                 f"granted: {selected['title']} ({selected['process']}) "
-                f"to @{target['name']} on «{target['line_name']}»")
+                f"to line «{target['line_name']}»")
             registered = ident
             response = await self.request("window_grant", grant_id=ident,
-                attachment_id=target["attachment_id"], targets_request_id=targets["request_id"],
+                line_id=target["line_id"], targets_request_id=targets["request_id"],
                 hwnd=selected["hwnd"], title=selected["title"], process=selected["process"])
             if not response.get("ok"):
                 return

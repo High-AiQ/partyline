@@ -1,4 +1,4 @@
-"""Second local consent step: choose exactly one attached process, grouped by line."""
+"""Second local consent step: choose exactly one line to share the window with."""
 import json
 import subprocess
 import sys
@@ -6,17 +6,17 @@ import tempfile
 from pathlib import Path
 
 
-def public_selection(process):
-    return {key: process[key] for key in ("attachment_id", "name", "preset", "line_id", "line_name")
-            if key in process}
+def public_selection(line):
+    return {key: line[key] for key in ("line_id", "line_name") if key in line}
 
 
 def public_lines(lines):
     return [{"line_id": line["line_id"], "line_name": line["line_name"],
-             "processes": [public_selection(process) for process in line["processes"]]} for line in lines]
+             "processes": len(line.get("processes", ()))} for line in lines]
 
 
 def select_target(lines, run=subprocess.run):
+    """The one line the person chose, or None; lines may have no process attached yet."""
     if not lines:
         return None
     with tempfile.TemporaryDirectory(prefix="partyline-target-") as directory:
@@ -33,22 +33,26 @@ def select_target(lines, run=subprocess.run):
             return None
 
 
+def line_text(line):
+    count = line["processes"]
+    return f"«{line['line_name']}» — " + (f"{count} attached process{'es' if count != 1 else ''}"
+                                           if count else "no process attached yet")
+
+
 def dialog(root, lines, accept):  # pragma: no cover - native picker, verified with a real capture
     import tkinter as tk
     from tkinter import ttk
-    root.title("Share this window with which process?")
+    root.title("Share this window with which line?")
     root.minsize(540, 340)
-    tk.Label(root, text="Choose one attached process. It may read and act on this window.\n"
-                       "Other processes will not have access. Nothing is selected by default.",
+    tk.Label(root, text="Choose one line. Every process attached to it, now or later, may read and act "
+                       "on this window until you stop sharing.\nNothing is selected by default.",
              wraplength=550, justify="left").pack(padx=16, pady=12, anchor="w")
     tree = ttk.Treeview(root, show="tree", selectmode="browse", height=12)
     options = {}
     for i, line in enumerate(lines):
-        parent = tree.insert("", "end", iid=f"line-{i}", text=f"«{line['line_name']}»", open=True)
-        for j, process in enumerate(line["processes"]):
-            ident = f"process-{i}-{j}"
-            tree.insert(parent, "end", iid=ident, text=f"@{process['name']} ({process['preset']})")
-            options[ident] = {**process, "line_id": line["line_id"], "line_name": line["line_name"]}
+        ident = f"line-{i}"
+        tree.insert("", "end", iid=ident, text=line_text(line))
+        options[ident] = public_selection(line)
     tree.pack(fill="both", expand=True, padx=16)
     buttons = tk.Frame(root)
     buttons.pack(fill="x", padx=16, pady=12)
@@ -59,7 +63,7 @@ def dialog(root, lines, accept):  # pragma: no cover - native picker, verified w
             accept(options[selected[0]])
             root.destroy()
 
-    button = ttk.Button(buttons, text="Share with selected process", command=grant, state="disabled")
+    button = ttk.Button(buttons, text="Share with selected line", command=grant, state="disabled")
     button.pack(side="left")
     tree.bind("<<TreeviewSelect>>", lambda _: button.configure(
         state="normal" if tree.selection() and tree.selection()[0] in options else "disabled"))

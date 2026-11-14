@@ -13,12 +13,12 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 ELEMENT_ACTION_NOTE = (
     "Use a UIA pattern on an element id from screen_elements; its [actions] say what it supports (none "
-    "shown: scroll_into_view). window_* act on the shared window only. No input is synthesized; the "
+    "shown: scroll_into_view). window_* act on the line's shared window only. No input is synthesized; the "
     "pointer never moves. then: re-read after the action in the same call (screen_elements fields; "
     "empty = what changed). For dragging use screen_drag.")
 ELEMENT_ACTION_PROPERTIES = {
     "window": {"type": "string",
-               "description": "Window grant id or title when several windows are shared with you."},
+               "description": "Window grant id or title when several windows are shared with this line."},
     "element_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "action": {"type": "string", "enum": [
         "invoke", "toggle", "set_value", "select", "add_to_selection", "remove_from_selection", "expand",

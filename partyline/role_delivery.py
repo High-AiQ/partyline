@@ -121,10 +121,11 @@ def _task_goal_delivery(db, att, runtime):
 
 def bind_role_delivery(db, att: dict, runtime=None) -> None:
     from .captain_handover import state_text
+    from .screen_window_notices import line_window_text
     initial = current_role(db, att["id"])
     att["role_briefing"] = "\n\n".join(
         part for part in (_instructions(initial, db), pack_for(db, att["id"]),
-                          state_text(db, att["id"], runtime)) if part)
+                          state_text(db, att["id"], runtime), line_window_text(db, initial.conv_id)) if part)
     original_rider = att["digest_rider"]
     gate = att["suffix_gate"] = SuffixGate()
     att["credited_through"] = lambda: int((db.get_attachment(att["id"]) or {}).get("last_seen") or 0)

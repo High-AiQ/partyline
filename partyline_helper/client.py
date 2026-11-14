@@ -15,6 +15,7 @@ from .desktop import pointer_state
 from .images import encode
 from .status import Status
 from .tools import MESSAGES as TOOL_MESSAGES, TOOLS_VERSION, Tools
+from .window_shares import WINDOWS_VERSION
 from .transport import CertificateError, certificate_failure
 from .version import helper_version
 from .uia_access import WindowAccess
@@ -214,7 +215,8 @@ class Session(SessionTransport):
     async def run(self):
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
                         helper_version=helper_version(), monitors=self.desktop.monitors(),
-                        control=CONTROL_VERSION, tools=TOOLS_VERSION, update_check=True)
+                        control=CONTROL_VERSION, tools=TOOLS_VERSION, windows=WINDOWS_VERSION,
+                        update_check=True)
         self.status.set("paired")
         loop = asyncio.get_running_loop()
         # The tray's Stop sharing runs on another thread: hand the stop to this loop.

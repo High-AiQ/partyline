@@ -18,7 +18,8 @@ def screen_frame_tool():
 
 
 ELEMENTS_NOTE = (
-    "Read a shared window's UI Automation tree (each answer ~4 KB). No arguments: summary. find: query "
+    "Read a window a person shared with this line (UI Automation tree, each answer ~4 KB; any process on "
+    "the line may). No arguments: summary. find: query "
     "(name), value, control_type; root=<id> lists children; text=true reads the page; id=<id> shows one "
     "element whole. Act with screen_element_action on element ids; ids survive refresh=true. "
     "Refresh after the page changes."

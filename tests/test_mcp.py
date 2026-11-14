@@ -782,8 +782,8 @@ class RenderAndServerTests(unittest.TestCase):
 
         db = SimpleNamespace(
             get_attachment=lambda _ident: {"adapter": "claude"},
-            _exec=lambda _query: SimpleNamespace(
-                fetchall=lambda: [{"attachment_id": "att-1"}]),
+            _exec=lambda _query, args=(): SimpleNamespace(
+                fetchone=lambda: {"id": "g"} if args == ("home",) else None),
         )
         share = SimpleNamespace(status="active", share_id="share")
         grant = SimpleNamespace(status="active", holder=None)
@@ -796,7 +796,9 @@ class RenderAndServerTests(unittest.TestCase):
         self.assertTrue(state["dynamic_screen_tools"])
         self.assertTrue(state["screen_read"])
         self.assertTrue(state["screen_control"])
-        self.assertTrue(state["screen_windows"])
+        self.assertTrue(state["screen_windows"])  # windows are shared with the line, not the process
+        other = SimpleNamespace(kind="machine", conv_id="elsewhere", attachment_id="att-2", name="peer")
+        self.assertFalse(for_attachment(runtime, other, None, {})["screen_windows"])
 
     def test_capability_version_tracks_sql_changes(self):
         import sqlite3

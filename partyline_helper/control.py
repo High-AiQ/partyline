@@ -93,7 +93,7 @@ class Control(Acting):
         print(f"\nAGENT CONTROL REQUEST\nRequested by: {agent}\n"
               f"Line: {display_text(message.get('line_name'))}\n"
               "The agent could move the mouse, click, scroll and type inside the shared region. "
-              "Window element actions require their own process-specific grant.",
+              "Window element actions require their own line-level grant.",
               flush=True)
         if self.without_prompt:
             print("WARNING: --allow-control-without-prompt GRANTED AGENT CONTROL WITHOUT ASKING.", flush=True)
@@ -101,7 +101,7 @@ class Control(Acting):
                 "Partyline agent control request",
                 f"{agent} asks to control the mouse and keyboard inside the shared region "
                 f"(line: {display_text(message.get('line_name'))}). Window element actions require "
-                "their own process-specific grant.\n\nAfter mouse or keyboard control starts, "
+                "their own line-level grant.\n\nAfter mouse or keyboard control starts, "
                 "moving the mouse or pressing a key takes control back. Ctrl+Alt+Esc revokes mouse and "
                 "keyboard control. Window grants have separate Stop controls in the tray."
                 "\n\nAllow agent control?")):

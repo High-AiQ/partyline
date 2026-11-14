@@ -1,4 +1,4 @@
-"""Route element actions to the window granted to the calling attachment."""
+"""Route element actions to a window granted to the calling process's line, one at a time per window."""
 from typing import Literal
 
 from fastapi import HTTPException, Request
@@ -92,12 +92,13 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
     try:
         grant, device = resolve_window(hub, principal, body.window)
         message = body.parameters()
-        message["element_id"], known = hub.elements.helper_id(grant["id"], body.element_id)
-        if not known:
-            return {"status": "failed", "error": STALE}
-        hub.window_grants.spend(grant)
-        response = await hub.elements.exchange(principal, grant, device, "window_element_action",
-                                               agent=principal.name, **message)
+        async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window
+            message["element_id"], known = hub.elements.helper_id(grant["id"], body.element_id)
+            if not known:
+                return {"status": "failed", "error": STALE}
+            hub.window_grants.spend(grant)
+            response = await hub.elements.exchange(principal, grant, device, "window_element_action",
+                                                   agent=principal.name, **message)
         result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
         if body.then and result.get("status") == "completed" and not result.get("grant_ended"):
             result["after"] = await after(hub, principal, grant, body.then, result)

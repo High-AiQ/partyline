@@ -264,41 +264,64 @@ require a new request and fresh consent. Backoff reaches at most 60 seconds.
 ### Read a Windows window's UI elements
 
 In the helper tray, choose **Share a window…**, select a visible window by title and
-executable, then choose exactly one attached process in **Share this window with which
-process?** The second picker groups live processes by line and shows their handle and
-preset. Only lines visible to the paired computer's owner appear, and empty lines are
-omitted. Nothing is selected by default; cancelling either picker grants no access.
-The selected process can be on any line the computer's owner can open.
-The target receives a private terminal notice with the window ID and usage instructions
-when access is granted, and a reason when it ends (except on detach or exit), while its
-line sees one brief sharing message.
+executable, then choose exactly one line in **Share this window with which line?** The
+second picker lists every line visible to the paired computer's owner, with a count of the
+processes attached to it. Lines with no process are listed too, so you can share first and
+let a process attach later. Nothing is selected by default; cancelling either picker grants
+no access. The line can be any line the computer's owner can open. Window grants need no
+captain, task or subline: a plain line with a few person-attached processes is the primary
+case.
 
-You can share several windows with the same process, or different windows with different
-processes. The tray lists each as **window → @process «line»**, with its own **Stop**;
+A grant belongs to the line, not to one process. Every live process attached to that line
+can call `screen_elements` and `screen_element_action` on its windows, including processes
+that attach later and processes started by a compaction rotation. Processes on other
+lines are refused, and when the holding line is one the caller may see (its own line, or a
+descendant for a captain) the refusal names it so the caller can ask the person; a hidden
+line is never named, and an id or title held there answers like a missing window. Sublines do not inherit a grant. When a grant starts or ends, the line sees
+one brief system message and every live process on the line receives a private terminal
+notice with the window ID and usage instructions (an ending names its reason). A process
+that attaches to, or is re-briefed on, a line with live grants hears about them in its
+briefing.
+
+You can share several windows with the same line, or different windows with different
+lines. The tray lists each as **window → «line»**, with its own **Stop**;
 **Stop all sharing** ends every grant and the screen share. An item appears when its grant starts and disappears when
 it ends, including when the web or the server revokes it. The web computer list also shows each
-target and offers **Stop sharing window**. Your sidebar marks each target line with
-a computer icon; its tooltip names the shared windows and their processes. Closing a window, detaching or ending its
-process, disconnecting the helper, or restarting the server ends that grant. Ending one
-grant leaves other windows and processes alone. Resuming the same handle or attachment
-requires fresh consent. Grants and revocations are recorded in the helper's local audit.
+target line and offers **Stop sharing window**. Your sidebar marks each target line with
+a computer icon; its tooltip names the shared windows and their lines. A grant ends when you stop it (tray **Stop**,
+**Stop all sharing**, or the web **Stop sharing window**), the window closes, the helper disconnects, the server
+restarts, or the line is archived or deleted. A process detaching, exiting, resuming or being replaced
+by a compaction rotation does not end it. Ending one grant leaves other windows alone. Consent is never
+restored after a restart. Grants and revocations are recorded in the helper's local audit.
 
 Window grants cover `screen_elements` and `screen_element_action`. With one window the
 target is unambiguous. With several, pass `window` as the grant ID or title; an ambiguous
-call lists the choices, and each snapshot returns its grant ID as `window`. Snapshots,
-element caches and dispatch gates are independent per grant. Other processes are refused;
-asking for another process's window names its holder so the caller can ask the person.
-These grants are independent of line-based pixel sharing and mouse/keyboard control:
+call lists the choices, and each snapshot returns its grant ID as `window`. Snapshots and
+element caches are per grant, shared by the processes on the line, so a second process reads
+the stored tree. Actions on one window run one at a time, so two processes on the line never
+interleave dispatches. These grants are independent of line-based pixel sharing and
+mouse/keyboard control:
 `screen_frame`, `screen_click`, `screen_type`, `screen_key`, `screen_scroll`, `screen_drag`
 and `screen_move` keep their existing pixel-share permissions.
 
-The server stores live grants in `screen_window_grants` so database lifecycle triggers
-can revoke atomically on detach, exit, deletion or a replacement activation. Rows are
-cleared on startup and helper disconnection; they never restore consent after a restart.
-The helper reports a grant only after both native choices, and the server revalidates the
-target against the owner's visible live processes. Machine credentials cannot create or
+The server stores live grants in `screen_line_window_grants`, keyed by line. The earlier
+per-process table and its detach, exit and activation triggers are dropped when the database
+opens; rows are cleared on startup and helper disconnection, so no row is migrated and no
+consent is ever restored. Archiving a line deletes its grants by trigger and the server tells the helper to
+stop them. The helper reports a grant only after both native choices, and the server
+revalidates the line against the lines visible to the owner. Machine credentials cannot create or
 revoke grants, and a different human cannot revoke the owner's grants. Access pauses on
 the secure desktop and resumes only while the same window and grant are still live.
+
+**Compatibility.** The helper announces `windows: 1` in its hello; helpers before 1.1.0 omit it.
+For a helper that announces it, `list_share_targets` returns every visible line (with an empty
+`processes` list where none is attached) and `window_grant` carries `line_id`. A helper that
+omits it still picks a process, so it is offered only lines that have a live process, and its
+`window_grant` carries `attachment_id`. The server maps that attachment to its line and
+grants the line, not the process, so the whole line gets the window. The old tray shows the
+chosen process's handle and the line, and the grant is not tied to that process afterward.
+A `window_grant` with neither a usable `line_id` nor a mappable `attachment_id` is refused with
+"update the Partyline helper". A current helper that sends only `attachment_id` is refused the same way.
 
 `screen_elements` captures that window's whole UI Automation tree without bringing the window to the
 front or sending input, and the server keeps it. No page is too big, but an agent never receives it
@@ -377,7 +400,7 @@ supplies the typed UI Automation COM interfaces; it is not installed on other pl
 
 ### Act on elements in the chosen window
 
-With a window granted to its attachment, an agent can call
+With a window granted to its line, any process on that line can call
 `screen_element_action` with an ID from the current `screen_elements` snapshot (any part, or one remembered
 from an earlier snapshot whose element is unchanged), using the matching
 UI Automation pattern. Each snapshot element lists its `patterns` and the `actions` it supports; the

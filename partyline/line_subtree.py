@@ -22,6 +22,8 @@ async def archive_line(runtime, conv_id: str) -> list[str]:
     stopped = await runtime.stop_attachments(conv_id)
     await docker_relay.stop(conv_id)
     runtime.db.archive_conversation(conv_id)
+    if hub := getattr(runtime, "screen_hub", None):
+        await hub.window_grants.expire()  # consent given to a line ends with the line
     runtime.sockets.pop(conv_id, None)
     return stopped
 

@@ -4,8 +4,8 @@ import WindowGrantList from "./WindowGrantList.svelte";
 import { screenApi } from "../../lib/screen-api";
 
 const grants = [
-  { id: "g1", title: "Editor", holder: "builder", line_name: "Development", conv_id: "dev" },
-  { id: "g2", title: "Browser", holder: "designer", line_name: "Design", conv_id: "design" },
+  { id: "g1", title: "Editor", line_name: "Development", conv_id: "dev" },
+  { id: "g2", title: "Browser", line_name: "Design", conv_id: "design" },
 ];
 
 afterEach(() => {
@@ -13,11 +13,11 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-it("names each window's target and revokes only the chosen grant", async () => {
+it("names each window's line and revokes only the chosen grant", async () => {
   const revoke = vi.spyOn(screenApi, "revokeWindow").mockResolvedValue({ ok: true });
   const component = mount(WindowGrantList, { target: document.body, props: { grants } });
-  expect(document.body.textContent).toContain("Editor → @builder on «Development»");
-  expect(document.body.textContent).toContain("Browser → @designer on «Design»");
+  expect(document.body.textContent).toContain("Editor → «Development»");
+  expect(document.body.textContent).toContain("Browser → «Design»");
   document.querySelectorAll("button")[1]?.click();
   await tick();
   expect(revoke).toHaveBeenCalledExactlyOnceWith("g2");

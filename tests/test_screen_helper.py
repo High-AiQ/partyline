@@ -323,6 +323,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             hello = await receive(ws, "hello")
             self.assertEqual(hello["monitors"], [MONITOR])
             self.assertEqual(hello["protocol"], 1)
+            self.assertEqual(hello["windows"], 1)  # windows are shared with a line
             await ws.send(json.dumps(dict(type="get_preview", request_id="pick", monitor_id=1, long_edge=64)))
             await receive(ws, "preview")
             await ws.send(json.dumps(request()))

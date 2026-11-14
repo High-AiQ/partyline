@@ -19,7 +19,7 @@ class CapabilityVersions:
         self._waiters = {}
         self._closed = False
         self._tables = {"attachments", "conversations", "conversation_write_grants",
-                        "task_reviews", "screen_window_grants"}
+                        "task_reviews", "screen_line_window_grants"}
         if db is not None:
             db.events.callbacks.add(self.changed_by_sql)
 

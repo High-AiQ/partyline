@@ -34,8 +34,6 @@ def for_attachment(runtime, principal, conv_id, state):
     state["screen_control"] = bool(
         grant and grant.status == "active" and grant.holder in (None, principal.name))
     from .screen_grants import GRANTS
-    state["screen_windows"] = any(
-        row["attachment_id"] == principal.attachment_id
-        for row in runtime.db._exec(GRANTS).fetchall()
-    )
+    state["screen_windows"] = runtime.db._exec(
+        GRANTS + " AND g.conv_id=?", (principal.conv_id,)).fetchone() is not None
     return state

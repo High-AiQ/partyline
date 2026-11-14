@@ -1,4 +1,4 @@
-"""Route snapshots to one window explicitly granted to the calling attachment."""
+"""Route snapshots to a window a person granted to the calling process's line."""
 import asyncio
 import time
 import uuid

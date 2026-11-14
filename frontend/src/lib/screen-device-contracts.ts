@@ -14,7 +14,6 @@ export type ScreenMonitor = z.infer<typeof ScreenMonitorSchema>;
 export const ScreenWindowGrantSchema = z.object({
   id: z.string(),
   title: z.string(),
-  holder: z.string(),
   line_name: z.string(),
   conv_id: z.string(),
 });

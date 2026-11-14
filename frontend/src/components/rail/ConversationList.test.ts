@@ -460,7 +460,7 @@ describe("active share indicators", () => {
     ];
     screenStatus.indicators = [
       { conv_id: "a", device_name: "Desk", kind: "screen", label: "Desk screen share" },
-      { conv_id: "a", device_name: "Desk", kind: "window", label: "reading Editor for @bot" },
+      { conv_id: "a", device_name: "Desk", kind: "window", label: "window → «Alpha» (Editor)" },
     ];
     const list = mount(ConversationList, {
       target: document.body,
@@ -473,7 +473,7 @@ describe("active share indicators", () => {
       const icons = document.querySelectorAll(".share-icon");
       expect(interval).not.toHaveBeenCalled();
       expect(icons).toHaveLength(1);
-      expect(icons[0]?.getAttribute("aria-label")).toBe("Desk screen share; reading Editor for @bot");
+      expect(icons[0]?.getAttribute("aria-label")).toBe("Desk screen share; window → «Alpha» (Editor)");
       screenStatus.indicators = [];
       await tick();
       await Promise.resolve();
