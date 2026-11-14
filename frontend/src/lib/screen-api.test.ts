@@ -1,5 +1,27 @@
-import { describe, expect, it } from "vitest";
-import { mapPreviewRegion, ScreenMonitorSchema } from "./screen-api";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mapPreviewRegion, ScreenMonitorSchema, screenApi } from "./screen-api";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("preview errors", () => {
+  const failure = (status: number, body: unknown) =>
+    vi.fn().mockResolvedValue({ ok: false, status, json: () => Promise.resolve(body) });
+
+  it("carries the server's detail", async () => {
+    vi.stubGlobal("fetch", failure(504, { detail: "Desk did not send a preview within 10 s" }));
+    await expect(screenApi.preview("d", 1)).rejects.toMatchObject({
+      message: "Desk did not send a preview within 10 s",
+      status: 504,
+    });
+  });
+
+  it("never falls back to a bare status code", async () => {
+    vi.stubGlobal("fetch", failure(409, {}));
+    await expect(screenApi.preview("d", 1)).rejects.toThrow("the computer did not send a preview");
+  });
+});
 
 describe("monitor preview region mapping", () => {
   it("maps a crop on monitors with non-zero desktop offsets", () => {

@@ -3,6 +3,7 @@ import ctypes
 from ctypes import wintypes
 import os
 import sys
+import threading
 
 def prepare():
     if sys.platform.startswith("linux") and (os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
@@ -15,7 +16,34 @@ def prepare():
             ctypes.windll.shcore.SetProcessDpiAwareness(2)
 
 
+FRAME_SECONDS = 0.75
+RELEASE_SECONDS = 2
+
+
+def release(control, stop):
+    """Stop a capture and wait for its thread, but never for long: a stuck one is abandoned.
+
+    The wait runs in a daemon thread so a capture that never finishes cannot hold the caller or
+    keep the helper from exiting. The thread is returned: if it is still alive the capture is
+    still outstanding, and no further one may start until it ends.
+    """
+    def finish():
+        if stop:
+            control.stop()
+        control.wait()
+
+    worker = threading.Thread(target=finish, daemon=True)
+    worker.start()
+    worker.join(RELEASE_SECONDS)
+    return worker
+
+
 class Desktop:
+    # Shared by every Desktop and so by every reconnected Session: one capture at a time, and none
+    # while an abandoned one is still shutting down.
+    _grab_lock = threading.Lock()
+    _cleanup = None
+
     def __init__(self):
         prepare()
         from pynput.mouse import Controller
@@ -60,6 +88,17 @@ class Desktop:
         """Take an explicit monitor preview from its first Graphics Capture frame event."""
         if not self.supports_capture:
             raise RuntimeError("Monitor capture is unsupported on this platform")
+        if not Desktop._grab_lock.acquire(blocking=False):
+            raise RuntimeError("another monitor capture is still running")
+        try:
+            if Desktop._cleanup is not None and Desktop._cleanup.is_alive():
+                raise RuntimeError("the previous monitor capture is still shutting down")
+            Desktop._cleanup = None
+            return self._capture(monitor)
+        finally:
+            Desktop._grab_lock.release()
+
+    def _capture(self, monitor):
         from threading import Event
         from windows_capture import WindowsCapture
         from .capture_loop import _wgc_image
@@ -79,11 +118,10 @@ class Desktop:
             arrived.set()
 
         control.append(capture.start_free_threaded())
-        if not arrived.wait(0.75) or not frames:
-            control[0].stop()
-            control[0].wait()
+        if not arrived.wait(FRAME_SECONDS) or not frames:
+            Desktop._cleanup = release(control[0], stop=True)
             raise RuntimeError("Windows Graphics Capture did not deliver a monitor preview frame")
-        control[0].wait()
+        Desktop._cleanup = release(control[0], stop=False)
         return frames[0]
 
     def pointer(self):

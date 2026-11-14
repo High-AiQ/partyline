@@ -20,6 +20,7 @@ from partyline.media_routes import media_router
 from partyline.runtime import ChatRuntime
 from partyline.screen_frames import BufferedFrame, ShareBuffer, frames_since, pick_distinct
 from partyline.screen_routes import register_screen_routes
+from partyline_helper.version import helper_version
 from tests.screen_helper_fakes import FakeDesktop
 
 
@@ -427,6 +428,19 @@ class ScreenTest(unittest.TestCase):
             self.assertEqual(result.status_code, 409)
             self.assertEqual(result.json()["detail"], "Preview rate limit")
 
+    def test_helper_error_without_text_still_gives_a_reason(self):
+        device = self.pair()
+        with self.client.websocket_connect("/api/screen/helper", headers={
+                "Authorization": "Bearer " + device["token"]}) as ws:
+            self.hello(ws)
+            url = "/api/screen/preview?device_id=" + device["device_id"] + "&monitor_id=1"
+            future = self.executor.submit(self.client.post, url)
+            command = ws.receive_json()
+            ws.send_json({"type": "error", "request_id": command["request_id"], "message": ""})
+            result = future.result()
+            self.assertEqual(result.status_code, 409)
+            self.assertEqual(result.json()["detail"], "the computer reported an error")
+
     def test_mcp_tool_contract_and_dispatch(self):
         from partyline.mcp import tools_core
         from unittest.mock import Mock
@@ -471,7 +485,7 @@ class ScreenTest(unittest.TestCase):
             message = ws.receive_json()
             self.assertEqual(message["type"], "ping")
             self.assertTrue(message["helper_update"]["available"])
-            self.assertEqual(message["helper_update"]["version"], "1.1.0")
+            self.assertEqual(message["helper_update"]["version"], helper_version())
             self.assertIn("PartylineHelper-Setup.exe", message["helper_update"]["url"])
 
     def test_live_revoke_and_invalid_region(self):

@@ -22,8 +22,8 @@
   const devices = $derived(screenStatus.devices);
   let deviceId = $state("");
   let monitorId = $state<string | number>("");
-  let preview = $state("");
   let previews = $state<Record<string, string>>({});
+  let previewErrors = $state<Record<string, string>>({});
   let code = $state("");
   let error = $state("");
   interface Point {
@@ -36,6 +36,7 @@
   let walkthroughDialog = false;
   const device = $derived(devices.find((item) => item.id === deviceId));
   const monitor = $derived(device?.monitors.find((item) => item.id === monitorId));
+  const preview = $derived(monitor ? (previews[monitor.id] ?? "") : "");
 
   $effect(() => {
     if (screenStatus.openPicker !== pickerRequest) {
@@ -58,7 +59,7 @@
     deviceId = "";
     monitorId = "";
     previews = {};
-    preview = "";
+    previewErrors = {};
     code = "";
   }
   async function pair(): Promise<void> {
@@ -72,15 +73,16 @@
   async function selectDevice(item: ScreenDevice): Promise<void> {
     deviceId = item.id;
     monitorId = "";
-    preview = "";
     previews = {};
+    previewErrors = {};
     await Promise.all(
       item.monitors.map(async (monitor) => {
         try {
           const result = await screenApi.preview(item.id, monitor.id);
           if (deviceId === item.id) previews[monitor.id] = `data:${result.mime};base64,${result.data}`;
         } catch (e) {
-          if (deviceId === item.id) error = e instanceof Error ? e.message : "Preview failed";
+          if (deviceId === item.id)
+            previewErrors[monitor.id] = e instanceof Error ? e.message : "the preview request failed";
         }
       }),
     );
@@ -88,7 +90,6 @@
   function selectMonitor(item: ScreenMonitor): void {
     monitorId = item.id;
     crop = null;
-    preview = previews[item.id] ?? "";
   }
   function point(event: PointerEvent): Point {
     const bounds = image?.getBoundingClientRect();
@@ -194,7 +195,6 @@
       <h3>Choose a monitor</h3>
       {#each device.monitors as item (item.id)}<button
           type="button"
-          disabled={!previews[item.id]}
           onclick={() => {
             selectMonitor(item);
           }}
@@ -203,7 +203,17 @@
               alt=""
               class="max-h-24 max-w-40"
             />{/if}{item.id} ({item.width} × {item.height})</button
-        >{/each}
+        >{#if previewErrors[item.id]}<small role="status" data-testid="preview-unavailable"
+            >Preview unavailable: {previewErrors[item.id]}</small
+          >{/if}{/each}
+    {/if}
+    {#if monitor && !preview}
+      <p data-testid="full-monitor-only">
+        {previewErrors[monitor.id]
+          ? "Preview unavailable: " + String(previewErrors[monitor.id]) + ". "
+          : "The preview has not arrived. "}The full monitor can still be shared.
+      </p>
+      <div><button type="button" onclick={() => void share()}>Share screen</button></div>
     {/if}
     {#if preview && monitor}
       <p>Drag to select an area, or share the full monitor.</p>

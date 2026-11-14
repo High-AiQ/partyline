@@ -16,7 +16,8 @@ from websockets.http11 import Response
 from websockets.datastructures import Headers
 
 from partyline_helper import cli, config, desktop, images, terminal
-from partyline_helper.client import Session, bounded
+from partyline_helper.bounds import bounded
+from partyline_helper.client import Session
 from tests.screen_helper_fakes import (
     FakeDesktop, FakeSocket, FakeTerminal, ManualTime, MONITOR, REGION, checkpoint, request, serve,
     fake_capture_factory,
@@ -510,11 +511,27 @@ class ExtraHelperTests(unittest.IsolatedAsyncioTestCase):
             await ws.send(json.dumps(dict(type="get_preview", monitor_id=100, request_id="bad")))
             self.assertEqual(json.loads(await ws.recv()),
                              dict(type="error", request_id="bad",
-                                  message="Invalid request or capture failed; see local terminal"))
+                                  message="monitor 100 is not connected to this computer"))
             await ws.close(code=1008)
         async with websocket_server(handler, "127.0.0.1", 0, ping_interval=None) as server:
             port = server.sockets[0].getsockname()[1]
             with self.assertWarns(UserWarning):
+                await serve(dict(server=f"http://127.0.0.1:{port}", token="secret"),
+                            FakeDesktop(), FakeTerminal())
+
+    async def test_any_failure_while_handling_a_request_is_answered(self):
+        async def handler(ws):
+            await ws.recv()
+            await ws.send(json.dumps(dict(type="get_preview", monitor_id=1, request_id="odd")))
+            self.assertEqual(json.loads(await ws.recv()),
+                             dict(type="error", request_id="odd",
+                                  message="Invalid request or capture failed; see local terminal"))
+            await ws.close(code=1008)
+        async with websocket_server(handler, "127.0.0.1", 0, ping_interval=None) as server:
+            port = server.sockets[0].getsockname()[1]
+            failing = AsyncMock(side_effect=AttributeError("odd"))
+            with patch("partyline_helper.client.Session.dispatch", new=failing), \
+                    self.assertWarns(UserWarning):
                 await serve(dict(server=f"http://127.0.0.1:{port}", token="secret"),
                             FakeDesktop(), FakeTerminal())
 

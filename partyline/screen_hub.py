@@ -167,7 +167,7 @@ class ScreenHub:
                 elif kind == "error":
                     request_id = message.get("request_id")
                     entry = self.snap_waiters.get(request_id)
-                    error = ValueError(str(message.get("message", "helper error")))
+                    error = ValueError(str(message.get("message") or "the computer reported an error"))
                     if entry and entry[0].device_id == ident and not entry[1].done():
                         entry[1].set_exception(error)
                     entry = self.preview_waiters.get(request_id)

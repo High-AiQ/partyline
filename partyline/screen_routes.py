@@ -14,6 +14,7 @@ from .machine_scope import deny_unless, is_human
 from .media import MediaError, MediaStore
 from .screen_audit import recover
 from .screen_connections import revoke as revoke_device
+from .screen_errors import screen_error
 from .local_tools_audit import recover as recover_tools
 from .local_tools_routes import tools_router
 from .render_check_routes import render_check_router
@@ -134,8 +135,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
             share = await hub.start_share(conv_id, principal.user_id, principal.name,
                                           body.device_id, body.region.model_dump(), conv["name"],
                                           walkthrough=body.walkthrough, control=body.control)
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+        except (ValueError, TimeoutError) as exc:
+            raise screen_error(exc, "the computer") from exc
         return {"share_id": share.share_id, "status": share.status}
 
     @router.delete("/api/screen/shares/{share_id}")
@@ -155,7 +156,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         try:
             item = await hub.preview(device_id, principal.user_id, monitor_id)
         except (TimeoutError, ValueError) as exc:
-            raise HTTPException(409, str(exc)) from exc
+            raise screen_error(exc, "the computer") from exc
         return {**{key: value for key, value in item.items() if key != "data"},
                 "data": base64.b64encode(item["data"]).decode("ascii")}
 
@@ -182,7 +183,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
             ref, unchanged = await frame_reference(store, share, principal.name, frame, data, mime,
                                            marked=mark_pointer)
         except (ValueError, TimeoutError) as exc:
-            raise HTTPException(409, str(exc)) from exc
+            raise screen_error(exc) from exc
         except MediaError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         return {"file": ref.model_dump(mode="json"), "description": frame_detail(frame),
