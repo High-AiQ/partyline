@@ -21,13 +21,16 @@ ELEMENTS_NOTE = (
     "Read a window a person shared with this line (UI Automation tree, each answer ~4 KB; any process on "
     "the line may). No arguments: summary. find: query "
     "(name), value, control_type; root=<id> lists children; text=true reads the page; id=<id> shows one "
-    "element whole. Act with screen_element_action on element ids; ids survive refresh=true. "
-    "Refresh after the page changes."
+    "element whole. Use screen_element_action on its ids. State recaptures on UIA change events and "
+    "every 3 seconds; answers include "
+    "snapshot_age_seconds and change_event_since_snapshot. Refresh with refresh=true after a visible "
+    "change or when you need a fresh read now. Element ids survive refresh=true."
 )
 ELEMENTS_PROPERTIES = {
     "device": {"type": "string", "description": "Computer name when several are online."},
     "window": {"type": "string", "description": "Window grant id or title when several are shared."},
-    "refresh": {"type": "boolean", "description": "Take a new snapshot (after the page changed)."},
+    "refresh": {"type": "boolean",
+                "description": "Take a fresh snapshot now; unchanged ids stay stable."},
     "more": {"type": "boolean", "description": "Continue a capture reported as partial."},
     "root": {"type": "string", "maxLength": 128,
              "description": "Element id: list its children, or limit find/text to its subtree."},

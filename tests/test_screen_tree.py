@@ -264,7 +264,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         now = [0]
         self.hub.clock = lambda: now[0]
         for name in ("old", "other", "keep"):
-            self.hub.remember(name, Snapshot("s", 0 if name != "keep" else 900))
+            self.hub.remember(name, Snapshot("s", 0 if name != "keep" else 999))
         now[0] = 1000
         self.replies = [{"snapshot_id": "s", "elements": [{"id": "w", "name": "W"}]}]
         await self.hub.read(None)  # purges before it answers

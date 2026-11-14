@@ -18,7 +18,7 @@ from .screen_tree_answer import answer, elements_options
 from .op_timing import pushed
 
 ELEMENT_OPTIONS = Annotated[dict, Depends(elements_options)]
-SNAPSHOT_TTL = 600  # seconds a captured tree answers queries before it must be taken again
+SNAPSHOT_TTL = 3  # seconds a captured tree answers queries before it must be taken again
 MAX_SNAPSHOTS = 16
 OLD_ID = 16  # helper ids are 16 hex digits; older helpers sent 64
 MAX_STORED = 300_000  # nodes all stored trees together keep; the least recently used go first
@@ -34,6 +34,8 @@ class ElementsHub:
         self.snapshots = OrderedDict()  # window grant id -> its latest captured tree
         self.locks = {}
         self.clock = clock
+        self.change_versions = {}
+        self.after_action = set()
 
     async def exchange(self, principal, grant, device, kind, **fields):
         require_window(self.hub, principal, grant["id"])
@@ -81,6 +83,8 @@ class ElementsHub:
         """The grant is over: its tree and its ids go."""
         self.forget(grant_id)
         self.spaces.pop(grant_id, None)
+        self.change_versions.pop(grant_id, None)
+        self.after_action.discard(grant_id)
 
     def forget(self, grant_id):
         self.snapshots.pop(grant_id, None)
@@ -90,14 +94,19 @@ class ElementsHub:
         grant, device = resolve_window(self.hub, principal, window, device_name)
         try:
             async with self.locked(grant["id"]):
-                self.purge()
-                tree = self.fresh(grant["id"])
-                if options.get("refresh") or tree is None:
+                preserve = grant["id"] if options.get("more") else None
+                self.purge(preserve=preserve)
+                tree = self.fresh(grant["id"], more=bool(options.get("more")))
+                continuation = options.get("more") and tree and tree.cursor
+                forced = grant["id"] in self.after_action and not continuation
+                if options.get("refresh") or tree is None or forced:
                     self.forget(grant["id"])  # the helper drops its ids as a new snapshot starts
                     previous = tree
                     space = self.spaces.setdefault(grant["id"], IdSpace())
                     space.renew()
-                    tree = await self.capture(principal, grant, device, Snapshot(None, self.clock(), space))
+                    tree = Snapshot(None, self.clock(), space)
+                    tree.event_version = self.change_versions.get(grant["id"], 0)
+                    tree = await self.capture(principal, grant, device, tree)
                     if previous is not None and not isinstance(tree, dict):
                         tree.before = set(previous.nodes)
                 elif options.get("more") and tree.cursor:
@@ -106,30 +115,82 @@ class ElementsHub:
                     return tree
                 require_window(self.hub, principal, grant["id"])  # a revoke during the capture stores nothing
                 self.remember(grant["id"], tree)
-                return {"window": grant["id"], "snapshot_id": tree.snapshot_id,
-                        **await asyncio.to_thread(answer, tree, grant, options, budget)}
+                if not (grant["id"] in self.after_action and options.get("more")):
+                    self.after_action.discard(grant["id"])
+                result = await asyncio.to_thread(answer, tree, grant, options, max(256, budget - 100))
+                result.update(snapshot_age_seconds=max(0, round(self.clock() - tree.created, 3)),
+                              change_event_since_snapshot=(tree.event_version !=
+                                                           self.change_versions.get(grant["id"], 0)))
+                return {"window": grant["id"], "snapshot_id": tree.snapshot_id, **result}
         except (TimeoutError, OSError, RuntimeError):
             return {"elements_unavailable": "helper did not respond"}
 
-    def fresh(self, grant_id):
+    def fresh(self, grant_id, more=False):
         tree = self.snapshots.get(grant_id)
-        if tree and self.clock() - tree.created > SNAPSHOT_TTL:
+        if tree and getattr(tree, "event_version", self.change_versions.get(grant_id, 0)) != \
+                self.change_versions.get(grant_id, 0):
+            del self.snapshots[grant_id]
+            return None
+        if tree and self.clock() - tree.created > SNAPSHOT_TTL and not (more and tree.cursor):
             del self.snapshots[grant_id]
             return None
         return tree
 
+    def changed(self, grant_id):
+        """A helper UIA event invalidates this grant's tree without resetting its stable ids."""
+        self.change_versions[grant_id] = self.change_versions.get(grant_id, 0) + 1
+        self.forget(grant_id)
+
+    def action_completed(self, grant_id, retain_snapshot=False):
+        """The next read must be fresh, including after a `then` snapshot taken too soon."""
+        if not retain_snapshot:
+            self.forget(grant_id)
+        self.after_action.add(grant_id)
+
     def helper_id(self, grant_id, element_id):
         """The helper's id for a stable id of the stored tree: `(helper id, ok)`; no tree passes the id on."""
         tree = self.fresh(grant_id)
+        return self._helper_id(tree, element_id)
+
+    def locked_target(self, grant_id, element_id):
+        """Translate under the window lock against the newest stored tree, which action_target refreshed.
+
+        Another process on the line may have recaptured meanwhile; its tree is the current id space.
+        `(None, False)`: an id space exists but no tree survived, so the caller must read again.
+        """
+        tree = self.snapshots.get(grant_id)
+        if tree is None and grant_id in self.spaces:
+            return None, False
+        return self._helper_id(tree, element_id)
+
+    @staticmethod
+    def _helper_id(tree, element_id):
+        """Translate against the tree already checked fresh by the caller."""
         if tree is None:
             return element_id, True
         node = tree.nodes.get(element_id) or tree.nodes.get(tree.by_helper.get(element_id))  # or helper's
         return (node.helper, True) if node else (element_id, False)
 
-    def purge(self):
+    async def action_target(self, principal, grant, element_id):
+        """Recapture expired trees before translating stable ids to the helper's current ids."""
+        tree = self.fresh(grant["id"])
+        if tree is None:
+            if grant["id"] not in self.spaces:
+                return element_id, True  # no server snapshot has established a stable id space yet
+            result = await self.read(principal, window=grant["id"], options={"refresh": True})
+            if result.get("elements_unavailable"):
+                return None, False
+            tree = self.snapshots.get(grant["id"])
+            if tree is None or tree.event_version != self.change_versions.get(grant["id"], 0):
+                return None, False
+        return self._helper_id(tree, element_id)
+
+    def purge(self, preserve=None):
         """Forget every window's tree that has outlived its time."""
         now = self.clock()
-        for grant_id in [key for key, tree in self.snapshots.items() if now - tree.created > SNAPSHOT_TTL]:
+        for grant_id in [key for key, tree in self.snapshots.items()
+                         if now - tree.created > SNAPSHOT_TTL and
+                         not (key == preserve and tree.cursor)]:
             del self.snapshots[grant_id]
 
     def remember(self, grant_id, tree):
@@ -173,6 +234,8 @@ class ElementsHub:
                 tree.cursor = None
                 tree.note = f"the window has more than the {MAX_TREE} elements one snapshot keeps"
             if not tree.cursor or len(tree.order) >= MAX_NODES or self.clock() >= deadline:
+                if not tree.cursor:
+                    tree.created = self.clock()
                 return tree
 
     def receive(self, device, message):

@@ -12,6 +12,7 @@ from partyline.file_events import Changes
 from .uia_task import WindowTask, read_options
 from .uia_window_identity import unmark
 from .window_target_picker import select_target
+from .uia_events import UIAEventSubscription
 
 WINDOWS_VERSION = 1  # 1: a window is shared with a line, not with one process
 MESSAGES = ("share_targets", "window_grant_result", "revoke_window")
@@ -28,10 +29,13 @@ class WindowSession:
 
 
 class WindowShares:
-    def __init__(self, session, window_picker=select_window, target_picker=select_target):
+    def __init__(self, session, window_picker=select_window, target_picker=select_target,
+                 event_factory=UIAEventSubscription):
         self._changes = Changes()
         self.session, self.window_picker, self.target_picker = session, window_picker, target_picker
+        self.event_factory = event_factory
         self.grants, self.waiters, self.tasks = {}, {}, set()
+        self.event_timers = {}
         self.picking, self.generation = False, 0
 
     async def request(self, kind, **fields):
@@ -107,6 +111,7 @@ class WindowShares:
             worker = WindowTask(access_session)
             self.grants[ident] = {"access": access, "worker": worker, "target": response["target"],
                                   "title": selected["title"]}
+            self.spawn(self.start_events(ident, selected["hwnd"]))
             selected, registered = None, None
             self.changed()
         except (OSError, ValueError, KeyError, TimeoutError, ConnectionClosed):
@@ -121,13 +126,46 @@ class WindowShares:
     def revoke(self, ident, notify=True, *, reason="revoked by the person"):
         entry = self.grants.pop(ident, None)
         if entry:
+            timer = self.event_timers.pop(ident, None)
+            if timer:
+                timer.cancel()
             entry["access"].revoke()
             self.spawn(entry["worker"].close())
+            if subscription := entry.get("events"):
+                self.spawn(asyncio.to_thread(subscription.close))
             if notify:
                 reason = {"window closed": "window closed", "replaced": "replaced by another grant"}.get(
                     reason, "revoked by the person")
                 self.spawn(self.send_revoked(ident, reason))
             self.changed()
+
+    async def start_events(self, ident, hwnd):
+        loop = asyncio.get_running_loop()
+        subscription = self.event_factory(hwnd, lambda: loop.call_soon_threadsafe(self.queue_change, ident))
+        entry = self.grants.get(ident)
+        if not entry:
+            return
+        entry["events"] = subscription
+        entry["events_supported"] = await asyncio.to_thread(subscription.start)
+        if self.grants.get(ident) is not entry:
+            await asyncio.to_thread(subscription.close)
+
+    def queue_change(self, ident):
+        if ident not in self.grants:
+            return
+        previous = self.event_timers.pop(ident, None)
+        if previous:
+            previous.cancel()
+        self.event_timers[ident] = asyncio.get_running_loop().call_later(
+            0.1, lambda: self.spawn(self.send_changed(ident)))
+
+    async def send_changed(self, ident):
+        self.event_timers.pop(ident, None)
+        entry = self.grants.get(ident)
+        if not entry or not entry.get("events_supported"):
+            return
+        with contextlib.suppress(ConnectionClosed, OSError):
+            await self.session.send("window_changed", grant_id=ident)
 
     def revoke_all(self, notify=True):
         self.generation += 1  # also cancels consent currently open in a native picker

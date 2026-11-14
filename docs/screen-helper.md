@@ -342,7 +342,7 @@ no new read:
 | `id` | `id=<id>`: one element whole, like `cat`: its full name (up to 1,000 characters) and value (600), actions, child count and `in:` path |
 | `changes` | `changes=true`: what the last `refresh=true` added (the topmost new elements) with a `+added -gone` count; `offset` pages it |
 | paging | a long answer ends with `more` and `next_offset`; pass `offset` to continue |
-| `refresh` | `refresh=true` takes a new snapshot; ids of elements that are unchanged stay valid |
+| `refresh` | `refresh=true` takes a new snapshot now; ids of unchanged elements stay valid |
 
 There is no regex search: a backtracking pattern over tens of thousands of names could stall the server, so `find` and `text` take the plain terms above only.
 
@@ -378,7 +378,7 @@ elements, 10,000 visited nodes or 3 s, whichever comes first. A part that stops 
 nodes. A larger window comes back marked `partial` and `more=true` continues it from the same cursor, so
 no cap is a dead end (there is no depth limit, since the walk is iterative). The helper keeps each
 part's ids and paths, merged, until the next plain snapshot; a cursor from an earlier snapshot is
-refused as expired. The server keeps at most 16 trees, each for 10 minutes. A cursor remembers, for each unread section, which element it hangs under and how many children that element had; if the page changed when a part resumes, those sections are dropped rather than read from shifted positions, and every answer carries a `changed` note telling the agent to `refresh`. Stored trees total at most 300,000 nodes (120,000 in one), go when their grant ends or a refresh starts, and answers are measured in UTF-8 bytes (4,096 at most, title and hint included), so CJK pages fit. An older helper sends a flat list: summary and `ls` work on it, with a note to update the helper. The first part's whole-tree prefetch runs under the start limit, not the part's 3 s budget. Every part runs in the
+refused as expired. The server keeps at most 16 trees and refreshes them after 3 seconds. UI Automation property and structure events also invalidate a grant's tree immediately; if event registration is unavailable, the 3-second bound still applies. A cursor remembers, for each unread section, which element it hangs under and how many children that element had; if the page changed when a part resumes, those sections are dropped rather than read from shifted positions, and every answer carries a `changed` note telling the agent to `refresh`. Each answer reports `snapshot_age_seconds` and `change_event_since_snapshot`. Stored trees total at most 300,000 nodes (120,000 in one), go when their grant ends or a refresh starts, and answers are measured in UTF-8 bytes (4,096 at most, title and hint included), so CJK pages fit. An older helper sends a flat list: summary and `ls` work on it, with a note to update the helper. The first part's whole-tree prefetch runs under the start limit, not the part's 3 s budget. Every part runs in the
 isolated child process (killed about 12 s after its budget); the unread frontier travels to the child in
 a file, because it can be far longer than a command line. Unnamed, patternless
 `Pane`/`Group`/`Custom` wrappers are walked but not listed.
@@ -422,7 +422,7 @@ helper reads pattern state (range, scroll axes, window abilities) only for the a
 **Click then read.** `then` takes the `screen_elements` read fields (`query`, `value`, `control_type`,
 `root`, `id`, `text`, `context`, `depth`). After a completed action the server waits half a second, takes a
 new snapshot and returns the answer as `after`, within the same 4 KB for the action result and the answer
-together. The client waits up to 100 s for a call with `then` (40 s without). An empty `then` returns what is new: the topmost elements the new snapshot has that the old one
+together. The next separate `screen_elements` read recaptures again, so a delayed app update is not hidden by the immediate post-action snapshot. The client waits up to 160 s for a call with `then` (100 s without), allowing time for a multi-part pre-action snapshot and action. An empty `then` returns what is new: the topmost elements the new snapshot has that the old one
 did not (ids are stable, so a page change lists the new rows and not the unchanged chrome) and a `diff`
 count `+added -gone`. The read needs read access to the line as well as write. If the share ends meanwhile,
 `after` says so and the action result is kept.

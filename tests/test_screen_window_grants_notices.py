@@ -2,7 +2,7 @@
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from partyline.screen_grants import device_grants
 from partyline.screen_window_notices import line_window_text
@@ -182,3 +182,15 @@ class WindowNoticeTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         self.runtime.live["a"].deliver.side_effect = deliver
         await self.grant("a")
         self.assertEqual(1, len(self.notices("a")))
+
+    async def test_window_change_invalidates_only_a_grant_from_its_device(self):
+        await self.grant("a")
+        changed = Mock()
+        self.hub.elements.changed = changed
+        await self.hub.window_grants.from_helper(self.device,
+            {"type": "window_changed", "grant_id": "g1"})
+        changed.assert_called_once_with("g1")
+        changed.reset_mock()
+        await self.hub.window_grants.from_helper({**self.device, "id": "another"},
+            {"type": "window_changed", "grant_id": "g1"})
+        changed.assert_not_called()

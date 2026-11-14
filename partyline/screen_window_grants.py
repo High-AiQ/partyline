@@ -16,7 +16,7 @@ from .screen_grants import GRANTS
 from .screen_grant_store import replace_grant
 from .op_timing import pushed
 
-MESSAGES = ("list_share_targets", "window_grant", "window_revoked")
+MESSAGES = ("list_share_targets", "window_grant", "window_revoked", "window_changed")
 
 
 class TargetRequest(BaseModel):
@@ -31,6 +31,12 @@ class WindowRevoked(BaseModel):
     grant_id: str = Field(min_length=1, max_length=128)
     reason: Literal["revoked by the person", "window closed", "replaced by another grant"] = Field(
         default="revoked by the person")
+
+
+class WindowChanged(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["window_changed"]
+    grant_id: str = Field(min_length=1, max_length=128)
 
 
 class WindowGrantMessage(BaseModel):
@@ -121,6 +127,15 @@ class WindowGrants:
             entry = self.known.get(revoked.grant_id)
             if entry and entry["device_id"] == device["id"]:
                 await self.revoke(revoked.grant_id, tell_helper=False, reason=revoked.reason)
+            return
+        if kind == "window_changed":
+            try:
+                event = WindowChanged.model_validate(message)
+            except ValidationError:
+                return
+            entry = self.known.get(event.grant_id)
+            if entry and entry["device_id"] == device["id"]:
+                self.hub.elements.changed(event.grant_id)
             return
         response = {"type": "window_grant_result", "request_id": ident, "ok": False}
         try:
