@@ -40,7 +40,8 @@ class TreeTests(unittest.TestCase):
         self.assertEqual(2, len(node.nodes))
         x, y = key(node, "x"), key(node, "y")
         line = node.line(node.nodes[x], 2)
-        self.assertEqual(f"  {x} CheckBox \"say 'hi' now\" =\"v\" [toggle] toggle:on off disabled focused",
+        self.assertEqual(f"  {x} CheckBox \"say 'hi' now\" =\"v\" [toggle] "
+                         "toggle:on off disabled(IsEnabled=false;self) focused",
                          line)
         self.assertTrue(node.line(node.nodes[x], bounds=True).endswith("@1,2,3,4 frame@5,6,7,8"))
         self.assertEqual(f"{y} Edit #field", node.line(node.nodes[y]))

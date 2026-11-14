@@ -68,7 +68,8 @@ def pick(tree, grant, options):
     if query or kind or value:
         return find(tree, query, kind, root, options.get("offset", 0), options.get("bounds", False), value)
     if root:
-        return listing(tree, root, options.get("depth", 1), options.get("offset", 0))
+        return listing(tree, root, options.get("depth", 1), options.get("offset", 0),
+                       options.get("include_root", False))
     return {"window_title": grant["title"][:100], "process_name": grant["process"][:60],
             **summary(tree), "hint": HINT}
 
@@ -78,6 +79,12 @@ def answer(tree, grant, options, budget=OUT_BYTES):
     if body is None:
         return {"error": "unknown element id: not in this snapshot (gone, or not read yet: more=true, "
                          "or find it again)"}
+    root = options.get("root")
+    if options.get("include_root") and root in tree.nodes and "lines" in body:
+        if not any(line.startswith(root + " ") for row in body["lines"] for line in row.splitlines()):
+            body["lines"].insert(0, tree.line(tree.nodes[root]))
+            body["total"] = body.get("total", 0) + 1
+            body["resume"] = [0, *body.get("resume", ())]
     if options.get("changes") and "diff" not in body:
         body["diff"] = changes(tree)["diff"]
     key = next((name for name in ("lines", "outline") if name in body), None)

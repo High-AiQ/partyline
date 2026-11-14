@@ -1,5 +1,25 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-14 — Dropdown options need not be children of the ComboBox
+
+The false assumptions were that a granted HWND subtree contains every dropdown popup,
+that options are children of their opener, and that a successful pattern call proves a
+state change. Live Chrome exposed a sibling List while ExpandCollapse still reported
+Collapsed; other providers can use owned top-level windows. Snapshot scope now includes
+only visible same-process owner-chain popups, named selection searches nearby/new Lists,
+and action results compare pattern state and separately report discovered options.
+Rooted post-action reads retain the root. UIA's IsEnabled can also disagree with a usable
+web link: retain ARIA/ancestor evidence and require an explicit, person-informed force
+request to try the pattern and its accessible default action. Regressions:
+`tests/test_uia_dropdown.py`, `tests/test_uia_disabled.py`.
+
+The same-process restriction belongs to appended popups, not hosted content inside the
+granted HWND. Persistent UIA subscriptions must remain on granted/popup roots, with
+popup registration changes deferred from WinEvent callbacks to the message loop; an
+unfiltered desktop subscription is not a cheap substitute. Selection cleanup must not
+replace the result after Select has already run, or mask an earlier refusal. Hosted
+subtree, popup-root lifecycle and failed-collapse regressions cover these boundaries.
+
 ## 2026-11-14 — A failed worktree add can leave a locked registration
 
 The false assumption was that an unsuccessful `git worktree add` creates nothing and

@@ -12,22 +12,24 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 
 ELEMENT_ACTION_NOTE = (
-    "Act on a screen_elements id in the line's granted window. [actions] lists supported actions. "
-    "press key=enter/tab/escape posts only to its HWND after UIA focus; no global input or activation. "
-    "Prefer invoke on submit buttons. no_effect includes a hint; queueing is not success. "
-    "then re-reads (empty = changes); later reads recapture. Drag with screen_drag.")
+    "UIA on a screen_elements id in a shared/inherited window. select value=option name; set_value=text. "
+    "press key=enter/tab/escape targets its HWND after focus; no global input/activation. Prefer invoke "
+    "on submit buttons; no_effect has a hint. force=true: disabled only if person confirms it works. "
+    "then re-reads (empty=changes). Event-counter cache barrier. Drag: screen_drag.")
 ELEMENT_ACTION_TIMEOUT = 100  # a 20s capture deadline may be followed by a 35s exchange, then action
 ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and settle
 ELEMENT_ACTION_PROPERTIES = {
     "window": {"type": "string",
                "description": "Window grant id or title when several windows are shared with this line."},
+    "force": {"type": "boolean", "description": "Try a reported-disabled control the person confirms works."},
     "element_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "action": {"type": "string", "enum": [
         "invoke", "toggle", "set_value", "press", "select", "add_to_selection",
         "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent", "scroll_into_view",
         "set_range_value", "window_close",
         "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize"]},
-    "value": {"type": "string", "maxLength": 500, "description": "Text for set_value."},
+    "value": {"type": "string", "maxLength": 500,
+              "description": "Text for set_value; option name for ComboBox select."},
     "key": {"type": "string", "enum": ["enter", "tab", "escape"], "description": "For press; no modifiers."},
     "direction": {"type": "string", "enum": ["up", "down", "left", "right"], "description": "For scroll."},
     "amount": {"type": "string", "enum": ["small", "large"], "description": "For scroll."},

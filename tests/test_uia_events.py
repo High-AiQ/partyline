@@ -72,3 +72,37 @@ class UIAEventContractTests(unittest.TestCase):
             register_handlers(automation, uia, "window", lambda: None, HandlerBase)
         self.assertEqual("property", automation.removed[0][0])
 
+
+    def test_structure_only_subscription_filters_unrelated_senders(self):
+        automation = AutomationContract()
+        uia = SimpleNamespace(IUIAutomationPropertyChangedEventHandler=object,
+                              IUIAutomationStructureChangedEventHandler=object)
+        changes = []
+        register_handlers(automation, uia, "desktop", lambda: changes.append("changed"), HandlerBase,
+                          accepts=lambda sender: sender == "owned popup", structure_only=True)
+        self.assertEqual(1, len(automation.added))
+        handler = automation.added[0][-1]
+        handler.HandleStructureChangedEvent("unrelated", 0, [])
+        handler.HandleStructureChangedEvent("owned popup", 0, [])
+        self.assertEqual(["changed"], changes)
+
+    def test_expand_waits_once_for_structure_with_injected_event_and_no_real_time(self):
+        from unittest.mock import Mock
+        from partyline_helper.uia_expand_events import EXPAND_EVENT_SECONDS, structure_call
+        event = Mock()
+        subscription = SimpleNamespace(start=Mock(return_value=True), close=Mock())
+        subscribe = Mock(return_value=subscription)
+        pattern = Mock(return_value="done")
+        self.assertEqual("done", structure_call(42, pattern, subscribe, lambda: event)())
+        subscribe.assert_called_once_with(42, event.set, structure_only=True)
+        event.clear.assert_called_once_with()
+        event.wait.assert_called_once_with(EXPAND_EVENT_SECONDS)
+        subscription.close.assert_called_once_with()
+        subscription.start.return_value = False
+        event.reset_mock()
+        structure_call(42, pattern, subscribe, lambda: event)()
+        event.wait.assert_not_called()
+        pattern.side_effect = RuntimeError("pattern failed")
+        with self.assertRaisesRegex(RuntimeError, "pattern failed"):
+            structure_call(42, pattern, subscribe, lambda: event)()
+        self.assertEqual(3, subscription.close.call_count)

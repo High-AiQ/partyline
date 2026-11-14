@@ -28,7 +28,7 @@ def clip(text, limit):
 
 class Node:
     __slots__ = ("id", "helper", "parent", "type", "name", "value", "auto", "actions", "toggle", "flags",
-                 "bounds", "frame")
+                 "bounds", "frame", "aria")
 
     def __init__(self, item):
         self.id = self.helper = str(item.get("id", ""))  # id is replaced by the stable one on add
@@ -37,6 +37,7 @@ class Node:
         self.name = clean(item.get("name"))
         self.value = clean(item.get("value"), VALUE_FIELD)
         self.auto = clean(item.get("automation_id"), 40)
+        self.aria = clean(item.get("aria_properties"), 160)
         self.actions = tuple(item.get("actions") or ())
         self.toggle = item.get("toggle")
         self.flags = tuple(flag for flag, on in (("off", item.get("offscreen")),
@@ -140,7 +141,19 @@ class Snapshot:
             parts.append("[" + ",".join(node.actions) + "]")
         if node.toggle in TOGGLE:
             parts.append("toggle:" + TOGGLE[node.toggle])
-        parts.extend(node.flags)
+        flags = list(node.flags)
+        if "disabled" in flags:
+            evidence, ancestor = ["IsEnabled=false"], self.nodes.get(node.parent)
+            for _ in range(20):
+                if ancestor is None or "disabled" in ancestor.flags:
+                    break
+                ancestor = self.nodes.get(ancestor.parent)
+            source = "ancestor=" + ancestor.id if ancestor and "disabled" in ancestor.flags else "self"
+            evidence.append(source)
+            if node.aria:
+                evidence.append("aria:" + node.aria)
+            flags[flags.index("disabled")] = "disabled(" + ";".join(evidence) + ")"
+        parts.extend(flags)
         if bounds and node.bounds:
             parts.append("@" + ",".join(str(int(v)) for v in node.bounds))
             if node.frame:

@@ -4,9 +4,12 @@ import json
 import threading
 
 from .uia_action import prepare
+from .uia_force import forced_call
+from .uia_options import expand_call
 from .uia_patterns import ActionRefused, argument, number
 from .uia_press import press
 from .uia_snapshot import MAX_TEXT
+from .uia_selection import effect, select_call
 from .uia_window_identity import live
 
 
@@ -22,12 +25,14 @@ def provider_factory(hwnd):  # pragma: no cover - Windows COM provider
 
 
 def run_action(access, grant, generation, message, factory=provider_factory):
-    observed, foreground_samples, delivery = {}, [], {}
+    observed, foreground_samples = {}, []
+    dispatched = False
     try:
         provider = factory(grant["hwnd"])
         arg = argument(message)
         path = getattr(access, "paths", {}).get(message["element_id"])
-        node, _ = prepare(provider, message["element_id"], message["action"], arg, path)
+        force = message.get("force", False)
+        node, _ = prepare(provider, message["element_id"], message["action"], arg, path, force)
 
         windows = access.list_windows()
         if windows is None:
@@ -36,11 +41,29 @@ def run_action(access, grant, generation, message, factory=provider_factory):
             raise ValueError("window closed")
         if grant.get("marker") and not live(grant):
             raise ValueError("window closed")
-        fresh, _ = prepare(provider, message["element_id"], message["action"], arg, path)
+        fresh, initial = prepare(provider, message["element_id"], message["action"], arg, path, force)
+        def check():
+            if access.gate.revoked.is_set() or access.gate.generation != generation:
+                raise ValueError("revoked")
+            current = access.list_windows()
+            if current is None:
+                raise ValueError("secure desktop active")
+            if (not any(item["hwnd"] == grant["hwnd"] and item["pid"] == grant["pid"] for item in current)
+                    or (grant.get("marker") and not live(grant))):
+                raise ValueError("window closed")
+        named_select = message["action"] == "select" and isinstance(arg, str)
+        forced = force and not initial.get("enabled")
+        call = select_call(provider, fresh, arg, initial, check, force) if named_select else None
+        if message["action"] == "expand":
+            call = ((lambda: expand_call(provider, fresh, initial)()) if forced
+                    else expand_call(provider, fresh, initial))
         if message["action"] == "press":
             def call():
                 return press(provider, fresh, arg["key"], active=lambda: not access.gate.revoked.is_set())
-        else:
+        if forced:
+            observed["reported_disabled"] = True
+            call = forced_call(provider, fresh, message["action"], arg, initial, check, call)
+        elif call is None:
             call = provider.action_call(fresh, message["action"], arg)
         windows = access.list_windows()
         if windows is None:
@@ -49,6 +72,7 @@ def run_action(access, grant, generation, message, factory=provider_factory):
                 or (grant.get("marker") and not live(grant))):
             raise ValueError("window closed")
         def invoke():
+            nonlocal dispatched
             current = access.list_windows()
             if current is None:
                 raise ValueError("secure desktop active")
@@ -61,6 +85,7 @@ def run_action(access, grant, generation, message, factory=provider_factory):
             if access.gate.revoked.is_set():
                 raise ValueError("revoked")
             try:
+                dispatched = True
                 return call()
             finally:
                 after = provider.foreground()
@@ -69,9 +94,10 @@ def run_action(access, grant, generation, message, factory=provider_factory):
                 observed.update(foreground_changed=changed,
                                 target_came_forward=bool(changed and after == grant["hwnd"]))
 
-        outcome, revoked_during = access.gate.dispatch(generation, invoke)
-        if message["action"] == "press" and isinstance(outcome, dict):
-            delivery = outcome
+        selection, revoked_during = access.gate.dispatch(generation, invoke)
+        selection = selection if isinstance(selection, dict) else {}
+        if message["action"] == "select" and not named_select:
+            selection.update(selected_option=str(initial.get("name", ""))[:MAX_TEXT], value_changed=None)
         if revoked_during or access.gate.revoked.is_set() or access.gate.generation != generation:
             return {"status": "completed", "revoked_during": True, "state_unavailable": "consent revoked",
                     **observed}
@@ -90,6 +116,9 @@ def run_action(access, grant, generation, message, factory=provider_factory):
                 if key in element:
                     element[key] = str(element[key] or "")[:MAX_TEXT]
             element["role"] = state.get("control_type")
+            if selection.get("options_found") and element.get("expand_state") == "collapsed":
+                element["reported_expand_state"] = element.pop("expand_state")
+                selection["hint"] = "provider reports collapsed; options are available for select"
             if access.gate.revoked.is_set() or access.gate.generation != generation:
                 return {"status": "completed", "revoked_during": True, "state_unavailable": "consent revoked",
                         **observed}
@@ -102,12 +131,16 @@ def run_action(access, grant, generation, message, factory=provider_factory):
             observed.update(foreground_changed=changed,
                             target_came_forward=bool(changed and grant["hwnd"] in (immediate, late)))
             return {"status": "completed", "revoked_during": revoked_during, "element": element,
-                    **observed, **delivery}
+                    **effect(message["action"], initial, state), **(selection or {}), **observed}
         except Exception:
             return {"status": "completed", "revoked_during": revoked_during,
-                    "state_unavailable": "could not re-read element", **observed, **delivery}
+                    "state_unavailable": "could not re-read element",
+                    **effect(message["action"], initial, {}), **selection, **observed}
     except ValueError as exc:
         reason = str(exc)
+        if reason == "revoked" and dispatched:
+            return {"status": "completed", "revoked_during": True,
+                    "state_unavailable": "consent revoked", **observed}
         allowed = ("revoked", "secure desktop active", "window closed")
         known = isinstance(exc, ActionRefused) or reason in allowed
         return {"status": "failed", "error": reason if known else "UI Automation failed", **observed}
@@ -125,8 +158,14 @@ def audit(session, grant, message, props, result):
             "result": result.get("status"), "revoked_during": result.get("revoked_during", False),
             "foreground_changed": result.get("foreground_changed"),
             "target_came_forward": result.get("target_came_forward")}
+    if message.get("force"):
+        info["force"] = True
+        info["reported_disabled"] = result.get("reported_disabled", False)
+    args = argument(message)
+    if isinstance(args, str):
+        args = {"option": args}
     params = {} if message.get("action") == "set_value" else {
-        key: value for key, value in argument(message).items()
+        key: value for key, value in args.items()
         if number(value) or (isinstance(value, str) and len(value) <= 16)}
     if params:
         info["params"] = params

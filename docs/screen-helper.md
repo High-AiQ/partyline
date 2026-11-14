@@ -411,7 +411,8 @@ helper reads pattern state (range, scroll axes, window abilities) only for the a
 | `invoke`, `toggle` | Invoke, Toggle | none |
 | `set_value` | Value | `value` (text) |
 | `press` | UIA focus, then window messages | `key`: `enter`, `tab`, or `escape` only |
-| `select`, `add_to_selection`, `remove_from_selection` | SelectionItem | none |
+| `select` | SelectionItem; ComboBox expands then selects an option | `value` (option name) on ComboBox; none on an option |
+| `add_to_selection`, `remove_from_selection` | SelectionItem | none |
 | `expand`, `collapse` | ExpandCollapse | none |
 | `scroll` | Scroll | `direction` (`up`, `down`, `left`, `right`), `amount` (`small`, `large`) |
 | `set_scroll_percent` | Scroll | `horizontal_percent` and/or `vertical_percent`, 0 to 100 |
@@ -661,3 +662,105 @@ its own checkout; there is no network polling. The tray shows an update and a
 notification when available. On Windows the tray item opens the installer; on other
 platforms rerun the helper install command. The Computers list also shows updates.
 Older helpers that reported a Partyline 2.x version are treated as outdated.
+
+### Dropdown options and reported-disabled controls (helper 1.2)
+
+A window snapshot includes its visible owned popups, labelled `popup: …` under the
+shared window. Win32's owner chain must reach the granted HWND, with the same process
+at every link; popup UIA ProcessId and NativeWindowHandle are checked too. Other browser
+windows and foreign-process popups are excluded. Content hosted by another process inside
+the granted HWND remains readable and actionable through that granted subtree. Popup options are action targets under the
+same grant. Hidden or closed popups add nothing to subsequent reads. UIA events are
+scoped to the granted element and each discovered popup root. PID-scoped WinEvent
+show/hide/destroy notifications invalidate reads and post messages to reconcile popup
+subscriptions outside the callbacks. Persistent UIA handlers do not inspect sender
+properties or walk desktop ancestry. Desktop scope is used only during the short Expand
+deadline. No timed popup discovery runs.
+
+Use `select` for dropdowns and `set_value` for text fields. On a ComboBox,
+`select(value="Amazon.co.uk")` expands it if needed, searches its children, then nearby
+Lists and owned popups (newly appeared lists first), uses SelectionItem.Select on the
+exact option name, and requests collapse. Chrome can expose a dropdown's List as a
+sibling under the Document rather than under the ComboBox. Ambiguous names require
+reading and selecting the option's own id. The response includes `selected_option`
+and `value_changed` (null if the provider cannot expose the value). If cleanup fails
+after selection, `collapse_failed=true` preserves the selection result; cleanup also
+never replaces an earlier selection error. Selecting an option
+directly also uses SelectionItem.Select. This is the pattern Chrome uses for a genuine
+selection and its page `change` event; setting Value is not a substitute.
+
+Expand, collapse, toggle, select and set_value return `status="completed"` with
+`effect="changed"`, `"none"` or `"unknown"`, comparing the exposed pattern state before
+and after. An unchanged value reports `none`. A provider that cannot expose state
+reports `unknown`, rather than claiming a change. Native Expand allows one structure-event deadline (up to 250 ms) before reading its
+result; there is no repeated state check. Expand also reports `options_found`,
+a bounded preview in `option_names`, and whether an option container appeared. Chrome
+may continue reporting Collapsed while its sibling List is open: in that case the
+response labels the raw state `reported_expand_state` and points to the options.
+`effect="none"` refers to the reported pattern state, which may disagree with these
+option observations. `then={root: id}` includes the root itself even when it has no
+children or the query finds none. Ordinary `screen_elements(root=id)` lists children.
+
+Disabled lines include `IsEnabled=false`, raw UIA `AriaProperties` when available,
+and a nearby disabled ancestor's id, or `self` when none was found in the captured
+ancestry. Disabled unnamed containers are retained as evidence. `ancestor=…` means
+that ancestor also reports disabled: UIA does not distinguish inheritance from an
+independently disabled child, so this is evidence of a possible cause, not proof.
+These annotations use the captured tree and do not require a second ancestor walk.
+
+If the person confirms a reported-disabled control works, `force=true` permits invoke,
+toggle, select or expand under the same grant and revocation checks. The helper tries
+the pattern; on failure for a link or button supporting LegacyIAccessible, it tries
+DoDefaultAction. It never synthesizes input. It reports `reported_disabled=true`, the
+method used, observed focus/value changes and the window title before/after (including
+whether it changed). A target removed by navigation may have no readable final state.
+An ordinary disabled refusal explains when to use force. Force does not bypass password,
+read-only, ownership, window identity, consent or action parameter checks.
+
+**Response sizes.** The deterministic Chrome-shaped fake has a window, one ComboBox,
+and a separate popup List with two options. These are compact JSON response bytes
+(UTF-8, excluding MCP envelope), with the requested estimate of bytes / 4 tokens;
+real page content and names change the sizes. `tests/test_uia_dropdown.py` measures
+the actual server read/action path with a fake clock and no elapsed-time waits.
+
+| Call | Bytes | Estimated tokens |
+| --- | ---: | ---: |
+| `screen_elements()` with the popup closed | 515 | 128.75 |
+| `screen_elements(query="marketplace")` | 279 | 69.75 |
+| Unchanged `set_value` action, without `then` | 300 | 75 |
+| `expand` action with `then={root:C, depth:2}` | 517 | 129.25 |
+| Read open popup options with `control_type="ListItem"` | 364 | 91 |
+| `screen_elements()` with popup options included | 589 | 147.25 |
+
+After collapse the same summary returns to 515 bytes: popup support adds no bytes to
+closed-popup reads. Summary and query output retain the existing 4 KB budget; expand
+previews at most eight option names rather than returning every option in the action.
+
+**Native Chrome check.** Run against a granted KDP Chrome window with the marketplace
+select and Manage A+ Content link; another Chrome window can remain open to check
+exclusion. These are MCP calls, in order. Bind `W` to the existing window grant id,
+`C` to the ComboBox id in step 1, `O` to the Amazon.co.uk ListItem id in step 3,
+and `L` to the link id in step 8. Use the returned ids, not old examples.
+
+1. `screen_elements(window=W, refresh=true, control_type="ComboBox", query="=Choose a marketplace…")`
+2. `screen_element_action(window=W, element_id=C, action="expand", then={root:C, depth:2})`
+   — root is listed; inspect effect and any option observations, including a stale reported state.
+3. `screen_elements(window=W, control_type="ListItem", query="=Amazon.co.uk")`
+   — find the sibling or popup option; no controls from the other Chrome window should appear.
+4. `screen_element_action(window=W, element_id=O, action="select", then={query:"=Manage A+ Content"})`
+   — verify the link href switches to the UK domain (the page's `change` handler ran).
+5. `screen_element_action(window=W, element_id=C, action="select", value="Amazon.com", then={root:C})`
+   — selected_option is Amazon.com; value_changed is true; select requests collapse.
+6. `screen_element_action(window=W, element_id=C, action="set_value", value="Amazon.com", then={root:C})`
+   — effect is none; the root still appears.
+7. `screen_element_action(window=W, element_id=C, action="select", value="Amazon.com", then={root:C})`
+   — value_changed is false and effect is none for an already-selected option.
+8. `screen_elements(window=W, refresh=true, query="=Manage A+ Content")`
+   — inspect disabled evidence and the restored .com href.
+9. `screen_element_action(window=W, element_id=L, action="invoke")`
+   — when reported disabled, refusal explains the force override.
+10. After the person confirms the link works:
+    `screen_element_action(window=W, element_id=L, action="invoke", force=true, then={})`
+    — inspect reported_disabled, action_method, focus/value changes and window title/navigation.
+11. `screen_elements(window=W, refresh=true)`
+    — inspect the destination and confirm a dismissed popup no longer appears.

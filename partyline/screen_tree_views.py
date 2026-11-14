@@ -81,7 +81,7 @@ def collapse(tree, nodes):
     return out
 
 
-def listing(tree, root, depth, offset):
+def listing(tree, root, depth, offset, include_root=False):
     """Children of `root` (or grandchildren too), each with its own child count."""
     found = tree.subtree(root)
     if found is None:
@@ -96,9 +96,11 @@ def listing(tree, root, depth, offset):
             if level < depth:
                 walk(node.id, level + 1)
 
+    if include_root:
+        rows.append((tree.nodes[root], 0))
     walk(root, 1)
     return page(tree, rows[offset:], offset, lambda row: tree.line(
-        row[0], row[1] - 1, extra=counted(tree, row[0])), len(rows))
+        row[0], row[1] if include_root else row[1] - 1, extra=counted(tree, row[0])), len(rows))
 
 
 def page(tree, rows, offset, render, total, starts=None):
