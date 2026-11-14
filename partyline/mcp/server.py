@@ -59,6 +59,7 @@ class MCPServer:
         screen_state = ((bool(state.get("screen_read")), bool(state.get("screen_control")),
                          bool(state.get("screen_windows")))
                         if state.get("dynamic_screen_tools") else ())
+        screen_state += (bool(state.get("bridge_open")),)
         return (state.get("kind"), state.get("role"), state.get("conv_id"),
                 state.get("attachment_id"), bool(state.get("is_lead")),
                 tuple(sorted(state.get("actions", []))), screen_state)

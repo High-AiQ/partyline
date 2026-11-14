@@ -1235,7 +1235,11 @@ full contract is `docs/contracts/line-bridge.md`; the code is
   `DELETE /api/bridges/<id>`); a process token gets 403. A bridge is refused
   with 409 for lines in one tree, a line that already has a bridge, a
   non-live ambassador, or an archived line.
-- **Speaking.** An ambassador's message containing `@[bridge]<peer>` is
+- **Speaking.** The `bridge_send(text, client_key)` MCP tool (listed only while
+  the caller is the ambassador of an open bridge; capability flag `bridge_open`)
+  delivers through the same path, rate limit and log as the prefix, and returns
+  `delivered` or `queued`. It posts nothing to either chat, so an ambassador can
+  answer its peer and still tell its own people in the final message. An ambassador's message containing `@[bridge]<peer>` is
   delivered whole to the peer as a private copy (audience = the peer, stamped
   `bridge_id`, forced wake). The ordinary `@name` regex never matches `@[`. A
   person's `@[bridge]` is ignored; a non-ambassador or wrong handle gets a

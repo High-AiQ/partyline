@@ -29,4 +29,8 @@ MIGRATIONS = [
     " WHERE closed_at IS NULL",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_line_bridges_open_b ON line_bridges(b_conv_id)"
     " WHERE closed_at IS NULL",
+    # Rows the bridge_send tool wrote: their words never pass through the turn's
+    # final text, so the API-echo filter must not treat them as its twin. A side
+    # table, not a messages column, so every message dict keeps its shape.
+    "CREATE TABLE IF NOT EXISTS bridge_tool_sends(message_id INTEGER PRIMARY KEY)",
 ]

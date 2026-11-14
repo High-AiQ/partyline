@@ -7,10 +7,13 @@ def pack_text(peer: str, peer_line: str) -> str:
     return (
         f"**Bridge open.** You are this line's ambassador to @{peer} on «{peer_line}», "
         "a separate project.\n"
-        f"- Address it with `@[bridge]{peer}`. That whole message goes only to @{peer}. "
-        "The people on your line don't see bridge messages (they can read the bridge log), so "
-        "report anything they or your line's processes need in a separate, normal message, "
-        "never inside an @[bridge] message.\n"
+        f"- Send to @{peer} with the `bridge_send` tool (text, client_key; if it is not listed, "
+        "run it as `extras(op=\"bridge_send\", args={...})`). The text goes only to "
+        f"@{peer}. The people on your line don't see bridge messages (they can read the bridge "
+        "log), so tell them and your line's processes in your normal final message, never "
+        "through the bridge. Writing `@[bridge]" + peer + "` at the start of a message still "
+        "works, but then that whole message goes to the bridge and nothing reaches your "
+        "people.\n"
         "- Its replies reach you as private messages marked as coming over the bridge.\n"
         "- Only text crosses: no files, tokens, credentials or secrets. Its line's checkout, "
         "fence and people are not yours, and yours are not its.\n"
@@ -33,13 +36,13 @@ def pack_for(db, att_id: str) -> str:
 
 
 def close_notice(peer: str, peer_line: str, by: str) -> str:
-    return (f"bridge to @{peer} on «{peer_line}» closed by {by}; @[bridge] no longer "
-            "delivers; disregard the bridge pack")
+    return (f"bridge to @{peer} on «{peer_line}» closed by {by}; bridge_send and @[bridge] "
+            "no longer deliver; disregard the bridge pack")
 
 
 def open_line_notice(me: str, peer: str, peer_line: str, by: str) -> str:
     return (f"⇄ bridge opened by {by}: {me} is this line's ambassador to {peer} on «{peer_line}»; "
-            f"address it by writing @[bridge]{peer} in a normal chat message — there is no bridge tool; "
+            f"it sends with the bridge_send tool (a message beginning @[bridge]{peer} also works); "
             "people read bridge messages under Manage → Bridges → view log")
 
 

@@ -34,9 +34,15 @@ def _same(a: str, b: str) -> bool:
 
 
 def is_api_echo(db, att_id: str, conv_id: str, body: str) -> bool:
-    """Whether this process already posted these words through the API just now."""
+    """Whether this process already posted these words through the API just now.
+
+    Rows the bridge_send tool wrote are excluded: they carry this process's stamp,
+    but their words never reach the transcript's final text, so they are no twin.
+    An ``@[bridge]`` prefix message is still a twin and still counts.
+    """
     rows = db._exec(
         "SELECT body, created_at FROM messages WHERE conv_id=? AND source_attachment_id=?"
+        " AND id NOT IN (SELECT message_id FROM bridge_tool_sends)"
         " ORDER BY id DESC LIMIT 5",
         (conv_id, att_id),
     ).fetchall()

@@ -784,7 +784,7 @@ class RenderAndServerTests(unittest.TestCase):
             get_attachment=lambda _ident: {"adapter": "claude"},
             get_conversation=lambda ident: {"id": ident, "parent_id": None},
             _exec=lambda _query, args=(): SimpleNamespace(
-                fetchall=lambda: [{"id": "g", "conv_id": "home"}]),
+                fetchall=lambda: [{"id": "g", "conv_id": "home"}], fetchone=lambda: None),
         )
         share = SimpleNamespace(status="active", share_id="share")
         grant = SimpleNamespace(status="active", holder=None)

@@ -11,7 +11,7 @@ through the one `extras(op, args)` tool; `guide()` lists them with a line each a
 from __future__ import annotations
 
 from . import (
-    tools_blender, tools_captain, tools_check, tools_control, tools_core, tools_handover,
+    tools_blender, tools_bridge, tools_captain, tools_check, tools_control, tools_core, tools_handover,
     tools_resources, tools_tasks, tools_turn_usage, tools_usage,
 )
 from .captain_schemas import ACK_HINT
@@ -20,11 +20,11 @@ from .validation import validate_arguments
 from .descriptions import one_line, slim_schema
 
 # The order a name is looked up in; the first module serving it handles the call.
-DISPATCH = (tools_usage, tools_turn_usage, tools_blender, tools_check, tools_control, tools_handover, tools_resources,
-            tools_tasks, tools_core, tools_captain)
+DISPATCH = (tools_usage, tools_turn_usage, tools_blender, tools_bridge, tools_check, tools_control,
+            tools_handover, tools_resources, tools_tasks, tools_core, tools_captain)
 # The order tools are shown in.
-LISTING = (tools_usage, tools_turn_usage, tools_core, tools_captain, tools_tasks, tools_resources, tools_handover,
-           tools_control, tools_blender, tools_check)
+LISTING = (tools_usage, tools_turn_usage, tools_core, tools_captain, tools_tasks, tools_resources,
+           tools_handover, tools_control, tools_blender, tools_check, tools_bridge)
 
 # Reached through extras(op, args): rare errands, or tools a client cannot be given later.
 EXTRAS_OPS = frozenset({
@@ -59,7 +59,8 @@ def every_tool(state: dict) -> list[dict]:
 
 def door(name: str, state: dict) -> str | None:
     """The tool that runs ``name`` when it is not listed itself; None when it is listed."""
-    if name in EXTRAS_OPS or (name in SCREEN_CONTROL and not state.get("dynamic_screen_tools")):
+    if name in EXTRAS_OPS or (name in SCREEN_CONTROL | {tools_bridge.NAME}
+                              and not state.get("dynamic_screen_tools")):
         return EXTRAS
     if name in (*tools_captain.OPERATIONS, *tools_tasks.OPERATIONS) and name not in EVERYDAY:
         return CAPTAIN
@@ -122,6 +123,8 @@ def dispatch(client, name: str, args: dict, state: dict):
         return dispatch(client, args["op"], args["args"], state)
     module = owner(state, name)
     if module is None:
+        if name == tools_bridge.NAME:
+            raise ApiError("no open bridge: bridge_send is for the ambassador of a line with an open bridge")
         if name in SCREEN and state.get("dynamic_screen_tools"):
             raise ApiError("no screen shared with you" if not state.get("screen_windows") else
                            "no monitor is shared with you, but a window is: use screen_window_snapshot "

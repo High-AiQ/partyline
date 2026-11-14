@@ -103,7 +103,7 @@ class LineBridgeTest(unittest.TestCase):
         notices = [r["body"] for r in self.rows("y") if r["sender_type"] == "system"
                    and not r["audience_attachment_id"]]
         self.assertTrue(any("bridge opened by greg" in n and "@[bridge]" in n
-                            and "there is no bridge tool" in n for n in notices))
+                            and "bridge_send tool" in n for n in notices))
         got = self.client.get("/api/bridges?conv_id=x", headers=self.machine("x-other"))
         self.assertEqual(got.json()["id"], bridge["id"])
         self.assertIsNone(self.client.get("/api/bridges?conv_id=kid", headers=self.person).json())
@@ -261,7 +261,7 @@ class LineBridgeTest(unittest.TestCase):
             self.assertTrue([r for r in self.rows(conv) if "bridge closed by" in r["body"]
                              and not r["audience_attachment_id"]])
         private = [r for r in self.rows("y") if r["audience_attachment_id"] == "y-amb"][-1]
-        self.assertIn("@[bridge] no longer delivers", private["body"])
+        self.assertIn("bridge_send and @[bridge] no longer deliver", private["body"])
         self.say("y", "y-amb", "@[bridge]sonnet anyone?")
         self.assertIn("no open bridge",
                       [r for r in self.rows("y") if r["audience_attachment_id"] == "y-amb"][-1]["body"])
@@ -330,7 +330,7 @@ class LineBridgeTest(unittest.TestCase):
             self.runtime.deliver_pending("x", self.db.get_attachment("x-amb"), revived)))
         bodies = [m["body"] for m in revived.delivered]
         self.assertTrue(any("bridge restored after the restart" in b and "@fable" in b
-                            and "@[bridge]fable in a normal chat message" in b
+                            and "bridge_send tool" in b
                             for b in bodies), bodies)
         self.assertTrue(any("are you back?" in b for b in bodies), bodies)
 
