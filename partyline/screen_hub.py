@@ -11,6 +11,8 @@ from pydantic import ValidationError
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from .helper_release import update_available
+from partyline_helper import __version__ as helper_version
 from .screen_connections import device_valid
 from .local_tools import TOOL_MESSAGES, LocalTools
 from .screen_control import CONTROL_MESSAGES, ControlHub
@@ -100,6 +102,10 @@ class ScreenHub:
                 return
             self.devices[ident] = current
             self.pending_sockets.get(ident, set()).discard(ws)
+            if hello.update_check:
+                await pushed("screen", ws.send_json({"type": "ping", "helper_update": {
+                    "available": update_available(hello.helper_version), "version": helper_version,
+                    "url": "https://github.com/High-AiQ/partyline/releases/latest/download/PartylineHelper-Setup.exe"}}))
             await self._device_event(current, True)
             last_ping = time.monotonic()
             while True:

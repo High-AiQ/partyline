@@ -93,17 +93,16 @@ an update (the symptom reported), has no dialog at all. What changed (none of it
 - the tray also raises a balloon notification when a prompt opens, as a second signal;
 - the frozen exe starts its own dialogs as `PartylineHelper.exe dialog <request>` (it cannot run `python -m`).
 
-**Version check.** The helper reports its version (`importlib.metadata`, carried inside the frozen build) in its
-hello. `GET /api/screen/devices` returns `helper_version` and `update_available` (true when the helper is older
-than the server's own version; `unknown` is never flagged), and the computers list in Partyline shows
-"Helper update available" with the download link for Windows computers.
+**Version check.** The helper reports its own version in its hello. The server compares it with
+the helper version shipped in its checkout and sends the result to capable helpers. The tray and
+Computers list show available updates; unknown versions are not flagged.
 
 **Building.** `.github/workflows/windows-installer.yml` runs on `windows-latest`: it freezes the helper with
 PyInstaller (`packaging/windows/PartylineHelper.spec`), checks the frozen exe (`selfcheck`), builds the installer
 with Inno Setup (`packaging/windows/installer.iss`), installs and uninstalls it silently as a smoke test and
-uploads `PartylineHelper-Setup.exe` as an artifact of every main push (and of pull requests that touch the
-helper). A `v*` tag attaches it to the release; the tag-version job dispatches the workflow because a tag pushed
-with `GITHUB_TOKEN` cannot start another workflow itself. Locally on Windows, with uv:
+uploads `PartylineHelper-Setup.exe` as an artifact for helper pull requests. A `helper-v*` tag publishes
+it to the helper release. The tag-version job dispatches the workflow for tags created with `GITHUB_TOKEN`.
+Locally on Windows, with uv:
 `uv run --extra helper python packaging/windows/make_icon.py build/PartylineHelper.ico`, then
 `uv run --extra helper --with pyinstaller==6.14.2 pyinstaller packaging/windows/PartylineHelper.spec`, then
 `iscc /DAppVersion=<version> packaging\windows\installer.iss`.
@@ -576,3 +575,22 @@ the server at startup.
 **Compatibility.** The helper announces `control: 1` in its hello. Helpers that
 predate agent control get no control messages; agents receive `helper too old
 for control` instead.
+
+
+## Helper versions and updates
+
+The helper has its own version in `partyline_helper/__init__.py`, independent of the
+server. Changes to helper code, Windows packaging, or shared helper imports require a
+helper version bump. Server changes require a server bump; a change touching both
+requires both. Features bump minor, fixes patch, and breaking changes major.
+
+On a green merge, CI tags changed helper versions `helper-v<version>` and builds
+the Windows installer; it publishes a latest GitHub release named Partyline Helper
+with `PartylineHelper-Setup.exe`. Pull requests touching helper paths also build a
+smoke-test artifact. Server `v<version>` tags do not create releases.
+
+At connection the server compares the reported version with the helper version in
+its own checkout; there is no network polling. The tray shows an update and a
+notification when available. On Windows the tray item opens the installer; on other
+platforms rerun the helper install command. The Computers list also shows updates.
+Older helpers that reported a Partyline 2.x version are treated as outdated.

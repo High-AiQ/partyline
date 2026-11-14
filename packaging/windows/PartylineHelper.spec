@@ -4,7 +4,7 @@
 # start, including every consent dialog, and trips antivirus heuristics more often).
 import os
 
-from PyInstaller.utils.hooks import collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, "..", ".."))  # noqa: F821 - SPECPATH is set by PyInstaller
 ICON = os.environ.get("HELPER_ICON") or os.path.join(ROOT, "build", "PartylineHelper.ico")
@@ -16,7 +16,7 @@ hidden = (collect_submodules("partyline_helper") + collect_submodules("pynput")
 a = Analysis(
     [os.path.join(ROOT, "packaging", "windows", "entry.py")],
     pathex=[ROOT],
-    datas=copy_metadata("partyline"),  # importlib.metadata.version("partyline") is the version we report
+    datas=[],
     hiddenimports=hidden,
     excludes=["pytest"],
 )

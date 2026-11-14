@@ -195,6 +195,9 @@ class Session(SessionTransport):
         elif kind == "window_element_action":
             await self.window_task.submit_action(message)
         elif kind == "ping":
+            update = message.get("helper_update")
+            if isinstance(update, dict):
+                self.status.set_update(update)
             await self.send("pong")
         elif kind not in ("pong", "snap", "error"):
             await self.send("error", request_id=message.get("request_id"), message=f"unsupported: {kind}")
@@ -211,7 +214,7 @@ class Session(SessionTransport):
     async def run(self):
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
                         helper_version=helper_version(), monitors=self.desktop.monitors(),
-                        control=CONTROL_VERSION, tools=TOOLS_VERSION)
+                        control=CONTROL_VERSION, tools=TOOLS_VERSION, update_check=True)
         self.status.set("paired")
         loop = asyncio.get_running_loop()
         # The tray's Stop sharing runs on another thread: hand the stop to this loop.

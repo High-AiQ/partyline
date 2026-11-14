@@ -74,7 +74,7 @@ class FreezeSpecTests(unittest.TestCase):
         self.assertIn("COLLECT(", SPEC)
         for package in ("partyline_helper", "pynput", "pystray", "windows_capture"):
             self.assertIn(f'collect_submodules("{package}")', SPEC)
-        self.assertIn('copy_metadata("partyline")', SPEC)  # the version the helper reports
+        self.assertNotIn('copy_metadata("partyline")', SPEC)
         self.assertIn("uac_admin=False", SPEC)
 
     def test_helper_extra_lists_every_dependency_the_spec_collects(self):
@@ -84,10 +84,10 @@ class FreezeSpecTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
-    def test_it_builds_on_windows_for_main_prs_and_tags(self):
+    def test_it_builds_on_windows_for_helper_prs_and_tags(self):
         self.assertIn("runs-on: windows-latest", WORKFLOW)
-        self.assertRegex(WORKFLOW, r"branches: \[main\]")
-        self.assertRegex(WORKFLOW, r'tags: \["v\*"\]')
+        self.assertNotIn("branches: [main]", WORKFLOW)
+        self.assertRegex(WORKFLOW, r'tags: \["helper-v\*"\]')
         self.assertIn("actions/upload-artifact@v4", WORKFLOW)
         self.assertIn("path: build/installer/PartylineHelper-Setup.exe", WORKFLOW)
 
@@ -95,7 +95,7 @@ class WorkflowTests(unittest.TestCase):
         step = WORKFLOW[WORKFLOW.index("name: attach to the release"):]
         self.assertIn("if: ${{ env.TAG != '' }}", step)
         self.assertIn("gh release upload", step)
-        self.assertIn("startsWith(github.ref, 'refs/tags/v')", WORKFLOW)
+        self.assertIn("startsWith(github.ref, 'refs/tags/helper-v')", WORKFLOW)
 
     def test_tags_made_by_the_tag_job_dispatch_the_build(self):
         self.assertIn("gh workflow run windows-installer.yml", CHECKS)

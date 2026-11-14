@@ -176,7 +176,7 @@
             })}>Revoke</button
         >
         {#if item.update_available}
-          <span role="status" data-testid="helper-update"
+          <span class="text-copper" role="status" data-testid="helper-update"
             >Helper update available{item.helper_version ? ` (running ${item.helper_version})` : ""}.
             {#if item.os === "Windows"}
               <a href={HELPER_WINDOWS_INSTALLER_URL} data-testid="helper-update-download"

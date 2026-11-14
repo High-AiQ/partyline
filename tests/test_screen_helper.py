@@ -89,6 +89,12 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
                                clock=self.clock, sleep=self.clock.sleep,
                                capture_factory=fake_capture_factory(self.desktop))
 
+    async def test_update_information_in_ping_reaches_status(self):
+        update = {"available": True, "version": "1.1.0", "url": "https://example.com/setup"}
+        await self.session.dispatch({"type": "ping", "helper_update": update})
+        self.assertEqual(self.session.status.update, ("1.1.0", update["url"]))
+        self.assertEqual(self.socket.sent[-1]["type"], "pong")
+
     async def asyncTearDown(self):
         await self.session.stop(notify=False)
 

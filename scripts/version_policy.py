@@ -148,20 +148,70 @@ def git(*args: str) -> str:
     ).stdout.strip()
 
 
-def revision_version(revision: str) -> Version:
-    return source_version(git("show", f"{revision}:partyline/__init__.py"))
+HELPER_SHARED = {"partyline/file_events.py", "partyline/file_watch_paths.py", "partyline/process_events.py",
+                 "partyline/file_notify_kqueue.py", "partyline/file_notify_linux.py",
+                 "partyline/file_notify_windows.py"}
+HELPER_VERSION_PATH = "partyline_helper/__init__.py"
 
 
-def commit_history(base: str, head: str) -> list[Change]:
+def helper_path(path: str) -> bool:
+    return path.startswith(("partyline_helper/", "packaging/windows/")) or path in HELPER_SHARED
+
+
+def revision_version(revision: str, path: str = "partyline/__init__.py") -> Version:
+    try:
+        source = git("show", f"{revision}:{path}")
+    except subprocess.CalledProcessError:
+        if path == HELPER_VERSION_PATH:
+            return Version(0, 0, 0)
+        raise
+    if path == HELPER_VERSION_PATH and not any(
+        isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__version__"
+                                             for t in node.targets)
+        for node in ast.parse(source).body
+    ):
+        return Version(0, 0, 0)
+    return source_version(source)
+
+
+def commit_history(base: str, head: str, path: str = "partyline/__init__.py",
+                   scope: str | None = None) -> list[Change]:
     output = git("rev-list", "--reverse", "--no-merges", f"{base}..{head}")
     return [
         Change(
-            subject=git("show", "-s", "--format=%s", revision),
-            before=revision_version(f"{revision}^"),
-            after=revision_version(revision),
+            subject=scoped_subject(revision, scope),
+            before=revision_version(f"{revision}^", path),
+            after=revision_version(revision, path),
         )
         for revision in output.splitlines()
     ] if output else []
+
+
+def helper_init_content(revision: str) -> str:
+    try:
+        source = git("show", f"{revision}:{HELPER_VERSION_PATH}")
+    except subprocess.CalledProcessError:
+        source = ""
+    tree = ast.parse(source)
+    tree.body = [node for node in tree.body if not (
+        isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "__version__" for t in node.targets))]
+    return ast.dump(tree)
+
+
+def scoped_subject(revision: str, scope: str | None) -> str:
+    subject = git("show", "-s", "--format=%s", revision)
+    if scope is None:
+        return subject
+    paths = git("diff-tree", "--no-commit-id", "--name-only", "-r", revision).splitlines()
+    if scope == "helper":
+        relevant = any(helper_path(p) and p != HELPER_VERSION_PATH for p in paths)
+        if not relevant and HELPER_VERSION_PATH in paths:
+            relevant = helper_init_content(f"{revision}^") != helper_init_content(revision)
+    else:
+        relevant = any((not helper_path(p) or p in HELPER_SHARED)
+                       and not p.startswith(("tests/", "docs/", "scripts/", ".github/")) for p in paths)
+    return subject if relevant else "chore: outside release scope"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -170,17 +220,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", default="HEAD", help="head revision (default: HEAD)")
     args = parser.parse_args(argv)
 
-    changes = commit_history(args.base, args.head)
-    if not changes:
-        parser.error(f"no non-merge commits found in {args.base}..{args.head}")
-    base = revision_version(args.base)
-    head = revision_version(args.head)
-    failure = history_verdict(base, head, changes)
-    if failure:
-        print(f"FAIL: {failure}")
-        return 1
-    bump = required_bump([change.subject for change in changes])
-    print(f"version policy satisfied: {base} -> {head} ({bump or 'no release'})")
+    for scope, path in (("server", "partyline/__init__.py"), ("helper", HELPER_VERSION_PATH)):
+        changes = commit_history(args.base, args.head, path, scope)
+        if not changes:
+            parser.error(f"no non-merge commits found in {args.base}..{args.head}")
+        base, head = revision_version(args.base, path), revision_version(args.head, path)
+        if scope == "helper" and base == Version(0, 0, 0) and head == Version(1, 0, 0):
+            transitions = [change for change in changes if change.changes_version]
+            if len(transitions) != 1 or required_bump([transitions[0].subject]) is None:
+                print("FAIL: helper initialization must accompany a helper feature or fix")
+                return 1
+            print("helper version initialized at 1.0.0")
+            continue
+        failure = history_verdict(base, head, changes)
+        if failure:
+            print(f"FAIL: {scope}: {failure}")
+            return 1
+        bump = required_bump([change.subject for change in changes])
+        print(f"{scope} version policy satisfied: {base} -> {head} ({bump or 'no release'})")
     return 0
 
 

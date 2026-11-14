@@ -1,12 +1,6 @@
-"""The helper's own version: installed metadata (uvx, checkout, or the frozen exe's bundled copy)."""
-from importlib.metadata import PackageNotFoundError, version
-
-UNKNOWN = "unknown"
+"""The version shipped by the helper, including frozen builds."""
+from . import __version__
 
 
-def helper_version(lookup=None):
-    """Read distribution metadata without importing server modules; the server ignores `unknown`."""
-    try:
-        return (lookup or version)("partyline")
-    except PackageNotFoundError:
-        return UNKNOWN
+def helper_version():
+    return __version__
