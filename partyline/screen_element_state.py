@@ -1,0 +1,132 @@
+"""Snapshot event barriers, bounded capture and live diagnostics."""
+import asyncio
+
+from .screen_tree import MAX_NODES, MAX_TREE, STATE_FIELDS, Snapshot
+
+CAPTURE_SECONDS = 20  # bounds work; never establishes that a page finished changing
+OLD_ID = 16
+
+
+def comparable(node):
+    return tuple(node.cached.get(key) for key in STATE_FIELDS)
+
+
+def compare(tree, previous):
+    tree.before = set(previous.nodes)
+    tree.updated = {key for key in tree.nodes.keys() & previous.nodes.keys()
+                    if comparable(tree.nodes[key]) != comparable(previous.nodes[key])}
+
+
+def verdict(live, cached, ancestors):
+    if live.get("enabled") is True and cached.get("enabled") is False:
+        return "live enabled, snapshot disabled: stale"
+    if live.get("enabled") is False and cached.get("enabled") is True:
+        return "live disabled, snapshot enabled: stale"
+    disabled = next((item for item in ancestors if item.get("enabled") is False), None)
+    if live.get("enabled") is False and disabled:
+        return "ancestor " + str(disabled.get("name") or "(unnamed)") + " disabled"
+    if live.get("enabled") is False and cached.get("enabled") is False:
+        return "live and snapshot agree: Chrome reports disabled (IsEnabled=false; aria=" + str(
+            live.get("aria_properties")) + "; STATE_SYSTEM_UNAVAILABLE=" + str(
+            live.get("legacy_unavailable")) + ")"
+    return "live and snapshot agree: enabled" if live.get("enabled") is True else "live state unavailable"
+
+
+class ElementState:
+    async def barrier(self, principal, grant, device, tree):
+        if getattr(tree, "event_counter", None) is None:
+            return True  # older helpers retain their TTL and pushed-event behavior
+        status = await self.exchange(principal, grant, device, "read_window_elements", event_status=True)
+        return (status.get("events_supported") is True and status.get("subscription_live") is True
+                and status.get("event_counter") == tree.event_counter)
+
+    async def capture_status(self, principal, grant, device, tree):
+        if getattr(tree, "event_counter", None) is None:
+            return False
+        status = await self.exchange(principal, grant, device, "read_window_elements", event_status=True)
+        return status.get("event_counter") != tree.event_counter
+
+    async def inspect(self, principal, grant, device, ident):
+        tree = self.snapshots.get(grant["id"])
+        node = tree.nodes.get(ident) if tree else None
+        if node is None:
+            return {"error": "unknown element id; read the window first"}
+        if getattr(tree, "event_counter", None) is None:
+            return {"error": "inspect unavailable; update the helper"}
+        result = await self.exchange(principal, grant, device, "read_window_elements", inspect=node.helper)
+        if "live" not in result:
+            return {"error": result.get("error", "inspect unavailable; update the helper")}
+        cached = {key: node.cached.get(key) for key in
+                  ("enabled", "name", "value", "toggle", "selected", "expand_state")}
+        cached["bounds"] = list(node.bounds) if node.bounds else None
+        result.update(cached=cached, snapshot_event_counter=getattr(tree, "event_counter", None),
+                      server_change_version=self.change_versions.get(grant["id"], 0),
+                      snapshot_change_version=tree.event_version)
+        result["event_counter_advanced_since_snapshot"] = (
+            result.get("event_counter", tree.event_counter) > tree.event_counter)
+        result["verdict"] = verdict(result["live"], cached, result.get("ancestors", []))
+        return result
+
+    async def capture(self, principal, grant, device, tree):
+        """Recapture only in response to an observed event; deadlines bound churn, not truth."""
+        deadline = self.clock() + CAPTURE_SECONDS
+        raced = False
+        for attempt in range(8):  # also bounds providers whose clock or event stream misbehaves
+            result = await self.capture_parts(principal, grant, device, tree, deadline)
+            if isinstance(result, dict):
+                return result
+            if getattr(tree, "event_counter", None) is None:
+                return tree  # old helpers retain their explicit changed/partial response
+            if not tree.changed and not await self.capture_status(principal, grant, device, tree):
+                tree.capture_raced = raced
+                return tree
+            raced = True
+            if self.clock() >= deadline or attempt == 7:
+                tree.note = "tree inconsistent: events during capture; refresh"
+                return tree
+            tree.space.renew()
+            tree = Snapshot(None, self.clock(), tree.space)
+            tree.event_version = self.change_versions.get(grant["id"], 0)
+        return tree
+
+    async def capture_parts(self, principal, grant, device, tree, deadline):
+        """Read the helper's window part by part into `tree`; stop at a cap and keep the cursor."""
+        started = tree.snapshot_id is not None
+        while True:
+            fields = {"cursor": tree.cursor} if tree.cursor else {}
+            try:
+                response = await self.exchange(principal, grant, device, "read_window_elements", **fields)
+            except TimeoutError:
+                if not tree.order:
+                    raise
+                response = {"elements_unavailable": "helper did not respond"}
+            if response.get("elements_unavailable"):
+                if not started and not tree.order:
+                    return {"elements_unavailable": str(response["elements_unavailable"])[:160],
+                            **({"truncated": True} if response.get("truncated") else {})}
+                tree.note = "capture stopped: " + str(response["elements_unavailable"])[:100]
+                return tree
+            counter = response.get("captured_event_counter")
+            if not started:
+                tree.event_counter = counter
+            if counter is not None and (counter != getattr(tree, "event_counter", None) or
+                                        response.get("event_counter") != counter):
+                tree.changed = True
+            tree.snapshot_id = tree.snapshot_id or response.get("snapshot_id")
+            started = True
+            await asyncio.to_thread(tree.add, response.get("elements", []))
+            if any(len(str(item.get("id", ""))) > OLD_ID for item in response.get("elements", ())):
+                tree.old_helper = True
+            tree.cursor = response.get("next_cursor")
+            tree.changed = tree.changed or bool(response.get("changed"))
+            tree.note = ""
+            if response.get("truncated") and not tree.cursor:
+                tree.note = "the helper cannot continue reading; update it"
+            if len(tree.order) >= MAX_TREE:
+                tree.cursor = None
+                tree.note = f"the window has more than the {MAX_TREE} elements one snapshot keeps"
+            if not tree.cursor or len(tree.order) >= MAX_NODES or self.clock() >= deadline:
+                if not tree.cursor:
+                    tree.created = self.clock()
+                return tree
+

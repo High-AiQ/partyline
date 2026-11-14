@@ -17,7 +17,7 @@ ELEMENT_ACTION_NOTE = (
     "on submit buttons; no_effect has a hint. force=true: disabled only if person confirms it works. "
     "then re-reads (empty=changes). Event-counter cache barrier. Drag: screen_drag.")
 ELEMENT_ACTION_TIMEOUT = 100  # a 20s capture deadline may be followed by a 35s exchange, then action
-ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and settle
+ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and event barrier
 ELEMENT_ACTION_PROPERTIES = {
     "window": {"type": "string",
                "description": "Window grant id or title when several windows are shared with this line."},

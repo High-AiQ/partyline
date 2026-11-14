@@ -81,11 +81,10 @@ REFRESH_FAILED = "could not refresh the window; read it again before acting"
 
 
 async def after(hub, principal, grant, then, result):
-    """A new snapshot taken once the page has settled, answered like screen_elements and kept in budget."""
+    """A new snapshot taken at an event-counter boundary, answered like screen_elements and kept in budget."""
     options = {**then.model_dump(exclude_none=True), "refresh": True, "include_root": True}
     if not any(options.get(key) for key in ("query", "value", "control_type", "root", "id", "text")):
         options["changes"] = True
-    await hub.elements.settle()
     try:
         reply = await hub.elements.read(principal, None, grant["id"], options, OUT_BYTES - size(result) - 16)
     except HTTPException as exc:  # the share ended meanwhile: the action still happened

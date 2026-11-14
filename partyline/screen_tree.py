@@ -14,6 +14,7 @@ NAME_FIELD = 1000  # characters of a name kept; lines clip it, `id` reads it who
 VALUE_FIELD = 600
 LINE_NAME = 240  # characters of a name shown on a line
 LINE_VALUE = 80
+STATE_FIELDS = ("enabled", "value", "toggle", "selected", "expand_state", "name", "aria_properties")
 
 
 def clean(value, limit=NAME_FIELD):
@@ -28,9 +29,10 @@ def clip(text, limit):
 
 class Node:
     __slots__ = ("id", "helper", "parent", "type", "name", "value", "auto", "actions", "toggle", "flags",
-                 "bounds", "frame", "aria")
+                 "bounds", "frame", "aria", "cached")
 
     def __init__(self, item):
+        self.cached = {key: item[key] for key in STATE_FIELDS if key in item}
         self.id = self.helper = str(item.get("id", ""))  # id is replaced by the stable one on add
         self.parent = item.get("parent")
         self.type = clean(item.get("control_type") or "?", 40)
@@ -59,6 +61,7 @@ class Snapshot:
         self.by_helper, self.places = {}, {}  # the helper's id -> stable id; identical siblings seen so far
         self.space = space or IdSpace()  # the window's ids, carried from one snapshot to the next
         self.anchors = {}  # stable id -> the id of its nearest named ancestor (or itself)
+        self.updated = set()
         self.before = None  # ids of the snapshot this one replaced, to tell what a click changed
         self.cursor = None  # the helper's cursor for the unread rest of the window, if any
         self.note = ""

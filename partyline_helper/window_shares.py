@@ -13,6 +13,7 @@ from .uia_task import WindowTask, read_options
 from .uia_window_identity import unmark
 from .window_target_picker import select_target
 from .uia_events import UIAEventSubscription
+from .uia_event_state import EventState
 
 WINDOWS_VERSION = 1  # 1: a window is shared with a line, not with one process
 MESSAGES = ("share_targets", "window_grant_result", "revoke_window")
@@ -111,6 +112,9 @@ class WindowShares:
             worker = WindowTask(access_session)
             self.grants[ident] = {"access": access, "worker": worker, "target": response["target"],
                                   "title": selected["title"]}
+            state = EventState()
+            self.grants[ident]["event_state"] = state
+            access.event_status = state.status
             self.spawn(self.start_events(ident, selected["hwnd"]))
             selected, registered = None, None
             self.changed()
@@ -141,12 +145,18 @@ class WindowShares:
 
     async def start_events(self, ident, hwnd):
         loop = asyncio.get_running_loop()
-        subscription = self.event_factory(hwnd, lambda: loop.call_soon_threadsafe(self.queue_change, ident))
         entry = self.grants.get(ident)
         if not entry:
             return
+        state = entry.setdefault("event_state", EventState())
+        entry["access"].event_status = state.status
+        def changed():
+            state.changed()  # UIA thread advances the barrier before scheduling any push
+            loop.call_soon_threadsafe(self.queue_change, ident)
+        subscription = self.event_factory(hwnd, changed)
+        state.subscription = subscription
         entry["events"] = subscription
-        entry["events_supported"] = await asyncio.to_thread(subscription.start)
+        entry["events_supported"] = state.supported = await asyncio.to_thread(subscription.start)
         if self.grants.get(ident) is not entry:
             await asyncio.to_thread(subscription.close)
 
@@ -179,6 +189,11 @@ class WindowShares:
             await self.session.send(kind, request_id=message["request_id"],
                                     elements_unavailable="consent revoked",
                                     status="failed", error="consent revoked")
+        elif message.get("event_status"):
+            state = entry.get("event_state")
+            await self.session.send("window_elements", request_id=message["request_id"],
+                                    **(state.status() if state else {"event_counter": 0,
+                                       "events_supported": False, "subscription_live": False}))
         elif message["type"] == "read_window_elements":
             await entry["worker"].submit(message["request_id"], read_options(message))
         else:

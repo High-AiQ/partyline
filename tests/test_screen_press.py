@@ -41,10 +41,9 @@ class PressServerTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(422, (await self.press(modifiers=["ctrl"])).status_code)
         self.assertEqual([], self.sent)
 
-    async def test_no_effect_still_runs_then_with_fake_settle(self):
+    async def test_no_effect_still_reads_then_without_a_settle(self):
         await self.grant("a")
         self.device["press"] = 1
-        self.hub.elements.settle = AsyncMock()
         receive = self.receive
         async def answer(message):
             if message["type"] == "window_element_action":
@@ -58,7 +57,7 @@ class PressServerTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual("no_effect", result["status"])
         self.assertIn("after", result)
         self.assertIn("diff", result["after"])
-        self.hub.elements.settle.assert_awaited_once()
+        self.assertFalse(hasattr(self.hub.elements, "settle"))
 
 
 class PressSchemaTests(unittest.TestCase):

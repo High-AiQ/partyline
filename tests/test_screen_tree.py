@@ -134,7 +134,7 @@ class TreeTests(unittest.TestCase):
     def test_tool_schema_and_query_string(self):
         tool = screen_elements_tool()
         self.assertEqual({"device", "window", "refresh", "more", "root", "depth", "query", "value", "id",
-                          "control_type", "text", "changes", "context", "offset", "bounds"},
+                          "control_type", "text", "changes", "context", "offset", "bounds", "inspect"},
                          set(tool["inputSchema"]["properties"]))
         for word in ("summary", "find", "text=true", "root=<id>", "id=<id>", "screen_element_action",
                      "refresh=true", "Refresh"):
@@ -286,7 +286,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.replies = [{"snapshot_id": "s", "next_cursor": "c",
                          "elements": [{"id": f"n{n}", "parent": "n0" if n else None, "name": "n"}
                                       for n in range(8)]}]
-        with patch("partyline.screen_tree.MAX_TREE", 5), patch("partyline.screen_elements.MAX_TREE", 5):
+        with patch("partyline.screen_tree.MAX_TREE", 5), patch("partyline.screen_element_state.MAX_TREE", 5):
             result = await self.hub.read(None)
         self.assertEqual(5, result["nodes"])
         self.assertIn("keeps", result["partial"])

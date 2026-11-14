@@ -3,7 +3,7 @@ import sys
 import threading
 
 
-PROPERTIES = (30010, 30045, 30086, 30079, 30070, 30005)
+PROPERTIES = (30010, 30045, 30086, 30079, 30070, 30005, 30101, 30102, 30096)
 
 
 def register_handlers(automation, uia, root, changed, com_object, accepts=lambda sender: True,
@@ -56,6 +56,11 @@ class UIAEventSubscription:
         self.cancelled = threading.Event()
         self.state_lock = threading.Lock()
         self.started = False
+
+    @property
+    def live(self):
+        return bool(self.started and self.thread and self.thread.is_alive()
+                    and not self.cancelled.is_set())
 
     def start(self):
         if sys.platform != "win32":
@@ -126,6 +131,7 @@ class UIAEventSubscription:
         except Exception:
             self.ready.set()  # unsupported UIA event registration falls back to bounded snapshots
         finally:
+            self.started = False
             if popup_hook:
                 user.UnhookWinEvent(popup_hook)
             if "automation" in locals():

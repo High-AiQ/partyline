@@ -153,11 +153,15 @@ def changes(tree, offset=0):
     """What a new snapshot has that the one before did not: the topmost new elements, and the counts."""
     before = tree.before or set()
     added = [ident for ident in tree.order if ident not in before]
+    updated = [ident for ident in tree.order if ident in tree.updated]
+    added += updated
     fresh = set(added)
     tops = [tree.nodes[ident] for ident in added if tree.nodes[ident].parent not in fresh]
     body = page(tree, tops[offset:], offset, lambda node: tree.line(node, 0, extra=counted(tree, node)),
                 len(tops))
-    body["diff"] = f"+{len(added)} -{len(before - set(tree.nodes))}"
+    body["diff"] = f"+{len(added) - len(updated)} -{len(before - set(tree.nodes))}"
+    if updated:
+        body["diff"] += f" ~{len(updated)}"
     return body
 
 

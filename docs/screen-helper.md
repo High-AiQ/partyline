@@ -369,8 +369,8 @@ elements hash to the same id, the later one moves on to its next candidate, and 
 element holds each id for as long as the window grant lasts, whatever happens to its trees (expiry, eviction,
 a failed refresh), so a gone element's id is never handed to another one. A window that has been given
 more than 100,000 ids starts a new numbering (every id changes and gains an `-1`, `-2`... epoch suffix, so an id from before can never name an element after) rather than forget a claim. A summary's pager and repeated-row lines are clipped to 200 characters each and share a 900-byte budget. The helper's own ids
-(16 or 64 hex digits) from the same snapshot are still accepted. This is server-side only: the helper and
-its wire format are unchanged, and a helper older than the whole-window capture still works as before.
+(16 or 64 hex digits) from the same snapshot are still accepted. Stable id translation is server-side, and a helper older than the whole-window capture still works
+as before. Optional event-clock and inspect metadata below requires the updated helper.
 
 How the capture works. The helper walks the tree depth-first in tree order, in parts of at most 2,000
 elements, 10,000 visited nodes or 3 s, whichever comes first. A part that stops early returns a
@@ -378,13 +378,13 @@ elements, 10,000 visited nodes or 3 s, whichever comes first. A part that stops 
 nodes. A larger window comes back marked `partial` and `more=true` continues it from the same cursor, so
 no cap is a dead end (there is no depth limit, since the walk is iterative). The helper keeps each
 part's ids and paths, merged, until the next plain snapshot; a cursor from an earlier snapshot is
-refused as expired. The server keeps at most 16 trees and refreshes them after 3 seconds. UI Automation property and structure events also invalidate a grant's tree immediately; if event registration is unavailable, the 3-second bound still applies. A cursor remembers, for each unread section, which element it hangs under and how many children that element had; if the page changed when a part resumes, those sections are dropped rather than read from shifted positions, and every answer carries a `changed` note telling the agent to `refresh`. Each answer reports `snapshot_age_seconds` and `change_event_since_snapshot`. Stored trees total at most 300,000 nodes (120,000 in one), go when their grant ends or a refresh starts, and answers are measured in UTF-8 bytes (4,096 at most, title and hint included), so CJK pages fit. An older helper sends a flat list: summary and `ls` work on it, with a note to update the helper. The first part's whole-tree prefetch runs under the start limit, not the part's 3 s budget. Every part runs in the
+refused as expired. The server keeps at most 16 trees. New helpers permit reuse only after a live subscription/event-counter barrier; without confirmed events every read recaptures. Older helpers retain the 3-second expiry and pushed-event fallback. UI Automation property and structure events invalidate a grant's tree, retaining it only as a delta baseline. A cursor remembers, for each unread section, which element it hangs under and how many children that element had; if the page changed when a part resumes, those sections are dropped rather than read from shifted positions, and every answer carries a `changed` note telling the agent to `refresh`. Each answer reports `snapshot_age_seconds` and `change_event_since_snapshot`. Stored trees total at most 300,000 nodes (120,000 in one), go when their grant ends or a refresh starts, and answers are measured in UTF-8 bytes (4,096 at most, title and hint included), so CJK pages fit. An older helper sends a flat list: summary and `ls` work on it, with a note to update the helper. The first part's whole-tree prefetch runs under the start limit, not the part's 3 s budget. Every part runs in the
 isolated child process (killed about 12 s after its budget); the unread frontier travels to the child in
 a file, because it can be far longer than a command line. Unnamed, patternless
 `Pane`/`Group`/`Custom` wrappers are walked but not listed.
 
 Speed. The Windows provider asks UI Automation for a cache request (control view; the properties and
-pattern-availability flags, plus the Value and Toggle state) so a node costs no further cross-process
+pattern-availability flags, plus Value, Toggle, SelectionItem and ExpandCollapse state) so a node costs no further cross-process
 calls. The first part prefetches the whole tree with one TreeScope_Subtree request; later parts, and the
 action recheck, fetch a node and its children (TreeScope_Element | Children) once per parent. If the
 one-call prefetch ever outruns its budget, the helper switches to per-parent reads for later snapshots.
@@ -395,7 +395,7 @@ once a Windows box is available and tune `MAX_ELEMENTS`, `BUDGET` and `KILL_SLAC
 `partyline_helper/uia_snapshot.py` and `uia_process.py` if needed.
 
 Errors, denied consent, closed windows and unsupported platforms return an unavailable reason.
-Settle/wait, macOS AX and Linux AT-SPI are planned. The Windows-only helper dependency `comtypes`
+macOS AX and Linux AT-SPI are planned. The Windows-only helper dependency `comtypes`
 supplies the typed UI Automation COM interfaces; it is not installed on other platforms.
 
 ### Act on elements in the chosen window
@@ -464,11 +464,11 @@ refused before any capture or action exchange with “update the Partyline helpe
 Existing UIA actions continue to work with older helpers.
 
 **Click then read.** `then` takes the `screen_elements` read fields (`query`, `value`, `control_type`,
-`root`, `id`, `text`, `context`, `depth`). After a completed action the server waits half a second, takes a
-new snapshot and returns the answer as `after` (also for `no_effect`), within the same 4 KB for the action result and the answer
+`root`, `id`, `text`, `context`, `depth`). After a completed action the server takes a
+new snapshot at an event-counter boundary and returns the answer as `after` (also for `no_effect`), within the same 4 KB for the action result and the answer
 together. The next separate `screen_elements` read recaptures again, so a delayed app update is not hidden by the immediate post-action snapshot. The client waits up to 160 s for a call with `then` (100 s without), allowing time for a multi-part pre-action snapshot and action. An empty `then` returns what is new: the topmost elements the new snapshot has that the old one
 did not (ids are stable, so a page change lists the new rows and not the unchanged chrome) and a `diff`
-count `+added -gone`. The read needs read access to the line as well as write. If the share ends meanwhile,
+count `+added -gone`, plus `~updated` for changed state on stable ids. The read needs read access to the line as well as write. If the share ends meanwhile,
 `after` says so and the action result is kept.
 
 The helper rechecks the window, element identity, containment, enabled state and supported pattern
@@ -764,3 +764,109 @@ and `L` to the link id in step 8. Use the returned ids, not old examples.
     — inspect reported_disabled, action_method, focus/value changes and window title/navigation.
 11. `screen_elements(window=W, refresh=true)`
     — inspect the destination and confirm a dismissed popup no longer appears.
+
+
+### Diagnose live state and snapshot races
+
+`screen_elements(inspect="<element id>")` compares the retained snapshot with a new **uncached**
+UIA read of that same identity. It deliberately bypasses refresh/TTL/invalidation: refreshing first
+would destroy the evidence of a stale snapshot. It does not click or focus the window. Live data
+includes IsEnabled, Name, Value (redacted for passwords), Toggle, SelectionItem, ExpandCollapse,
+BoundingRectangle, AriaRole/AriaProperties, LegacyIAccessible State and its
+`STATE_SYSTEM_UNAVAILABLE` bit, ClassName, FrameworkId and ProviderDescription. Unsupported live
+properties are null. Missing cached properties are null, rather than inferred values. The raw-view
+ancestor walk reports each ancestor's live name/IsEnabled through the grant root, plus whether that
+root was reached; it never walks above the grant root. The element's live/snapshot mismatch wins
+the verdict in either direction. A disabled ancestor names the source only when the element itself
+is live-disabled and there is no enabled-state mismatch.
+`events_supported`, `subscription_live`, `event_counter`, `last_event_time` (Unix time),
+`snapshot_event_counter`, `event_counter_advanced_since_snapshot`, `server_change_version` and
+`snapshot_change_version` expose the grant's subscription and both sides of invalidation. Inspect requires only the existing window read grant,
+including on a plain line with person-attached processes and no captain.
+
+The helper's thread-safe event counter advances **inside the UIA callback**, before scheduling the
+100 ms push debounce. A stored tree carries the counter sampled before its capture. Before serving
+that tree the server makes one cheap status request and requires matching counters and a confirmed
+live subscription. A failed/unconfirmed subscription never authorizes cache reuse. A status request
+never walks UIA or waits behind a capture. Helpers without counter metadata retain their previous
+expiry/push behavior. This barrier establishes truth as of its status response; it cannot predict a
+future JavaScript change or a UIA event Chrome has not delivered yet.
+
+Post-action reads capture immediately, then recapture only when an observed event crossed that capture.
+Churn is bounded by the capture deadline and eight attempts; exhaustion says `tree inconsistent`.
+The answer includes `snapshot_event_counter` and checks the helper clock again after rendering, so
+an event during that final interval sets `change_event_since_snapshot`. Observed capture races also
+set that flag on the capturing reply, even if a recapture reaches a consistent boundary; later cache hits
+report their current barrier result without repeating an already-reported capture race. The next
+ordinary read after an action recaptures, and comparisons include enabled/value/toggle/selection/expand state on stable ids,
+so late changes appear in the delta as `~updated`. Bounds, focus, offscreen status and pattern-list
+changes do not count as semantic updates, preventing layout or scrolling from burying the changed link.
+The comparison runs off the server event loop. A later event cannot retroactively alter an already
+returned reply; the next read's barrier detects it even if its debounced push is still in flight.
+A `more` across a counter change restarts from the root, or explicitly reports an inconsistent tree;
+it never silently combines epochs. A restarted continuation returns `continuation_restarted`.
+
+`uia_events.PROPERTIES` includes IsEnabled (30010), Value (30045), Toggle (30086), SelectionItem
+(30079), ExpandCollapse (30070), Name (30005), AriaRole (30101), AriaProperties (30102) and
+LegacyIAccessible State (30096). Persistent property and structure registration uses
+`TreeScope_Subtree` (7) at the granted window and visible owned-popup roots. There is no sender
+walk/filter in these callbacks, so an aria change on an ancestor or descendant reaches the counter.
+Whether the real Chrome provider emits the expected event remains part of the live retest.
+
+| Timing in the elements path | Replacement or purpose |
+| --- | --- |
+| `SETTLE_SECONDS=0.5`, `settle()`, post-action sleep | Removed. Capture immediately and recapture on observed counter changes; report races. |
+| `SNAPSHOT_TTL=3` | Retained as expiry/memory policy and old-helper fallback. New helpers additionally require a live counter barrier; TTL never proves freshness. |
+| `queue_change` 100 ms debounce | Push coalescing only. Callback increments the counter first; a status request sees in-flight changes. |
+| `uia_access.watch(sleep)` | Unused sleep parameter removed. Watch blocks on native window events/local grant changes. |
+| Expand's 250 ms structure-event wait | One event wait after Expand, bounded for providers emitting no structure event. It never proves expanded state; selection rechecks the live options/value/state and reports unknown on timeout. |
+| `CAPTURE_SECONDS=20`, eight capture attempts, `MAX_NODES`/`more` | Bound work/churn, never establish freshness. Epoch mismatch restarts or marks inconsistency. |
+| Snapshot part `BUDGET=3`, child startup `START_LIMIT=25`, `KILL_SLACK=4` | Bound a walk or hung COM provider. Child signals READY through a pipe; no readiness sleep. |
+| `WindowTask.READ_TIMEOUT=33`, server exchange 35 s, MCP read 60 s/action 100 s/then 160 s | Bound failed exchanges/operations. No elapsed interval is used to infer page state. |
+| UIA subscription ready wait / thread join, each 3 s | Bound native registration/shutdown. Cache requires a confirmed living subscription thread, not successful waiting. |
+| ActionWorker 32 s shared deadline for audit readiness and native action | Bounds failure; timeout revokes the dispatch gate and reports uncertainty. No sleep proves action success. |
+| Socket hello/binary 45 s and heartbeat receive 15 s | Bound failed helper transport; protocol liveness, never tree freshness. |
+| Picker 65 s / consent exchange 70 s | Bound independent human consent, outside snapshot correctness. |
+
+#### Exact manual retest
+
+Deploy the state-truth server **and helper** first; helper version remains 1.2.0. Share Chrome with
+the testing line using the tray, and attach an ordinary person-owned process to that line. No
+captain is required. Run from the repository with that process's existing connection JSON (or omit
+`--connection` when `PARTYLINE_MCP_CONNECTION` is set):
+
+```bash
+uv run --locked python scripts/uia-state-retest.py --connection "$PARTYLINE_MCP_CONNECTION"
+```
+
+The script sends these actual MCP `tools/call` requests over stdio, retaining the returned window
+and element id in variables rather than requiring an id to be transcribed:
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"screen_elements","arguments":{"query":"=Manage A+ Content","control_type":"Hyperlink","refresh":true}}}
+```
+
+At the prompt, choose the marketplace **by hand** in the real KDP window, observe the visible link,
+then press Enter. The next request is exactly `screen_elements({"window": before["window"],
+"inspect": link_id})`. It never refreshes between the manual change and inspect. Save the before
+and inspect JSON and the final one-line verdict. Repeat the run if the snapshot was evicted or the
+identity disappeared; do not substitute a different node silently.
+
+Also run against `/lab/a11y` once that sibling change is deployed. Use `--query '=LINK NAME'` for
+the unique hyperlink in each card (copy its exact accessible name from the lab page/docs), and
+`--window 'WINDOW GRANT OR TITLE'` if needed. At the manual prompt, trigger the matching card:
+
+1. Sync enable; delayed enable at 300 ms; delayed enable at 2.5 s. Press Enter immediately after the
+   trigger, then run inspect again on the same id after the page's DOM event log reports the change.
+   No sleep or guessed delay is required. Record both DOM-log and UIA-clock observations.
+2. Class-only enable retaining aria-disabled, correct aria-disabled enable, and disabled-fieldset
+   ancestor. Record live/snapshot/ancestor evidence; visual styling alone is not proof of enabled UIA.
+3. Name change, structure change and input/change checks: record clock advancement, use a fresh
+   `screen_elements(changes=true)` for the state/structure delta, and note if a renamed identity is gone.
+4. Finish with the default script on KDP's actual Manage A+ Content link after choosing a marketplace
+   by hand. Agree-disabled identifies Chrome's exposed state; live-enabled/snapshot-disabled identifies
+   stale Partyline state; ancestor-disabled names the source. ProviderDescription/FrameworkId distinguish
+   native Chrome UIA from an MSAA proxy.
+
+The script performs no artificial waits. A live result must include the actual JSON/verdict; fake
+provider tests establish invariants but cannot decide which side of Greg's real page reports disabled.

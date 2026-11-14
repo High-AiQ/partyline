@@ -2919,3 +2919,25 @@ mail filed after the settling and a short list of restart notes (`CONTINUATION`,
 banner) are treated by time or kind. A write-set or memory notice that arrived between settling and a reopen is
 consumed with the rest; the reopened worker files again. Tests: `tests/test_settled_task_mail.py` (real
 `ReattachCoordinator` followed by a live wake; failed admission, recovery, approval).
+
+
+### A debounced invalidation push is not a snapshot freshness barrier
+
+False assumption: waiting half a second after an action and expiring a UIA tree after three seconds
+would keep the agent's state aligned with a visible browser change. UIA may deliver a later event,
+and a helper push can still be coalescing when a server read reuses the tree. Dropping the tree also
+lost the baseline needed to show a state change on an otherwise stable element id.
+
+Increment the helper's per-grant counter in the native callback, authorize cached reads only with a
+live subscription and matching counter, and label capture races. Retain the previous tree for state
+deltas; compare enabled/value/selection as well as identities. `tests/test_screen_state_truth.py`
+covers in-flight pushes, changes during/after capture, continuation epochs, dead subscriptions and
+legacy fallback without real elapsed-time waits. `inspect` reads current UIA independently from the
+retained snapshot; use the manual retest in `docs/screen-helper.md` to distinguish Chrome accessibility
+state from Partyline staleness.
+
+A state delta must compare semantic fields, not layout, focus or pattern-list noise. Counting a
+scroll's rectangle shifts as updates can mark a Document changed and fold away the link whose
+enabled state actually changed. The layout-shift regression in `tests/test_screen_state_truth.py`
+requires that link to remain visible. A live/snapshot mismatch also takes precedence over ancestor
+evidence in either direction; a disabled ancestor must never conceal stale state on the target.

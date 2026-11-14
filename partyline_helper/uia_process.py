@@ -19,7 +19,7 @@ def command(payload):
 
 
 def read(hwnd, frame=None, state=None, deep=True, popen=subprocess.Popen, platform=sys.platform,
-         ready_wait=None):
+         ready_wait=None, probe=None):
     if platform != "win32":
         return {"elements_unavailable": "Windows UI Automation is not available on this platform"}
     with tempfile.TemporaryDirectory(prefix="partyline-uia-") as directory:
@@ -28,6 +28,8 @@ def read(hwnd, frame=None, state=None, deep=True, popen=subprocess.Popen, platfo
         if state:
             saved.write_text(json.dumps(state), encoding="utf-8")
         payload = json.dumps([hwnd, frame, str(path), str(ready), str(saved) if state else None, deep])
+        if probe:
+            payload = json.dumps([hwnd, frame, str(path), str(ready), None, False, probe])
         process = None
         try:
             process = popen(command(payload), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -79,12 +81,22 @@ def initialize():  # pragma: no cover - native Windows UIA type library
 def main(request=None):  # pragma: no cover - isolated Windows child process
     from .uia_snapshot import snapshot
     from .uia_windows import WindowsProvider
-    hwnd, frame, path, ready, saved, deep = json.loads(request or sys.argv[1])
-    provider = WindowsProvider(hwnd, cached=True, deep=deep and not saved)
+    payload = json.loads(request or sys.argv[1])
+    hwnd, frame, path, ready, saved, deep = payload[:6]
+    probe = payload[6] if len(payload) > 6 else None
+    if probe:
+        from .uia_probe import LiveProvider
+        provider = LiveProvider(hwnd)
+    else:
+        provider = WindowsProvider(hwnd, cached=True, deep=deep and not saved)
     provider.root()  # the whole-tree prefetch runs under the start limit, not the walk's budget
     print("READY", flush=True)
     state = json.loads(Path(saved).read_text(encoding="utf-8")) if saved else None
-    result = snapshot(provider, frame, state=state)
+    if probe:
+        from .uia_probe import inspect
+        result = inspect(provider, probe["id"], probe.get("path"))
+    else:
+        result = snapshot(provider, frame, state=state)
     Path(path).write_text(json.dumps(result), encoding="utf-8")
 
 

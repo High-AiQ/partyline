@@ -5,7 +5,6 @@ from .uia_patterns import PATTERN
 from .uia_popups import WindowScope, configure
 from .uia_expand_events import structure_call
 
-# UIA property and pattern IDs are defined by UIAutomationClient.h.
 PATTERNS = {10000: "Invoke", 10015: "Toggle", 10002: "Value", 10010: "SelectionItem",
             10005: "ExpandCollapse", 10003: "RangeValue", 10004: "Scroll", 10017: "ScrollItem",
             10009: "Window", 10016: "Transform", 10018: "LegacyIAccessible"}
@@ -14,11 +13,9 @@ AVAILABLE = {10000: 30031, 10015: 30041, 10002: 30043, 10010: 30036, 10005: 3002
              10004: 30034, 10017: 30035, 10009: 30044, 10016: 30042, 10018: 30090}
 # Properties a snapshot reads for every node, fetched with it so each node costs no further round trips.
 CACHED = {"BoundingRectangle": 30001, "ControlType": 30003, "Name": 30005, "HasKeyboardFocus": 30008,
-          "IsKeyboardFocusable": 30009,
           "IsEnabled": 30010, "AutomationId": 30011, "IsPassword": 30019, "NativeWindowHandle": 30020,
-          "IsOffscreen": 30022, "ProcessId": 30002, "AriaProperties": 30102}
-# Cached too, so a Value or Toggle element costs no live pattern call: ValueValue, ToggleToggleState.
-PATTERN_STATE = {"value": 30045, "toggle": 30086}
+          "IsOffscreen": 30022, "ProcessId": 30002, "AriaProperties": 30102, "IsKeyboardFocusable": 30009}
+PATTERN_STATE = {"value": 30045, "toggle": 30086, "selected": 30079, "expand_state": 30070}
 SUBTREE, SHALLOW = 7, 3  # TreeScope_Subtree; TreeScope_Element | TreeScope_Children
 MAX_CHILDREN = 20000  # runaway guard for one node's children; far beyond any real list
 EXPAND_STATES = {0: "collapsed", 1: "expanded", 2: "partial", 3: "leaf"}
@@ -201,8 +198,7 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
         patterns = [name for ident, name in PATTERNS.items() if self.available(node, ident)
                     and (name != "LegacyIAccessible" or control in (50000, 50005))]
         result = {"control_type": TYPES.get(control, str(control)),
-                  "name": self.prop(node, "Name"),
-                  "automation_id": self.prop(node, "AutomationId"),
+                  "name": self.prop(node, "Name"), "automation_id": self.prop(node, "AutomationId"),
                   "enabled": bool(self.prop(node, "IsEnabled")),
                   "focused": bool(self.prop(node, "HasKeyboardFocus")),
                   "focusable": bool(self.prop(node, "IsKeyboardFocusable")),
@@ -216,6 +212,13 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
             result["value"] = self.state_value(node, "value", 10002, "Value", "CurrentValue")
         if "Toggle" in patterns:
             result["toggle"] = int(self.state_value(node, "toggle", 10015, "Toggle", "CurrentToggleState"))
+        if "SelectionItem" in patterns:
+            result["selected"] = bool(self.state_value(node, "selected", 10010, "SelectionItem",
+                                                       "CurrentIsSelected"))
+        if "ExpandCollapse" in patterns:
+            state = self.state_value(node, "expand_state", 10005, "ExpandCollapse",
+                                     "CurrentExpandCollapseState")
+            result["expand_state"] = EXPAND_STATES.get(int(state), "unknown")
         return result
 
     def state_value(self, node, key, ident, name, attribute):

@@ -16,12 +16,13 @@ def elements_options(refresh: bool = False, more: bool = False,
                      id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
                      control_type: Annotated[str | None, Query(min_length=1, max_length=40)] = None,
                      text: bool = False, changes: bool = False,
+                     inspect: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
                      context: Annotated[int, Query(ge=0, le=5)] = 1,
                      offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0, bounds: bool = False):
     """What a screen_elements call asks of the stored snapshot; every query parameter is optional."""
     return dict(refresh=refresh, more=more, root=root, depth=depth, query=query, value=value, id=id,
                 control_type=control_type, text=text, changes=changes, context=context, offset=offset,
-                bounds=bounds)
+                bounds=bounds, inspect=inspect)
 
 
 def state(tree):

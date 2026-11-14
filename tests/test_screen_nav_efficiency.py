@@ -303,7 +303,6 @@ class ClickThenReadTests(unittest.IsolatedAsyncioTestCase):
         self.snapshots = 0
         self.actions = []
         self.hub = ElementsHub(SimpleNamespace(devices={}), clock=lambda: 0)
-        self.hub.settle = AsyncMock()
 
         async def exchange(principal, grant, device, kind, **fields):
             if kind == "read_window_elements":
@@ -347,7 +346,6 @@ class ClickThenReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(size(result) / 3.5, 1000)  # a page change and its titles stay under ~1,000 tokens
         # the remembered id still names the link in the new snapshot
         self.assertEqual(link, named(self.hub.snapshots["g"], "Hyperlink", "2"))
-        self.hub.settle.assert_awaited()
 
     async def test_then_can_ask_a_question_and_is_kept_inside_the_budget(self):
         await self.hub.read(self.principal)
@@ -493,10 +491,6 @@ class SchemaTests(unittest.TestCase):
 
             hub.exchange = exchange
 
-            async def settle():
-                now[0] += 0.5
-
-            hub.settle = settle
             runtime = SimpleNamespace(db=None)
             action_hub = SimpleNamespace(elements=hub, window_grants=hub.window_grants)
             body = {"element_id": stable_id, "action": "invoke"}
@@ -523,7 +517,7 @@ class SchemaTests(unittest.TestCase):
 
         self.assertEqual("completed", operation(False)["status"])
         self.assertEqual("completed", operation(True)["status"])
-        self.assertEqual([81, 132.5], durations)
+        self.assertEqual([81, 132], durations)
 
     def test_descriptions_stay_short(self):
         from partyline.mcp.tools_screen import ELEMENTS_NOTE

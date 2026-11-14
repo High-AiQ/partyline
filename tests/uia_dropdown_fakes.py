@@ -80,6 +80,8 @@ class Chrome(WindowsProvider):
         return PATTERNS[ident] in node.patterns
 
     def state_value(self, node, key, *args):
+        if key == "expand_state":
+            return {"collapsed": 0, "expanded": 1, "partial": 2, "leaf": 3}[node.state[key]]
         return node.state[key]
 
     def state(self, node, props):
