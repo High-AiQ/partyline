@@ -24,11 +24,14 @@ from .orchestrator_handles import message_task
 from .orchestrator_contracts import MessageTaskIn
 from .orchestrator_store import require_task, require_task_or_root, task
 from .orchestrator_wait import live as live_wait
+from . import orchestrator_reviewer as reviewer_progress
 from .task_workspaces import anchor, moved, workspaces
 
 
 def candidate(db, att):
     row = task(db, att['conv_id']) if att else None
+    if att and reviewer_progress.candidate(row, att):
+        return True
     return bool(row and row['implementer_id'] == att['id']
                 and row['status'] in ('implementing', 'idle') and row['stall_stage'] in (0, 2)
                 and peer(db, att) is None)
@@ -36,6 +39,8 @@ def candidate(db, att):
 
 def delivered(db, att, messages):
     row = task(db, att['conv_id'])
+    if row and row['reviewer_id'] == att['id'] and row['reviewer_env_gap'] and messages:
+        db._exec('UPDATE task_reviews SET reviewer_env_gap=0 WHERE conv_id=?', (att['conv_id'],))
     if row and row['implementer_id'] == att['id'] and row['stall_stage'] == 1:
         if any(message.get('id') == row['stall_notice_id'] for message in messages):
             db._exec('UPDATE task_reviews SET stall_stage=2 WHERE conv_id=? AND stall_stage=1',
@@ -107,7 +112,7 @@ def reminder(db, att):
     return GENERIC
 
 
-async def settle(runtime, att):
+async def settle(runtime, att, review=None):
     adapter = getattr(runtime, "live", {}).get(att["id"])
     if getattr(adapter, "provider_failed", False) is True:
         return
@@ -122,6 +127,9 @@ async def settle(runtime, att):
     if working(runtime, att['id']):
         # A tool call in flight keeps the harness turn open, so the implementer
         # is busy and a hand-off is not due yet.
+        return
+    if row['reviewer_id'] == att['id']:
+        await reviewer_progress.settle(runtime, att, review)
         return
     if row['stall_stage'] == 0:
         # What the line owes is read from its workspaces first, off the event loop:
@@ -241,6 +249,8 @@ async def _set_status(runtime, conv_id, new, old):
 async def began(runtime, att):
     """A blocked implementer starting a turn after fresh word from above is working again."""
     row = task(runtime.db, att['conv_id'])
+    if row and row['reviewer_id'] == att['id'] and row['status'] == 'in_review':
+        runtime.db._exec('UPDATE task_reviews SET reviewer_env_gap=0 WHERE conv_id=?', (att['conv_id'],))
     if row and row['implementer_id'] == att['id'] and row['status'] == 'idle':
         await _set_status(runtime, att['conv_id'], 'implementing', 'idle')
     if (row and row['implementer_id'] == att['id'] and row['status'] == 'blocked'

@@ -47,7 +47,7 @@ def wait_deadline(db):
     waits = db._exec('SELECT MIN(wait_until) FROM task_reviews WHERE wait_until>?',
                      (now,)).fetchone()[0]
     claim = db._exec('SELECT MIN(r.notifying_at) FROM line_reports r '
-                     'JOIN task_reviews t ON t.report_id=r.id '
+                     'JOIN task_reviews t ON t.report_id=r.id OR t.reviewer_stall_report_id=r.id '
                      'JOIN conversations c ON c.id=t.conv_id '
                      'WHERE r.notified_at IS NULL AND r.notifying_at IS NOT NULL '
                      'AND c.archived_at IS NULL').fetchone()[0]

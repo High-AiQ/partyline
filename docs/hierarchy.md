@@ -1447,6 +1447,22 @@ again and gets the same single reminder, never a skipped straight to a stall
 report. A wait is a structured statement, never prose: a chat message saying
 "still waiting" waits for nothing.
 
+A reviewer returning idle during `in_review` without `review_verdict` or `env_gap`
+also sends the root a deduplicated notify report: `stalled: reviewer returned
+without review_verdict or env_gap`. It is reported once per review round, including
+across duplicate turn receipts and server restarts. An open harness turn or a live
+`waiting(reason, seconds)` suppresses the report; reviewers can declare waits too.
+An expired review wait checks the reviewer again. An `env_gap` excuses that turn;
+the next reviewer turn must make progress or declare another gap or wait.
+
+During `in_review`, only the task's own implementer can call `nudge_reviewer()`
+(HTTP `POST /api/conversations/{conv_id}/task/nudge-reviewer`, empty body or `{}`).
+It delivers a fixed request to continue and submit `review_verdict` or `env_gap`,
+at most once per round. Text arguments are rejected: reviewer independence means
+the implementer can prompt progress but cannot steer the verdict. A dead reviewer
+returns 409 directing the implementer to the root captain's `restart_reviewer`.
+Root captains and people retain `message_task` for free-text messages.
+
 ## Task modes: full, light and express
 
 `create_task(..., mode="full"|"light"|"express")` picks how much process a task carries. The

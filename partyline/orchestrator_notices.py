@@ -20,6 +20,8 @@ async def tell(runtime, ident, text, source=None):
 async def report(runtime, row):
     db = runtime.db
     row = await asyncio.to_thread(task, db, row['conv_id'])
+    if row['status'] == 'in_review' and row['reviewer_stall_report_id'] is not None:
+        await retry_notify(runtime, row, row['reviewer_stall_report_id'])
     if row['status'] not in ('done', 'approved', 'blocked') and not (
             row['status'] == 'in_review' and row['policy'] == 'captain') and row['stall_stage'] != 3:
         return
@@ -34,14 +36,20 @@ async def report(runtime, row):
         record, wake = reports.add(db, row['root_id'], row['conv_id'], 'task server', text, notify=True)
         db._exec('UPDATE task_reviews SET report_id=? WHERE conv_id=?', (record['id'], row['conv_id']))
     else:
-        record = reports.get(db, row['report_id'])
-        if record['notified_at'] is not None or record['acknowledged_at'] is not None:
-            return  # woken once, or already read and acknowledged: nothing left to ring
-        # Retry only the existing report whose wake never went out.
-        with db.lock:
-            wake = reports._claim_wake(db.conn, record['id'], time.time())
-            db.conn.commit()
-        record = reports.get(db, record['id'])
+        return await retry_notify(runtime, row, row['report_id'])
+    await wake_root(runtime, row, record, wake)
+
+
+async def retry_notify(runtime, row, report_id):
+    """Retry delivery of an existing report, without updating it or waking twice."""
+    db = runtime.db
+    record = reports.get(db, report_id)
+    if record['notified_at'] is not None or record['acknowledged_at'] is not None:
+        return
+    with db.lock:
+        wake = reports._claim_wake(db.conn, record['id'], time.time())
+        db.conn.commit()
+    record = reports.get(db, record['id'])
     await wake_root(runtime, row, record, wake)
 
 

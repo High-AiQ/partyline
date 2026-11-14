@@ -46,6 +46,7 @@ EVERYDAY = frozenset({
     "attach_worker", "detach_worker", "create_child", "accept", "ack_report", "list_presets", "reports",
     "create_task", "tasks", "message_task", "set_task_goal", "reopen_task",
     "env_gap", "blocked", "deliver", "request_review", "review_verdict", "waiting", "resume_work",
+    "nudge_reviewer",
 })
 EXTRAS = "extras"
 CAPTAIN = "captain"

@@ -6,13 +6,14 @@ from .auth_guard import request_principal
 from .contracts import ConversationEvent, ConversationResponse, ConversationsChangedEvent
 from .machine_scope import deny_unless
 from .orchestrator_contracts import (
-    BlockedIn, EnvGapIn, CaptainStyleIn, DeliverIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn,
-    ShareRefIn,
+    BlockedIn, EnvGapIn, CaptainStyleIn, DeliverIn, MessageTaskIn, NudgeReviewerIn, ReopenIn, ResumeIn,
+    ReviewRequestIn, ShareRefIn,
     ShareRefOut, TaskIn, TaskReview, VerdictIn, WaitingIn)
 from .orchestrator_handles import message_task, task_line
 from .orchestrator_stall import blocked, resume_work
 from .orchestrator_wait import waiting as declare_wait
 from .orchestrator_reopen import reopen_task
+from .orchestrator_reviewer import env_gap as report_env_gap, nudge_reviewer
 from .orchestrator_revive import restart_implementer, restart_reviewer
 from .orchestrator_service import create_task, request_review, review_verdict
 from .orchestrator_share_ref import share_ref as publish_shared_ref
@@ -91,6 +92,10 @@ def orchestrator_router(runtime):
         actor = request_principal(request)
         return await message_task(runtime, actor, task_line(db, actor, conv_id), body)
 
+    @router.post('/api/conversations/{conv_id}/task/nudge-reviewer', response_model=TaskReview)
+    async def nudge(request: Request, conv_id: str, body: NudgeReviewerIn | None = None):
+        return await nudge_reviewer(runtime, request_principal(request), conv_id)
+
     @router.post('/api/conversations/{conv_id}/task/share-ref', response_model=ShareRefOut)
     async def share_ref(request: Request, conv_id: str, body: ShareRefIn):
         actor = request_principal(request)
@@ -102,14 +107,7 @@ def orchestrator_router(runtime):
 
     @router.post('/api/conversations/{conv_id}/env-gap', response_model=TaskReview)
     async def env_gap(request: Request, conv_id: str, body: EnvGapIn):
-        from .orchestrator_store import require_task
-        from .orchestrator_notices import notify_root
-        row = require_task(db, request_principal(request), conv_id, reviewer=True)
-        if row['status'] != 'in_review':
-            raise HTTPException(409, 'no review is open')
-        await notify_root(runtime, row, f"Review environment gap in {body.repository}/{body.subpath}: "
-                          f"{body.what_failed}; tried: {body.tried}")
-        return row
+        return await report_env_gap(runtime, request_principal(request), conv_id, body)
 
     @router.post('/api/conversations/{conv_id}/blocked', response_model=TaskReview)
     async def block(request: Request, conv_id: str, body: BlockedIn):
