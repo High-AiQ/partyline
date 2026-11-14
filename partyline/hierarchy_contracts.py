@@ -10,7 +10,7 @@ from .contracts import ConversationResponse
 from .goal import MAX_GOAL, MAX_TASK_GOAL, MAX_TOPIC
 
 MAX_REPORT_BODY = 2000
-MAX_MESSAGE_BODY = 8000
+MAX_MESSAGE_BODY = 10_000
 
 
 class LeadIn(BaseModel):

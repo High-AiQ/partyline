@@ -14,6 +14,7 @@
  */
 
 import { SvelteMap } from "svelte/reactivity";
+import { clampDraft } from "../lib/composer";
 
 export const DRAFT_STORAGE_KEY = "partyline.composer-draft";
 
@@ -40,7 +41,7 @@ export function restoreDraft(
   storage: DraftStorage | null = browserStorage(),
 ): string {
   try {
-    return storage?.getItem?.(draftStorageKey(conversationId)) ?? "";
+    return clampDraft(storage?.getItem?.(draftStorageKey(conversationId)) ?? ""); // an older client may have saved more
   } catch {
     return "";
   }
@@ -81,6 +82,7 @@ export class Draft {
 
   set text(value: string) {
     if (this.#activeId === null) return; // no line open — nowhere for text to belong
+    value = clampDraft(value); // dictation, a mention or a restore can never outgrow the cap
     if (this.#texts.get(this.#activeId) === value) return;
     this.#texts.set(this.#activeId, value);
     persistDraft(this.#activeId, value, this.#storage);
@@ -109,7 +111,7 @@ export class Draft {
 
   restoreFailed(conversationId: string, text: string): void {
     const current = this.#texts.get(conversationId) ?? restoreDraft(conversationId, this.#storage);
-    const restored = current ? `${text}\n${current}` : text;
+    const restored = clampDraft(current ? `${text}\n${current}` : text);
     this.#texts.set(conversationId, restored);
     persistDraft(conversationId, restored, this.#storage);
     if (this.#activeId === conversationId) this.externalEdits++;

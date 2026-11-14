@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { DRAFT_STORAGE_KEY, Draft, draftStorageKey, persistDraft, restoreDraft } from "./draft.svelte.js";
 import type { DraftStorage } from "./draft.svelte.js";
+import { MAX_MESSAGE_BODY } from "../lib/composer";
 
 function recordingStorage(): DraftStorage {
   const map = new Map<string, string>();
@@ -132,5 +133,32 @@ describe("per-line drafts", () => {
     instance.text = "still here";
     instance.openLine("conv-1");
     expect(instance.text).toBe("still here");
+  });
+});
+
+describe("draft length cap", () => {
+  it("never holds more than the message cap, however the text arrives", () => {
+    const instance = new Draft(recordingStorage());
+    instance.openLine("conv-1");
+    instance.text = "a".repeat(MAX_MESSAGE_BODY + 50);
+    expect(instance.text).toHaveLength(MAX_MESSAGE_BODY);
+    instance.text = "b".repeat(MAX_MESSAGE_BODY - 1) + "😀";
+    expect(instance.text).toBe("b".repeat(MAX_MESSAGE_BODY - 1));
+    instance.restoreFailed("conv-1", "c".repeat(MAX_MESSAGE_BODY));
+    expect(instance.text).toBe("c".repeat(MAX_MESSAGE_BODY));
+    instance.text = "d".repeat(MAX_MESSAGE_BODY - 1);
+    instance.mention("sol");
+    expect(instance.text).toHaveLength(MAX_MESSAGE_BODY);
+  });
+
+  it("clamps a saved draft from an older client when its line first opens", () => {
+    const storage = recordingStorage();
+    persistDraft("conv-1", "e".repeat(MAX_MESSAGE_BODY - 1) + "😀", storage);
+    persistDraft("conv-2", "f".repeat(MAX_MESSAGE_BODY + 1), storage);
+    const instance = new Draft(storage);
+    instance.openLine("conv-1");
+    expect(instance.text).toBe("e".repeat(MAX_MESSAGE_BODY - 1));
+    instance.openLine("conv-2");
+    expect(instance.text).toHaveLength(MAX_MESSAGE_BODY);
   });
 });

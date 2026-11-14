@@ -16,7 +16,7 @@ from .mentions import addresses
 from .role_briefing import WORKER_REMINDER
 
 REBRIEF_LIMIT = 4000
-# The assignment is quoted verbatim but bounded: a message may be 8,000
+# The assignment is quoted verbatim but bounded: a message may be 10,000
 # characters, and an unbounded quote is the one part that can push every
 # other section past the cap on its own.
 ASSIGNMENT_LIMIT = 2000

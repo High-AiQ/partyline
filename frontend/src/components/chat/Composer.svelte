@@ -15,6 +15,7 @@
   import HandsFreeInput from "./HandsFreeInput.svelte";
   import ComposerMoreMenu from "./ComposerMoreMenu.svelte";
   import AttachButton from "./AttachButton.svelte";
+  import ComposerHint from "./ComposerHint.svelte";
   import type { VoiceStatus } from "../../lib/voice";
   import { handsFree } from "../../state/hands-free.svelte.js";
   import ScreenFramesToggle from "./ScreenFramesToggle.svelte";
@@ -25,7 +26,7 @@
   import { layout } from "../../state/layout.svelte.js";
   import { session } from "../../state/session.svelte.js";
   import { sendFailures } from "../../state/send-failures.svelte.js";
-  import { composerPlaceholder, insertNewline } from "../../lib/composer";
+  import { composerPlaceholder, insertNewline, MAX_MESSAGE_BODY } from "../../lib/composer";
   import { api } from "../../lib/api";
   import type { FileIntake, PendingFiles } from "../../lib/files";
   import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
@@ -254,6 +255,7 @@
         bind:this={box}
         bind:value={draft.text}
         rows="1"
+        maxlength={MAX_MESSAGE_BODY}
         {placeholder}
         aria-label="message"
         onkeydown={onKeydown}
@@ -277,24 +279,5 @@
       >
     </div>
   </div>
-  <div class="hint mt-1.5 text-[10px] text-cream-faint" class:blocked={!hasLiveProcess} aria-live="polite">
-    {#if !hasLiveProcess}
-      attach a process to message this line
-    {:else}
-      enter to send · shift+enter or ctrl+j for a new line · agents only wake when @mentioned · @all rings
-      every running agent
-    {/if}
-  </div>
+  <ComposerHint attached={hasLiveProcess} length={draft.text.length} />
 </ComposerDropZone>
-
-<style>
-  /* Tailwind's `max-*` variants are exclusive of the boundary, so the
-     documented `(max-width: 899px)` narrow breakpoint stays hand-written. */
-  @media (max-width: 899px) {
-    /* Three lines of keyboard advice, none of which applies to a touch
-       keyboard, on the screen with the least room to spare. */
-    .hint:not(.blocked) {
-      display: none;
-    }
-  }
-</style>
