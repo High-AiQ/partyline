@@ -1,6 +1,7 @@
 """Independent window grants and snapshots, multiplexed over the existing helper socket."""
 import asyncio
 import contextlib
+import time
 import uuid
 from types import SimpleNamespace
 
@@ -15,9 +16,18 @@ from .window_target_picker import select_target
 from .uia_events import UIAEventSubscription
 from .uia_event_state import EventState
 from .window_outline import WindowOutline
+from .window_snapshot import SNAPSHOT_VERSION, WindowSnapshots
 
-WINDOWS_VERSION = 1  # 1: a window is shared with a line, not with one process
+WINDOWS_VERSION = SNAPSHOT_VERSION  # 1: a window is shared with a line; 2: it can also be screenshotted
 MESSAGES = ("share_targets", "window_grant_result", "revoke_window")
+
+
+def shot(entry):
+    """What the tray adds to a window's label once an agent has taken its screenshot."""
+    last = entry.get("last_screenshot")
+    if not last:
+        return ""
+    return f" (last screenshot {time.strftime('%H:%M', time.localtime(last['at']))} by @{last['by']})"
 
 
 class WindowSession:
@@ -40,6 +50,7 @@ class WindowShares:
         self.grants, self.waiters, self.tasks = {}, {}, set()
         self.event_timers = {}
         self.picking, self.generation = False, 0
+        self.snapshots = WindowSnapshots(self)
 
     async def request(self, kind, **fields):
         ident = uuid.uuid4().hex
@@ -72,7 +83,7 @@ class WindowShares:
 
     def changed(self):
         self._changes.notify()
-        labels = {ident: f"{entry['title']} → «{entry['target']['line_name']}»"
+        labels = {ident: f"{entry['title']} → «{entry['target']['line_name']}»" + shot(entry)
                   for ident, entry in self.grants.items()}
         self.session.status.window_grants = labels
         self.session.status.window_title = "; ".join(labels.values()) or None
@@ -192,7 +203,9 @@ class WindowShares:
 
     async def dispatch(self, message):
         entry = self.grants.get(message.get("grant_id"))
-        if not entry:
+        if message["type"] == "snapshot_window":
+            self.spawn(self.snapshots.handle(entry, message))
+        elif not entry:
             kind = "window_elements" if message["type"] == "read_window_elements" else "window_element_result"
             await self.session.send(kind, request_id=message["request_id"],
                                     elements_unavailable="consent revoked",

@@ -15,6 +15,17 @@ def device_grants(db, device_id):
     return [dict(row) for row in db._exec(GRANTS + " AND g.device_id=?", (device_id,)).fetchall()]
 
 
+def monitor_refusal(db, conv_id):
+    """Why a monitor-capture tool has nothing to capture; with a window shared, where to look instead."""
+    rows = db._exec(GRANTS + " AND g.conv_id=? ORDER BY g.title", (conv_id,)).fetchall()
+    if not rows:
+        return "nobody is sharing a screen on this line"
+    windows = "; ".join(f"window «{row['title']}» ({row['id']})" for row in rows)
+    return (f"no monitor is shared with this line; {windows} is: use screen_window_snapshot(window=<id>) "
+            "for a picture (extras(op=\"screen_window_snapshot\", args) if unlisted), or screen_elements "
+            "first. Do not ask the person to share the whole screen")
+
+
 def resolve_window(hub, principal, window=None, device_name=None):
     """The granted window a caller may use: a person's own, or any window shared with the caller's line."""
     rows = [dict(row) for row in hub.runtime.db._exec(GRANTS).fetchall()]

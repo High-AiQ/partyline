@@ -303,7 +303,7 @@ restarts, or the line is archived or deleted. A process detaching, exiting, resu
 by a compaction rotation does not end it. Ending one grant leaves other windows alone. Consent is never
 restored after a restart. Grants and revocations are recorded in the helper's local audit.
 
-Window grants cover `screen_elements` and `screen_element_action`. With one window the
+Window grants cover `screen_elements`, `screen_element_action` and `screen_window_snapshot`. With one window the
 target is unambiguous. With several, pass `window` as the grant ID or title; an ambiguous
 call lists the choices, and each snapshot returns its grant ID as `window`. Snapshots and
 element caches are per grant, shared by the processes on the line, so a second process reads
@@ -322,7 +322,8 @@ revalidates the line against the lines visible to the owner. Machine credentials
 revoke grants, and a different human cannot revoke the owner's grants. Access pauses on
 the secure desktop and resumes only while the same window and grant are still live.
 
-**Compatibility.** The helper announces `windows: 1` in its hello; helpers before 1.1.0 omit it.
+**Compatibility.** The helper announces `windows` in its hello: 1 shares a window with a line, 2 (helper 1.2.0) also takes
+window screenshots; helpers before 1.1.0 omit it.
 For a helper that announces it, `list_share_targets` returns every visible line (with an empty
 `processes` list where none is attached) and `window_grant` carries `line_id`. A helper that
 omits it still picks a process, so it is offered only lines that have a live process, and its
@@ -406,6 +407,46 @@ once a Windows box is available and tune `MAX_ELEMENTS`, `BUDGET` and `KILL_SLAC
 Errors, denied consent, closed windows and unsupported platforms return an unavailable reason.
 macOS AX and Linux AT-SPI are planned. The Windows-only helper dependency `comtypes`
 supplies the typed UI Automation COM interfaces; it is not installed on other platforms.
+
+### Screenshot of the chosen window
+
+`screen_window_snapshot` (listed with `screen_elements`; on clients that never re-list, `extras(op="screen_window_snapshot")`)
+returns one image of a window shared with the caller's line, and of nothing else. It is not the default way to
+work in a window: read `screen_elements` first, and the deltas after each `screen_element_action`; take a
+screenshot only when layout or visuals matter, or when elements do not explain what is on screen. The grant
+notice an agent receives says the same. It needs no pixel share and no monitor region, so an agent with only a
+window grant never has to ask for the whole screen.
+
+- **Capture.** The helper takes that window's own content with Windows Graphics Capture for one window handle,
+  falling back to `PrintWindow(PW_RENDERFULLCONTENT)`. A covered or partly off-screen window comes out whole;
+  desktop pixels, which would include other windows, are never grabbed. A minimised window is refused with a
+  plain error and is never restored. Protected (DRM) content is drawn black by Windows; an all-black result
+  carries a `note` saying so.
+- **Access.** The same as `screen_elements`: only processes on the grant's line, machine credentials need read
+  access to that line, other lines get the same refusal, and a grant that has ended is a clear error. The route is
+  `POST /api/conversations/{conv_id}/screen-window-snapshot?window=&device=`, and the window is resolved only
+  through `resolve_window`, as for elements.
+- **No limits on the picture.** It is the window at its own resolution, with no size cap and no rate limit; the
+  person's visibility is the audit below. The helper sends it as a lossless PNG, in as many 4 MB binary
+  messages as it takes. Only if that exceeds what the media store itself accepts (20 MB) does it use the highest
+  WebP quality that fits (never fewer pixels).
+- **Variants.** The media store keeps the capture as the original and derives `slim` (at most 1600 px) and `thumb`
+  (at most 512 px) as it does for every image. The result lists `full`, `slim` and `thumb`, each with its `url`
+  (`/api/media/<id>/original|slim|thumb`, which `get_media` also fetches), `width`, `height` and `image_tokens`
+  (width x height / 750 after a model's own resize). `slim` is the usual choice; `full` is the window's own pixels.
+- **Result.** Also `file` (the same reference as `screen_frame`, whose `urls` an agent can post to the line),
+  `window`, `title`, and `unchanged`: true when the bytes match this agent's previous capture of the window, in which
+  case the stored file is reused.
+- **Audit.** Each capture is recorded in the screen control audit (who asked, the grant, the size) and noted in the
+  line; the helper's local audit records it too. The tray's window label reads "last screenshot HH:MM by @handle"
+  and the web window-grant list carries `last_screenshot` for the grant.
+- **Protocol.** The server sends `snapshot_window` (`request_id`, `grant_id`, `agent`); the helper
+  answers `window_snapshot` with the same `request_id`, `ok`, and either `error` or `mime`, `width`, `height` and
+  `media: true` and `chunks: n`, followed by n binary messages that join into the image.
+  The helper checks consent once more under its writer lock immediately before the first byte leaves, and the
+  server checks once more after it has stored and announced the capture, immediately before it answers; if the
+  grant ended in between, nothing is sent or returned, the new media is deleted, and the audit gains a "withheld" entry. Only a helper whose hello says `windows: 2` is asked; an older
+  one is told "update the Partyline helper to use window screenshots" at once, never left to time out.
 
 ### Act on elements in the chosen window
 

@@ -35,7 +35,7 @@ class WindowGrantFixture:
         device_id, _, _, _ = self.hub.claim_pair_code(code, "Computer", "test")
         self.sent = []
         self.device = {"id": device_id, "owner_id": self.owner["id"],
-                       "name": "Computer", "monitors": [], "helper_version": "1.1.0", "windows": 1,
+                       "name": "Computer", "monitors": [], "helper_version": "1.2.0", "windows": 2,
                        "socket": SimpleNamespace(send_json=self.receive)}
         self.hub.devices[device_id] = self.device
 

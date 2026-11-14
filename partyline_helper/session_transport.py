@@ -7,11 +7,14 @@ from websockets.exceptions import ConnectionClosed
 
 
 class SessionTransport:
-    async def send(self, kind, binary=None, **fields):
+    async def send(self, kind, binary=None, before=None, **fields):
+        """Send one message and its bytes (or a list of byte chunks); `before` runs under the lock, last."""
         async def write():
+            if before:
+                await before()  # the final gate, as the write's first step: only the check precedes the bytes
             await self.socket.send(json.dumps(dict(type=kind, **fields)))
-            if binary is not None:
-                await self.socket.send(binary)
+            for chunk in ([] if binary is None else binary if isinstance(binary, list) else [binary]):
+                await self.socket.send(chunk)
 
         async with self.lock:
             if binary is None:

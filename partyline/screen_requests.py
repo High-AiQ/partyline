@@ -38,7 +38,8 @@ async def _await_frame(future):
 async def capture(hub, conv_id):
     share = hub.shares.get(conv_id)
     if not share or share.status != "active":
-        raise ValueError("nobody is sharing a screen on this line")
+        from .screen_grants import monitor_refusal
+        raise ValueError(monitor_refusal(hub.runtime.db, conv_id))
     device = hub.devices.get(share.device_id)
     if not device:
         raise ValueError("the sharing computer is offline")

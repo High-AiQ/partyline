@@ -13,7 +13,11 @@ def owner_devices(hub, owner_id):
     for row in rows:
         item = dict(row)
         online = hub.devices.get(item["id"])
-        item.update(window_grants=device_grants(hub.runtime.db, item["id"]),
+        grants = device_grants(hub.runtime.db, item["id"])
+        for grant in grants:
+            if shot := hub.snapshots.last_screenshot(grant["id"]):
+                grant["last_screenshot"] = shot  # when an agent last took a screenshot, and who
+        item.update(window_grants=grants,
                     online=online is not None, monitors=online["monitors"] if online else [],
                     helper_version=online["helper_version"] if online else None,
                     update_available=bool(online) and update_available(online["helper_version"]))

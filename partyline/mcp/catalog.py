@@ -31,6 +31,7 @@ EXTRAS_OPS = frozenset({
     "blender_request", "blender_exec", "blender_scene_info", "blender_render", "blender_screenshot",
     "blender_end", "render_check", "upload_3d_model", "upload_file",
     "offer_handover", "cancel_handover", "accept_handover", "complete_handover",
+    "screen_window_snapshot",  # elements are the default way to read a window; this is the rare errand
 })
 # Clients that never re-list cannot gain a screen tool when a share starts, so the
 # whole control set is reached through extras there; the others list it while shared.
@@ -38,7 +39,7 @@ SCREEN_CONTROL = frozenset({
     "screen_element_action", "screen_control_request", "screen_click", "screen_move",
     "screen_drag", "screen_scroll", "screen_type", "screen_key",
 })
-SCREEN = SCREEN_CONTROL | {"screen_frame", "screen_elements"}
+SCREEN = SCREEN_CONTROL | {"screen_frame", "screen_elements", "screen_window_snapshot"}
 # Captain and task operations that stay listed; every other one runs as captain(op, args).
 EVERYDAY = frozenset({
     "attach_worker", "detach_worker", "create_child", "accept", "ack_report", "list_presets", "reports",
@@ -120,7 +121,9 @@ def dispatch(client, name: str, args: dict, state: dict):
     module = owner(state, name)
     if module is None:
         if name in SCREEN and state.get("dynamic_screen_tools"):
-            raise ApiError("no screen shared with you")
+            raise ApiError("no screen shared with you" if not state.get("screen_windows") else
+                           "no monitor is shared with you, but a window is: use screen_window_snapshot "
+                           "(or screen_elements first); do not ask the person to share the whole screen")
         raise ValueError("tool is not currently available to this attachment")
     if module is tools_core:
         tool = next(item for item in tools_core.tool_list(state) if item["name"] == name)

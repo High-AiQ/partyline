@@ -21,6 +21,7 @@ from .screen_frames import BufferedFrame, ShareBuffer
 from .screen_share_frames import add_frame
 from .screen_share_stop import stop_share as stop_screen_share
 from .screen_elements import ElementsHub
+from .screen_window_snapshot import WindowSnapshots
 from .screen_window_grants import MESSAGES as WINDOW_MESSAGES, WindowGrants
 from .screen_pair_limits import PairLimits
 from .screen_requests import capture, preview
@@ -44,6 +45,7 @@ class ScreenHub:
         self.snap_waiters: dict[str, tuple[ShareBuffer, asyncio.Future]] = {}
         self.preview_waiters: dict[str, tuple[str, str | int, asyncio.Future]] = {}
         self.elements = ElementsHub(self)
+        self.snapshots = WindowSnapshots(self)
         self.window_grants = WindowGrants(self)
         self.control = ControlHub(self)
         self.tools = LocalTools(self)
@@ -160,6 +162,8 @@ class ScreenHub:
                     await self.window_grants.from_helper(current, message)
                 elif kind in ("window_elements", "window_element_result"):
                     self.elements.receive(current, message)
+                elif kind == "window_snapshot":
+                    await self.snapshots.from_helper(current, message)
                 elif kind in CONTROL_MESSAGES:
                     await self.control.from_helper(current, message)
                 elif kind in TOOL_MESSAGES:

@@ -18,7 +18,10 @@ def usage(grant_id, title, computer, shared_by):
             "with offset/next_offset and refresh after page changes because ids may become stale. "
             "Commit a field with press key=enter (also tab/escape); prefer invoke on submit buttons. "
             "Every process on this line can use this window; actions run one at a time. UIA changes "
-            "invalidate snapshots; pass refresh=true for a fresh read.")
+            "invalidate snapshots; pass refresh=true for a fresh read.\n"
+            "Read elements first, and the deltas after each action. Take a screenshot "
+            f"(extras(op=\"screen_window_snapshot\", args={{\"window\": {window}}})) when layout or "
+            "visuals matter, or elements do not explain what is on screen; slim is the usual size.")
 
 
 def live_processes(db, conv_id):
@@ -37,7 +40,8 @@ def line_window_text(db, conv_id):
     parts = [f"«{clean(row['title'])}» (window={json.dumps(row['id'])}) on {clean(row['device_name'])}"
              for row in rows]
     return ("Windows a person shared with this line (any process here may use them): " + "; ".join(parts) +
-            ". Read with screen_elements(window=...), act with screen_element_action.")
+            ". Read with screen_elements(window=...), act with screen_element_action; a screenshot "
+            "(screen_window_snapshot) is for layout or visuals only.")
 
 
 async def announce(runtime, entry, grant_id, reason=None):
