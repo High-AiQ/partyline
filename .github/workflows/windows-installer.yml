@@ -9,6 +9,7 @@ on:
     paths:
       - "partyline_helper/**"
       - "packaging/windows/**"
+      - ".github/workflows/windows-installer.yml"
       - "partyline/file_events.py"
       - "partyline/file_notify_kqueue.py"
       - "partyline/file_notify_linux.py"
