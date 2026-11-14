@@ -578,7 +578,7 @@ the intentional **Count** rename. The DOM state and UIA state should be compared
 | --- | --- | --- |
 | 1. Sync enable | A real `disabled` attribute removed synchronously by `change` | `Sync target` starts `disabled`; selecting A removes that flag. |
 | 2. Delayed enable | Real `disabled` attributes removed at 300 ms and 2500 ms | An immediate `then` reads at its event-counter boundary; it may precede either deadline. Once both targets visibly enable, a fresh read shows neither as `disabled`. |
-| 3. Looks enabled, accessibility says disabled | Only the link's CSS class changes | **`Class-only link` remains `disabled` in UIA after selection**, even though it looks enabled. This is the deliberate KDP-style divergence. |
+| 3. Looks enabled, accessibility says disabled | Only the link's CSS class changes | **`Class-only link` remains `disabled` in UIA after selection**, even though it looks enabled. This deliberately models the listing dashboard’s accessibility divergence. |
 | 4. aria-disabled link done right | Selection removes `aria-disabled` | `ARIA link` starts `disabled`; selecting A removes that flag. |
 | 5. Disabled ancestor | A button inherits disabled state from `<fieldset disabled>` | `Fieldset target` is `disabled` while `Fieldset disabled` is on, and enabled after toggle off. |
 | 6. Name change | The button increments its own accessible name | Invoking `Count 0` produces `Count 1`, then `Count 2`. |
@@ -786,7 +786,13 @@ notification when available. On Windows the tray item opens the installer; on ot
 platforms rerun the helper install command. The Computers list also shows updates.
 Older helpers that reported a Partyline 2.x version are treated as outdated.
 
-### Dropdown options and reported-disabled controls (helper 1.2)
+### Helper 1.3.0
+
+This release combines scoped owned dialogs, UIA action latency instrumentation and filtered
+reads with retained action IDs, and approved Chrome CDP reads and actions. These changes
+share one helper version.
+
+#### Dropdown options and reported-disabled controls
 
 A window snapshot includes its visible owned popups, labelled `popup: …` under the
 shared window. Win32's owner chain must reach the granted HWND. Same-process popups
@@ -806,7 +812,7 @@ properties or walk desktop ancestry. Desktop scope is used only during the short
 deadline. No timed popup discovery runs.
 
 Use `select` for dropdowns and `set_value` for text fields. On a ComboBox,
-`select(value="Amazon.co.uk")` expands it if needed, searches its children, then nearby
+`select(value="shop.uk")` expands it if needed, searches its children, then nearby
 Lists and owned popups (newly appeared lists first), uses SelectionItem.Select on the
 exact option name, and requests collapse. Chrome can expose a dropdown's List as a
 sibling under the Document rather than under the ComboBox. Ambiguous names require
@@ -864,27 +870,27 @@ After collapse the same summary returns to 515 bytes: popup support adds no byte
 closed-popup reads. Summary and query output retain the existing 4 KB budget; expand
 previews at most eight option names rather than returning every option in the action.
 
-**Native Chrome check.** Run against a granted KDP Chrome window with the marketplace
-select and Manage A+ Content link; another Chrome window can remain open to check
+**Native Chrome check.** Run against a granted Catalog Dashboard Chrome window with the marketplace
+select and Manage listing content link; another Chrome window can remain open to check
 exclusion. These are MCP calls, in order. Bind `W` to the existing window grant id,
-`C` to the ComboBox id in step 1, `O` to the Amazon.co.uk ListItem id in step 3,
+`C` to the ComboBox id in step 1, `O` to the shop.uk ListItem id in step 3,
 and `L` to the link id in step 8. Use the returned ids, not old examples.
 
 1. `screen_elements(window=W, refresh=true, control_type="ComboBox", query="=Choose a marketplace…")`
 2. `screen_element_action(window=W, element_id=C, action="expand", then={root:C, depth:2})`
    — root is listed; inspect effect and any option observations, including a stale reported state.
-3. `screen_elements(window=W, control_type="ListItem", query="=Amazon.co.uk")`
+3. `screen_elements(window=W, control_type="ListItem", query="=shop.uk")`
    — find the sibling or popup option; no controls from the other Chrome window should appear.
-4. `screen_element_action(window=W, element_id=O, action="select", then={query:"=Manage A+ Content"})`
+4. `screen_element_action(window=W, element_id=O, action="select", then={query:"=Manage listing content"})`
    — verify the link href switches to the UK domain (the page's `change` handler ran).
-5. `screen_element_action(window=W, element_id=C, action="select", value="Amazon.com", then={root:C})`
-   — selected_option is Amazon.com; value_changed is true; select requests collapse.
-6. `screen_element_action(window=W, element_id=C, action="set_value", value="Amazon.com", then={root:C})`
+5. `screen_element_action(window=W, element_id=C, action="select", value="shop.us", then={root:C})`
+   — selected_option is shop.us; value_changed is true; select requests collapse.
+6. `screen_element_action(window=W, element_id=C, action="set_value", value="shop.us", then={root:C})`
    — effect is none; the root still appears.
-7. `screen_element_action(window=W, element_id=C, action="select", value="Amazon.com", then={root:C})`
+7. `screen_element_action(window=W, element_id=C, action="select", value="shop.us", then={root:C})`
    — value_changed is false and effect is none for an already-selected option.
-8. `screen_elements(window=W, refresh=true, query="=Manage A+ Content")`
-   — inspect disabled evidence and the restored .com href.
+8. `screen_elements(window=W, refresh=true, query="=Manage listing content")`
+   — inspect disabled evidence and the restored shop.us href.
 9. `screen_element_action(window=W, element_id=L, action="invoke")`
    — when reported disabled, refusal explains the force override.
 10. After the person confirms the link works:
@@ -894,7 +900,14 @@ and `L` to the link id in step 8. Use the returned ids, not old examples.
     — inspect the destination and confirm a dismissed popup no longer appears.
 
 
-### Diagnose live state and snapshot races
+#### UIA latency, scoped reads and live state diagnostics
+
+Reads, actions and window snapshots include local monotonic phase timings. Name/type queries
+use scoped UIA capture; prior IDs stay in a bounded action-only map and require live identity
+validation before dispatch. Press observes the target and window title without a broad browser
+scan. See [the latency audit](screen-action-latency.md) for phases, retained-ID limits and the
+remaining costs to measure. CDP reads may return a full tree for the same query scope; the
+server then clears the scoped marker and applies its normal full-tree filtering.
 
 `screen_elements(inspect="<element id>")` compares the retained snapshot with a new **uncached**
 UIA read of that same identity. It deliberately bypasses refresh/TTL/invalidation: refreshing first
@@ -956,7 +969,7 @@ Whether the real Chrome provider emits the expected event remains part of the li
 | Socket hello/binary 45 s and heartbeat receive 15 s | Bound failed helper transport; protocol liveness, never tree freshness. |
 | Picker 65 s / consent exchange 70 s | Bound independent human consent, outside snapshot correctness. |
 
-#### Exact manual retest
+##### Exact manual retest
 
 Deploy the state-truth server **and helper** first; use helper 1.3.0 or newer for the latency timings
 and filtered captures. Share Chrome with the testing line using the tray, and attach an ordinary
@@ -971,10 +984,10 @@ The script sends these actual MCP `tools/call` requests over stdio, retaining th
 and element id in variables rather than requiring an id to be transcribed:
 
 ```json
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"screen_elements","arguments":{"query":"=Manage A+ Content","control_type":"Hyperlink","refresh":true}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"screen_elements","arguments":{"query":"=Manage listing content","control_type":"Hyperlink","refresh":true}}}
 ```
 
-At the prompt, choose the marketplace **by hand** in the real KDP window, observe the visible link,
+At the prompt, choose the marketplace **by hand** in the real Catalog Dashboard window, observe the visible link,
 then press Enter. The next request is exactly `screen_elements({"window": before["window"],
 "inspect": link_id})`. It never refreshes between the manual change and inspect. Save the before
 and inspect JSON and the final one-line verdict. Repeat the run if the snapshot was evicted or the
@@ -991,8 +1004,8 @@ the unique hyperlink in each card (copy its exact accessible name from the lab p
    ancestor. Record live/snapshot/ancestor evidence; visual styling alone is not proof of enabled UIA.
 3. Name change, structure change and input/change checks: record clock advancement, use a fresh
    `screen_elements(changes=true)` for the state/structure delta, and note if a renamed identity is gone.
-4. Finish with the default script on KDP's actual Manage A+ Content link after choosing a marketplace
-   by hand. Agree-disabled identifies Chrome's exposed state; live-enabled/snapshot-disabled identifies
+4. Finish with the default script on the Catalog Dashboard’s Manage listing content link after
+   choosing a marketplace by hand. Agree-disabled identifies Chrome's exposed state; live-enabled/snapshot-disabled identifies
    stale Partyline state; ancestor-disabled names the source. ProviderDescription/FrameworkId distinguish
    native Chrome UIA from an MSAA proxy.
 
@@ -1001,7 +1014,7 @@ provider tests establish invariants but cannot decide which side of Greg's real 
 Tool result sizes and image estimates can be compared in the line's Usage section;
 see [tool telemetry](telemetry.md) for estimators, privacy and retention.
 
-### Chrome page state without an extension (helper 1.3.0)
+#### Chrome page state without an extension
 
 In an already running **Chrome 144 or newer**, open `chrome://inspect/#remote-debugging`
 and enable remote debugging once. Share the Chrome window from the helper tray. Chrome asks whether to allow the debugging connection as soon as the window is shared;
@@ -1074,7 +1087,7 @@ This confirms the click/navigation boundary; it does not assert the destination 
 Navigation before mouse release, document replacement without observed navigation, and
 revocation remain interrupted outcomes.
 
-#### Windows live comparison checklist (Greg)
+##### Windows live comparison checklist
 
 This implementation is tested against a fake CDP websocket and fake HWND lists on Linux.
 **Live Windows connection, DPI/window matching and website behavior remain to be run.**
@@ -1116,23 +1129,23 @@ and any difference. Upload sanitized evidence to the line; keep host/account det
    window; the next read follows that tab and old page IDs fail. Leave the old tab changing
    in the background: the selected tab's counter, `more` cursor and quiet settle must remain stable. Move a tab to the other window;
    verify it is no longer read through this grant. Repeat at Windows display scaling 100%/150%.
-9. On KDP, find **Manage A+ Content** and record its CDP AX disabled state, DOM native/ARIA/
+9. On Catalog Dashboard, find **Manage listing content** and record its CDP AX disabled state, DOM native/ARIA/
    readonly/inert state (use `screen_elements(inspect=<id>)`), and the matching UIA inspect.
    Count native `change` events and log selected marketplace values during the operation;
    record popup/fallback mode and verify that no unintended marketplace was committed.
-   Change the marketplace, repeat all readings, then invoke only the intended link. Record
-   actual navigation and discrepancies between style, AX/UIA and DOM. Do not infer success
+   Change the marketplace, repeat all readings, then invoke only the intended link. Confirm the
+   Listing Content Manager page opens. Record actual navigation and discrepancies between style, AX/UIA and DOM. Do not infer success
    from an input dispatch acknowledgement. While an iframe navigates or is removed, verify
    that main-page IDs remain usable and clicks/selects finish. A link navigating the main page
    should report `completed`, `navigated: true`, invalidate old IDs and require a fresh read.
-10. Record capture and event-status latency on the lab and KDP pages. DOM observation now
+10. Record capture and event-status latency on the lab and Catalog Dashboard pages. DOM observation now
     uses two calls per exposed DOM node plus one object-group release per capture chunk;
     event-status checks still remap the HWND. Revoke while a read/eval/action or tab attach is in flight; expect no subsequent page command/result
     disclosure, stale IDs refused, and another separately shared window unaffected. Disconnect
     the helper and quit Chrome; verify the browser socket closes and UIA fallback is explicit.
 
 
-#### Windows foundations source audit
+##### Windows foundations source audit
 
 Read alongside the helper changes: `tests/test_windows_uia.py::test_background_tk_window`,
 `tests/windows_uia_window.py` (native controls and separate foreground window), and

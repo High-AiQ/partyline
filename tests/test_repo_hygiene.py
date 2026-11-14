@@ -74,7 +74,7 @@ class RepoHygieneTest(unittest.TestCase):
 CLIENT_NAMES = re.compile(
     r"\b(?:" + "|".join(("K" + "DP", "Kindle " + "Direct", "A\\+ " + "Content", "Ama" + "zon")) + r")\b"
 )
-CLIENT_SKIP_PREFIXES = SKIP_PREFIXES + ("docs/",)
+CLIENT_SKIP_PREFIXES = SKIP_PREFIXES
 
 
 class NoClientNamesTest(unittest.TestCase):
@@ -86,7 +86,7 @@ class NoClientNamesTest(unittest.TestCase):
             self.assertTrue(CLIENT_NAMES.search(sample), sample)
         self.assertIsNone(CLIENT_NAMES.search("Catalog Dashboard, Manage listing content"))
 
-    def test_no_tracked_file_outside_docs_names_a_client(self):
+    def test_no_tracked_file_names_a_client(self):
         offenders = []
         for path in tracked_files(skip_files=()):
             if path.startswith(CLIENT_SKIP_PREFIXES):

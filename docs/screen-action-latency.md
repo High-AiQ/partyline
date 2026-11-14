@@ -26,7 +26,7 @@ report its own completed send. Screenshot `capture_ms`/`encode_ms` and server `i
 pixel capture, compression, and media storage.
 
 The following are ranked static hypotheses, **not measurements on Greg's PC**. Savings overlap;
-helper 1.3.0 must be deployed and the KDP sequence repeated to establish the subsecond target.
+helper 1.3.0 must be deployed and the Catalog Dashboard sequence repeated to establish the subsecond target.
 
 | Rank | Likely cost | Change or reason retained | Expected saving to verify live |
 | --- | --- | --- | --- |
