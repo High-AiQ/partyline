@@ -446,14 +446,14 @@ class ScreenTest(unittest.TestCase):
             "POST", "/api/conversations/line/screen-elements?device=My%20PC", timeout=60)
 
     def test_devices_report_the_helper_version_and_flag_an_outdated_helper(self):
-        from partyline import __version__
+        from partyline_helper import __version__
 
         device = self.pair()
         url = "/api/screen/devices?conv_id=line"
         offline = self.client.get(url).json()["devices"][0]
         self.assertEqual((offline["helper_version"], offline["update_available"]), (None, False))
         headers = {"Authorization": "Bearer " + device["token"]}
-        for reported, outdated in (("1", True), (__version__, False), ("unknown", False),
+        for reported, outdated in (("0.9", True), (__version__, False), ("unknown", False),
                                    ("9" * 5000, False)):
             with self.client.websocket_connect("/api/screen/helper", headers=headers) as ws:
                 ws.send_json({"type": "hello", "protocol": 1, "device_name": "desk", "os": "Windows",
@@ -461,6 +461,18 @@ class ScreenTest(unittest.TestCase):
                 self.sync(ws)
                 online = self.client.get(url).json()["devices"][0]
             self.assertEqual((online["helper_version"], online["update_available"]), (reported, outdated))
+
+    def test_hello_receives_update_information(self):
+        device = self.pair()
+        headers = {"Authorization": "Bearer " + device["token"]}
+        with self.client.websocket_connect("/api/screen/helper", headers=headers) as ws:
+            ws.send_json({"type": "hello", "protocol": 1, "device_name": "desk", "os": "Windows",
+                          "helper_version": "2.117.0", "monitors": [], "update_check": True})
+            message = ws.receive_json()
+            self.assertEqual(message["type"], "ping")
+            self.assertTrue(message["helper_update"]["available"])
+            self.assertEqual(message["helper_update"]["version"], "1.0.0")
+            self.assertIn("PartylineHelper-Setup.exe", message["helper_update"]["url"])
 
     def test_live_revoke_and_invalid_region(self):
         from starlette.websockets import WebSocketDisconnect

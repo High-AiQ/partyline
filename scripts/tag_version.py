@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 
-from scripts.version_policy import revision_version
+from scripts.version_policy import HELPER_VERSION_PATH, revision_version
 
 
 BOT_NAME = "github-actions[bot]"
@@ -30,36 +30,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--remote", default="origin", help="tag destination")
     args = parser.parse_args(argv)
 
-    before = revision_version(args.base)
-    after = revision_version(args.head)
-    if before == after:
-        print(f"version unchanged at {after}; no tag needed")
-        return 0
-
-    tag = f"v{after}"
-    head = git("rev-parse", f"{args.head}^{{commit}}").stdout.strip()
-    target = existing_target(tag)
-    if target is not None:
-        if target == head:
-            print(f"{tag} already points to {head}; nothing to do")
-            return 0
-        print(f"FAIL: {tag} already points to {target}, not {head}")
-        return 1
-
-    git(
-        "-c",
-        f"user.name={BOT_NAME}",
-        "-c",
-        f"user.email={BOT_EMAIL}",
-        "tag",
-        "-a",
-        tag,
-        head,
-        "-m",
-        f"partyline {after}",
-    )
-    git("push", args.remote, f"refs/tags/{tag}")
-    print(f"created {tag} at {head}")
+    for path, prefix in (("partyline/__init__.py", "v"), (HELPER_VERSION_PATH, "helper-v")):
+        before = revision_version(args.base, path)
+        after = revision_version(args.head, path)
+        if before == after:
+            print(f"version unchanged at {after}; no tag needed")
+            continue
+        tag = f"{prefix}{after}"
+        head = git("rev-parse", f"{args.head}^{{commit}}").stdout.strip()
+        target = existing_target(tag)
+        if target is not None:
+            if target == head:
+                print(f"{tag} already points to {head}; nothing to do")
+                continue
+            print(f"FAIL: {tag} already points to {target}, not {head}")
+            return 1
+        git("-c", f"user.name={BOT_NAME}", "-c", f"user.email={BOT_EMAIL}",
+            "tag", "-a", tag, head, "-m", f"partyline {tag}")
+        git("push", args.remote, f"refs/tags/{tag}")
+        print(f"created {tag} at {head}")
     return 0
 
 

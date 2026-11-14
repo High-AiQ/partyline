@@ -668,18 +668,36 @@ class StartupRaceTests(unittest.TestCase):
 
 
 class VersionTests(unittest.TestCase):
-    def test_version_comes_from_metadata_or_is_unknown(self):
-        self.assertEqual(version.helper_version(lambda name: "9.9.9"), "9.9.9")
-
-        def missing(name):
-            raise version.PackageNotFoundError(name)
-        self.assertEqual(version.helper_version(missing), "unknown")
-
-    def test_cli_prints_it(self):
-        with contextlib.redirect_stdout(io.StringIO()) as out, \
-                patch.object(version, "version", lambda n: "1.2.3"):
+    def test_version_and_cli_use_helper_version(self):
+        from partyline_helper import __version__
+        self.assertEqual(version.helper_version(), __version__)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
             cli.main(["version"])
-        self.assertEqual(out.getvalue().strip(), "1.2.3")
+        self.assertEqual(out.getvalue().strip(), __version__)
+
+    def test_update_tray_item_and_notification(self):
+        status = Status()
+        shown = tray.Tray(status, FAKE_BACKEND)
+        notices = []
+        status.attention_listeners.append(notices.append)
+        update = {"available": True, "version": "1.2.0", "url": "https://example.com/setup"}
+        status.set_update(update)
+        status.set_update(update)
+        item = next(item for item in shown.menu() if item.text == "Update available (1.2.0)")
+        with patch.object(tray.platform, "system", return_value="Windows"), \
+                patch.object(tray.webbrowser, "open") as open_url:
+            item.action()
+        open_url.assert_called_once_with(update["url"])
+        self.assertEqual(len(notices), 1)
+        with patch.object(tray.platform, "system", return_value="Linux"), \
+                patch.object(shown, "notify") as notify, contextlib.redirect_stdout(io.StringIO()):
+            item.action()
+        self.assertIn("install command", notify.call_args.args[0])
+        status.set_update({"available": False})
+        self.assertIsNone(status.update)
+        with patch.object(tray.webbrowser, "open") as open_url:
+            item.action()
+        open_url.assert_not_called()
 
 
 class SessionStatusTests(unittest.IsolatedAsyncioTestCase):
@@ -708,7 +726,7 @@ class SessionStatusTests(unittest.IsolatedAsyncioTestCase):
             done.set()
         async with websocket_server(handler, "127.0.0.1", 0, ping_interval=None) as server:
             port = server.sockets[0].getsockname()[1]
-            with self.assertWarns(UserWarning), patch.object(version, "version", lambda n: "7.8.9"), \
+            with self.assertWarns(UserWarning), patch.object(version, "__version__", "7.8.9"), \
                     contextlib.redirect_stdout(io.StringIO()):
                 await serve(dict(server=f"http://127.0.0.1:{port}", token="t"), FakeDesktop(), terminal,
                             status=status)

@@ -1,10 +1,9 @@
 """Is a connected screen helper older than this server?
 
-Both ship from the same release, so the server's own version is the newest helper there is. A helper that
-cannot say what it is (`unknown`) is never flagged."""
+The checkout ships the current helper version. Unknown versions are not flagged."""
 import re
 
-from . import __version__
+from partyline_helper import __version__
 
 PLAIN = re.compile(r"[0-9]{1,9}(\.[0-9]{1,9}){0,2}")  # bounded: a hostile version cannot overflow int()
 
@@ -18,4 +17,4 @@ def parse(value) -> tuple[int, int, int] | None:
 
 def update_available(helper_version, server_version=None) -> bool:
     helper, server = parse(helper_version), parse(server_version or __version__)
-    return helper is not None and server is not None and helper < server
+    return helper is not None and server is not None and (helper[0] >= 2 or helper < server)

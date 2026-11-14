@@ -4,6 +4,8 @@ The icon and its menu live on pystray's own thread; every action goes through th
 which hand off to the helper's event loop thread-safely. `icon_type` is injectable so tests need no desktop.
 """
 import threading
+import platform
+import webbrowser
 
 from PIL import Image, ImageDraw
 
@@ -62,10 +64,22 @@ class Tray:
     def tools(self, item=None):
         return self.status.tools_active
 
+    def open_update(self, *_):
+        update = self.status.update
+        if not update:
+            return
+        if platform.system() == "Windows":
+            webbrowser.open(update[1])
+        else:
+            self.notify("Run the helper install command again to update.")
+            print("Run the helper install command again to update.", flush=True)
+
     def menu(self):
         item = self.backend.MenuItem
         return self.backend.Menu(
             item(lambda _: self.status.label, None, enabled=False),
+            *([item(f"Update available ({self.status.update[0]})", self.open_update)]
+              if self.status.update else []),
             item("Stop screen sharing", lambda *_: self.status.request_stop_share(),
                  enabled=lambda _: self.sharing()),
             item("Stop all sharing", lambda *_: self.status.request_stop_all(),

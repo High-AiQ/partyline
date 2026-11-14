@@ -277,7 +277,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=$(git tag --points-at "$GITHUB_SHA" 'v*' | head -n 1)
+          tag=$(git tag --points-at "$GITHUB_SHA" 'helper-v*' | head -n 1)
           if [ -n "$tag" ]; then
             gh workflow run windows-installer.yml --ref main -f tag="$tag"
           else

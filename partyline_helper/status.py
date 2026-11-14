@@ -14,6 +14,8 @@ LABELS = {"offline": "Not connected to Partyline", "paired": "Paired with Partyl
 class Status:
     def __init__(self):
         self.state = "offline"
+        self.update = None
+        self.notified_updates = set()
         self.listeners, self.attention_listeners = [], []
         self.stop_share = self.quit = self.stop_tools = None
         self.tools_active = False
@@ -44,6 +46,15 @@ class Status:
         for listener in list(self.attention_listeners):
             with contextlib.suppress(Exception):
                 listener(text)
+
+    def set_update(self, update):
+        version, url = update.get("version"), update.get("url")
+        valid = update.get("available") and isinstance(version, str) and isinstance(url, str)
+        self.update = (version, url) if valid else None
+        self.changed()
+        if self.update and version not in self.notified_updates:
+            self.notified_updates.add(version)
+            self.attention(f"Partyline Helper update available ({version})")
 
     def request_stop_share(self):
         if self.stop_share:

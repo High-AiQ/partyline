@@ -175,6 +175,35 @@ class CliHistoryTest(unittest.TestCase):
             sys.executable, str(SCRIPT), "--base", base, "--head", head, check=False
         )
 
+    def setup_helper(self):
+        helper = self.repo / "partyline_helper"
+        helper.mkdir()
+        (helper / "__init__.py").write_text('__version__ = "1.0.0"\n')
+        (helper / "client.py").write_text("old\n")
+        self.command("git", "add", "partyline_helper")
+        self.commit("chore: establish helper")
+        self.base = self.command("git", "rev-parse", "HEAD").stdout.strip()
+        return helper
+
+    def test_helper_only_fix_requires_only_helper_patch(self):
+        helper = self.setup_helper()
+        (helper / "client.py").write_text("new\n")
+        self.command("git", "add", "partyline_helper")
+        self.commit("fix: repair helper")
+        self.assertIn("helper", self.policy().stdout)
+        self.assertEqual(self.policy().returncode, 1)
+        (helper / "__init__.py").write_text('__version__ = "1.0.1"\n')
+        self.command("git", "add", "partyline_helper")
+        self.command("git", "commit", "--amend", "--no-edit", "-q")
+        self.assertEqual(self.policy().returncode, 0, self.policy().stdout)
+
+    def test_helper_version_without_helper_change_is_rejected(self):
+        helper = self.setup_helper()
+        (helper / "__init__.py").write_text('__version__ = "1.0.1"\n')
+        self.command("git", "add", "partyline_helper")
+        self.commit("fix: unnecessary helper bump")
+        self.assertEqual(self.policy().returncode, 1)
+
     def test_cli_accepts_a_fix_that_owns_its_patch_bump(self):
         self.write_version("0.21.8")
         self.commit("fix(db): close race")
@@ -183,6 +212,8 @@ class CliHistoryTest(unittest.TestCase):
         self.assertIn("patch", result.stdout)
 
     def test_cli_rejects_a_chore_that_launders_a_missing_fix_bump(self):
+        (self.repo / "partyline" / "db.py").write_text("fixed\n")
+        self.command("git", "add", "partyline/db.py")
         self.commit("fix(db): close race")
         self.write_version("0.21.8")
         self.commit("chore: bump version")
@@ -215,6 +246,65 @@ class CliHistoryTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("no release", result.stdout)
+
+
+def imported_partyline_modules(source, shared_module, root):
+    """Find imports of project modules, including package-level import aliases."""
+    import ast
+    found = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names if alias.name.startswith("partyline."))
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module == "partyline":
+                names = [alias.name for alias in node.names]
+            elif node.level == 1 and shared_module and node.module is None:
+                names = [alias.name for alias in node.names]
+            else:
+                names = []
+            for name in names:
+                if ((root / "partyline" / f"{name}.py").is_file()
+                        or (root / "partyline" / name / "__init__.py").is_file() or name == "*"):
+                    found.add(f"partyline.{name}")
+            if node.level == 1 and shared_module and node.module:
+                found.add(f"partyline.{node.module}")
+            elif node.level == 0 and node.module and node.module.startswith("partyline."):
+                found.add(node.module)
+    paths = set()
+    for name in found:
+        path = name.replace(".", "/")
+        if (root / path / "__init__.py").is_file():
+            paths.add(path + "/__init__.py")
+        else:
+            paths.add(path + ".py")
+    return paths
+
+
+class HelperPathTest(unittest.TestCase):
+    def test_helper_imports_are_in_the_shared_path_list(self):
+        from scripts.version_policy import HELPER_SHARED
+        root = Path(__file__).resolve().parents[1]
+        files = list((root / "partyline_helper").rglob("*.py")) + [root / p for p in HELPER_SHARED]
+        for path in files:
+            imported = imported_partyline_modules(path.read_text(), path.parent.name == "partyline", root)
+            self.assertFalse(imported - HELPER_SHARED, f"{path}: {imported - HELPER_SHARED}")
+
+    def test_package_and_relative_imports_are_checked(self):
+        from scripts.version_policy import HELPER_SHARED
+        root = Path(__file__).resolve().parents[1]
+        for source, shared in (("from partyline import file_events", False),
+                               ("from . import file_events", True),
+                               ("from partyline.file_events import Changes", False)):
+            self.assertEqual(imported_partyline_modules(source, shared, root) - HELPER_SHARED, set())
+        for source, shared in (("from partyline import screen_hub as hub", False),
+                               ("from . import screen_hub as hub", True),
+                               ("from partyline.screen_hub import ScreenHub", False)):
+            self.assertEqual(imported_partyline_modules(source, shared, root) - HELPER_SHARED,
+                             {"partyline/screen_hub.py"})
+        self.assertEqual(imported_partyline_modules("from partyline import adapters", False, root),
+                         {"partyline/adapters/__init__.py"})
+        self.assertEqual(imported_partyline_modules("from partyline import *", False, root),
+                         {"partyline/*.py"})
 
 
 if __name__ == "__main__":

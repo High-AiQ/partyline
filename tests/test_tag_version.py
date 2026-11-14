@@ -70,6 +70,16 @@ class TagVersionTest(unittest.TestCase):
             f"refs/tags/{tag}^{{commit}}",
         ).stdout.strip()
 
+    def test_initial_helper_version_creates_helper_tag(self):
+        package = self.repo / "partyline_helper"
+        package.mkdir()
+        (package / "__init__.py").write_text('__version__ = "1.0.0"\n')
+        self.command("git", "add", "partyline_helper")
+        self.commit("feat: initialize helper")
+        result = self.tag()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.remote_target("helper-v1.0.0"), self.sha())
+
     def test_unchanged_version_creates_no_tag(self):
         self.commit("docs: improve README")
 
