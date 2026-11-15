@@ -13,7 +13,9 @@ SAFETY = ("Same rules as screen_window_click: the window must not have moved, re
           "the person agrees on their computer, once per window grant. Never a terminal, password manager "
           "or system dialog. Answers with route (cdp or cursor), settle and what changed; capture=thumb "
           "adds a picture afterwards. landing reports image/screen points, DPI, hit HWND/class, foreground; "
-          "unchanged outcomes include a crosshair landing_thumb. ")
+          "read each point’s landed_in verdict (granted_page, granted_window, other_window). "
+          "After a click, read changes before deciding it failed. Event-driven settle waiting shares the "
+          "action deadline; unchanged or still-changing outcomes include one crosshair landing_thumb. ")
 WINDOW = {"type": "string",
           "description": "Window grant id or title; includes grants inherited from ancestors."}
 CAPTURE = {"type": "string", "enum": ["none", "thumb"],

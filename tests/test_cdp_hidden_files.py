@@ -62,7 +62,7 @@ class Discovery(TestCase):
         script = r'''
 const state=RECIPE;
 const element=(width,height,visibility)=>({tagName:'INPUT',type:'file',files:[],
- getBoundingClientRect:()=>({left:0,top:0,right:width,bottom:height,width,height}),
+ getRootNode:()=>({}),getBoundingClientRect:()=>({left:0,top:0,right:width,bottom:height,width,height}),
  closest:()=>null,matches:()=>false,
  ownerDocument:{activeElement:null,defaultView:{getComputedStyle:()=>({visibility})}}});
 console.log(JSON.stringify([[0,0,'visible'],[10,10,'hidden'],[10,10,'visible']]

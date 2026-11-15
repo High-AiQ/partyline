@@ -26,7 +26,8 @@ class LandingTests(ClickFixture):
                           "foreground_after": True, "input_sent": True,
                           "points": [{"snapshot_point": [100, 100], "screen_point": [200, 150],
                                       "hwnd": 11, "class": "TestChild", "granted_window": False,
-                                      "page_area_child": True}]}, result["landing"])
+                                      "page_area_child": True, "landed_in": "granted_page"}]},
+                         result["landing"])
         self.assertNotIn("Editor", json.dumps(result["landing"]))
         self.assertIn(("restore", 50), self.pointer.calls)
 

@@ -7,7 +7,7 @@ not a hard-floor program, and the foreground is still the same just before the b
 import threading
 
 from .uia_window_list import HARD_FLOOR
-from .point_landing import after, before
+from .point_landing import after, before, describe_hit
 
 MINIMIZED = "the window is minimised; Partyline never restores it. Ask the person to bring it back"
 NOT_FRONT = "the window could not be brought to the front; no click was sent"
@@ -69,7 +69,7 @@ def run(api, grant, points, send, alive, events=None, ready=lambda: None, last=l
                 if landing is not None:
                     for item in landing["points"]:
                         if item["screen_point"] == list(point or ()):
-                            item.update(api.describe(hit, hwnd))
+                            item.update(describe_hit(api, hit, hwnd))
                 under = api.root(hit)
                 if not under or not api.owns(under):
                     raise PointRefused(COVERED)

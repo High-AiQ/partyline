@@ -115,6 +115,23 @@ class WindowLookTests(SnapshotFixture, unittest.IsolatedAsyncioTestCase):
             self.assertEqual([75, 75], sent["screen"])
             self.assertEqual(40, sent["budget"])
 
+    async def test_point_fallback_changes_include_actionable_popup_option_ids(self):
+        from tests.test_point_feedback import rows
+        look = (await self.look(query="Decoration")).json()
+        receive = self.hub.elements.receive
+
+        def observed(device, message):
+            if self.sent[-1]["type"] == "window_click":
+                message = {**message, "point_observation": {"before": rows(), "after": rows(True)}}
+            return receive(device, message)
+        with patch.object(self.hub.elements, "receive", observed):
+            result = (await self.action(mark=look["marks"][0]["n"])).json()
+        self.assertIn("appeared:", result["changes"])
+        tree = self.hub.elements.snapshots["g1"]
+        option = tree.by_helper["option"]
+        self.assertIn(f'[{option}] ListItem "A"', result["changes"])
+        self.assertEqual(("option", True), self.hub.elements.locked_target("g1", option))
+
     async def test_stale_after_new_look_and_peer_cannot_reuse(self):
         for change in ("look", "peer"):
             look = (await self.look()).json()

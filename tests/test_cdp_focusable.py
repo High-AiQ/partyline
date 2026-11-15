@@ -70,7 +70,7 @@ class Recipes(TestCase):
         script = r'''
 const make=(tabIndex,native=false)=>({tagName:'DIV',tabIndex,closest:()=>null,
  matches:s=>s===':disabled'?false:native,getAttribute:()=>null,
- getBoundingClientRect:()=>({left:0,top:0,right:80,bottom:20,width:80,height:20}),
+ getRootNode:()=>({}),getBoundingClientRect:()=>({left:0,top:0,right:80,bottom:20,width:80,height:20}),
  ownerDocument:{activeElement:null}});
 const elements=[make(0),make(-1),make(-1,true),make(-1)];
 elements[3].isContentEditable=true;
@@ -87,7 +87,7 @@ let visits=0;
 const view={getComputedStyle:n=>({display:n.hidden?'none':'block',visibility:n.visibility||'visible'})};
 const text=value=>({nodeType:3,get nodeValue(){visits++;return value;}});
 const el=(children=[],hidden=false)=>({nodeType:1,tagName:'DIV',hidden,childNodes:children,
- ownerDocument:{defaultView:view},getBoundingClientRect:()=>({width:80,height:20})});
+ ownerDocument:{defaultView:view},getRootNode:()=>({}),getBoundingClientRect:()=>({width:80,height:20})});
 const target=el([text(' Choose '),el([text('Hidden')],true),text(' option ')]);
 const normal=(RECIPE).call(target);
 target.shadowRoot={childNodes:[text('Shadow')]};

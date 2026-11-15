@@ -311,7 +311,9 @@ class WindowSnapshotToolTests(unittest.TestCase):
         from partyline.screen_window_notices import line_window_text, usage
 
         text = usage("g1", "Editor", "PC", "me")
-        self.assertIn("Read elements first, and the deltas after each action", text)
+        self.assertIn("Read elements first", text)
+        self.assertIn("after a click, read changes before deciding it failed", text)
+        self.assertIn("Read landed_in", text)
         self.assertIn('screen_window_look(window="g1")', text)
         self.assertIn("screen_window_look", line_window_text(
             SimpleNamespace(get_conversation=lambda ident: {"id": ident, "parent_id": None},

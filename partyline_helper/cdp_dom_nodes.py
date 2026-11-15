@@ -27,7 +27,8 @@ def candidate(tag, attrs):
             return True
     except ValueError:
         pass
-    return (attrs.get("role", "").split(" ")[0] in WIDGET_ROLES | {"gridcell"}
+    return (any(key in attrs for key in ("aria-haspopup", "aria-expanded", "aria-controls", "aria-owns"))
+            or attrs.get("role", "").split(" ")[0] in WIDGET_ROLES | {"gridcell"}
             or tag in ("BUTTON", "SELECT", "TEXTAREA", "SUMMARY", "IFRAME")
             or tag == "INPUT" and attrs.get("type", "").lower() != "hidden"
             or tag in ("A", "AREA") and "href" in attrs

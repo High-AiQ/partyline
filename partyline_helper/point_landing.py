@@ -18,7 +18,8 @@ def evidence(entry, message):
             except GeometryError:
                 pass
         points.append({"snapshot_point": [message.get(x), message.get(y)], "screen_point": screen,
-                       "hwnd": None, "class": None, "granted_window": None, "page_area_child": None})
+                       "hwnd": None, "class": None, "granted_window": None, "page_area_child": None,
+                       "landed_in": None})
     return {"snapshot": message.get("snapshot"), "points": points,
             "dpi": geometry["dpi"] if geometry else None,
             "dpi_scale": geometry["dpi"] / 96 if geometry else None,
@@ -26,11 +27,22 @@ def evidence(entry, message):
             "foreground_before": None, "foreground_after": None, "input_sent": False}
 
 
+def describe_hit(api, hwnd, granted):
+    details = api.describe(hwnd, granted)
+    root = api.root(hwnd)
+    verdict = ("granted_window" if hwnd == granted else
+               "granted_page" if root == granted else "other_window")
+    details["landed_in"] = verdict
+    if verdict == "other_window":
+        details["warning"] = "hit another window: " + str(details.get("class") or "unknown class")
+    return details
+
+
 def observe(api, grant, landing):
     for point in landing["points"]:
         if point["screen_point"] is not None:
             hwnd = api.window_at(*point["screen_point"])
-            point.update(api.describe(hwnd, grant["hwnd"]))
+            point.update(describe_hit(api, hwnd, grant["hwnd"]))
 
 
 def before(api, grant, landing):

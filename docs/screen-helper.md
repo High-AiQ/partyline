@@ -429,6 +429,11 @@ no new read:
 | paging | a long answer ends with `more` and `next_offset`; pass `offset` to continue |
 | `refresh` | `refresh=true` takes a new snapshot now; ids of unchanged elements stay valid |
 
+Role-less popup triggers with standard ARIA `haspopup` (`listbox`, `menu`, `true`), `expanded`, or
+`controls`/`owns` targeting a List/Menu are mapped to ComboBox (with a popup hint), so
+`screen_elements(control_type="ComboBox")` can find them on CDP and UIA. A hint adds no input capability;
+use the listed actions or a look mark's guarded point fallback.
+
 There is no regex search: a backtracking pattern over tens of thousands of names could stall the server, so `find` and `text` take the plain terms above only.
 
 Lines read `id Type "name" ="value" [actions] flags`; `bounds=true` adds screen and frame-pixel
@@ -744,7 +749,10 @@ leave the granted window.
 - **Landing evidence.** Every point-operation reply has `landing`, with `snapshot` and `points` (both
   endpoints for a drag; empty for typing and keys). Each point reports `snapshot_point`, `screen_point`
   (physical screen pixels), the raw `hwnd` and `class` returned by `WindowFromPoint`, `granted_window`
-  (the handle is the grant itself), and `page_area_child` (its renderer child belongs to the grant).
+  (the handle is the grant itself), and `page_area_child` (a child belongs to the grant).
+  Read each point's `landed_in` verdict: `granted_page` means a child whose `GA_ROOT` is the granted HWND,
+  `granted_window` means the grant's own chrome/frame, and `other_window` means another root, with the hit
+  class and a warning. This ownership check works for every app; renderer class names are not authority.
   `dpi` and `dpi_scale` (DPI / 96) describe the named snapshot; `image_scale` is image pixels per physical
   screen pixel on each axis. DPI is never multiplied into the physical mapping a second time.
   `foreground_before` and `foreground_after` say whether the grant or its owned dialog was foreground,
@@ -752,8 +760,19 @@ leave the granted window.
   distinguishes observed input from a refused attempt. Unknown observations are `null`, including old
   helpers and transport timeouts; these fields contain no page text. On CDP, `screen_point` is the mapped
   physical equivalent: input goes to the page in CSS pixels and the hit window is observational only.
-- **Reading a miss.** `settle: unchanged`, `status: no_effect`, or an unchanged requested `after` image
-  attaches `landing_thumb`: a crop of at most 240 × 240 pixels of the granted window around the last
+- **What changed.** After a click, read `changes` before deciding it failed. Every point operation,
+  including a look mark falling back to a point, compares read-only element observations before and after
+  input, on CDP and UIA. `changes` lists appeared/disappeared elements and state transitions (for example,
+  `expand_state collapsed→expanded`), with ordinary actionable element IDs. New Lists/Menus include option
+  IDs and names. The reply caps the delta at 20 lines plus a `more` note; read `screen_elements` for the rest.
+  Partial observations are labelled and never claim missing elements disappeared. Read failures are explicit;
+  the text delta requires read permission.
+- **Settling.** Quiet barriers reset on real change events; they never poll. Waiting and observations share
+  the action's existing deadline. Events during the final read restart the barrier. If the window keeps
+  changing, `settle: changing` and `still changing after N ms` accompany the delta observed so far.
+- **Reading a miss.** Unchanged outcomes (`settle: unchanged`, `status: no_effect`, or an unchanged requested
+  `after` image) with no clear element change, and windows still changing at the deadline, attach
+  `landing_thumb`: a crop of at most 240 × 240 pixels of the granted window around the last
   landing point, with a red crosshair edged in white. It needs read permission, captures no desktop pixels,
   and supplies no new coordinate snapshot. Compare the crosshair with the intended control. An unexpected
   physical point suggests image scale or offset; an unexpected handle/class suggests a covering window or
@@ -761,7 +780,7 @@ leave the granted window.
   activates first, confirms foreground, and then sends a separate page click. A correct crosshair and
   target with unchanged pixels suggests the component ignored input; it does not prove that no state changed.
   Do not repeat input automatically. If the window moved away from the landing point, the crop reports that
-  failure instead. A missing renderer child alone does not prove a miss; some windows expose only a root.
+  failure instead. At most one crosshair crop is attached; a clear settled delta needs no image.
 - **Stale pictures.** The click is refused, with "take a fresh `screen_window_snapshot`", when the snapshot
   is unknown or older than the last eight for that grant, or when the window moved, resized, closed, or was
   re-granted, or when the secure desktop is up. The check compares the live rectangle and client areas with the

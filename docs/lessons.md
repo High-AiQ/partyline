@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — Events during a click do not prove a page is still changing
+
+The false assumption was that an event arriving during a quiet barrier invalidated its eventual quiet
+result. That made successful popup clicks look inconclusive. Point actions now wait on the existing
+change events, compare read-only observations, and return actionable changes before pixels. A raw child
+HWND is also not a wrong-window verdict: GA_ROOT ownership determines the landing. Regressions in
+`tests/test_point_feedback.py` cover settled and continuously changing actions on both routes.
+
 ## 2026-11-15 — A checked cursor point is not proof of the dispatched pixel
 
 The false assumption was that normalising physical coordinates with `65535 / (size - 1)` preserves the
