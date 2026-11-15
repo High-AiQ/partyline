@@ -309,6 +309,42 @@ class NativeForegroundRestoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([unittest.mock.call(24, 42, True), unittest.mock.call(24, 42, False)],
                          user32.AttachThreadInput.call_args_list)
 
+    def test_set_value_reports_a_refused_native_restore_without_claiming_success(self):
+        from tests.windows_uia_patterns import foreground_observation
+        for ordered in (False, True):
+            with self.subTest(ordered=ordered):
+                provider = Provider()
+                provider.action_call = lambda *_, target=provider: (
+                    lambda: setattr(target, "foreground_hwnd", 1))
+                user32 = Mock()
+                user32.GetForegroundWindow.side_effect = provider.foreground
+                user32.GetWindowThreadProcessId.return_value = 42
+                user32.AttachThreadInput.return_value = True
+                user32.SetWindowPos.return_value = ordered
+                user32.SetForegroundWindow.return_value = False  # Windows denies activation
+                native = self.provider(user32)
+                provider.restore_foreground = Mock(side_effect=native.restore_foreground)
+                kernel = SimpleNamespace(GetCurrentThreadId=Mock(return_value=24))
+                gate = DispatchGate()
+                generation = gate.grant()
+                grant = {"hwnd": 1, "pid": 2}
+                access = SimpleNamespace(gate=gate, list_windows=lambda selected=grant: [selected])
+                message = {"element_id": element_id(provider, 1, [0]), "action": "set_value", "value": "x"}
+                with patch("partyline_helper.uia_windows.ctypes.windll", SimpleNamespace(kernel32=kernel),
+                           create=True):
+                    result = run_action(access, grant, generation, message,
+                                        factory=lambda _, target=provider: target)
+                self.assertEqual("completed", result["status"])
+                self.assertTrue(result["foreground_changed"])
+                self.assertTrue(result["target_came_forward"])
+                self.assertFalse(result["foreground_restored"])
+                self.assertEqual(1, provider.foreground_hwnd)
+                provider.restore_foreground.assert_called_once_with(99, 1)
+                self.assertEqual(int(ordered), user32.SetForegroundWindow.call_count)
+                self.assertEqual([unittest.mock.call(24, 42, True), unittest.mock.call(24, 42, False)],
+                                 user32.AttachThreadInput.call_args_list)
+                foreground_observation(self, result, 99, provider.foreground_hwnd, 1)
+
     def test_person_foreground_change_prevents_native_z_order_or_focus_changes(self):
         user32 = Mock()
         user32.GetForegroundWindow.return_value = 7

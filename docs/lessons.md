@@ -1,5 +1,18 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — A native restore attempt is not a foreground guarantee
+
+The false assumption in CDP commit `45143c01` (integrated as `c55eb919`) was that the native
+UIA test could unconditionally require its foreground fixture after each action. The outline
+change shipped in 2.121.0 attempted restoration but explicitly allowed Windows to refuse it:
+`WindowsProvider.restore_foreground` returns false, and the original native test then checked
+that the target remained foreground with truthful observations. That restore method, SetValue
+binding and force path are unchanged in the release integration. The new unconditional assertion
+created the regression; it was not evidence that latency or CDP removed a restore call. Keep
+background-read/cursor assertions and check successful restoration when reported, while accepting
+an accurately reported refusal. Portable regression `tests/test_uia_worker.py` dispatches SetValue
+with fake Win32 z-order/activation refusals and verifies observations plus input-queue cleanup.
+
 ## 2026-11-15 — Native query candidates are broader than exact server answers
 
 The false assumption in the Windows filtered-read test was that an exact multiword query

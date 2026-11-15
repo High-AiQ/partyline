@@ -29,8 +29,10 @@ focus, and supported Windows versions exclude it from screen capture. The outlin
 windows while the grant is active and is removed as soon as the grant ends.
 
 Some UI Automation actions can bring the granted window forward. When an action does that, the helper
-restores the window that was in front before the action, provided the granted window is still in front
-when the action completes. Actions intended to activate a window are not restored.
+attempts to restore the window that was in front, provided the granted window is still in front when
+the action completes. Windows can refuse this best-effort restore; `foreground_restored` reports whether
+it succeeded. The helper does not synthesize global input to force activation, and skips restoration
+when another window is observed in front. Actions intended to activate a window are not restored.
 
 The Partyline Computers dialog shows these
 commands with your server's address and a pairing code filled in, each with a copy
@@ -1150,9 +1152,11 @@ and any difference. Upload sanitized evidence to the line; keep host/account det
 Read alongside the helper changes: `tests/test_windows_uia.py::test_background_tk_window`,
 `tests/windows_uia_window.py` (native controls and separate foreground window), and
 `tests/windows_uia_patterns.py` (selection, expand/collapse, range, scroll and window actions).
-The foreground assertions now accept a transient activation followed by restoration while
-still requiring the foreground fixture and cursor to remain unchanged after the basic actions.
-The same assertion helper has a Linux regression in `tests/test_cdp_active_select.py`.
+The foreground assertions check both a transient activation followed by restoration and a native
+restore refusal, using the reported observations; the cursor must remain unchanged. Background reads
+still require the foreground fixture to remain active. The shared assertion helper has a Linux
+regression in `tests/test_cdp_active_select.py`; `tests/test_uia_worker.py` fakes native Win32 restore
+refusals through the SetValue dispatch path.
 Also read `tests/test_windows_capture_events.py` including its native Tk capture smoke test,
 `tests/test_windows_packaging.py`, `tests/test_windows_startup.py`, and
 `tests/test_windows_platform.py`. Their capture, packaging and startup contracts remain
