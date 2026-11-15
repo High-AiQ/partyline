@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 
 from partyline_helper.cdp_transport import CDPError
-from partyline_helper.page_area import CHROME, read_metrics, window_area
+from partyline_helper.page_area import CHROME
 from partyline_helper.page_windows import PageSources
 from partyline_helper.point_cdp import page_frame
 from partyline_helper.window_snapshot import WindowSnapshots
@@ -11,12 +11,10 @@ from partyline_helper.window_snapshot import WindowSnapshots
 PAGE = (100, 200, 1300, 1000)  # 1200 x 800 screen pixels: a 600 x 400 viewport at two pixels per CSS pixel
 PANEL = (1300, 200, 1700, 1000)
 SPLIT = (700, 200, 1300, 1000)  # a second pane of 600 x 800
-BOUNDS = {"left": 50, "top": 60, "width": 700, "height": 520, "windowState": "normal"}
-THIN = {"left": 50, "top": 60, "width": 604, "height": 440, "windowState": "normal"}  # 4-pixel frame at 2x
 
 
 class FakePage:
-    def __init__(self, viewport=(600, 400, 1, 2), bounds=BOUNDS):
+    def __init__(self, viewport=(600, 400, 1, 2), bounds=None):
         self.viewport, self.bounds, self.calls, self.fail = list(viewport), bounds, [], False
 
     async def call(self, method, params=None):
@@ -28,9 +26,8 @@ class FakePage:
         return {"result": {"value": self.viewport}}
 
 
-def sources(renderers=(), documents=(), scale=2.0):
-    return PageSources(renderers=lambda hwnd: list(renderers), documents=lambda hwnd: list(documents),
-                       scale=lambda hwnd: scale)
+def sources(renderers=(), documents=()):
+    return PageSources(renderers=lambda hwnd: list(renderers), documents=lambda hwnd: list(documents))
 
 
 class RendererChoiceTests(unittest.IsolatedAsyncioTestCase):
@@ -106,20 +103,12 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
             await page_frame(FakePage(viewport=(600, 400, 2, 2)), 7, None, sources([], [PAGE]))
         self.assertIn("pinch-zoomed", str(error.exception))
 
-    async def test_documents_that_are_empty_or_the_wrong_size_fall_through_to_the_cdp_bounds(self):
-        page = FakePage(bounds=THIN)
-        self.assertEqual((104, 196, 2.0, (104, 196, 1304, 996)),
-                         await page_frame(page, 7, None, sources([], [(5, 5, 5, 5)])))
-        self.assertIn("Browser.getWindowForTarget", page.calls)
-        # one document, but not the page's size
-        page = FakePage(bounds=THIN)
-        self.assertEqual((104, 196, 2.0, (104, 196, 1304, 996)),
-                         await page_frame(page, 7, None, sources([], [PANEL])))
+    async def test_documents_that_are_empty_or_malformed_are_ignored(self):
         for broken in ((5, 5), None, "x"):
-            frame = await page_frame(FakePage(), 7, None, sources([], [broken, PAGE]))
+            frame = await page_frame(FakePage(), 7, None, sources([], [broken, (5, 5, 5, 5), PAGE]))
             self.assertEqual(PAGE, frame[3])
 
-    async def test_documents_that_fit_nothing_and_no_bounds_name_the_count(self):
+    async def test_documents_that_fit_nothing_name_the_count(self):
         with self.assertRaises(CDPError) as error:
             await page_frame(FakePage(), 7, None, sources([], [(5, 5, 5, 5)]))
         self.assertEqual("found 0 renderer windows and no page document", str(error.exception))
@@ -134,48 +123,15 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("found 0 renderer windows and 2 page documents, none matching the viewport",
                          str(error.exception))
 
-    async def test_without_renderers_or_documents_the_cdp_window_bounds_give_the_page(self):
-        # 700 x 520 DIPs at two pixels per DIP is 1400 x 1040: a 100-pixel side is more than a frame
+    async def test_window_bounds_are_never_a_source_even_when_they_look_right(self):
+        # a 60-DIP panel below the page: the bounds and the viewport fit a page that starts 60 DIPs too low
+        # (a click on the panel would be sent into the page), so the bounds are not used at all
+        bounds = {"left": 0, "top": 0, "width": 1216, "height": 556, "windowState": "normal"}
+        page = FakePage(viewport=(1200, 400, 1, 1), bounds=bounds)
         with self.assertRaises(CDPError) as error:
-            await page_frame(FakePage(), 7, None, sources())
+            await page_frame(page, 7, (100, 520), sources())
         self.assertEqual("found 0 renderer windows and no page document", str(error.exception))
-        page = FakePage(bounds=THIN)
-        frame = await page_frame(page, 7, (500, 500), sources())
-        # the window is 1208 x 880 screen pixels at (100, 120): a 4-pixel frame at each side and below
-        self.assertEqual((104, 196, 2.0, (104, 196, 1304, 996)), frame)
-
-    async def test_the_cdp_fallback_refuses_what_it_cannot_trust(self):
-        metrics = read_metrics({"result": {"value": [600, 400, 1, 2]}})
-        thin = {"left": 50, "top": 60, "width": 604, "height": 440}
-        self.assertIsNotNone(window_area(thin, 2.0, metrics))
-        self.assertIsNone(window_area({**thin, "windowState": "minimized"}, 2.0, metrics))
-        self.assertIsNone(window_area({**thin, "width": 700}, 2.0, metrics))  # a frame that is not thin
-        self.assertIsNone(window_area({**thin, "width": 590}, 2.0, metrics))  # narrower than the viewport
-        self.assertIsNone(window_area({**thin, "height": 300}, 2.0, metrics))  # shorter than the viewport
-        # a panel docked at the bottom would put the page's origin inside the browser's controls
-        docked = read_metrics({"result": {"value": [1200, 400, 1, 1]}})
-        self.assertIsNone(window_area({"left": 0, "top": 0, "width": 1216, "height": 900}, 1.0, docked))
-        plain = {"left": 0, "top": 0, "width": 1216, "height": 500}  # 92 DIPs of controls above the page
-        self.assertEqual((8, 92, 1208, 492), window_area(plain, 1.0, docked))
-        self.assertIsNone(window_area({"left": 1}, 2.0, metrics))
-        self.assertIsNone(window_area({**thin, "left": "x"}, 2.0, metrics))
-        for broken in (None, {"bounds": None}):
-            page = FakePage()
-            page.bounds = broken
-            with self.assertRaises(CDPError):
-                await page_frame(page, 7, None, sources())
-
-    async def test_a_failing_page_or_scale_is_an_error_not_a_guess(self):
-        page = FakePage(bounds={"left": 50, "top": 60, "width": 604, "height": 440})
-        with self.assertRaises(CDPError):
-            await page_frame(page, 7, None, sources(scale=None))
-        with self.assertRaises(CDPError):
-            await page_frame(page, 7, None, PageSources(renderers=lambda h: [], documents=lambda h: [],
-                                                        scale=lambda h: (_ for _ in ()).throw(OSError())))
-        page.fail = True
-        with self.assertRaises(CDPError) as error:
-            await page_frame(page, 7, None, sources())
-        self.assertEqual("target closed", str(error.exception))
+        self.assertNotIn("Browser.getWindowForTarget", page.calls)
 
     async def test_an_unreadable_viewport_is_refused_first(self):
         for value in ("bad", [0, 400, 1, 2], [600, 400, 1, 0], [600, 400, 0, 2], None):

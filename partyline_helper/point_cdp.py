@@ -2,28 +2,19 @@
 import asyncio
 
 from .cdp_transport import CDPError
-from .page_area import CHROME, VIEWPORT, choose, describe, fits, read_metrics, usable, verify, window_area
+from .page_area import CHROME, VIEWPORT, choose, describe, fits, read_metrics, usable, verify
 from .page_windows import PageSources
 
 BUTTONS = {"left": 1, "right": 2}
-
-
-async def window_bounds(page, hwnd, metrics, sources):
-    """The page area from the browser's own idea of the window (CDP bounds), or None."""
-    try:
-        bounds = (await page.call("Browser.getWindowForTarget", {})).get("bounds")
-        scale = await asyncio.to_thread(sources.scale, hwnd)
-    except (CDPError, OSError, AttributeError):
-        return None
-    return window_area(bounds, scale, metrics) if isinstance(bounds, dict) and scale else None
 
 
 async def page_frame(page, hwnd, point=None, sources=None):
     """`(screen left, screen top, screen pixels per CSS pixel, area)` of the page's viewport.
 
     The page area is the only visible renderer window of the Chrome window; of several, the one of the
-    viewport's size that holds `point`. When Chrome has none, it is the UIA Document of the active tab, or
-    else what the window's CDP bounds and the page's metrics give. The same checks apply to every source."""
+    viewport's size that holds `point`. When Chrome has none, it is the UIA Document of the active tab, of the
+    viewport's size. Anything else is refused: the window's CDP bounds give the page's size, never its place.
+    The same checks apply to every source."""
     sources = sources or PageSources()
     reply = await page.call("Runtime.evaluate", {"expression": VIEWPORT, "returnByValue": True})
     metrics = read_metrics(reply)
@@ -36,10 +27,7 @@ async def page_frame(page, hwnd, point=None, sources=None):
     sized = [area for area in documents if fits(area, metrics)]  # a document must be the viewport's size
     if sized:
         return verify(choose(sized, metrics, point, what), metrics)
-    area = await window_bounds(page, hwnd, metrics, sources)
-    if area is None:
-        raise CDPError(f"{what}, none matching the viewport" if documents else f"{what} and no page document")
-    return verify(area, metrics)
+    raise CDPError(f"{what}, none matching the viewport" if documents else f"{what} and no page document")
 
 
 def to_page(frame, sx, sy):

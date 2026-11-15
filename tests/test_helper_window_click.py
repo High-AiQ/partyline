@@ -23,10 +23,9 @@ from tests.screen_helper_fakes import FakeDesktop, FakeSocket, FakeTerminal
 RECT, REGION = (100, 50, 500, 350), (108, 80, 492, 342)
 
 
-def areas(*rects, documents=(), scale=None):
-    """Page-area sources that report these renderer rectangles, UIA documents and window scale."""
-    return PageSources(renderers=lambda hwnd: list(rects), documents=lambda hwnd: list(documents),
-                       scale=lambda hwnd: scale)
+def areas(*rects, documents=()):
+    """Page-area sources that report these renderer rectangles and UIA documents."""
+    return PageSources(renderers=lambda hwnd: list(rects), documents=lambda hwnd: list(documents))
 GRANT = {"hwnd": 10, "pid": 42, "title": "Editor", "process": "editor.exe"}
 
 

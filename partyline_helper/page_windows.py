@@ -1,4 +1,4 @@
-"""Where a Chrome window's page is on screen, read from Windows: renderer child windows, UIA documents, DPI.
+"""Where a Chrome window's page is on screen, read from Windows: renderer child windows and UIA documents.
 
 Every rectangle is in physical screen pixels (this thread is made per-monitor aware around each call)."""
 import ctypes
@@ -15,8 +15,6 @@ def user32():  # pragma: no cover - Windows only
     user.GetAncestor.restype = wintypes.HWND
     user.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
     user.IsWindowVisible.argtypes = [wintypes.HWND]
-    user.GetDpiForWindow.argtypes = [wintypes.HWND]
-    user.GetDpiForWindow.restype = wintypes.UINT
     return user
 
 
@@ -71,13 +69,8 @@ def documents(hwnd):  # pragma: no cover - Windows only
         comtypes.CoUninitialize()
 
 
-def scale(hwnd):  # pragma: no cover - Windows only
-    """Screen pixels per device-independent pixel on the window's monitor."""
-    return user32().GetDpiForWindow(hwnd) / 96
-
-
 class PageSources:
-    """The three places the page's rectangle can come from; tests replace them with fakes."""
+    """The two places the page's rectangle can come from; tests replace them with fakes."""
 
-    def __init__(self, renderers=renderers, documents=documents, scale=scale):
-        self.renderers, self.documents, self.scale = renderers, documents, scale
+    def __init__(self, renderers=renderers, documents=documents):
+        self.renderers, self.documents = renderers, documents

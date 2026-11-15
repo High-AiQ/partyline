@@ -4,7 +4,6 @@ from .cdp_transport import CDPError
 VIEWPORT = ("[innerWidth, innerHeight, window.visualViewport ? visualViewport.scale : 1, "
             "window.devicePixelRatio || 1]")
 TOLERANCE = 0.02  # the two axes may disagree by this fraction (rounding of the page area)
-BORDER = 32  # the most the window's side frame may take from each side of the page, in screen pixels
 TOP = 170  # the most the browser's own controls above the page may take, in DIPs (tabs, toolbar, bars)
 CHROME = ("that point is on the browser's own controls (tabs, address bar), not on the page; "
           "use screen_element_action for those")
@@ -68,26 +67,6 @@ def choose(found, metrics, point, what):
     if len(sized) > 1:
         raise CDPError(f"{what}, several matching the viewport")
     return sized[0]
-
-
-def window_area(bounds, scale, metrics):
-    """The page area from the window's CDP bounds (DIPs) and its scale to screen pixels, or None.
-
-    The viewport is as large as the metrics say; its sides sit inside the frame and its bottom on the window's
-    bottom. Nothing here tells where a panel docked at the bottom or a side begins, so a frame that is not
-    thin, or controls above the page that are taller than any browser has, are not guessed at."""
-    width, height, _, ratio = metrics
-    try:
-        left, top, wide, high = (float(bounds[key]) * scale for key in ("left", "top", "width", "height"))
-    except (KeyError, TypeError, ValueError):
-        return None
-    if bounds.get("windowState") == "minimized":
-        return None
-    side = (wide - width * ratio) / 2
-    if not 0 <= side <= BORDER or height * ratio > high or high - height * ratio - side > TOP * scale:
-        return None
-    return (round(left + side), round(top + high - side - height * ratio),
-            round(left + wide - side), round(top + high - side))
 
 
 def verify(area, metrics):
