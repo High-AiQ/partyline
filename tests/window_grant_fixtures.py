@@ -48,6 +48,10 @@ class WindowGrantFixture:
 
     async def receive(self, message):
         self.sent.append(message)
+        if message["type"] == "snapshot_window":  # a failure's picture: this helper has no capture to give
+            await self.hub.snapshots.from_helper(self.device, {
+                "type": "window_snapshot", "request_id": message["request_id"], "ok": False,
+                "error": "no capture in this fixture"})
         if message["type"] in ("read_window_elements", "window_element_action"):
             grant = message["grant_id"]
             response = {"request_id": message["request_id"], "elements": [{"id": grant + "-element"}],

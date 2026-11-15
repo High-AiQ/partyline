@@ -11,7 +11,7 @@ from .screen_tree_answer import elements_options
 ELEMENT_OPTIONS = Annotated[dict, Depends(elements_options)]
 
 
-def elements_router(runtime, hub):
+def elements_router(runtime, hub, store=None):
     router = APIRouter()
 
     @router.post("/api/conversations/{conv_id}/screen-elements")
@@ -58,6 +58,12 @@ def elements_router(runtime, hub):
             raise
         await core.record_standing_window_access(
             runtime, hub, principal, conv_id, "uia_action", body.window, None, result.get("status", "failed"))
+        if store is not None:
+            from .screen_failure_snapshot import attach, failed
+            if failed(result):  # a failure a picture explains carries one, with marks
+                await attach(runtime, hub, store, principal, conv_id, grant, result)
+            elif body.then and body.then.snapshot and result.get("status") in ("completed", "no_effect"):
+                await attach(runtime, hub, store, principal, conv_id, grant, result, marks=False)
         return result
 
     @router.post("/api/conversations/{conv_id}/screen-eval")

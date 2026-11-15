@@ -7,6 +7,7 @@ keeps it as the original and derives its `slim` and `thumb` tiers, as for every 
 import asyncio
 import time
 from types import SimpleNamespace
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -21,7 +22,8 @@ from .screen_frame_store import frame_reference
 from .screen_grants import require_window, resolve_window
 from .screen_protocol import HEARTBEAT_TIMEOUT
 from .screen_timing import timed, phase, locked
-from .screen_window_marks import NO_TREE, USE, Geometries, clean_marks, mark_inputs
+from .screen_window_marks import (NO_TREE, THUMB_EDGE, THUMB_PIXELS, USE, Geometries, clean_marks,
+                                  mark_inputs)
 
 MAX_CHUNKS = 8  # binary messages one screenshot may travel in; the image itself is capped by the media store
 MIN_WINDOWS = 2  # the helper's `windows` hello value that can take window screenshots
@@ -48,6 +50,9 @@ def variants(ref):
             for name, (width, height, url) in tiers.items()}
 
 
+KEPT_WHEN_UNCHANGED = ("snapshot", "note", "budget", "source", "page_state", "recovery_hint")
+
+
 class WindowSnapshots:
     def __init__(self, hub, wall=time.time):
         self.hub, self.wall = hub, wall
@@ -55,10 +60,13 @@ class WindowSnapshots:
         self.shares = {}  # window grant id -> what frame_reference needs to say "unchanged"
         self.locks = {}
         self.geometry = Geometries()  # window grant id -> the geometry of its latest snapshots
+        self.marks = {}  # (window grant id, handle) -> the marks that process was last sent
 
     def end(self, grant_id):
         for table in (self.last, self.shares, self.locks):
             table.pop(grant_id, None)
+        for key in [key for key in self.marks if key[0] == grant_id]:
+            del self.marks[key]
         self.geometry.end(grant_id)
 
     def last_screenshot(self, grant_id):
@@ -76,13 +84,20 @@ class WindowSnapshots:
         self.hub.elements.receive(device, {**message, "data": data})
 
     @timed
-    async def take(self, principal, store, window=None, device_name=None, marks=False):
+    async def take(self, principal, store, window=None, device_name=None, marks=False, tier=None):
+        """One picture. `tier` "thumb" (the default with marks) shrinks the window to THUMB_EDGE x
+        THUMB_PIXELS
+        before the boxes are drawn and its geometry is recorded, so the picture costs at most ~930 image
+        tokens and its pixels are the ones a point operation takes; "full" is the window's own size."""
+        tier = tier or ("thumb" if marks else "full")
         grant, device = resolve_window(self.hub, principal, window, device_name)
         if device.get("windows", 0) < MIN_WINDOWS:
             raise HTTPException(409, OLD_HELPER)
         async with locked(self.locks.setdefault(grant["id"], asyncio.Lock())):
             tree = self.hub.elements.snapshots.get(grant["id"]) if marks else None
             extra = {"overlay": True, "marks": mark_inputs(tree) if tree is not None else []} if marks else {}
+            if tier == "thumb":
+                extra["fit"] = {"edge": THUMB_EDGE, "pixels": THUMB_PIXELS}
             try:
                 answer = await self.hub.elements.exchange(principal, grant, device, "snapshot_window",
                                                           agent=principal.name, **extra)
@@ -93,14 +108,20 @@ class WindowSnapshots:
                 reason = answer.get("error") or "the computer could not take the screenshot"
                 raise HTTPException(409, str(reason)[:300])
             with phase("image_store_ms"):
-                result = await self.keep(store, principal, grant, answer)
+                result = await self.keep(store, principal, grant, answer, tier)
                 if marks:
-                    result["marks"] = clean_marks(answer.get("marks")) if tree is not None else []
+                    listed = clean_marks(answer.get("marks")) if tree is not None else []
+                    key = (grant["id"], principal.name)
+                    if result["unchanged"] and self.marks.get(key) == listed:
+                        result["marks_unchanged"] = True
+                    else:
+                        result["marks"] = listed
+                    self.marks[key] = listed
                     if tree is None:
                         result["marks_note"] = NO_TREE
                 return result
 
-    async def keep(self, store, principal, grant, answer):
+    async def keep(self, store, principal, grant, answer, tier="full"):
         data, mime = answer.get("data"), answer.get("mime")
         if (not data or len(data) > MAX_IMAGE_BYTES or mime not in MIMES
                 or not await asyncio.to_thread(decodes, data)):
@@ -131,10 +152,22 @@ class WindowSnapshots:
                   "use": "slim is the usual choice; full is the window's own pixels", "unchanged": unchanged}
         result.update({key: answer[key] for key in ("source", "page_state", "recovery_hint")
                        if key in answer})
+        if tier == "thumb":  # the picture was shrunk to the budget, so full and slim are the same pixels
+            result["variants"] = {name: tiers for name, tiers in result["variants"].items() if name != "full"}
+            result["budget"] = {"tier": "thumb", "max_edge": THUMB_EDGE, "max_pixels": THUMB_PIXELS,
+                                "image_tokens": image_tokens(ref.width, ref.height)}
+            result["use"] = "slim is this picture (the thumb tier); thumb is a 512 px glance"
         if answer.get("blank") is True:
             result["note"] = BLANK
         if self.geometry.keep(grant["id"], answer.get("snapshot_id"), answer.get("geometry")):
             result.update(snapshot=answer["snapshot_id"], coordinates=USE)
+        if unchanged:  # the agent already has this picture: its reference, and the new snapshot id to use
+            result = {"unchanged": True, "file": {"id": ref.id}, "window": grant["id"],
+                      "title": grant["title"],
+                      "width": ref.width, "height": ref.height,
+                      **{key: result[key] for key in KEPT_WHEN_UNCHANGED if key in result},
+                      "use": "the picture is the same as your last one for this window: use that image with "
+                             "this snapshot id"}
         return result
 
     async def audit(self, principal, grant, ref):
@@ -157,9 +190,10 @@ def snapshot_router(runtime, hub, store):
     @router.post("/api/conversations/{conv_id}/screen-window-snapshot")
     @timed
     async def window_snapshot(conv_id: str, request: Request, device: str | None = None,
-                              window: str | None = None, marks: bool = False):
+                              window: str | None = None, marks: bool = False,
+                              tier: Literal["thumb", "full"] | None = None):
         principal = request_principal(request)
         deny_unless(runtime.db, principal, conv_id, "read")
-        return await hub.snapshots.take(principal, store, window, device, marks)
+        return await hub.snapshots.take(principal, store, window, device, marks, tier)
 
     return router

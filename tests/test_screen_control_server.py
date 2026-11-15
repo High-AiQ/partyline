@@ -606,7 +606,8 @@ class McpControlToolsTest(unittest.TestCase):
         self.assertEqual(tools_control.tool_list({"actions": ["read"]}), [])
         names = [tool["name"] for tool in tools_control.tool_list({"actions": ["write"]})]
         self.assertEqual(names, ["screen_eval", "screen_element_action", "screen_window_click",
-                                 "screen_control_request",
+                                 "screen_window_scroll", "screen_window_drag", "screen_window_type",
+                                 "screen_window_key", "screen_control_request",
                                  "screen_click", "screen_move", "screen_drag", "screen_scroll",
                                  "screen_type", "screen_key"])
         calls = []
@@ -636,6 +637,6 @@ class McpControlToolsTest(unittest.TestCase):
         self.assertEqual("completed", result["status"])
         self.assertEqual(("POST", "/api/conversations/line/screen-control/element-action", action),
                          calls[0][0])
-        self.assertEqual({"timeout": 100}, calls[0][1])
+        self.assertEqual({"timeout": 125}, calls[0][1])
         with self.assertRaises(ApiError):
             tools_control.call(client, "screen_element_action", action, {"actions": ["read"]})

@@ -20,8 +20,8 @@ def clean_inputs(marks):
             box = mark.get(kind)
             if (isinstance(box, list) and len(box) == 4
                     and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in box)):
-                found.append({"n": mark["n"], "id": mark["id"][:128], "name": str(mark.get("name", ""))[:60],
-                              kind: box})
+                found.append({"n": mark["n"], "id": mark["id"][:128], "role": str(mark.get("role", ""))[:20],
+                              "name": str(mark.get("name", ""))[:40], kind: box})
                 break
     return found[:MAX_MARKS]
 
@@ -81,6 +81,7 @@ def draw(image, found):
 
 
 def listed(found):
-    """What the answer lists for each box: {n, id, name, box}."""
-    return [{"n": mark["n"], "id": mark["id"], "name": mark.get("name", ""), "box": list(box)}
+    """What the answer lists for each box: {n, id, role, name, box}."""
+    return [{"n": mark["n"], "id": mark["id"], "role": mark.get("role", ""), "name": mark.get("name", ""),
+             "box": list(box)}
             for mark, box in found]

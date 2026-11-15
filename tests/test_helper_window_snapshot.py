@@ -221,7 +221,7 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("r10", "unsupported: snapshot_window"), (error["request_id"], error["message"]))
 
     async def test_the_hello_announces_screenshots_and_the_minor_version_moved(self):
-        self.assertEqual(3, WINDOWS_VERSION)
+        self.assertEqual(4, WINDOWS_VERSION)
         self.assertEqual(2, SNAPSHOT_VERSION)
         self.assertEqual("1.6.0", __version__)
 

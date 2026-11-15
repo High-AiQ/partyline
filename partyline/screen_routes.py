@@ -217,7 +217,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         await hub.connect(ws, dict(row))
 
     from .screen_elements import elements_router
-    app.include_router(elements_router(runtime, hub))
+    app.include_router(elements_router(runtime, hub, store))
     from .screen_file_input import router_for as file_input_router
     app.include_router(file_input_router(hub))
     from .screen_window_snapshot import snapshot_router

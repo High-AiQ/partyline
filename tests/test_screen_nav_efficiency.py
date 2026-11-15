@@ -454,7 +454,7 @@ class SchemaTests(unittest.TestCase):
         action = {"element_id": "a", "action": "invoke"}
         tools_control.call(client, "screen_element_action", action, {"actions": ["write"]})
         tools_control.call(client, "screen_element_action", {**action, "then": {}}, {"actions": ["write"]})
-        self.assertEqual([{"timeout": 100}, {"timeout": 160}], calls)
+        self.assertEqual([{"timeout": 125}, {"timeout": 160}], calls)
 
     def test_action_deadline_covers_paged_recapture_action_and_optional_then_read(self):
         from partyline.screen_element_actions import ElementAction, element_action
@@ -524,7 +524,7 @@ class SchemaTests(unittest.TestCase):
     def test_descriptions_stay_short(self):
         from partyline.mcp.tools_screen import ELEMENTS_NOTE
         self.assertLess(len(ELEMENTS_NOTE), 900)
-        self.assertLess(len(tools_control.ELEMENT_ACTION_NOTE), 400)
+        self.assertLess(len(tools_control.ELEMENT_ACTION_NOTE), 700)  # it also carries the fallback guidance
 
 
 class FixtureSizeTests(unittest.TestCase):

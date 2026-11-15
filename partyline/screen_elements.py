@@ -290,6 +290,6 @@ class ElementsHub(ElementState):
             entry[1].set_result(message)
 
 
-def elements_router(runtime, hub):
+def elements_router(runtime, hub, store=None):
     from .screen_element_routes import elements_router as build_router
-    return build_router(runtime, hub)
+    return build_router(runtime, hub, store)

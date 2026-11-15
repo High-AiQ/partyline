@@ -12,6 +12,7 @@ from partyline.point_geometry import GeometryError, clean
 
 from .window_grab import GrabError, WindowGrab
 from .timing import Timing
+from .window_fit import budget, fitted
 from .window_marks import boxes, clean_inputs, draw, listed
 
 SNAPSHOT_VERSION = 2  # the `windows` hello value that includes window screenshots
@@ -81,7 +82,7 @@ class WindowSnapshots:
         if await asyncio.to_thread(self.backend.minimized, grant["hwnd"]):
             raise GrabError(MINIMIZED)
         with timing.phase("capture_ms"):
-            image = await asyncio.to_thread(self.backend.grab, grant["hwnd"])
+            image = fitted(await asyncio.to_thread(self.backend.grab, grant["hwnd"]), budget(message))
         ident, geometry = self.remember(entry, grant, image, gate_generation)
         found = None
         if message.get("overlay") and geometry:

@@ -39,6 +39,7 @@ EXTRAS_OPS = frozenset({
 SCREEN_CONTROL = frozenset({
     "screen_eval", "screen_element_action", "screen_control_request", "screen_click", "screen_move",
     "screen_drag", "screen_scroll", "screen_type", "screen_key", "screen_window_click",
+    "screen_window_scroll", "screen_window_drag", "screen_window_type", "screen_window_key",
 })
 SCREEN = SCREEN_CONTROL | {"screen_frame", "screen_elements", "screen_window_snapshot"}
 WINDOW_ACCESS = frozenset({"screen_windows", "screen_attach_window"})

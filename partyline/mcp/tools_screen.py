@@ -18,7 +18,9 @@ def screen_frame_tool():
 
 
 ELEMENTS_NOTE = (
-    "Read a shared/inherited window (CDP for Chrome pages, UIA otherwise; ~4 KB; source in header). "
+    "The first way to read a window, and screen_element_action the first way to act (precise, fast, cheap; "
+    "a screenshot is the fallback, never a step of its own). Read a shared/inherited window (CDP for "
+    "Chrome pages, UIA otherwise; ~4 KB; source in header). "
     "No arguments: "
     "summary. find by query/name, value, control_type; root=<id> lists children; text=true reads text; "
     "id=<id> reads one element; inspect=<id> compares live UIA with the stored snapshot and event clock. "
@@ -77,18 +79,27 @@ def screen_elements_tool():
 
 WINDOW_SNAPSHOT_NOTE = (
     "One screenshot of a window a person shared with this line, only that window. Not the default: "
-    "read screen_elements first, and its deltas after each screen_element_action. Use this when layout or "
-    "visuals matter, or when elements do not explain what is on screen. Returns variants full, slim and "
-    "thumb (url, size, image tokens); slim is the usual choice; get_media fetches one. Protected content "
-    "shows black; the person sees each capture. The answer's snapshot id and pixels are what "
-    "screen_window_click takes, for a point elements cannot reach. Crashed Chrome includes source: uia, "
-    "page_state and a reload hint."
+    "read screen_elements first and act with screen_element_action; a failed action already carries a "
+    "marked `screenshot`. Use this when layout or visuals matter, or when elements do not explain what is "
+    "on screen. With marks=true the picture is the thumb tier by default: shrunk to at most 1000 px on its "
+    "longest side and 700,000 pixels (about 930 image tokens or fewer) with at most 60 numbered boxes of "
+    "visible actionable elements, listed as {n, id, role, name, box}; its pixels are the ones "
+    "screen_window_click, _scroll and _drag take. tier=full is the window's own size. Without marks "
+    "it is the window's own size with variants full, slim and thumb (url, size, image tokens); get_media "
+    "fetches one. "
+    "A window that has not changed since your last snapshot answers `unchanged` with the previous file id "
+    "and the new snapshot id. Protected content shows black; the person sees each capture. "
+    "Crashed Chrome includes source: uia, page_state and a reload hint."
 )
 WINDOW_SNAPSHOT_PROPERTIES = {
     **{key: ELEMENTS_PROPERTIES[key] for key in ("device", "window")},
     "marks": {"type": "boolean", "description": (
-        "Overlay a light coordinate grid and numbered boxes for the elements of the latest "
-        "screen_elements read, listed as {n, id, name, box}. Use with screen_window_click.")}}
+        "Overlay a light coordinate grid and numbered boxes for the visible actionable elements of the "
+        "latest screen_elements read (at most 60), listed as {n, id, role, name, box}. "
+        "Use with the point tools.")},
+    "tier": {"type": "string", "enum": ["thumb", "full"], "description": (
+        "thumb (the default with marks): a budgeted picture of about 930 image tokens or fewer; "
+        "full: the window's own pixels.")}}
 
 
 def screen_window_snapshot_tool():
@@ -125,6 +136,7 @@ def call(client, name, args, state, conv):
     if name == "screen_window_snapshot":
         pairs = [f"{key}={quote(str(args[key]), safe='')}" for key in ("device", "window") if args.get(key)]
         pairs += ["marks=true"] if args.get("marks") else []
+        pairs += [f"tier={args['tier']}"] if args.get("tier") else []
         query = "?" + "&".join(pairs) if pairs else ""
         return client.request("POST", base + "/screen-window-snapshot" + query, timeout=60)
     query = "?mark_pointer=true" if args.get("mark_pointer") else ""
