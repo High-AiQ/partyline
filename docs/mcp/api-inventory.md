@@ -4,7 +4,7 @@ Scope: every HTTP and WebSocket route registered under `partyline/`, found by an
 
 This document has two labelled sets:
 
-- **Set 1: all routes found by the AST pass (138).** Method, path, source handler and current registration line, caller class, and whether an agent principal can call the route. Handler names are the stable reference; registration lines are a locator for this source revision.
+- **Set 1: all routes found by the AST pass (139).** Method, path, source handler and current registration line, caller class, and whether an agent principal can call the route. Handler names are the stable reference; registration lines are a locator for this source revision.
 - **Set 2: agent-reachable subset (106).** Every route Set 1 marks reachable, with its MCP disposition and reason.
 
 **Agent-reachable** means a machine token or an attachment token passes the route's guard. Routes exempt from the bearer guard count as reachable because the guard admits any caller (rows 7-9, 108, 109). Human-only routes, the operator-token route (77), and the restart report-token route (98) are not agent-reachable.
@@ -22,7 +22,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 - **guide**: read on demand through the core `guide` tool.
 - **excluded**: never exposed to MCP. The reason states the rule.
 
-## Set 1: all 138 routes (AST pass)
+## Set 1: all 139 routes (AST pass)
 
 | # | Method | Path | Source handler (registration line) | Caller | Agent-reachable | Note |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -167,6 +167,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 136 | POST | `/api/conversations/{conv_id}/write-set` | partyline/write_set_routes.py:grant_or_request_write_set (registration line 92) | H grants; M files a request | yes | see Set 2 |
 | 137 | GET | `/api/conversations/{conv_id}/chapter` | partyline/chapter_routes.py:chapter_preview | M with `read` | yes | see Set 2 |
 | 138 | POST | `/api/conversations/{conv_id}/chapter` | partyline/chapter_routes.py:new_chapter | H, or L with `chapter` (own line only) | yes | see Set 2 |
+| 139 | GET | `/api/conversations/{conv_id}/window-access-audit` | partyline/screen_audit_routes.py:window_access_audit (registration line 36) | H only | no | newest-first standing window-access metadata and chain head; `limit` 1–200, default 50; never an agent tool |
 
 ## Set 2: agent-reachable subset (106 routes)
 

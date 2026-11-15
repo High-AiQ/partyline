@@ -208,7 +208,9 @@ class ServerWindowPermissionTests(WindowGrantFixture, unittest.IsolatedAsyncioTe
         self.assertEqual("alpha", grant["conv_id"])
         self.assertTrue(any("granted" in row["entry"] for row in self.db._exec(
             "SELECT entry FROM screen_control_audit WHERE conv_id='alpha'").fetchall()))
-        self.assertTrue(any("Window access audit" in row["body"] for row in self.db.list_messages("alpha")))
+        bodies = [row["body"] for row in self.db.list_messages("alpha")]
+        self.assertEqual(1, sum("Agents on this line are using window access" in body for body in bodies))
+        self.assertFalse(any("Window access audit" in body for body in bodies))
 
 
 class StandingCallCancellationTests(unittest.IsolatedAsyncioTestCase):

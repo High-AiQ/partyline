@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .auth_guard import request_principal
 from .machine_scope import is_human
-from .screen_audit import record_window_access
+from .screen_audit import record_window_access, reset_window_access_notices
 from .screen_device_access import standing_devices
 
 
@@ -41,6 +41,7 @@ def router_for(runtime, hub):
                         "VALUES(?,0,?) ON CONFLICT(device_id) DO UPDATE "
                         "SET owner_conv_id=excluded.owner_conv_id", (device_id, body.conv_id))
         # Remove outstanding grants before announcing the changed scope.
+        reset_window_access_notices(runtime, device_id)
         await hub.window_grants.revoke_standing(device_id, tell_helper=True)
         from .capability_versions import bump_runtime
         bump_runtime(runtime)
@@ -57,8 +58,8 @@ def router_for(runtime, hub):
             raise HTTPException(403, "no paired person has enabled window access for this line")
         return principal, devices[0]
 
-    async def audit(conv_id, principal, call, app="", title="", result="failed"):
-        await record_window_access(runtime, conv_id, principal.name, call, app, title, result)
+    async def audit(conv_id, principal, call, app="", title="", result="failed", device=None):
+        await record_window_access(runtime, conv_id, principal.name, call, app, title, result, device)
 
     @router.post("/api/conversations/{conv_id}/screen-windows")
     async def screen_windows(conv_id: str, request: Request):
@@ -69,19 +70,19 @@ def router_for(runtime, hub):
             if not is_human(principal) and principal.conv_id == conv_id:
                 await audit(conv_id, principal, "list", "windows", "window list", "denied")
             raise
-        await audit(conv_id, principal, "list", "windows", "window list", "started")
+        await audit(conv_id, principal, "list", "windows", "window list", "started", device)
         try:
             result = await hub.standing_windows.request(device, "screen_windows", line=conv_id,
                 line_id=conv_id, line_name=runtime.db.get_conversation(conv_id)["name"],
                 agent=principal.name)
         except HTTPException:
-            await audit(conv_id, principal, "list", "windows", "window list", "failed")
+            await audit(conv_id, principal, "list", "windows", "window list", "failed", device)
             raise
         if result.get("error"):
-            await audit(conv_id, principal, "list", "windows", "window list", "paused")
+            await audit(conv_id, principal, "list", "windows", "window list", "paused", device)
             raise HTTPException(409, result["error"])
         windows = result.get("windows", [])
-        await audit(conv_id, principal, "list", "windows", "window list", f"listed {len(windows)}")
+        await audit(conv_id, principal, "list", "windows", "window list", f"listed {len(windows)}", device)
         return {"windows": [{key: row[key] for key in ("id", "hwnd", "process", "title", "state", "url")
                              if key in row}
                             for row in windows]}
@@ -95,22 +96,22 @@ def router_for(runtime, hub):
             if not is_human(principal) and principal.conv_id == conv_id:
                 await audit(conv_id, principal, "attach", "", body.window, "denied")
             raise
-        await audit(conv_id, principal, "attach", "", body.window, "started")
+        await audit(conv_id, principal, "attach", "", body.window, "started", device)
         try:
             result = await hub.standing_windows.request(device, "attach_window", window=body.window,
                 reason=body.reason, line=conv_id, line_id=conv_id,
                 line_name=hub.runtime.db.get_conversation(conv_id)["name"], agent=principal.name)
         except HTTPException:
-            await audit(conv_id, principal, "attach", "", body.window, "failed")
+            await audit(conv_id, principal, "attach", "", body.window, "failed", device)
             raise
         if result.get("ok") is not True:
-            await audit(conv_id, principal, "attach", "", body.window, "denied")
+            await audit(conv_id, principal, "attach", "", body.window, "denied", device)
             raise HTTPException(409, result.get("error", "the helper refused the window"))
         entry = hub.runtime.db._exec(
             "SELECT process,title FROM screen_line_window_grants WHERE id=?", (result["window"],)
         ).fetchone()
         await audit(conv_id, principal, "attach", entry["process"] if entry else "",
-                    entry["title"] if entry else body.window, "granted")
+                    entry["title"] if entry else body.window, "granted", device)
         return {"window": result["window"], "title": result.get("title", "")}
 
     return router

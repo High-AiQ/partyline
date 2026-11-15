@@ -19,8 +19,9 @@ def record(db, share_id, conv_id, agent, entry):
                                  separators=(",", ":"))
             digest = hashlib.sha256(payload.encode()).hexdigest()
             db.conn.execute(
-                "INSERT INTO screen_control_audit(share_id,conv_id,agent,entry,previous_hash,entry_hash) "
-                "VALUES(?,?,?,?,?,?)", (share_id, conv_id, agent, entry, prior, digest))
+                "INSERT INTO screen_control_audit(share_id,conv_id,agent,entry,previous_hash,entry_hash,"
+                "created_at) VALUES(?,?,?,?,?,?,?)",
+                (share_id, conv_id, agent, entry, prior, digest, time.time()))
             db.conn.commit()
         except BaseException:
             db.conn.rollback()
@@ -49,6 +50,8 @@ def _body(rows):
 
 def publish(db, share_id):
     """Insert the system note and mark its entries together, or leave all pending."""
+    if share_id.startswith("window-access:"):
+        return None
     with db.lock:
         try:
             rows = db.conn.execute(
@@ -73,22 +76,48 @@ def publish(db, share_id):
 
 
 def recover(db):
-    """Publish batches left pending by a previous server lifetime."""
-    shares = db._exec("SELECT DISTINCT share_id FROM screen_control_audit WHERE message_id IS NULL")
+    """Publish pixel-control batches, never standing window-access entries."""
+    shares = db._exec("SELECT DISTINCT share_id FROM screen_control_audit WHERE message_id IS NULL "
+                      "AND share_id NOT LIKE 'window-access:%'")
     for row in shares.fetchall():
         publish(db, row["share_id"])
 
 
-async def record_window_access(runtime, conv_id, agent, call, app, title, result):
-    """Persist and publish metadata-only audit events for standing window calls."""
+def reset_window_access_notices(runtime, device_id):
+    """Let a revoked and re-granted device produce one new first-use notice."""
+    notices = getattr(runtime, "window_access_notices", set())
+    for key in list(notices):
+        if key[1] == device_id:
+            notices.discard(key)
+
+
+async def _note_first_use(runtime, conv_id, device):
     from .contracts import MessageEvent, MessageResponse
 
+    notices = getattr(runtime, "window_access_notices", None)
+    if notices is None:
+        notices = runtime.window_access_notices = set()
+    key = (conv_id, device["id"])
+    if key in notices:
+        return
+    notices.add(key)
+    computer = " ".join(str(device.get("name", "")).split()) or "this computer"
+    body = f"Agents on this line are using window access on {computer}; log: Settings → Computers"
+    try:
+        message = runtime.db.add_message(conv_id, "system", "system", body)
+    except BaseException:
+        notices.discard(key)
+        raise
+    await runtime.broadcast(conv_id, MessageEvent(message=MessageResponse.model_validate(message)))
+
+
+async def record_window_access(runtime, conv_id, agent, call, app, title, result, device=None):
+    """Persist metadata-only standing window calls without per-call chat messages."""
     share_id = "window-access:" + conv_id
     record(runtime.db, share_id, conv_id, agent,
            f"{call}: {app[:128]} — {title[:256]} ({result[:80]})")
-    message = publish(runtime.db, share_id)
-    if message:
-        await runtime.broadcast(conv_id, MessageEvent(message=MessageResponse.model_validate(message)))
+    if device is not None:
+        await _note_first_use(runtime, conv_id, device)
 
 
 async def record_standing_window_access(runtime, hub, principal, conv_id, call, window, device_name, result):
@@ -97,9 +126,11 @@ async def record_standing_window_access(runtime, hub, principal, conv_id, call, 
     from .screen_grants import resolve_window
 
     app = title = ""
+    device = None
     try:
-        grant, _ = resolve_window(hub, principal, window, device_name)
+        grant, connected = resolve_window(hub, principal, window, device_name)
         app, title = grant.get("process", ""), grant.get("title", "")
+        device = connected if grant.get("standing_access") else None
     except HTTPException:
         result = "denied"
-    await record_window_access(runtime, conv_id, principal.name, call, app, title, result)
+    await record_window_access(runtime, conv_id, principal.name, call, app, title, result, device)

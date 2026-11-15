@@ -50,8 +50,18 @@ commits. Real-cursor or synthetic mouse and keyboard control, full-monitor captu
 their separate consent paths. Partyline Helper, terminals and shells, password managers, UAC and OS
 security windows are never listed or attachable this way; password values remain redacted. The tray shows
 window access as off, on or active; the active tooltip names the line and agent. **Recent activity** shows
-the helper's append-only metadata log, and per-line audit notices record call type, app, title and result
-without contents.
+the helper's append-only metadata log. The server also keeps a durable, hash-chained per-line audit of call
+type, app, title and result without contents. Individual calls do not post chat messages. The first standing
+call on a line for each computer posts one short note pointing to **Settings → Computers → View log**; it is
+not repeated unless access is revoked and re-granted (or the server restarts).
+
+People can read the newest 50 entries under the computer's selected line with **View log**, including each
+entry hash and the current chain head. The equivalent person-only API is
+`GET /api/conversations/{conv_id}/window-access-audit?limit=50` (limit 1–200, default 50). It returns
+`entries` newest first, each with `agent`, `call`, `app`, `title`, `result`, `time` and `entry_hash`, plus the
+overall `chain_head`. Agent credentials cannot read this route. Window-access rows deliberately remain
+unpublished, and restart recovery never turns them into chat messages; live-consented pixel-control audits
+keep their existing chat behavior.
 
 Each granted window has a thin blue outline just outside its visible frame. It follows the window and
 hides while the window is minimized or on another virtual desktop. It is click-through, does not take
