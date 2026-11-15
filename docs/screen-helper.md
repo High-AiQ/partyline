@@ -768,7 +768,9 @@ leave the granted window.
   `expand_state collapsed→expanded`), with ordinary actionable element IDs. New Lists/Menus include option
   IDs and names. The reply caps the delta at 20 lines plus a `more` note; read `screen_elements` for the rest.
   The helper computes this delta locally, sending only changed rows and option samples under a 128 KiB
-  wire cap; whole before/after trees are never combined into a reply. Partial observations are labelled and
+  wire cap; whole before/after trees are never combined into a reply. UIA path shifts are paired by control
+  type, name, automation ID and duplicate order when comparing rows. Input keeps its original runtime/path
+  validation, and CDP provider identities remain authoritative. Partial observations are labelled and
   never claim missing elements disappeared. Read failures are explicit; the text delta needs read permission.
   The pre-input read has its own 500 ms cap and is skipped with at most one second of input budget left,
   so a diagnostic read cannot consume the approved input's whole start budget.

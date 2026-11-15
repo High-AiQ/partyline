@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — A path-bound UIA ID is not a persistent comparison identity
+
+The false assumption was that a new helper ID necessarily means a control appeared. UIA helper IDs bind
+runtime identity to the control-view path, so inserting a popup before existing siblings re-IDs those
+siblings and their subtrees. Pair unmatched non-provider rows by type, name, automation ID and duplicate
+order for the diagnostic diff; keep provider identities authoritative and native dispatch IDs unchanged.
+`tests/test_point_delta_identity.py` covers sibling insertion, shifted subtree state, duplicates, actual
+removals and provider replacement through both helper compaction and server formatting.
+
 ## 2026-11-15 — Bounded tree parts do not make a bounded action reply
 
 The false assumption was that two ordinary tree reads could safely ride together on a point reply.
