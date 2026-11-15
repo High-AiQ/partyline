@@ -30,18 +30,20 @@ class ElementsTests(unittest.IsolatedAsyncioTestCase):
             request = await socket.messages.get()
             self.assertNotIn("cursor", request)
             first = {"request_id": request["request_id"], "snapshot_id": "s", "truncated": True,
-                     "next_cursor": "c1",
+                     "next_cursor": "c1", "source": "cdp", "transport": "extension",
                      "elements": [{"id": "w", "control_type": "Window", "name": "Editor"}]}
             hub.receive({"id": "wrong"}, first)
             self.assertFalse(task.done())
             hub.receive({"id": "d"}, first)
             request = await socket.messages.get()
             self.assertEqual("c1", request["cursor"])
-            hub.receive({"id": "d"}, {"request_id": request["request_id"], "elements": [
+            hub.receive({"id": "d"}, {"request_id": request["request_id"], "source": "cdp",
+                                      "transport": "extension", "elements": [
                 {"id": "b", "parent": "w", "control_type": "Button", "name": "OK", "actions": ["invoke"]}]})
             result = await task
             self.assertEqual({}, hub.waiters)
             self.assertEqual("s", result["snapshot_id"])
+            self.assertEqual("extension", result["transport"])
             self.assertEqual(2, result["nodes"])
             self.assertEqual("Editor", result["window_title"])
             self.assertNotIn("partial", result)

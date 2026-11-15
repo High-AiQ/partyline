@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Partyline Chrome",
+  "version": "1.0.0",
+  "minimum_chrome_version": "125",
+  "permissions": [
+    "debugger",
+    "tabs",
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Connect Partyline helper"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu0uZC70kGXR3Fr5SAGQx5tIlS0jQMgnGfc3w4hJka1tn2bvvtCFU7vYsjqpT3HrBWFAFnA0f5OyM1YzU1T60AnA78SvxAIJZtUUPx6T6HjFH/lx3Jn3Ys1V7jxmNPziHL6KVMgXkfrQOiJ60JTtkt1J+Ib32Ycz4scSqvljpJhBnxMH83W7+pFV8ZpP4pAOxk/DpASM0ckkXFChzWIO0h3MoheqFtctiLkH6YBEwuK2vNZF7EfzhzoB5kPeNKKDCHhV2dGEFMuZhqATgX1HJorXPB8YSmFUYuD9MO2bnBCsVb8k5d45RbRZ0Nir+sPe2Rp3PjeqwsqJAoQWfA/WfzQIDAQAB"
+}

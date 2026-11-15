@@ -14,6 +14,7 @@ from .capture_frames import frame as capture_frame, frame_from_capture as captur
 from .preview import get_preview
 from .status import Status
 from .tools import MESSAGES as TOOL_MESSAGES, TOOLS_VERSION, Tools
+from .chrome_operations import chrome_label, watch_windows
 from .window_shares import MESSAGES as WINDOW_MESSAGES, WINDOWS_VERSION, WindowShares
 from .transport import CertificateError, certificate_failure
 from .version import helper_version
@@ -198,9 +199,11 @@ class Session(SessionTransport):
                         helper_version=helper_version(), monitors=self.desktop.monitors(),
                         control=CONTROL_VERSION, tools=TOOLS_VERSION, windows=WINDOWS_VERSION,
                         press=PRESS_VERSION, chrome_dom=4, chrome={"state": "not_enabled",
-                        "detail": self.windows.chrome.browser.detail},
+                        "detail": self.windows.chrome.browser.detail,
+                        "transport": self.windows.chrome.browser.transport},
                         window_access=self.window_access_enabled, update_check=True)
-        self.status.chrome = "Chrome: not enabled — " + self.windows.chrome.browser.detail
+        self.status.chrome = ("Chrome: " + chrome_label(self.windows.chrome.browser, "not_enabled")
+                              + " — " + self.windows.chrome.browser.detail)
         self.status.set("paired")
         loop = asyncio.get_running_loop()
         # The tray's Stop sharing runs on another thread: hand the stop to this loop.
@@ -212,7 +215,7 @@ class Session(SessionTransport):
         self.status.window_access_pause = lambda: request_pause_windows(self, loop)
         heartbeat = asyncio.create_task(self.heartbeat())
         self.status.stop_window_grant = lambda ident: loop.call_soon_threadsafe(self.windows.revoke, ident)
-        window_watch = asyncio.create_task(self.windows.watch())
+        window_watch = asyncio.create_task(watch_windows(self.windows))
         try:
             async for raw in self.socket:
                 self.last_received = self.clock()

@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import install_windows
+from . import install_windows, native_install
 from .instance import lock_dir
 from .launch import record_path, resolve_launch, save_record
 
@@ -54,10 +54,12 @@ class Installer:
         return self.home / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 
     def install(self, launch):
+        registry = self.registry or (install_windows.Registry() if self.system == "Windows" else None)
+        native = native_install.install(self.system, self.home, launch, registry)
         if self.system == "Windows":
-            return install_windows.install(self.registry or install_windows.Registry(), launch, self.log)
+            return install_windows.install(registry, launch, self.log) + native
         if self.system == "Darwin":
-            return self._install_mac(launch)
+            return self._install_mac(launch) + native
         handler, autostart = self.linux_paths()
         for path, args, extra in (
                 (handler, launch + ["open", "--", "%u"],
@@ -73,7 +75,7 @@ class Installer:
         else:
             lines.append(f"ran: xdg-mime default {DESKTOP_NAME} {MIME}")
         self._tool("update-desktop-database", str(handler.parent))  # best effort cache refresh
-        return lines
+        return lines + native
 
     def _install_mac(self, launch):
         plist = self.mac_plist()
@@ -91,8 +93,10 @@ class Installer:
         return lines
 
     def uninstall(self):
+        registry = self.registry or (install_windows.Registry() if self.system == "Windows" else None)
+        native = native_install.uninstall(self.system, self.home, registry)
         if self.system == "Windows":
-            return install_windows.uninstall(self.registry or install_windows.Registry())
+            return install_windows.uninstall(registry) + native
         paths = [self.mac_plist()] if self.system == "Darwin" else list(self.linux_paths())
         if self.system == "Darwin":
             self._tool("launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}")
@@ -103,7 +107,7 @@ class Installer:
             lines.append(f"{'removed' if existed else 'not present'}: {path}")
         if self.system == "Linux":
             self._tool("update-desktop-database", str(paths[0].parent))
-        return lines
+        return lines + native
 
 
 def install_command(installer=None, **kwargs):

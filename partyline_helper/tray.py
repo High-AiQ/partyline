@@ -80,6 +80,7 @@ class Tray:
         recent = self.status.window_access_audit.recent() if self.status.window_access_audit else []
         return self.backend.Menu(
             item(lambda _: self.status.label, None, enabled=False),
+            item(lambda _: self.status.chrome or "Chrome: not installed", None, enabled=False),
             *([item(f"Update available ({self.status.update[0]})", self.open_update)]
               if self.status.update else []),
             item("Stop screen sharing", lambda *_: self.status.request_stop_share(),

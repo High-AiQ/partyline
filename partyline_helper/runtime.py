@@ -51,7 +51,8 @@ def start_helper(paired, ensure, tell=None):
     return result
 
 
-CHECKED = ("partyline_helper.client", "partyline_helper.desktop", "partyline_helper.inputs",
+CHECKED = ("partyline_helper.extension_transport", "partyline_helper.native_host",
+           "partyline_helper.client", "partyline_helper.desktop", "partyline_helper.inputs",
            "partyline_helper.border", "partyline_helper.tray", "partyline_helper.dialog_proc",
            "partyline_helper.capture_loop", "partyline_helper.windows_capture",
            "websockets.asyncio.client", "pynput.keyboard", "pynput.mouse", "pystray", "PIL.ImageDraw")

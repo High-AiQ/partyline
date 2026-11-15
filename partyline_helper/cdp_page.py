@@ -27,7 +27,8 @@ class Page(Recovery):
         self.browser.listeners.add(self.event)
 
     def guard(self, document=True, healthy=True):
-        if (not self.live or self.access.grant is not self.grant or self.access.gate.revoked.is_set()
+        if (not self.live or self.grant.get("chrome_cancelled") or self.access.grant is not self.grant
+                or self.access.gate.revoked.is_set()
                 or self.access.gate.generation != self.generation):
             raise CDPError("consent revoked")
         if healthy and self.page_state != "alive":

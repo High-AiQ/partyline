@@ -74,7 +74,7 @@ def violations(path, source):
 
 def main():
     errors = []
-    for root in ('partyline', 'partyline_helper', 'frontend/src', 'scripts'):
+    for root in ('partyline', 'partyline_helper', 'partyline_chrome', 'frontend/src', 'scripts'):
         for path in (ROOT / root).rglob('*'):
             if 'static' in path.parts or path.suffix not in ('.py', '.js', '.jsx', '.ts', '.tsx', '.svelte'):
                 continue

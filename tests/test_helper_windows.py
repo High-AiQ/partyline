@@ -328,7 +328,11 @@ class TrayTests(unittest.TestCase):
         shown = tray.start_tray(status, FAKE_BACKEND)
         icon = FakeIcon.instances[0]
         self.assertTrue(icon.running)
-        label, stop, stop_all, choose_window, end_tools, end_checks, quit_item = icon.menu[:7]
+        label, chrome, stop, stop_all, choose_window, end_tools, end_checks, quit_item = icon.menu[:8]
+        self.assertEqual(chrome.text(None), "Chrome: not installed")
+        status.chrome = "Chrome: extension connected"
+        self.assertEqual(chrome.text(None), "Chrome: extension connected")
+        status.chrome = ""
         self.assertEqual((stop.text, stop_all.text), ("Stop screen sharing", "Stop all sharing"))
         picked, revoked = [], []
         status.choose_window, status.stop_window = lambda: picked.append(1), lambda: revoked.append(1)

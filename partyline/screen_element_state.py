@@ -118,6 +118,7 @@ class ElementState:
                 tree.note = "capture stopped: " + str(response["elements_unavailable"])[:100]
                 return tree
             tree.source = response.get("source", "uia")
+            tree.transport = response.get("transport")
             tree.source_reason = response.get("source_reason")
             tree.page_state = response.get("page_state")
             tree.recovery_hint = response.get("recovery_hint")
