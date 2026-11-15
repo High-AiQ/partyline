@@ -89,14 +89,16 @@ def image_tiers_in(*responses: object) -> list[str]:
     return sorted(found)
 
 
-def verify_response(response: dict, expected: str, target: str, expected_value: str | None = None) -> dict:
+def verify_response(response: dict, expected: str, target: str, expected_value: str | None = None,
+                    action_refused: bool = False) -> dict:
     """Verify only page observations; action response text is deliberately ignored."""
     state = response.get("observation", {})
     events = state.get("events", [])
     matches = [item for item in events if item.get("trusted") is True and item.get("target") == target
                and item.get("type") in ("click", "input", "change", "scroll")]
     if expected == "refused":
-        ok = not matches and state.get("covered_or_closed") is True
+        ok = (action_refused and not any(item.get("trusted") is True for item in events)
+              and state.get("covered_or_closed") is True)
     elif expected == "navigation":
         ok = state.get("navigation") is True and bool(matches)
     elif expected == "state":
@@ -110,7 +112,7 @@ def verify_response(response: dict, expected: str, target: str, expected_value: 
     if expected_value is not None:
         ok = ok and state.get("value") == expected_value
     evidence = {"events": matches, "url": state.get("url"), "value": state.get("value"),
-                "covered_or_closed": state.get("covered_or_closed")}
+                "covered_or_closed": state.get("covered_or_closed"), "action_refused": action_refused}
     return {"success": bool(ok), "evidence": evidence}
 
 def ax_observation(answer: object) -> dict:
@@ -157,3 +159,23 @@ def find_helper_version(value: object) -> str | None:
             if found:
                 return found
     return None
+
+
+def confirms_refusal(value: object) -> bool:
+    """Only explicit refusal evidence counts; a missing event or uncertain action is not enough."""
+    if isinstance(value, dict):
+        status = value.get("status")
+        message = " ".join(str(value.get(key, "")) for key in ("error", "message", "note")).casefold()
+        refusal_words = ("refus", "cover", "obstruct", "interactable")
+        if status == "failed" and any(word in message for word in refusal_words):
+            return True
+        return any(confirms_refusal(child) for child in value.values())
+    if isinstance(value, list):
+        return any(confirms_refusal(child) for child in value)
+    if isinstance(value, str):
+        text = value.casefold()
+        return any(phrase in text for phrase in (
+            "refused the action", "computer refused", "element is covered", "covered or outside",
+            "covered by", "obstructed", "not interactable", "closed shadow root",
+        ))
+    return False

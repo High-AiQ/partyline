@@ -15,12 +15,12 @@ from urllib.parse import quote, urlsplit
 try:
     from .window_bench_logic import (
         SCENARIOS, ax_observation, find_helper_version,
-        estimate_tokens, image_tiers_in, percentile, verify_response,
+        confirms_refusal, estimate_tokens, image_tiers_in, percentile, verify_response,
     )
 except ImportError:  # direct script execution
     from window_bench_logic import (
         SCENARIOS, ax_observation, find_helper_version,
-        estimate_tokens, image_tiers_in, percentile, verify_response,
+        confirms_refusal, estimate_tokens, image_tiers_in, percentile, verify_response,
     )
 
 def rpc(process, ident: int, method: str, params: dict) -> dict:
@@ -54,13 +54,17 @@ class ToolCallError(RuntimeError):
         self.response_bytes = response_bytes
 
 
-def element_id(answer: dict) -> str:
+def element_id(answer: dict, query: str) -> str:
     lines = answer.get("lines", "")
-    pattern = r"^\s*(\S+)\s+(?:Button|Edit|ComboBox|ListItem|Hyperlink|Document|Pane)\s+"
-    matches = re.findall(pattern, lines, re.M)
-    if len(matches) != 1:
-        raise RuntimeError(f"expected one matching accessible element, found {len(matches)}")
-    return matches[0]
+    pattern = r'^\s*(\S+)\s+([A-Za-z][A-Za-z0-9_-]*)\s+"([^"]*)"'
+    matches = [(ident, name) for ident, _kind, name in re.findall(pattern, lines, re.M)]
+    exact = [ident for ident, name in matches if name.casefold() == query.casefold()]
+    if len(exact) == 1:
+        return exact[0]
+    partial = [ident for ident, name in matches if query.casefold() in name.casefold()]
+    if len(partial) == 1:
+        return partial[0]
+    raise RuntimeError(f"expected one accessible element named {query!r}, found {len(partial or exact)}")
 
 
 def run(args) -> dict:
@@ -116,6 +120,8 @@ def run(args) -> dict:
                 rows.append(row)
                 continue
             action_start = None
+            action_attempted = False
+            action_refused = False
             query_bytes = action_bytes = observe_bytes = 0
             query, action = {}, {}
             try:
@@ -140,7 +146,8 @@ def run(args) -> dict:
                                 "evidence": verified["evidence"]})
                     rows.append(row)
                     continue
-                target_id = element_id(query) if scenario.tool == "screen_element_action" else None
+                target_id = (element_id(query, scenario.query)
+                             if scenario.tool == "screen_element_action" else None)
                 action_args = {"window": args.window, **scenario.tool_args}
                 if scenario.tool == "screen_element_action":
                     action_args.update({"element_id": target_id, "action": scenario.action})
@@ -149,7 +156,9 @@ def run(args) -> dict:
                 if scenario.then:
                     action_args["then"] = scenario.then
                 action_start = time.perf_counter()
+                action_attempted = True
                 action, action_bytes = call_tool(process, ident, scenario.tool, action_args)
+                action_refused = confirms_refusal(action)
                 elapsed = (time.perf_counter() - action_start) * 1000
                 row["wall_ms"] = round(elapsed, 3)
                 action_start = None
@@ -159,7 +168,8 @@ def run(args) -> dict:
                 ident += 1
                 observed = ax_observation(observed)
                 verified = verify_response({"observation": observed}, scenario.expected, scenario.target,
-                                           scenario.value if scenario.action == "set_value" else None)
+                                           scenario.value if scenario.action == "set_value" else None,
+                                           action_refused=action_refused)
                 tiers = image_tiers_in(query, action, observed)
                 response_bytes = query_bytes + action_bytes + observe_bytes
                 row.update({"status": "verified" if verified["success"] else "failed",
@@ -169,6 +179,7 @@ def run(args) -> dict:
                             "transport_observed": query.get("source", action.get("source", args.transport)),
                             "evidence": verified["evidence"]})
             except Exception as exc:  # a missing element or refused action is a measured failure
+                action_refused = action_attempted and confirms_refusal(str(exc))
                 response_bytes = (query_bytes + action_bytes + observe_bytes
                                   + getattr(exc, "response_bytes", 0))
                 tiers = image_tiers_in(query, action)
@@ -184,7 +195,8 @@ def run(args) -> dict:
                         response_bytes += observed_bytes
                         ident += 1
                         observed = ax_observation(observed)
-                        verified = verify_response({"observation": observed}, "refused", scenario.target)
+                        verified = verify_response({"observation": observed}, "refused", scenario.target,
+                                                   action_refused=action_refused)
                         row.update({"status": "verified_refusal" if verified["success"] else "failed",
                                     "success": verified["success"], "error": str(exc),
                                     "response_bytes": response_bytes,

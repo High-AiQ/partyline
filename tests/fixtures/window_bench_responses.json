@@ -17,7 +17,7 @@
     }
   },
   "refused": {
-    "action_response": {"status": "failed", "claim": "blocked"},
+    "action_response": {"status": "failed", "error": "the computer refused the action: element is covered"},
     "observation": {"url": "https://partyline.example/lab/window-bench/overlay.html",
       "events": [], "covered_or_closed": true}
   },
@@ -27,5 +27,8 @@
   },
   "image_response": {
     "variants": {"thumb": {"url": "/api/media/id/thumb"}, "slim": {"url": "/api/media/id/slim"}}
+  },
+  "element_lines": {
+    "lines": "edit-17 Edit \"Text input\"\nbutton-22 Button \"Save\"\nbutton-23 Button \"Save as\""
   }
 }
