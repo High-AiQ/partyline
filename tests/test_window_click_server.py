@@ -202,7 +202,15 @@ class WindowClickTests(ClickFixture, unittest.IsolatedAsyncioTestCase):
         after = response.json()["after"]
         self.assertTrue(after["file"]["id"])
         self.assertEqual("s1", after["snapshot"])
-        self.assertEqual(2, len(self.requests))
+        self.assertEqual(3, len(self.requests))  # unchanged after also gets the landing crop
+
+    async def test_an_older_helper_cannot_pass_an_unmarked_full_image_off_as_a_landing_thumb(self):
+        await self.grant("a")
+        await self.snapshot()
+        self.click_answer["settle"] = "unchanged"
+        result = (await self.click()).json()
+        self.assertIn("update the Partyline helper", result["landing_thumb"]["error"])
+        self.assertNotIn("file", result["landing_thumb"])
 
     async def test_a_click_forgets_the_element_tree_so_the_next_read_is_fresh(self):
         await self.grant("a")

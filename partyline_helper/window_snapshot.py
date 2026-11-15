@@ -11,6 +11,7 @@ from websockets.exceptions import ConnectionClosed
 from partyline.point_geometry import GeometryError, clean
 
 from .window_grab import GrabError, WindowGrab
+from .landing_thumb import marked
 from .timing import Timing
 from .window_fit import budget, fitted
 from .window_marks import boxes, clean_inputs, draw, listed
@@ -92,7 +93,10 @@ class WindowSnapshots:
                 if not page or not await page.visible():
                     raise GrabError("the selected tab is not shown; take a fresh screen_window_look")
         with timing.phase("capture_ms"):
-            image = fitted(await asyncio.to_thread(self.backend.grab, grant["hwnd"]), budget(message))
+            image = await asyncio.to_thread(self.backend.grab, grant["hwnd"])
+        if message.get("landing") is not None:
+            image = marked(image, message["landing"])
+        image = fitted(image, budget(message))
         ident, geometry = self.remember(entry, grant, image, gate_generation)
         if look:
             if not ident:
@@ -134,6 +138,7 @@ class WindowSnapshots:
         await self.reply(request_id, chunks, gate, ok=True, mime=mime, width=image.width,
                          height=image.height, media=True, chunks=len(chunks),
                          timing=timing.values, **metadata,
+                         **({"landing_marked": True} if message.get("landing") is not None else {}),
                          **({"blank": True} if black else {}),
                          **({"snapshot_id": ident, "geometry": {k: geometry[k] for k in (
                              "rect", "size", "regions", "dpi")}} if ident else {}),

@@ -4,7 +4,7 @@ Only the failures a picture can explain get one (the point was covered, the elem
 not found, the page never settled); a revoked grant, a refused consent, a floor program or a vanished window
 get none. The picture is the granted window alone (the helper captures that one window, never the desktop
 around it), in the thumb tier with numbered marks from a tree read just now, and only for a caller who may
-read the window. Successful actions carry no image unless the caller asked.
+read the window. Point input also uses this capture path for a crosshair crop on unchanged outcomes.
 """
 import asyncio
 import re
@@ -38,7 +38,8 @@ def compact(picture):
     return shot
 
 
-async def attach(runtime, hub, store, principal, conv_id, grant, result, key="screenshot", marks=True):
+async def attach(runtime, hub, store, principal, conv_id, grant, result, key="screenshot", marks=True,
+                 landing=None):
     """Put a picture under `result[key]`; with `marks` the tree is read fresh first so the boxes are true.
 
     Never raises: a caller without read access, a grant that ended or a capture that took too long leaves
@@ -51,7 +52,8 @@ async def attach(runtime, hub, store, principal, conv_id, grant, result, key="sc
         async with asyncio.timeout(SECONDS):
             if marks:
                 await hub.elements.read(principal, None, grant["id"], {"refresh": True})
-            picture = await hub.snapshots.take(principal, store, grant["id"], None, marks, "thumb")
+            extra = {"landing": landing} if landing is not None else {}
+            picture = await hub.snapshots.take(principal, store, grant["id"], None, marks, "thumb", **extra)
     except HTTPException as exc:
         result[key] = {"error": str(exc.detail)}
     except TimeoutError:

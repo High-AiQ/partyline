@@ -20,6 +20,7 @@ from .point_geometry import GeometryError, locate
 from .screen_audit import publish, record, record_standing_window_access
 from .screen_grants import resolve_window
 from .screen_failure_snapshot import attach, failed
+from .screen_point_landing import unavailable
 
 POINT_VERSION = 3  # the `windows` hello value that can click at a point
 INPUT_VERSION = 4  # ... and scroll, drag, type and press keys
@@ -97,7 +98,7 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
     if device.get("windows", 0) < (POINT_VERSION if body.operation == "click" else INPUT_VERSION):
         raise HTTPException(409, OLD_HELPER if body.operation == "click"
                             else "update the Partyline helper to use " + f"screen_window_{body.operation}")
-    points = []
+    points, geometry = [], None
     if body.pixels():
         geometry = hub.snapshots.geometry.get(grant["id"], body.snapshot)
         refusal = None if geometry is not None else ("stale", STALE)
@@ -107,7 +108,9 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
             except GeometryError as exc:
                 refusal = ("outside", str(exc))
         if refusal:  # nothing was sent: answer like any failure a picture explains, with a fresh marked thumb
-            result = {"status": "failed", "reason": refusal[0], "error": refusal[1]}
+            result = {"status": "failed", "reason": refusal[0], "error": refusal[1],
+                      "landing": unavailable(body, geometry, points)}
+            result["landing"]["input_sent"] = False
             await attach(runtime, hub, store, principal, conv_id, grant, result)
             return result
     name = f"point_{body.operation}"
@@ -131,6 +134,7 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
     except (TimeoutError, OSError, RuntimeError):
         result = {"status": "unconfirmed", "note": "The helper did not confirm the input; it may have run. "
                   "Do not retry automatically."}
+    result.setdefault("landing", unavailable(body, geometry, points))
     status = result.get("status", "failed")
     await audit(runtime, grant, principal, body, result.get("route", "none"), status, points)
     await record_standing_window_access(runtime, hub, principal, conv_id, name, body.window, None, status)
@@ -138,6 +142,11 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
         hub.elements.action_completed(grant["id"])
         if body.capture == "thumb":  # asked for: the picture after, with no tree read
             await attach(runtime, hub, store, principal, conv_id, grant, result, "after", marks=False)
+    unchanged = (status == "no_effect" or result.get("settle") == "unchanged"
+                 or result.get("after", {}).get("unchanged") is True)
+    if unchanged and points and not result.get("grant_ended"):
+        await attach(runtime, hub, store, principal, conv_id, grant, result, "landing_thumb", marks=False,
+                     landing=points[-1])
     if failed(result):  # a failure a picture explains carries one, with marks: a point can be tried at once
         await attach(runtime, hub, store, principal, conv_id, grant, result)
     return result

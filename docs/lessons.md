@@ -1,5 +1,15 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — A checked cursor point is not proof of the dispatched pixel
+
+The false assumption was that normalising physical coordinates with `65535 / (size - 1)` preserves the
+pixel that WindowFromPoint checked. Windows expands absolute input over half-open virtual desktop pixels;
+truncation could land one pixel before the intended point. Aim at each physical pixel's centre using
+65536 and the desktop size, retaining negative monitor origins. `tests/test_point_landing.py` pins the
+snapshot-to-screen-to-input round trip at 100%, 125%, 150% and 200% DPI. Replies retain the raw hit handle,
+foreground observations and a marked crop on unchanged outcomes, so completion alone is not evidence of
+an effective page click.
+
 ## 2026-11-15 — An installer step runs the previous helper, not the new one
 
 The false assumption was that every helper the installer finds knows the newest commands. The upgrade's

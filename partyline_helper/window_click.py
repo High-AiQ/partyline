@@ -1,8 +1,6 @@
 """A click, scroll or drag at a point of an earlier window snapshot, or typing and keys, on a granted window.
 
-The helper converts the point again with the geometry it recorded for that snapshot (never with what the
-server sent), and refuses when the window moved, resized, closed or was re-granted since, when the point is
-outside the window's client area, or when the window is a hard-floor program. Then it picks the route:
+The helper reconverts the named snapshot, refuses stale geometry and floor programs, then picks the route:
 a Chrome page with a CDP connection is clicked through CDP (no cursor, no foreground); every other window
 needs the person's consent for that grant and uses the real cursor, confined to the window.
 Typing and keys name no point: they need an earlier click in the grant and go to where it put the focus.
@@ -21,6 +19,7 @@ from .point_cdp import CHROME
 from .point_cursor import CHANGED, COVERED, MOVED, PointRefused, run as cursor_run
 from .point_ops import KEYBOARD, NEEDS_CLICK, POINTED, arguments, by_cdp, for_cursor, which
 from .point_win32 import Win32Pointer
+from .point_landing import after, before, evidence
 from .uia_window_list import HARD_FLOOR
 from .uia_window_identity import live
 
@@ -74,6 +73,7 @@ class PointClicks:
         route = "none"
         message = {**message, "deadline": self.clock() + self.budget(message)}
         operation = which(message)
+        message["landing"] = evidence(entry, message)
         try:
             from .window_look import check, operation_lock
             async with operation_lock(entry):
@@ -97,6 +97,7 @@ class PointClicks:
                          f"{result.get('status', 'failed')} ({route})", message.get("line"))
         except OSError:
             result = {"status": "failed", "error": AUDIT}
+        result["landing"] = message["landing"]
         await self.shares.session.send("window_element_result", request_id=message["request_id"], **result)
 
     @staticmethod
@@ -235,6 +236,9 @@ class PointClicks:
         def guard():
             if self.clock() >= limit:
                 raise CDPError(PARTLY if page.dispatched else LATE)
+        api, landing = self.pointer(grant["hwnd"]), message["landing"]
+        with api.session():
+            before(api, grant, landing)
         try:
             info = await by_cdp(operation, page, frame, points, args, guard)
             counter = page.access.event_status()["event_counter"]
@@ -248,6 +252,10 @@ class PointClicks:
                 raise Refused(str(exc)) from exc
             return {"status": "unconfirmed", "source": "cdp", "error": str(exc),
                     "revoked_during": not page.live}
+        finally:
+            landing["input_sent"] = page.dispatched
+            with api.session():
+                after(api, landing)
 
     async def via_cursor(self, entry, message, access, grant, generation, points, epoch, args):
         operation = which(message)
@@ -282,11 +290,13 @@ class PointClicks:
 
         def call():
             return cursor_run(self.pointer(grant["hwnd"]), grant, spots, send, alive,
-                              getattr(access, "event_state", None), ready, last, check, partial, operation)
+                              getattr(access, "event_state", None), ready, last, check, partial, operation,
+                              message["landing"])
         try:
             result, revoked = await asyncio.wait_for(
                 asyncio.to_thread(access.gate.dispatch, generation, call), TIMEOUT)
         except TimeoutError:
+            message["landing"]["input_sent"] = None
             access.gate.invalidate()
             return {"status": "unconfirmed", "error": f"the {operation} did not finish in time"}
         except ValueError as exc:  # the gate: revoked before the input

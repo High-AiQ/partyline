@@ -22,7 +22,7 @@ ELEMENT_ACTION_NOTE = (
     "explains carries `screenshot` (marks, snapshot id): use screen_window_click/_scroll/_drag/_type/_key. "
     'reload element_id="page" recovers Chrome. UIA window_* targets the window; drag: screen_drag.')
 ELEMENT_ACTION_TIMEOUT = 125  # a 20s capture, a 35s exchange, the action, then a 20s failure picture
-WINDOW_CLICK_TIMEOUT = 130  # up to 70 s for the helper (the person is asked), then a thumb
+WINDOW_CLICK_TIMEOUT = 150  # helper 70s, requested after/crosshair/failure pictures 20s each, plus margin
 ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and event barrier
 ELEMENT_ACTION_PROPERTIES = {
     "window": {"type": "string",
@@ -78,7 +78,8 @@ WINDOW_CLICK_NOTE = (
     "outside the window's client area. A Chrome page with a debugging connection is clicked without the "
     "mouse; any other window moves the real cursor after the person agrees on their computer, once per "
     "window grant. Never a terminal, password manager or system dialog. Answers with route (cdp or "
-    "cursor), settle and what changed; capture=thumb adds a picture afterwards.")
+    "cursor), settle, and landing evidence (image/screen point, DPI, hit HWND/class, foreground). "
+    "Unchanged outcomes include a crosshair landing_thumb; capture=thumb adds a picture afterwards.")
 WINDOW_CLICK_PROPERTIES = {
     "window": ELEMENT_ACTION_PROPERTIES["window"],
     "snapshot": {"type": "string", "minLength": 1, "maxLength": 64,

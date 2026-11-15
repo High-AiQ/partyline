@@ -581,8 +581,8 @@ not found, is stale, or the page never settled) carries a `screenshot` with it: 
 granted window alone, a `snapshot` id and the numbered `marks`, taken right then from a fresh tree read (bounded
 to 20 s, and only for a caller who may read the window). Take the point from that picture and call a point tool
 (see *Point input in the chosen window*) without another look. A revoked grant, a refused consent, a floor
-program or a vanished window carry no picture. A success carries no image; pass `then: {"snapshot": true}` to
-get one after the action. The default `then` answers with what changed only (`diff` with added, removed and
+program or a vanished window carry no picture. An element-action success carries no image; pass
+`then: {"snapshot": true}` to get one after the action. The default `then` answers with what changed only (`diff` with added, removed and
 updated ids, and its notes), not a full re-read; any other `then` option reads as before.
 
 With a window granted to its line, any process on that line can call
@@ -736,6 +736,27 @@ leave the granted window.
   refuses a point outside the image or outside the window's client area (frame, title bar and shadows are not
   clickable; controls there go through `window_*` element actions). The helper converts again with its own
   record, never with the server's numbers, and the two must agree.
+- **Landing evidence.** Every point-operation reply has `landing`, with `snapshot` and `points` (both
+  endpoints for a drag; empty for typing and keys). Each point reports `snapshot_point`, `screen_point`
+  (physical screen pixels), the raw `hwnd` and `class` returned by `WindowFromPoint`, `granted_window`
+  (the handle is the grant itself), and `page_area_child` (its renderer child belongs to the grant).
+  `dpi` and `dpi_scale` (DPI / 96) describe the named snapshot; `image_scale` is image pixels per physical
+  screen pixel on each axis. DPI is never multiplied into the physical mapping a second time.
+  `foreground_before` and `foreground_after` say whether the grant or its owned dialog was foreground,
+  before activation and immediately after input, before restoring the person's foreground. `input_sent`
+  distinguishes observed input from a refused attempt. Unknown observations are `null`, including old
+  helpers and transport timeouts; these fields contain no page text. On CDP, `screen_point` is the mapped
+  physical equivalent: input goes to the page in CSS pixels and the hit window is observational only.
+- **Reading a miss.** `settle: unchanged`, `status: no_effect`, or an unchanged requested `after` image
+  attaches `landing_thumb`: a crop of at most 240 × 240 pixels of the granted window around the last
+  landing point, with a red crosshair edged in white. It needs read permission, captures no desktop pixels,
+  and supplies no new coordinate snapshot. Compare the crosshair with the intended control. An unexpected
+  physical point suggests image scale or offset; an unexpected handle/class suggests a covering window or
+  layer. A false foreground-before followed by true foreground-after records activation: the helper
+  activates first, confirms foreground, and then sends a separate page click. A correct crosshair and
+  target with unchanged pixels suggests the component ignored input; it does not prove that no state changed.
+  Do not repeat input automatically. If the window moved away from the landing point, the crop reports that
+  failure instead. A missing renderer child alone does not prove a miss; some windows expose only a root.
 - **Stale pictures.** The click is refused, with "take a fresh `screen_window_snapshot`", when the snapshot
   is unknown or older than the last eight for that grant, or when the window moved, resized, closed, or was
   re-granted, or when the secure desktop is up. The check compares the live rectangle and client areas with the
