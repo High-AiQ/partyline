@@ -670,8 +670,8 @@ Fresh means a new CLI session with no resume, including a rotation started from 
 note. An ordinary restart, sequential reattachment, crash reattach, or task restart that resumes
 the existing CLI session keeps the same context epoch and its compaction count. Captain handover
 also preserves the context when the same session continues. A restart-resumed process already at
-the limit is armed and rotates only at a later safe turn end; the sequential reattachment plan
-finishes its ordered work first.
+the limit is armed but stays blocked while any restart plan is active. After the plan finishes its
+ordered work, the process rotates at a later safe turn end.
 
 When a compaction brings the context epoch to the limit, or the thrash rule fires, the process is
 *armed*. Nothing happens mid-turn. At the end of that turn, the harness receipt sends one private

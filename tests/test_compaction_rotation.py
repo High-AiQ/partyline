@@ -378,6 +378,15 @@ class GuardsTest(RotationFixture):
         await self.turn("worker")
         self.assertEqual(len(self.starts), 1)
 
+    async def test_a_pending_restart_plan_defers_rotation_until_the_plan_is_resolved(self):
+        await self.reach_the_ask()
+        self.db.save_restart_plan("root", ["worker"], "resume")
+        await self.turn("worker")
+        self.assertEqual(self.starts, [])
+        self.db._exec("DELETE FROM restart_plan")
+        await self.turn("worker")
+        self.assertEqual(len(self.starts), 1)
+
     async def test_a_pending_handover_defers_the_rotation_for_either_party(self):
         await self.reach_the_ask("captain")
         self.db._exec(
@@ -558,6 +567,9 @@ class RealStartTest(RotationFixture):
     async def test_the_fresh_instance_is_told_to_continue_and_the_line_hears_one_notice(self):
         await self.rotate_worker(HANDOFF)
         fresh = self.adapters[-1]
+        epoch = self.db._exec(
+            "SELECT epoch FROM attachment_context_epochs WHERE attachment_id='worker'").fetchone()
+        self.assertEqual(epoch["epoch"], 3)
         self.assertEqual(fresh.att["id"], "worker")
         self.assertTrue(fresh.att["fresh_resume_now"])
         briefing = fresh.briefing()

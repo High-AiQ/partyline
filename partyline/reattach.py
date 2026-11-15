@@ -150,16 +150,29 @@ class ReattachCoordinator:
             return "that reattachment offer is no longer available"
 
         action = "started" if command.action == "accept" else "cancelled"
-        await self.runtime.broadcast(
-            conv_id,
-            ReattachDecisionEvent(
-                conversation_id=conv_id,
-                token=command.token,
-                action=action,
-            ),
-        )
+        accepting = command.action == "accept"
+        if accepting:
+            # The offer row is already consumed; protect the acceptance
+            # broadcast gap before run() installs its ordered-plan marker.
+            self.runtime.restart_plan_order = list(plan["attachment_ids"])
+        try:
+            await self.runtime.broadcast(
+                conv_id,
+                ReattachDecisionEvent(
+                    conversation_id=conv_id,
+                    token=command.token,
+                    action=action,
+                ),
+            )
+        except BaseException:
+            if accepting:
+                self.runtime.restart_plan_order = []
+            raise
         if command.action == "accept":
-            await self.run(plan, accepted_by)
+            try:
+                await self.run(plan, accepted_by)
+            finally:
+                self.runtime.restart_plan_order = []
         else:
             await self.runtime.post_message(
                 conv_id,
@@ -172,7 +185,12 @@ class ReattachCoordinator:
     async def run_automatic(self) -> ReattachResult | None:
         """Run a trusted automatic plan under recoverable, exclusive ownership."""
         async def operation(plan: RestartPlan, guard: Callable[[], None]) -> ReattachResult:
-            result = await self.run(plan, None, guard)
+            try:
+                result = await self.run(plan, None, guard)
+            finally:
+                # The durable plan row protects rotations across automatic
+                # retries; release this in-memory marker when this attempt ends.
+                self.runtime.restart_plan_order = []
             if result.unconfirmed:
                 names = ", ".join(result.unconfirmed)
                 if plan["attempt_count"] < MAX_AUTOMATIC_ATTEMPTS:
@@ -346,7 +364,6 @@ class ReattachCoordinator:
                     f"☏ @{name} is ready after restart; advancing to the next process",
                 )
         finally:
-            self.runtime.restart_plan_order = []
             # Keep unconfirmed processes queued to avoid routing to an unready
             # pty; automatic plans remain durable and retry on restart.
             self.runtime.reattaching.difference_update(

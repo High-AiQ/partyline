@@ -17,9 +17,10 @@ event-driven end to end — no timer decides anything:
 
 The attachment row never changes, so the handle, preset, line, lead flag, task
 role, bridge, notes and delivery cursor carry over; only the CLI session and the
-runtime owner are new. A restart request or a captain handover in flight defers
-the rotation to a later turn end. The one deadline is a short grace after the
-receipt, because the transcript tail posts a turn's last words just after it.
+runtime owner are new. An active sequential restart plan, restart request, or
+captain handover defers rotation until a later turn end. The one deadline is a
+short grace after the receipt, because the transcript tail posts a turn's last
+words just after it.
 """
 
 from __future__ import annotations
@@ -82,6 +83,10 @@ def blocker(runtime, att: dict) -> str:
         return "a restart request is pending"
     if getattr(runtime, "stopping", False):
         return "the server is stopping"
+    if getattr(runtime, "restart_plan_order", None):
+        return "a sequential reattachment plan is active"
+    if runtime.db.get_restart_plan() is not None:
+        return "a restart plan is pending"
     if att["id"] in runtime.reattaching:
         return "it is being restored"
     if state_text(runtime.db, att["id"]):

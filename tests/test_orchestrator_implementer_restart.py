@@ -88,6 +88,8 @@ class ImplementerRestartTest(TaskFixture):
     async def test_restart_relaunches_notifies_and_returns_the_task(self):
         await self.create()
         ident = self.detach()
+        self.db._exec(
+            "UPDATE attachment_context_epochs SET epoch=7 WHERE attachment_id=?", (ident,))
         self.actor = self.captain
         self.runtime.returns = MagicMock()
         response = self.client.post(self.url())
@@ -98,10 +100,16 @@ class ImplementerRestartTest(TaskFixture):
                    if m['audience_attachment_id'] == ident]
         self.runtime.returns.handed_to.assert_called_once_with('captain', ident)
         self.assertTrue(any('resumed by captain; continue the task:' in body for body in notices), notices)
+        epoch = self.db._exec(
+            "SELECT epoch FROM attachment_context_epochs WHERE attachment_id=?", (ident,)
+        ).fetchone()
+        self.assertEqual(epoch["epoch"], 8)  # no saved session: restart() chose a fresh launch
 
     async def test_restart_implementer_stages_queued_mail_before_newer_mail(self):
         await self.create()
         ident = self.detach()
+        self.db._exec(
+            "UPDATE attachment_context_epochs SET epoch=7 WHERE attachment_id=?", (ident,))
         self.db._exec("UPDATE attachments SET cli_session='session' WHERE id=?", (ident,))
         att = self.db.get_attachment(ident)
         old = self.db.add_message(self.conv_id, 'captain', 'human', f"@{att['name']} older")
@@ -113,6 +121,10 @@ class ImplementerRestartTest(TaskFixture):
         self.assertEqual(response.status_code, 200, response.text)
         ids = [message['id'] for message in self.runtime.live[ident].startup_messages]
         self.assertLess(ids.index(old['id']), ids.index(new['id']))
+        epoch = self.db._exec(
+            "SELECT epoch FROM attachment_context_epochs WHERE attachment_id=?", (ident,)
+        ).fetchone()
+        self.assertEqual(epoch["epoch"], 7)  # saved session: restart() resumed it
 
     async def test_a_blocked_task_and_a_person_are_allowed(self):
         await self.create()

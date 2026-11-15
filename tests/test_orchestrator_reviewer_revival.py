@@ -45,6 +45,8 @@ class ReviewerRevivalTest(TaskFixture):
     async def test_round_two_keeps_the_reviewer_folder_and_session_and_drops_round_one_files(self):
         first = await self.in_review()
         path, ident = first['review_worktree'], first['reviewer_id']
+        self.db._exec(
+            "UPDATE attachment_context_epochs SET epoch=7 WHERE attachment_id=?", (ident,))
         self.db._exec("UPDATE attachments SET cli_session='kept' WHERE id=?", (ident,))
         with open(os.path.join(path, 'leftover.txt'), 'w') as handle:
             handle.write('round one scratch')
@@ -63,6 +65,10 @@ class ReviewerRevivalTest(TaskFixture):
         self.assertEqual(git(path, 'status', '--porcelain'), '')
         att = self.db.get_attachment(ident)
         self.assertEqual((att['cwd'], att['cli_session']), (path, 'kept'))
+        epoch = self.db._exec(
+            "SELECT epoch FROM attachment_context_epochs WHERE attachment_id=?", (ident,)
+        ).fetchone()
+        self.assertEqual(epoch["epoch"], 7)  # a reviewer round resumed its saved session
         self.assertEqual([row['sha'] for row in list_review_worktrees(self.db, self.conv_id)], [sha])
 
     async def test_asking_again_revives_a_dead_reviewer_and_resends_the_brief(self):
@@ -80,6 +86,8 @@ class ReviewerRevivalTest(TaskFixture):
     async def test_the_manual_action_revives_and_is_limited(self):
         await self.in_review()
         ident = self.stop_reviewer()
+        self.db._exec(
+            "UPDATE attachment_context_epochs SET epoch=7 WHERE attachment_id=?", (ident,))
         stranger = Principal(kind='machine', name='stranger')
         with self.assertRaises(HTTPException):
             await restart_reviewer(self.runtime, stranger, self.conv_id)
@@ -87,6 +95,10 @@ class ReviewerRevivalTest(TaskFixture):
             await restart_reviewer(self.runtime, self.worker, self.conv_id)
         await restart_reviewer(self.runtime, self.captain, self.conv_id)
         self.assertEqual(self.db.get_attachment(ident)['status'], 'running')
+        epoch = self.db._exec(
+            "SELECT epoch FROM attachment_context_epochs WHERE attachment_id=?", (ident,)
+        ).fetchone()
+        self.assertEqual(epoch["epoch"], 8)  # no saved session: reviewer restart launched fresh
         with self.assertRaises(HTTPException) as live:
             await restart_reviewer(self.runtime, self.human, self.conv_id)
         self.assertEqual(live.exception.status_code, 409)
