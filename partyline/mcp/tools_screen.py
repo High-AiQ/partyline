@@ -101,7 +101,7 @@ def elements_query(args):
 def call(client, name, args, state, conv):
     from .client import ApiError
     if name in ("screen_windows", "screen_attach_window") and not state.get("window_access"):
-        raise ApiError("window access is off for the paired computer")
+        raise ApiError("no paired computer with window access on is connected for this line")
     standing_tool = name in ("screen_windows", "screen_attach_window") and state.get("window_access")
     if state.get("dynamic_screen_tools") and not (
             state.get("screen_read") or standing_tool
