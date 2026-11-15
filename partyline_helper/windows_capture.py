@@ -8,11 +8,8 @@ def window_for_region(region, user32=None):
     """Resolve the top-level HWND beneath a region's centre and return its desktop bounds."""
     user32 = user32 or ctypes.windll.user32
 
-    class Point(ctypes.Structure):
-        _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
-
-    point = Point(region["x"] + region["width"] // 2, region["y"] + region["height"] // 2)
-    user32.WindowFromPoint.argtypes = [Point]
+    point = wintypes.POINT(region["x"] + region["width"] // 2, region["y"] + region["height"] // 2)
+    user32.WindowFromPoint.argtypes = [wintypes.POINT]  # same type as every other caller
     user32.WindowFromPoint.restype = wintypes.HWND
     user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
     user32.GetAncestor.restype = wintypes.HWND

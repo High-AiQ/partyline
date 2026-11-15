@@ -1,6 +1,7 @@
 """Independent window grants and snapshots, multiplexed over the existing helper socket."""
 import asyncio
 import contextlib
+import logging
 import time
 import uuid
 from types import SimpleNamespace
@@ -20,6 +21,8 @@ from .window_outline import WindowOutline
 from .point_consent import clear
 from .window_click import POINT_VERSION, PointClicks
 from .window_snapshot import WindowSnapshots
+
+log = logging.getLogger(__name__)
 
 # 1: a window is shared with a line; 2: it can also be screenshotted; 3: it can also be clicked at a point
 WINDOWS_VERSION = POINT_VERSION
@@ -248,7 +251,11 @@ class WindowShares:
                     grant = access.grant
                     if not grant:
                         continue
-                    reason = await access.check(grant)
+                    try:
+                        reason = await access.check(grant)
+                    except Exception:  # an OS query failing must pause the grant, never end the helper
+                        log.exception("window check failed; pausing the grant until the next check")
+                        reason = "secure desktop active"
                     if access.grant is not grant:
                         continue
                     if reason == "window closed":

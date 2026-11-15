@@ -1,5 +1,6 @@
 """Local two-step consent and isolated per-window workers, with event-driven transport."""
 import asyncio
+import ctypes
 import json
 import subprocess
 import unittest
@@ -251,6 +252,41 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
                     ticks.put_nowait(True)
             self.assertNotIn(ident, self.manager.grants)
             self.assertEqual("window closed", (await self.socket.next("window_revoked"))["reason"])
+            watch.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await watch
+
+    async def test_a_failing_window_check_pauses_the_grant_and_never_ends_the_helper(self):
+        await self.manager.choose()
+        ident, entry = next(iter(self.manager.grants.items()))
+        access = entry["access"]
+        access.check = AsyncMock(side_effect=[ctypes.ArgumentError("argument 2: wrong type"), None])
+        entered, ticks = asyncio.Queue(), asyncio.Queue()
+
+        class Events:
+            def __init__(self, *args):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def wait(self):
+                entered.put_nowait(True)
+                await ticks.get()
+
+        with patch('partyline_helper.window_shares.WindowEvents', Events), \
+                self.assertLogs('partyline_helper.window_shares', 'ERROR'):
+            watch = asyncio.create_task(self.manager.watch())
+            await entered.get()
+            self.assertTrue(access.gate.revoked.is_set())  # paused, fail closed
+            self.assertFalse(watch.done())
+            ticks.put_nowait(True)
+            await entered.get()
+            self.assertFalse(access.gate.revoked.is_set())  # the next good check resumes it
+            self.assertIn(ident, self.manager.grants)
             watch.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await watch
