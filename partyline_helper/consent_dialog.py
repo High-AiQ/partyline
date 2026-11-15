@@ -12,6 +12,8 @@ import sys
 import threading
 
 from .dialog_proc import encode_request
+from .update_prompts import remember
+from .prompt_processes import remember as remember_child, forget as forget_child
 
 PROMPT_DELAY = 1.0
 TIMEOUT = 60
@@ -35,15 +37,19 @@ class ProcessDialog:
         # The request travels in argv (no stdin in a windowed process); the child watches our pid and
         # exits if this helper dies (e.g. is restarted after re-pairing), so no dialog outlives it.
         request = encode_request(title, message, timeout, kind, box=box, labels=labels)
-        self.proc = popen(dialog_command(request), **options)
+        self.proc = remember_child(popen(dialog_command(request), **options))
         self.checked = False
 
     def wait(self):
-        code = self.proc.wait()
+        try:
+            code = self.proc.wait()
+        finally:
+            forget_child(self.proc)
         self.checked = code == 4  # Yes with the optional box ticked
         return code in (0, 4)
 
     def close(self):
+        forget_child(self.proc)
         if self.proc.poll() is None:
             with contextlib.suppress(OSError):
                 self.proc.terminate()
@@ -102,6 +108,7 @@ async def confirm_labeled(title, message, labels, timeout=TIMEOUT, backend=None,
     return (await _confirm(title, message, timeout, backend, sleep, labels=labels))[0]
 
 
+@remember
 async def _confirm(title, message, timeout, backend, sleep, box=None, labels=None):
     backend = backend or default_backend()
     if backend is None:

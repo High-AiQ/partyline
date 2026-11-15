@@ -11,8 +11,6 @@ from pydantic import ValidationError
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from .helper_release import installer_info, update_available
-from partyline_helper import __version__ as helper_version
 from .screen_connections import device_valid
 from .local_tools import TOOL_MESSAGES, LocalTools
 from .screen_control import CONTROL_MESSAGES, ControlHub
@@ -34,6 +32,7 @@ from .screen_protocol import (
     HelperHello, HelperPreview, ShareAccepted, ShareCommand, ShareEnded,
 )
 from .op_timing import pushed
+from .screen_helper_updates import HelperUpdates, MESSAGES as UPDATE_MESSAGES
 
 class ScreenHub:
     def __init__(self, runtime):
@@ -52,6 +51,7 @@ class ScreenHub:
         self.standing_windows = StandingWindows(self)
         self.control = ControlHub(self)
         self.tools = LocalTools(self)
+        self.updates = HelperUpdates(self)
 
     @staticmethod
     def digest(token: str) -> str:
@@ -108,10 +108,7 @@ class ScreenHub:
                                   (ident, int(hello.window_access)))
             bump_runtime(self.runtime)
             self.pending_sockets.get(ident, set()).discard(ws)
-            if hello.update_check:
-                await pushed("screen", ws.send_json({"type": "ping", "helper_update": {
-                    "available": update_available(hello.helper_version), "version": helper_version,
-                    "url": installer_info(helper_version)["url"]}}))
+            await self.updates.connected(current, hello)
             await self._device_event(current, True)
             last_ping = time.monotonic()
             while True:
@@ -133,6 +130,9 @@ class ScreenHub:
                     await pushed("screen", ws.send_json({"type": "pong"}))
                     continue
                 if kind == "pong":
+                    continue
+                if kind in UPDATE_MESSAGES:
+                    await self.updates.receive(current, message)
                     continue
                 if kind == "window_access_changed":
                     await update_mirror(self, current, message)

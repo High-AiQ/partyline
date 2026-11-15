@@ -36,7 +36,8 @@ class ShareStart(BaseModel):
 
 
 def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
-    runtime.db._exec("DELETE FROM screen_line_window_grants")
+    runtime.db._exec("DELETE FROM screen_line_window_grants WHERE device_id NOT IN "
+                     "(SELECT device_id FROM screen_helper_updates)")
     runtime.window_access_notices = set()
     recover(runtime.db)
     recover_tools(runtime.db)
@@ -228,6 +229,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
     app.include_router(standing_router(runtime, hub))
     from .screen_audit_routes import audit_router
     app.include_router(audit_router(runtime))
+    from .screen_helper_updates import router_for as updates_router
+    app.include_router(updates_router(runtime, hub, app))
     app.include_router(router)
     app.include_router(control_router(runtime, hub, store))
     app.include_router(tools_router(runtime, hub, store))

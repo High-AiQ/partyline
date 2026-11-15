@@ -228,6 +228,8 @@ class WindowGrants:
 
     async def disconnected(self, device_id, *, reason="helper disconnected"):
         self.offers.pop(device_id, None)
+        if reason == "helper disconnected" and self.hub.updates.paused(device_id):
+            return
         for grant_id, entry in list(self.known.items()):
             if entry["device_id"] == device_id:
                 await self.revoke(grant_id, tell_helper=False, reason=reason)

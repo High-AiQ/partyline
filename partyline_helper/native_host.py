@@ -9,9 +9,20 @@ import sys
 from partyline.process_events import wait_pid
 from .chrome_identity import ORIGIN
 from .config import config_path, save_config
+from .update_preferences import enabled
+from . import __version__
 from .instance import InstanceLock
 from .native_codec import Decoder, frame, length, packets, read_frame
 from .native_socket import NativeSocket
+
+
+def hello():
+    try:
+        version = json.loads((config_path().parent / "chrome-extension" / "manifest.json").read_text())[
+            "version"]
+    except (OSError, ValueError, KeyError):
+        version = None
+    return {"method": "Partyline.hello", "extension_version": version, "auto_update": enabled()}
 
 
 def endpoint_path():
@@ -68,6 +79,7 @@ class Bridge:
                 return
             owned = True
             self.client = socket
+            self.native(hello())
             async for raw in socket:
                 message = json.loads(raw)
                 if "id" in message:
@@ -111,18 +123,22 @@ class Bridge:
                 return
 
 
-async def run(stream, output):
+async def run(stream, output, wait=wait_pid):
     lock = InstanceLock("chrome-native")
     if not lock.acquire():
-        return
+        # no-poll (b): extension reload may overlap the previous host's exit; wait once on its PID.
+        previous = running_pid()
+        if (not previous or previous == os.getpid() or
+                not await asyncio.to_thread(wait, previous, timeout=5) or not lock.acquire()):
+            return
     token = secrets.token_hex(32)
     bridge = Bridge(output, token)
     server = None
     try:
         server = await asyncio.start_server(bridge.accept, "127.0.0.1", 0)
         save_config({"port": server.sockets[0].getsockname()[1], "token": token,
-                     "pid": os.getpid()}, endpoint_path())
-        bridge.native({"method": "Partyline.hello"})
+                     "pid": os.getpid(), "version": __version__}, endpoint_path())
+        bridge.native(hello())
         await bridge.receive(stream)
     finally:
         if server:

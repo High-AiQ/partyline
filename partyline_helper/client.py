@@ -13,6 +13,8 @@ from .control import CONTROL_VERSION, Control
 from .capture_frames import frame as capture_frame, frame_from_capture as capture_frame_from_event
 from .preview import get_preview
 from .status import Status
+from .updates import Updates, MESSAGES as UPDATE_MESSAGES
+from .update_recovery import path as recovery_path
 from .tools import MESSAGES as TOOL_MESSAGES, TOOLS_VERSION, Tools
 from .chrome_operations import chrome_label, watch_windows
 from .window_shares import MESSAGES as WINDOW_MESSAGES, WINDOWS_VERSION, WindowShares
@@ -60,18 +62,7 @@ class Session(SessionTransport):
         self.window_access_audit = ScreenAccessAudit()
         self.status.window_access_enabled = self.window_access_enabled
         self.status.window_access_audit = self.window_access_audit
-
-    async def set_window_access(self, enabled):
-        from .screen_access_toggle import set_window_access
-        await set_window_access(self, enabled)
-
-    async def pause_windows(self):
-        from .screen_access_toggle import pause_windows
-        await pause_windows(self)
-
-    def request_window_access(self, enabled, loop):
-        from .screen_access_toggle import request_window_access
-        return request_window_access(self, enabled, loop)
+        self.updates = Updates(self)
 
     async def stop(self, reason="remote", notify=True):
         self.control.end(f"sharing stopped: {reason}")  # before any await: no queued action runs
@@ -145,6 +136,8 @@ class Session(SessionTransport):
 
     async def dispatch(self, message):
         kind = message["type"]
+        if await self.updates.paused_request(message):
+            return
         if kind in ("screen_windows", "attach_window"):
             self.windows.spawn_standing(message)
             return
@@ -177,11 +170,8 @@ class Session(SessionTransport):
             await self.window_task.submit(message["request_id"], read_options(message))
         elif kind == "window_element_action":
             await self.window_task.submit_action(message)
-        elif kind == "ping":
-            update = message.get("helper_update")
-            if isinstance(update, dict):
-                self.status.set_update(update)
-            await self.send("pong")
+        elif kind in UPDATE_MESSAGES:
+            await self.updates.message(message)
         elif kind not in ("pong", "snap", "error"):
             await self.send("error", request_id=message.get("request_id"), message=f"unsupported: {kind}")
 
@@ -201,7 +191,8 @@ class Session(SessionTransport):
                         press=PRESS_VERSION, chrome_dom=4, chrome={"state": "not_enabled",
                         "detail": self.windows.chrome.browser.detail,
                         "transport": self.windows.chrome.browser.transport},
-                        window_access=self.window_access_enabled, update_check=True)
+                        window_access=self.window_access_enabled, update_check=True,
+                        auto_update=self.updates.enabled, update_recovery=recovery_path().exists())
         self.status.chrome = ("Chrome: " + chrome_label(self.windows.chrome.browser, "not_enabled")
                               + " — " + self.windows.chrome.browser.detail)
         self.status.set("paired")
@@ -213,6 +204,8 @@ class Session(SessionTransport):
         self.status.window_access_toggle = lambda value: self.request_window_access(value, loop)
         from .screen_access_toggle import request_pause_windows
         self.status.window_access_pause = lambda: request_pause_windows(self, loop)
+        self.status.auto_update_toggle = lambda value: asyncio.run_coroutine_threadsafe(
+            self.updates.setting(value), loop)
         heartbeat = asyncio.create_task(self.heartbeat())
         self.status.stop_window_grant = lambda ident: loop.call_soon_threadsafe(self.windows.revoke, ident)
         window_watch = asyncio.create_task(watch_windows(self.windows))
@@ -231,6 +224,7 @@ class Session(SessionTransport):
                     await self.send("error", request_id=request_id,
                                     message="Invalid request or capture failed; see local terminal")
         finally:
+            await self.updates.close()
             self.windows.revoke_all(notify=False)  # disconnect gates every page before any awaited teardown
             await self.windows.chrome.close()
             heartbeat.cancel()
@@ -249,6 +243,7 @@ class Session(SessionTransport):
             await self.windows.close()
             self.status.stop_window_grant = None
             self.status.window_access_toggle = self.status.window_access_pause = None
+            self.status.auto_update_toggle = None
             self.status.set("offline")
         if self.socket.close_code in (1008, 4001, 4003, 4401, 4403):
             raise Revoked

@@ -170,6 +170,8 @@ async def post_interruption_notices(runtime, *,
 
 async def prepare_startup(runtime) -> None:
     """Settle pre-boot state before any reattachment or request can claim a row."""
+    if hub := getattr(runtime, "screen_hub", None):
+        hub.updates.start()
     try:
         await post_interruption_notices(runtime)
     except Exception:

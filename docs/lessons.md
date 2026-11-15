@@ -9,6 +9,48 @@ visibility filtering only to newly discovered candidates. Bounded text fallback 
 AX, `aria-label` and `title` provide no name. Regressions in `tests/test_cdp_focusable.py` retain
 zero-size controls and children, and prove named AX controls avoid extra detail calls.
 
+## 2026-11-15 — Reload and recovery intent need durable termination conditions
+
+The false assumptions were that a runtime reload necessarily changes the running extension’s
+version and that ending an update pause is enough to end an abandoned grant. Review probes
+restarted a worker with unchanged files and found repeated reloads, then expired an offline
+update and found its grants still in the database. The extension now records a version limit
+in local extension storage before reloading; server abandonment revokes database and in-memory
+grants and reports that access ended. The deadline shares the supervisor’s install and rollback
+budgets. Node restart regressions and `tests/test_screen_helper_updates.py` cover both failures.
+
+A related probe failed supervisor launch after a recovery snapshot was saved. That intent made
+the next connection report a successful update which had never happened. Pre-exit failure and
+cancellation now remove the snapshot and staged installer and restore every previously active,
+still-valid access gate. The supervisor’s event is persisted before it starts, and the recovery
+regressions cover failed launch, failed persistence and cancellation after snapshot creation.
+
+## 2026-11-15 — Runtime lifecycle hooks must allow runtimes without a screen hub
+
+The false assumption was that entering the server lifespan always supplies a screen hub. Cleanup
+fixtures deliberately construct a runtime without screen routes. An unconditional updater-start
+call failed before their housekeeping event, leaving the test waiting for a signal that could never
+arrive. Update deadlines now start and close through guarded startup/shutdown hooks. The existing
+`test_startup_yields_and_reattaches_while_housekeeping_is_blocked` regression exercises this runtime;
+helper-update tests separately cover arming and cancelling deadlines on a real hub.
+
+## 2026-11-15 — Completion state must precede the message that can acknowledge it
+
+A helper recovery response can return while its send coroutine is still yielding. Assigning
+`recovered` after sending `helper_update_restored` could discard that acknowledgment and make
+a successful update roll back. Recovery now stores its completion state before sending; the
+fake transport regression checks that state from inside the send itself. Register response
+state before any awaited write that makes a peer able to answer.
+
+## 2026-11-15 — A patched config reader does not redirect a separately imported writer
+
+The false assumption was that patching a preference module's `config_path` also redirected
+`save_config` imported from another module. Its implicit default resolved the writer's own path,
+so a new test wrote a credential-free fixture to the ordinary helper config location. That fixture
+was removed after checking its exact contents. Preference writes now pass the resolved path explicitly;
+the regression reads back the opt-in and failed-version marker from a temporary config and verifies
+that existing credential fields survive. Every test seam must control both reads and writes.
+
 ## 2026-11-15 — Native window pointers need discovery before attach
 
 The false assumption was that a safe owned dialog's HWND could be passed directly to

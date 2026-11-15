@@ -130,8 +130,8 @@ Helper**. The tooltip is cut to Windows' 127-character limit; a tray update that
 control consent and error messages (a failed pairing, a rejected link, a missing capability). Starting the program
 from the Start menu while it already runs, or before pairing, explains that in a dialog.
 
-**Upgrade.** Run the newer installer over the old one. It first runs `PartylineHelper.exe stop`, replaces the
-files, re-registers, and starts the helper again. Settings and pairing stay. The same stop also ends an older
+**Upgrade.** Run the newer installer over the old one. It first runs `PartylineHelper.exe stop`, installs the new
+version under `versions/<version>`, re-registers, and starts the helper again. Settings and pairing stay. The same stop also ends an older
 `uvx`-installed copy, because both use the lock and pid under `%LOCALAPPDATA%\Partyline`. **Uninstall** stops the
 helper and removes the registry entries and files; pairing credentials are left (use "Unpair" through
 `PartylineHelper.exe`, or delete `%LOCALAPPDATA%\Partyline\helper.json`), and revoke the computer in Partyline.
@@ -174,7 +174,7 @@ Computers list show available updates; unknown versions are not flagged.
 PyInstaller (`packaging/windows/PartylineHelper.spec`), checks the frozen exe (`selfcheck`), builds the installer
 with Inno Setup (`packaging/windows/installer.iss`), installs and uninstalls it silently as a smoke test and
 uploads `PartylineHelper-Setup-<version>.exe` as an artifact for helper pull requests. A `helper-v*` tag publishes
-only that versioned file to the helper release. The spec runs `packaging/windows/make_version_info.py` to write the exe's Windows
+the installer and its SHA-256 sidecar to the helper release. The spec runs `packaging/windows/make_version_info.py` to write the exe's Windows
 version resource from `partyline_helper.__version__`, and the workflow passes the same version to Inno Setup
 (`/DAppVersion`) for the installer's file name and version resource. The tag-version job dispatches the workflow for tags created with `GITHUB_TOKEN`.
 Locally on Windows, with uv:
@@ -918,15 +918,96 @@ helper version bump. Server changes require a server bump; a change touching bot
 requires both. Features bump minor, fixes patch, and breaking changes major.
 
 On a green merge, CI tags changed helper versions `helper-v<version>` and builds
-the Windows installer; it publishes a latest GitHub release named Partyline Helper
-with `PartylineHelper-Setup-<version>.exe`. Pull requests touching helper paths also build a
-smoke-test artifact. Server `v<version>` tags do not create releases.
+the Windows installer. Its release contains `PartylineHelper-Setup-<version>.exe`
+and `PartylineHelper-Setup-<version>.exe.sha256`. The extension manifest version must
+match the helper version; CI checks that before freezing. Pull requests also build
+smoke-test artifacts. Server `v<version>` tags do not create helper releases.
 
-At connection the server compares the reported version with the helper version in
-its own checkout; there is no network polling. The tray shows an update and a
-notification when available. On Windows the tray item opens the installer; on other
-platforms rerun the helper install command. The Computers list also shows updates.
-Older helpers that reported a Partyline 2.x version are treated as outdated.
+At connection or reconnection the server compares the reported helper version with
+its checkout. The tray and Computers list show available updates. Clicking the tray
+item opens the exact versioned Windows installer; other platforms use the helper
+install command. Legacy helpers reporting a Partyline 2.x version are flagged for
+manual installation. Automatic installation never downgrades or guesses an unknown version.
+
+**Install updates automatically** is available from helper 1.6.0 and is off by default.
+Install that first supporting version once using the existing tray installer link. If an older
+unpacked extension was already loaded, reload it once at `chrome://extensions` to load
+the new updater code; subsequent opted-in updates reload and reconnect automatically. Enable it in the Windows tray
+or Settings → Computers. The helper persists the choice beside its existing pairing
+configuration. Computers can queue a change while offline; the paired person's
+pending choice is sent on reconnect. Processes cannot change it. Changes are recorded
+in the server's helper update audit and the helper's local `screen-access-audit.jsonl`.
+
+With the setting enabled, a connection's update announcement makes one attempt.
+If the installer or checksum is missing (404), nothing happens: the release has not
+been published yet. Other transient download failures can be tried on the next connection or
+published-release event, without a timer. There is no polling, sleep loop, retry timer, or added background
+watcher. After both release assets exist, the captain makes one authenticated
+`POST /api/screen/helper-release-published` with `{"version":"<helper-version>"}`.
+Only a person or the root captain can announce the server's helper version. This
+push reaches computers connected before the installer finished building. CI can
+make the same call when `PARTYLINE_RELEASE_API` and `PARTYLINE_RELEASE_TOKEN` are
+configured as a repository variable and secret; keep the credential out of logs.
+
+**Pause, install, recover.** The helper announces the target version and waits for
+an acknowledgment that the server paused its grants. Reads, actions, evaluations,
+snapshots and clicks return `status:"paused", reason:"helper updating"` with a retry
+hint, including while the helper is disconnected. Outstanding exchanges are released
+with the same response. An earlier action may already have completed: inspect fresh
+state before requesting another action; Partyline never repeats the action itself.
+
+The helper saves window lifetime markers, the selected lines, standing access,
+existing mouse consent, Chrome transport preference and unanswered native prompts.
+Credentials stay in their existing private store. It invalidates action dispatch
+barriers and cancels pending work with one bounded event wait; an open prompt does
+not block installation. It then launches an independent supervisor and exits before
+the installer copies files. A single three-second exit deadline also ends any abandoned
+executor thread after the normal shutdown request. The per-user installer uses `/VERYSILENT
+/SUPPRESSMSGBOXES /NORESTART /START=1 /AUTOUPDATE=1`: no elevation, UAC or close-applications
+dialog. Each version has its own binary folder so the previous helper and native
+host remain available without holding the new files open.
+
+On restart, the server supplies only grants it still authorizes. The helper checks
+the live HWND, process identity, lifetime marker, desktop/integrity and protected-window
+floor before restoring each grant. A mismatch drops that grant and records a local
+note. Trees and snapshot coordinates are discarded; read again. Pending mouse-consent prompts are
+shown again without assuming an answer; the new answer applies to the restored window.
+Other interrupted requests are shown as information notices containing the original
+question and explaining that the request was cancelled. They have no discarded Yes/No answer.
+An interrupted operation needs a fresh request.
+After restoration the server lifts the pause and posts “helper updated to <version>;
+window access resumed” on affected lines. Tray notifications and the local audit
+record both the start and outcome.
+
+The supervisor waits on process completion and a Windows event, with bounded installer
+and reconnect deadlines. A failed installer or missing successful reconnect stops the
+new instance, restores the previous executable's registration and extension files,
+and starts it again. Registration also repairs the Start-menu shortcut and uninstall
+icon to point at the restored executable. The old helper reports the failure and restores still-valid
+grants. The server deadline includes the supervisor’s full install and rollback budgets plus
+a final reconnect allowance. An abandoned pause revokes offline or unconfirmed grants and
+reports that access ended. A late helper gets an empty recovery response without starting
+a second pause or posting another failure notice. Failed
+versions are remembered locally and are not automatically retried; the tray's manual
+installer link remains available. A failure before exit removes its recovery intent and downloaded installer and restores
+the access gates it invalidated. Completed attempts remove their downloaded installers.
+After success, cleanup retains the current and previous binaries, any identified live native
+host version, and newer installation folders; older unused versions are removed. If a live
+host cannot be identified, pruning waits for a later update event. Uninstall removes all versions.
+
+**Trust model.** Opting in grants the same release publisher the ability to run an
+installer as clicking the tray's installer link. The helper constructs and checks the
+exact `installer_info` URL, requires HTTPS with normal certificate and hostname
+verification (including redirects), downloads into its own data directory, and
+requires the matching release's SHA-256 sidecar. The checksum detects corrupt or
+mismatched assets; it does not protect against a compromised release publisher who
+can replace both files. Signed releases declare `# authenticode=required` in the checksum sidecar,
+which requires Windows Authenticode verification even from an earlier unsigned build.
+Builds made with `WINDOWS_SIGNING=true` also pin that requirement for future updates
+through Windows Authenticode verification through `WinVerifyTrust`, with no signature UI
+and certificate revocation checks. A missing or invalid signature fails closed. The
+prototype remains unsigned until signing is configured; enabling automatic updates
+does not supply an independent signing identity or bypass the Windows trust store.
 
 ### Helper 1.4.0
 
@@ -1192,8 +1273,17 @@ for the current user only. After installing/updating the helper, load it once:
 1. Open `chrome://extensions` and turn on **Developer mode**.
 2. Choose **Load unpacked** and select `%LOCALAPPDATA%\Partyline\chrome-extension`.
 3. Leave the extension enabled. It stays installed across Chrome restarts. Its toolbar
-   button reconnects the native host after an update. The installer pauses that host before
-   replacing its executable; ordinary helper restarts keep the native port alive.
+   button offers manual reconnect. With **Install updates automatically** enabled, upgrades
+   keep the native port alive from its previous version folder. When the updated helper connects,
+   the host's hello reads the installed folder's manifest version and the persisted opt-in. If
+   those files are newer than `chrome.runtime.getManifest().version`, the extension calls
+   `chrome.runtime.reload()`. Its worker reconnects the native host on startup, without a toolbar
+   click. Chrome local extension storage records the attempted version before reloading.
+   The same or an older target cannot trigger another automatic reload, even if the
+   unpacked extension was loaded from a different folder and its running version did not change.
+   A newer installed version can make one new attempt. Equal, older, invalid or unknown versions
+   never trigger reload; the opt-in must be true.
+   Manual installations and uninstalls can suspend the host before replacing its registration.
 
 For a source or `uv tool` install, run `partyline-helper install`; its output names the
 extension folder and native host. The host launcher must be installed alongside that
@@ -1201,7 +1291,7 @@ helper. The Windows installer includes a dedicated console-subsystem native exec
 its stdout carries binary protocol frames, never log messages. The host allows only
 `chrome-extension://plbehhebbdldlggkkpafpepcobmkojeb/`, fixed by the extension's public
 manifest key. There are no content scripts or host permissions: the only permissions are
-`debugger`, `tabs`, and `nativeMessaging`. A Web Store listing is a possible later step;
+`debugger`, `tabs`, `nativeMessaging`, and `storage` (the local reload-attempt marker). A Web Store listing is a possible later step;
 loading the installed folder works without one.
 
 The extension is preferred when connected. The tray has a dedicated **Chrome: extension
@@ -1243,8 +1333,9 @@ the endpoint and PID files to name the same live native-host process. It never t
 host's startup lock, so discovery cannot reject a concurrently starting Chrome host, and a
 crashed host's stale file cannot reopen remote-debugging approval on every operation. Authentication accepts one unchunked
 frame of at most 1 KiB. Automatic native-port reconnect is limited to one attempt per startup
-or toolbar gesture; a failed decode and an installer suspension clean up locally, and the
-toolbar can connect again without restarting Chrome.
+or toolbar gesture; a failed decode and an explicit installer suspension clean up locally.
+An automatic extension reload starts a fresh worker and reconnects without a gesture.
+The toolbar can also connect again without restarting Chrome.
 
 File-input commands (`DOM.setFileInputFiles`) are relayed to Chrome without broader
 permissions, but that path has not been verified against real Chrome's debugger-extension

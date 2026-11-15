@@ -328,7 +328,8 @@ class TrayTests(unittest.TestCase):
         shown = tray.start_tray(status, FAKE_BACKEND)
         icon = FakeIcon.instances[0]
         self.assertTrue(icon.running)
-        label, chrome, stop, stop_all, choose_window, end_tools, end_checks, quit_item = icon.menu[:8]
+        label, chrome, stop, stop_all, choose_window, end_tools, end_checks = icon.menu[:7]
+        quit_item = next(item for item in icon.menu if item.text == "Quit Partyline Helper")
         self.assertEqual(chrome.text(None), "Chrome: not installed")
         status.chrome = "Chrome: extension connected"
         self.assertEqual(chrome.text(None), "Chrome: extension connected")

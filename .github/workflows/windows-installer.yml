@@ -58,6 +58,16 @@ jobs:
         shell: pwsh
         run: uv run --locked --extra helper python packaging/windows/make_icon.py build/PartylineHelper.ico
 
+      - name: pin signing policy and verify extension version
+        shell: pwsh
+        env:
+          SIGNED: ${{ vars.WINDOWS_SIGNING }}
+        run: |
+          $policy = if ($env:SIGNED -eq 'true') { 'True' } else { 'False' }
+          "REQUIRE_SIGNATURE = $policy" | Set-Content partyline_helper/update_policy.py
+          $manifest = Get-Content partyline_chrome/manifest.json | ConvertFrom-Json
+          if ($manifest.version -ne $env:VERSION) { throw 'extension version must match the helper' }
+
       - name: freeze the helper (PyInstaller, onedir, windowed)
         shell: pwsh
         run: uv run --locked --extra helper --with pyinstaller==6.14.2 pyinstaller --noconfirm packaging/windows/PartylineHelper.spec
@@ -121,7 +131,8 @@ jobs:
       - name: install and uninstall silently, without administrator rights
         shell: pwsh
         run: |
-          $app = "$env:LOCALAPPDATA\Programs\Partyline Helper"
+          $root = "$env:LOCALAPPDATA\Programs\Partyline Helper"
+          $app = "$root\versions\$env:VERSION"
           $setup = Start-Process "build\installer\PartylineHelper-Setup-$env:VERSION.exe" -Wait -PassThru `
             -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$PWD\install.log"
           if ($setup.ExitCode -ne 0) { Get-Content install.log; throw "setup exited $($setup.ExitCode)" }
@@ -136,7 +147,7 @@ jobs:
           $native = Get-Content "$env:LOCALAPPDATA\Partyline\chrome-native-host.json" | ConvertFrom-Json
           if ($native.allowed_origins.Count -ne 1) { throw "native origin scope is too broad" }
           if (-not (Test-Path "$env:LOCALAPPDATA\Partyline\chrome-extension\manifest.json")) { throw "extension missing" }
-          $un = Start-Process "$app\unins000.exe" -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES"
+          $un = Start-Process "$root\unins000.exe" -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES"
           if ($un.ExitCode -ne 0) { throw "uninstall exited $($un.ExitCode)" }
           reg query "HKCU\Software\Classes\partyline" 2>$null
           if ($LASTEXITCODE -eq 0) { throw "uninstall left the partyline:// handler behind" }
@@ -144,10 +155,22 @@ jobs:
           if ($LASTEXITCODE -eq 0) { throw "uninstall left the native host behind" }
           $global:LASTEXITCODE = 0  # the failed query above is the expected outcome, not the step's exit code
 
+      - name: checksum the final installer
+        shell: pwsh
+        env:
+          SIGNED: ${{ vars.WINDOWS_SIGNING }}
+        run: |
+          $name = "PartylineHelper-Setup-$env:VERSION.exe"
+          $hash = (Get-FileHash "build/installer/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content "build/installer/$name.sha256" -Encoding ascii
+          if ($env:SIGNED -eq 'true') {
+            '# authenticode=required' | Add-Content "build/installer/$name.sha256" -Encoding ascii
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: PartylineHelper-Setup-${{ env.VERSION }}-${{ github.sha }}
-          path: build/installer/PartylineHelper-Setup-${{ env.VERSION }}.exe
+          path: build/installer/PartylineHelper-Setup-${{ env.VERSION }}.exe*
           if-no-files-found: error
 
       - name: attach to the release
@@ -161,5 +184,19 @@ jobs:
             gh release create $env:TAG --latest --title "Partyline Helper $env:VERSION" --notes "Partyline Helper $env:VERSION. PartylineHelper-Setup-$env:VERSION.exe, the Windows screen-helper installer, is attached (unsigned: see docs/screen-helper.md)."
             if ($LASTEXITCODE -ne 0) { throw "cannot create the release" }
           }
-          gh release upload $env:TAG "build/installer/PartylineHelper-Setup-$env:VERSION.exe" --clobber
+          gh release upload $env:TAG "build/installer/PartylineHelper-Setup-$env:VERSION.exe" "build/installer/PartylineHelper-Setup-$env:VERSION.exe.sha256" --clobber
           if ($LASTEXITCODE -ne 0) { throw "cannot upload the installer" }
+
+      # Optional deployment integration. A captain can make the same one-shot call after the asset exists.
+      - name: announce published helper release
+        if: ${{ env.TAG != '' && vars.PARTYLINE_RELEASE_API != '' }}
+        shell: pwsh
+        env:
+          RELEASE_API: ${{ vars.PARTYLINE_RELEASE_API }}
+          RELEASE_TOKEN: ${{ secrets.PARTYLINE_RELEASE_TOKEN }}
+        run: |
+          if (-not $env:RELEASE_TOKEN) { throw 'release notification credential is missing' }
+          $headers = @{ Authorization = "Bearer $env:RELEASE_TOKEN" }
+          $body = @{ version = $env:VERSION } | ConvertTo-Json
+          Invoke-RestMethod -Method Post -Uri "$env:RELEASE_API/api/screen/helper-release-published" `
+            -Headers $headers -ContentType 'application/json' -Body $body

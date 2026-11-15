@@ -150,6 +150,8 @@ def snapshot_shutdown_plan(db, live: Mapping[str, object]) -> set[str]:
 async def shutdown_runtime(runtime) -> None:
     """Snapshot recovery targets before stopping this generation's processes."""
     runtime.stopping = True
+    if hub := getattr(runtime, "screen_hub", None):
+        hub.updates.close()
     runtime._shutdown_resume = snapshot_shutdown_plan(runtime.db, runtime.live)
     from .attachment_stop_audit import direct_stop
     for ident, adapter in list(runtime.live.items()):

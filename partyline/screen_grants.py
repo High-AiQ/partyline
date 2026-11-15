@@ -49,12 +49,14 @@ def resolve_window(hub, principal, window=None, device_name=None):
     from .screen_device_access import standing_devices
 
     rows = [dict(row) for row in hub.runtime.db._exec(GRANTS).fetchall()]
-    online = [g for g in rows if g["device_id"] in hub.devices and
+    online = [g for g in rows if (g["device_id"] in hub.devices or
+              (getattr(hub, "updates", None) and hub.updates.paused(g["device_id"]))) and
               (not g["standing_access"] or
+               (getattr(hub, "updates", None) and hub.updates.paused(g["device_id"])) or
                any(device["id"] == g["device_id"] for device in standing_devices(
                    hub, getattr(principal, "conv_id", None) or g["conv_id"])))]
     if device_name:
-        online = [g for g in online if hub.devices[g["device_id"]]["name"] == device_name]
+        online = [g for g in online if g["device_name"] == device_name]
     if is_human(principal):
         own = [g for g in online if g["owner_id"] == principal.user_id]
         relevant = None
@@ -76,6 +78,9 @@ def resolve_window(hub, principal, window=None, device_name=None):
         raise HTTPException(409, "Several windows are shared with you; "
                             "specify window by grant id or title: " + choices)
     grant = own[0]
+    if getattr(hub, "updates", None) and hub.updates.paused(grant["device_id"]):
+        from .screen_helper_updates import HelperUpdating
+        raise HelperUpdating(grant)
     if not is_human(principal) and grant["conv_id"] != principal.conv_id:
         grant["inherited_from"] = grant["line_name"]
     return grant, hub.devices[grant["device_id"]]

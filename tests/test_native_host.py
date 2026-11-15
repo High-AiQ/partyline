@@ -62,6 +62,7 @@ class NativeHostTests(unittest.IsolatedAsyncioTestCase):
         bridge.client = None
         await bridge.accept(reader({"token": "secret"}, {"id": 1, "method": "DOM.enable"}), Writer())
         output.seek(0)
+        self.assertEqual(read_frame(output)["method"], "Partyline.hello")
         self.assertEqual(read_frame(output)["method"], "DOM.enable")
         self.assertEqual(read_frame(output)["method"], "Partyline.reset")
         self.assertIsNone(bridge.client)
@@ -247,3 +248,25 @@ class NativeHostTests(unittest.IsolatedAsyncioTestCase):
                         self.assertIsNone(native_host.discover())
             finally:
                 host.release()
+
+    async def test_reload_waits_once_for_previous_native_host_exit_before_claiming_the_lock(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(native_host, "config_path", return_value=Path(directory) / "helper.json"), \
+                patch.object(native_host, "InstanceLock") as locking, \
+                patch.object(native_host, "running_pid", return_value=123), \
+                patch.object(native_host.asyncio, "start_server", AsyncMock()) as starting, \
+                patch.object(native_host.Bridge, "receive", AsyncMock()):
+            server = starting.return_value
+            server.sockets = [Mock(getsockname=lambda: ("", 1234))]
+            server.close = Mock()
+            server.wait_closed = AsyncMock()
+            locking.return_value.acquire.side_effect = [False, True]
+            wait = Mock(return_value=True)
+            await native_host.run(io.BytesIO(), io.BytesIO(), wait=wait)
+            wait.assert_called_once_with(123, timeout=5)
+            self.assertEqual(locking.return_value.acquire.call_count, 2)
+            locking.return_value.acquire.side_effect = [False]
+            wait.return_value = False
+            starting.reset_mock()
+            await native_host.run(io.BytesIO(), io.BytesIO(), wait=wait)
+            starting.assert_not_called()

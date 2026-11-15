@@ -14,6 +14,10 @@ def owner_devices(hub, owner_id):
     for row in rows:
         item = dict(row)
         online = hub.devices.get(item["id"])
+        preference = hub.runtime.db._exec("SELECT enabled FROM screen_helper_preferences WHERE device_id=?",
+                                          (item["id"],)).fetchone()
+        item["auto_update"] = bool(preference and preference["enabled"])
+        item["updating"] = bool(getattr(hub, "updates", None) and hub.updates.paused(item["id"]))
         grants = device_grants(hub.runtime.db, item["id"])
         for grant in grants:
             if shot := hub.snapshots.last_screenshot(grant["id"]):

@@ -8,6 +8,7 @@
 #define VersionNumbers AppVersion + ".0"
 #define AppName "Partyline Helper"
 #define AppExe "PartylineHelper.exe"
+#define BinaryDir "{app}\versions\" + AppVersion
 
 [Setup]
 AppId={{B6F1D2A4-5C1E-4E0B-9C57-3A7E2D0F4A61}
@@ -28,7 +29,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\..\build\installer
 OutputBaseFilename=PartylineHelper-Setup-{#AppVersion}
 SetupIconFile=..\..\build\PartylineHelper.ico
-UninstallDisplayIcon={app}\{#AppExe}
+UninstallDisplayIcon={#BinaryDir}\{#AppExe}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -43,21 +44,21 @@ SignedUninstaller=yes
 #endif
 
 [Files]
-Source: "..\..\dist\PartylineHelper\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "..\..\dist\PartylineHelper\*"; DestDir: "{#BinaryDir}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
+Name: "{autoprograms}\{#AppName}"; Filename: "{#BinaryDir}\{#AppExe}"
 
 [Run]
 ; Order matters: end any helper still running (also an older uvx/pythonw copy: same lock files), register
 ; partyline:// and start-at-login with the install logic the helper already has, then start it.
-Filename: "{app}\{#AppExe}"; Parameters: "stop"; Flags: runhidden waituntilterminated; StatusMsg: "Stopping the running helper..."
-Filename: "{app}\{#AppExe}"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Registering partyline:// links..."
-Filename: "{app}\{#AppExe}"; Parameters: "start"; Flags: runhidden nowait; Check: ShouldStartHelper
+Filename: "{#BinaryDir}\{#AppExe}"; Parameters: "stop"; Flags: runhidden waituntilterminated; StatusMsg: "Stopping the running helper..."
+Filename: "{#BinaryDir}\{#AppExe}"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Registering partyline:// links..."
+Filename: "{#BinaryDir}\{#AppExe}"; Parameters: "start"; Flags: runhidden nowait; Check: ShouldStartHelper
 
 [UninstallRun]
-Filename: "{app}\{#AppExe}"; Parameters: "stop"; Flags: runhidden waituntilterminated; RunOnceId: "StopHelper"
-Filename: "{app}\{#AppExe}"; Parameters: "uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "Unregister"
+Filename: "{#BinaryDir}\{#AppExe}"; Parameters: "stop"; Flags: runhidden waituntilterminated; RunOnceId: "StopHelper"
+Filename: "{#BinaryDir}\{#AppExe}"; Parameters: "uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "Unregister"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
@@ -70,14 +71,18 @@ FinishedLabel=Partyline Helper is installed (once paired it shows a round icon i
 // that would not stop leaves a broken install, so a failure is reported and the caller aborts.
 function HelperStopped: Boolean;
 var
-  Exe: String;
+  Exe, RegisteredExe: String;
   Code: Integer;
 begin
-  Exe := ExpandConstant('{app}\{#AppExe}');
+  Exe := GetPreviousData('HelperExe', ExpandConstant('{app}\{#AppExe}'));
+  // Rollback restores this registration even when Setup's previous-data entry names a failed version.
+  if RegQueryStringValue(HKCU, 'Software\Partyline\Helper', 'Executable', RegisteredExe) then
+    if FileExists(RegisteredExe) then
+      Exe := RegisteredExe;
   Result := True;
   if FileExists(Exe) then
     Result := Exec(Exe, 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
-  if Result and FileExists(ExpandConstant('{app}\PartylineChromeHost.exe')) then
+  if Result and (ExpandConstant('{param:AUTOUPDATE|0}') <> '1') and FileExists(Exe) then
     Result := Exec(Exe, 'suspend-chrome', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
 end;
 
@@ -102,4 +107,9 @@ end;
 function ShouldStartHelper: Boolean;
 begin
   Result := (not WizardSilent) or (ExpandConstant('{param:START|0}') = '1');
+end;
+
+procedure RegisterPreviousData(PreviousDataKey: Integer);
+begin
+  SetPreviousData(PreviousDataKey, 'HelperExe', ExpandConstant('{#BinaryDir}\{#AppExe}'));
 end;

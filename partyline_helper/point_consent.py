@@ -7,6 +7,7 @@ import asyncio
 import time
 
 from . import consent_dialog
+from .update_prompts import SCOPE
 
 TITLE = "Partyline: mouse click"
 ALLOW, DENY = "Allow for this window", "Deny"
@@ -43,7 +44,14 @@ class MouseConsent:
                 return SOON
             line = str(entry.get("target", {}).get("line_name") or "a line")
             text = question(line, str(message.get("agent") or "an agent"), str(entry.get("title", "")))
-            if await self.ask(TITLE, text, labels=(ALLOW, DENY), timeout=SECONDS) is True:
+            access = entry.get("access")
+            token = SCOPE.set({"kind": "mouse", "grant": getattr(
+                getattr(access, "session", None), "window_grant_id", None)})
+            try:
+                yes = await self.ask(TITLE, text, labels=(ALLOW, DENY), timeout=SECONDS)
+            finally:
+                SCOPE.reset(token)
+            if yes is True:
                 entry["mouse_approved"] = True
                 entry.pop("mouse_denied", None)
                 return None

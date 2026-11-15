@@ -23,6 +23,7 @@ def router_for(runtime, hub):
         principal = request_principal(request)
         if is_human(principal) or principal.kind != "machine" or principal.conv_id != conv_id:
             raise HTTPException(403, "standing window access is only available on the caller's own line")
+        hub.updates.standing_pause(conv_id)
         devices = [device for device in standing_devices(hub, conv_id)
                    if device.get("id") in hub.devices]
         if len(devices) != 1:
@@ -30,6 +31,7 @@ def router_for(runtime, hub):
         return principal, devices[0]
 
     def still_authorized(device, conv_id):
+        hub.updates.standing_pause(conv_id)
         if (hub.devices.get(device["id"]) is not device or
                 device not in standing_devices(hub, conv_id)):
             raise HTTPException(403, "window access is no longer enabled for this line")

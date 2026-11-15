@@ -7,6 +7,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from .prompt_processes import run as run_prompt
+
 from .uia_process import read
 from .timing import Timing
 from .window_events import WindowEvents
@@ -18,7 +20,7 @@ MAX_WALKS = 4
 MAX_RETAINED_IDS = 120_000  # match the server tree cap, including IDs merged by filtered reads
 
 
-def select_window(platform=sys.platform, run=subprocess.run):
+def select_window(platform=sys.platform, run=run_prompt):
     if platform != "win32":
         return None
     with tempfile.TemporaryDirectory(prefix="partyline-window-") as directory:
@@ -86,7 +88,7 @@ class WindowAccess:
         self.unavailable = reason
         self.session.status.window_title = None
         if grant:
-            if grant.get("marker"):
+            if grant.get("marker") and not getattr(self, "preserve_update", False):
                 unmark(grant)
             self.session.status.changed()
             if self.on_revoke:
