@@ -45,6 +45,8 @@ def main(argv=None):
     commands.add_parser("start", help="Start the helper in the background (what the Start menu runs)")
     commands.add_parser("version", help="Print the helper version")
     commands.add_parser("suspend-chrome", help=argparse.SUPPRESS)
+    update = commands.add_parser("update-install", help=argparse.SUPPRESS)
+    update.add_argument("plan", type=Path)
     commands.add_parser("selfcheck", help="Check that every module the helper needs is present")
     dialog = commands.add_parser("dialog", help=argparse.SUPPRESS)  # the frozen exe's dialog child process
     dialog.add_argument("request")
@@ -78,6 +80,9 @@ def main(argv=None):
         elif args.command == "suspend-chrome":
             from .native_shutdown import pause_for_install
             print(pause_for_install())
+        elif args.command == "update-install":
+            from .update_supervisor import run as install_update
+            install_update(args.plan)
         elif args.command == "selfcheck":
             from .runtime import selfcheck
             problems = selfcheck()

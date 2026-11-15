@@ -7,24 +7,28 @@ import asyncio
 import time
 
 from . import consent_dialog
+from .update_prompts import SCOPE
 
-TITLE = "Partyline: mouse click"
+TITLE = "Partyline: mouse and keyboard"
 ALLOW, DENY = "Allow for this window", "Deny"
 SECONDS = 25  # the server waits 35 s for the whole click
 COOLDOWN = 120  # after a Deny the same grant is not asked again for this long
-DENIED = "the person declined mouse clicks in this window"
-SOON = "the person declined mouse clicks in this window a moment ago; do not ask again for a while"
+DENIED = "the person declined mouse and keyboard input in this window"
+SOON = ("the person declined mouse and keyboard input in this window a moment ago; "
+        "do not ask again for a while")
 
 
 def question(line, agent, title):
-    return (f"Allow {line[:60]}/{agent[:40]} to click with the mouse in {title[:80]}?\n\n"
-            "Its click moves your real pointer for an instant and brings that window to the front. "
-            "Clicks stay inside that window. This lasts until the window is no longer shared.")
+    return (f"Allow {line[:60]}/{agent[:40]} to use the mouse and keyboard in {title[:80]}?\n\n"
+            "Each click, scroll, drag or key press moves your real pointer for an instant and brings "
+            "that window to the front; typing goes to it. Input stays inside that window, and never into "
+            "a password field. This lasts until the window is no longer shared.")
 
 
 def clear(entry):
     entry.pop("mouse_approved", None)
     entry.pop("mouse_denied", None)
+    entry.pop("point_clicked", None)
 
 
 class MouseConsent:
@@ -43,7 +47,14 @@ class MouseConsent:
                 return SOON
             line = str(entry.get("target", {}).get("line_name") or "a line")
             text = question(line, str(message.get("agent") or "an agent"), str(entry.get("title", "")))
-            if await self.ask(TITLE, text, labels=(ALLOW, DENY), timeout=SECONDS) is True:
+            access = entry.get("access")
+            token = SCOPE.set({"kind": "mouse", "grant": getattr(
+                getattr(access, "session", None), "window_grant_id", None)})
+            try:
+                yes = await self.ask(TITLE, text, labels=(ALLOW, DENY), timeout=SECONDS)
+            finally:
+                SCOPE.reset(token)
+            if yes is True:
                 entry["mouse_approved"] = True
                 entry.pop("mouse_denied", None)
                 return None

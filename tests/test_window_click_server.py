@@ -18,7 +18,7 @@ GEOMETRY = {"rect": [100, 50, 500, 350], "size": [400, 300], "dpi": 96,
 
 
 def node(ident, name="", actions=("invoke",), bounds=None, flags=(), viewport=None):
-    return SimpleNamespace(id=ident, name=name, actions=actions, bounds=bounds, flags=flags,
+    return SimpleNamespace(id=ident, name=name, actions=actions, bounds=bounds, flags=flags, type="Button",
                            cached={"viewport_bounds": viewport} if viewport else {})
 
 
@@ -35,6 +35,12 @@ class ClickFixture(SnapshotFixture):
             self.clicks.append(message)
             self.hub.elements.receive(self.device, {"type": "window_element_result",
                                                     "request_id": message["request_id"], **self.click_answer})
+            return
+        if message["type"] == "read_window_elements":  # the fresh read behind a failure's marked picture
+            self.sent.append(message)
+            self.hub.elements.receive(self.device, {
+                "request_id": message["request_id"], "status": "completed", "snapshot_id": "t",
+                "elements": [{"id": "win", "control_type": "Window", "name": "Editor"}]})
             return
         await super().receive(message)
 
@@ -118,20 +124,29 @@ class WindowClickTests(ClickFixture, unittest.IsolatedAsyncioTestCase):
                            (200, 5, "client area"), (10, 300, "outside the snapshot image")):
             with self.subTest(x=x, y=y):
                 response = await self.click(x=x, y=y)
-                self.assertEqual(409, response.status_code)
-                self.assertIn(text, response.json()["detail"])
+                body = response.json()  # a refusal is an answer, so it can carry the picture to retry from
+                self.assertEqual((200, "failed", "outside"),
+                                 (response.status_code, body["status"], body["reason"]))
+                self.assertIn(text, body["error"])
+                self.assertIn("file", body["screenshot"])
         self.assertEqual([], self.clicks)
 
     async def test_an_unknown_snapshot_or_another_grants_snapshot_is_refused(self):
         await self.grant("a")
         await self.snapshot()
         response = await self.click(snapshot="nope")
-        self.assertEqual((409, STALE), (response.status_code, response.json()["detail"]))
+        body = response.json()
+        self.assertEqual((200, "failed", "stale", STALE),
+                         (response.status_code, body["status"], body["reason"], body["error"]))
+        self.assertEqual("g1", self.sent[-1]["grant_id"])  # the picture is of the granted window alone
+        self.assertEqual("snapshot_window", self.sent[-1]["type"])
+        self.assertTrue(body["screenshot"]["marks"] is not None and body["screenshot"]["file"]["id"])
         self.assertIn("take a fresh screen_window_snapshot", STALE)
         await self.hub.window_grants.revoke("g1")  # the grant ends: its snapshots go with it
         self.assertIsNone(self.hub.snapshots.geometry.get("g1", "s1"))
         await self.grant("a", grant_id="g2", hwnd=11)
-        self.assertEqual(409, (await self.click()).status_code)  # s1 belonged to g1, not g2
+        other = (await self.click()).json()  # s1 belonged to g1, not g2
+        self.assertEqual(("failed", "stale"), (other["status"], other["reason"]))
         self.assertEqual([], self.clicks)
 
     async def test_a_helper_that_cannot_click_is_told_to_update(self):
@@ -185,7 +200,7 @@ class WindowClickTests(ClickFixture, unittest.IsolatedAsyncioTestCase):
         await self.snapshot()
         response = await self.click(capture="thumb")
         after = response.json()["after"]
-        self.assertEqual(["thumb"], list(after["variants"]))
+        self.assertTrue(after["file"]["id"])
         self.assertEqual("s1", after["snapshot"])
         self.assertEqual(2, len(self.requests))
 
@@ -208,10 +223,12 @@ class WindowClickTests(ClickFixture, unittest.IsolatedAsyncioTestCase):
             headers=self.machine("a"))).json()
         request = self.requests[0]
         self.assertTrue(request["overlay"])
-        self.assertEqual([{"n": 1, "id": "e1", "name": "Save", "screen": [120, 90, 180, 110]},
-                          {"n": 2, "id": "e2", "name": "Page", "viewport": [0, 0, 50, 20]}],
+        self.assertEqual([{"n": 1, "id": "e1", "role": "Button", "name": "Save",
+                           "screen": [120, 90, 180, 110]},
+                          {"n": 2, "id": "e2", "role": "Button", "name": "Page", "viewport": [0, 0, 50, 20]}],
                          request["marks"])
-        self.assertEqual([{"n": 1, "id": "e1", "name": "Save", "box": [20, 40, 80, 60]}], body["marks"])
+        self.assertEqual([{"n": 1, "id": "e1", "role": "", "name": "Save", "box": [20, 40, 80, 60]}],
+                         body["marks"])
 
     async def test_a_marked_snapshot_without_a_read_says_so_and_still_gets_the_grid(self):
         await self.grant("a")
@@ -233,7 +250,8 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(["left", "right"], properties["button"]["enum"])
         self.assertEqual([1, 2], properties["clicks"]["enum"])
         self.assertNotIn("frame", properties)
-        self.assertIn("Prefer element actions", tool["description"])
+        self.assertIn("Last resort", tool["description"])
+        self.assertIn("Never click with page scripts", tool["description"])
         for state in ({"dynamic_screen_tools": True, "screen_read": True},
                       {"dynamic_screen_tools": True, "screen_windows": True, "screen_control": True}):
             names = {item["name"] for item in tools_control.tool_list(state)}
@@ -291,21 +309,22 @@ class GeometryTests(unittest.TestCase):
 
 
 class MarkTests(unittest.TestCase):
-    def test_marks_prefer_actionable_visible_elements_and_keep_tree_order(self):
-        nodes = {"a": node("a", "Label", actions=(), bounds=(0, 0, 9, 9)),
+    def test_marks_list_only_visible_actionable_elements_in_tree_order(self):
+        nodes = {"a": node("a", "Label", actions=("scroll_into_view", "press"), bounds=(0, 0, 9, 9)),
                  "b": node("b", "Go", bounds=(1, 1, 5, 5)),
                  "c": node("c", "Hidden", bounds=(1, 1, 5, 5), flags=("off",)),
                  "d": node("d", "", actions=(), bounds=(1, 1, 5, 5)),
                  "e": node("e", "Nobox"), "f": node("f", "Bad", bounds=(1, 2, 3))}
         tree = SimpleNamespace(order=list(nodes), nodes=nodes)
-        self.assertEqual([("a", 1), ("b", 2)], [(m["id"], m["n"]) for m in mark_inputs(tree)])
-        self.assertEqual([("b", 1)], [(m["id"], m["n"]) for m in mark_inputs(tree, limit=1)])
+        self.assertEqual([("b", 1)], [(m["id"], m["n"]) for m in mark_inputs(tree)])
+        self.assertEqual({"n": 1, "id": "b", "role": "Button", "name": "Go", "screen": [1, 1, 5, 5]},
+                         mark_inputs(tree)[0])
         many = {str(i): node(str(i), "x", bounds=(0, 0, 4, 4)) for i in range(MAX_MARKS + 5)}
         self.assertEqual(MAX_MARKS, len(mark_inputs(SimpleNamespace(order=list(many), nodes=many))))
 
     def test_helper_marks_are_cut_to_whole_numbers(self):
         self.assertEqual([], clean_marks("nope"))
-        self.assertEqual([{"n": 1, "id": "i", "name": "n", "box": [1, 2, 3, 4]}],
+        self.assertEqual([{"n": 1, "id": "i", "role": "", "name": "n", "box": [1, 2, 3, 4]}],
                          clean_marks([{"n": 1, "id": "i", "name": "n", "box": [1, 2, 3, 4]},
                                       {"n": 2, "box": [1.5, 2, 3, 4]}, {"n": "3", "box": [1, 2, 3, 4]}]))
 

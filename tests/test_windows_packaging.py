@@ -170,7 +170,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_the_smoke_test_does_not_fail_on_its_last_expected_failure(self):
         step = WORKFLOW[WORKFLOW.index("name: install and uninstall silently"):]
-        step = step[:step.index("- uses: actions/upload-artifact")].rstrip()
+        step = step.split("\n      - ", 1)[0].rstrip()
         self.assertTrue(step.splitlines()[-1].strip().startswith("$global:LASTEXITCODE = 0"))
 
     def test_the_frozen_build_is_checked_before_it_is_packed(self):

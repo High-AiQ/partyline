@@ -84,6 +84,12 @@ export const screenApi = {
       method: "POST",
       body: { code, device_name, os },
     }),
+  autoUpdate: (deviceId: string, enabled: boolean) =>
+    request(`/api/screen/devices/${encodeURIComponent(deviceId)}/auto-update`, {
+      schema: z.object({ ok: z.literal(true) }),
+      method: "PUT",
+      body: { enabled },
+    }),
   revoke: (deviceId: string) =>
     request("/api/screen/devices/" + encodeURIComponent(deviceId), {
       schema: z.object({ ok: z.literal(true) }),

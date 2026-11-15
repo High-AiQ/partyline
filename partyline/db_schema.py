@@ -7,6 +7,7 @@ from .tool_telemetry_schema import MIGRATIONS as TOOL_TELEMETRY
 from .storage_cleanup_schema import MIGRATIONS as STORAGE_CLEANUP
 from .turn_usage_schema import MIGRATIONS as TURN_USAGE
 from .reviewer_progress_schema import MIGRATIONS as REVIEWER_PROGRESS
+from .db_schema_helper_updates import HELPER_UPDATES
 MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
@@ -296,5 +297,4 @@ MIGRATIONS.append("""CREATE TABLE IF NOT EXISTS storage_cleanup_decisions(
 MIGRATIONS.extend(RETIRE_MANAGER_TREE)  # after EXTENSIONS: it drops their old triggers
 MIGRATIONS.extend(REVIEW_ENVIRONMENTS)
 MIGRATIONS.extend(TOOL_TELEMETRY)
-MIGRATIONS.extend(TURN_USAGE)
-MIGRATIONS.extend(REVIEWER_PROGRESS)
+MIGRATIONS.extend(TURN_USAGE + REVIEWER_PROGRESS + HELPER_UPDATES)

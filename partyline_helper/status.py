@@ -18,6 +18,9 @@ class Status:
     def __init__(self):
         self.state = "offline"
         self.update = None
+        from .update_preferences import enabled
+        self.auto_update = enabled()
+        self.auto_update_toggle = None
         self.notified_updates = set()
         self.listeners, self.attention_listeners = [], []
         self.stop_share = self.quit = self.stop_tools = None
@@ -134,3 +137,11 @@ class Status:
     def request_quit(self):
         if self.quit:
             self.quit()
+
+    def request_auto_update(self, value):
+        if self.auto_update_toggle:
+            self.auto_update_toggle(value)
+        else:
+            from .update_preferences import set_enabled
+            self.auto_update = set_enabled(value)
+            self.changed()

@@ -297,7 +297,7 @@ class CursorRouteTests(ClickFixture):
         await self.click()
         self.assertEqual(1, self.ask.await_count)  # consent is per grant, asked once
         text = self.ask.await_args.args[1]
-        self.assertIn("Allow Alpha/alice to click with the mouse in Editor?", text)
+        self.assertIn("Allow Alpha/alice to use the mouse and keyboard in Editor?", text)
         self.assertEqual(("Allow for this window", "Deny"), self.ask.await_args.kwargs["labels"])
         self.assertEqual([("send", "left", 1), ("send", "left", 1)], self.sends())
         self.assertIn(("move", 200, 150), self.pointer.calls)
@@ -781,7 +781,8 @@ class MarkTests(unittest.TestCase):
                               {"n": "x", "id": "d", "screen": [0, 0, 5, 5]}, "junk",
                               {"n": 4, "id": "e", "screen": [0, 0, True, 5]}])
         found = boxes(marks, self.GEOMETRY)
-        self.assertEqual([{"n": 1, "id": "a", "name": "Save", "box": [40, 80, 160, 120]}], listed(found))
+        self.assertEqual([{"n": 1, "id": "a", "role": "", "name": "Save", "box": [40, 80, 160, 120]}],
+                         listed(found))
         # a page box needs the page origin and factor, here 1 screen pixel per CSS pixel at (108, 80)
         page = boxes(marks, self.GEOMETRY, (108, 80, 1.0))
         self.assertEqual([1, 2], [item["n"] for item in listed(page)])
@@ -810,7 +811,8 @@ class MarkedSnapshotTests(ClickFixture):
                                                "screen": [120, 90, 180, 110]}]})
         await asyncio.gather(*self.shares.tasks)
         reply = [m for m in self.socket.sent if isinstance(m, dict) and m["type"] == "window_snapshot"][-1]
-        self.assertEqual([{"n": 1, "id": "a", "name": "Save", "box": [20, 40, 80, 60]}], reply["marks"])
+        self.assertEqual([{"n": 1, "id": "a", "role": "", "name": "Save", "box": [20, 40, 80, 60]}],
+                         reply["marks"])
         self.assertEqual(RECT, tuple(reply["geometry"]["rect"]))
         self.assertEqual([400, 300], reply["geometry"]["size"])
         self.assertIn(reply["snapshot_id"], self.entry["snapshots"])

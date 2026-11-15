@@ -4,7 +4,7 @@
 def label(message):
     """The audit name of a window call."""
     return {"snapshot_window": "screenshot", "read_window_elements": "uia_read",
-            "window_click": "point_click"}.get(message["type"], "uia_action")
+            "window_click": "point_click", "window_point": "point_input"}.get(message["type"], "uia_action")
 
 
 async def dispatch(shares, message):
@@ -38,7 +38,7 @@ async def dispatch(shares, message):
                      if message.get("action") == "set_files" else "consent revoked")
             await shares.session.send(kind, request_id=message["request_id"],
                                       elements_unavailable=error, status="failed", error=error)
-    elif message["type"] == "window_click":
+    elif message["type"] in ("window_click", "window_point"):
         shares.spawn(shares.clicks.handle(entry, message))
     elif message.get("event_status"):
         await _event_status(shares, entry, message)

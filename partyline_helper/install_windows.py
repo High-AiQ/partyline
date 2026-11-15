@@ -1,9 +1,11 @@
 """Per-user Windows registration: HKCU protocol handler and Run key. No admin rights, no console."""
 import subprocess
+import os
 
 PROTOCOL = r"Software\Classes\partyline"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_NAME = "PartylineHelper"
+HELPER_KEY = r"Software\Partyline\Helper"
 
 
 class Registry:  # pragma: no cover - the real HKCU; tests inject a fake with the same three methods
@@ -43,6 +45,11 @@ def install(registry, launch, log):
     registry.set(PROTOCOL, "URL Protocol", "")
     registry.set(PROTOCOL + r"\shell\open\command", "", opener)
     registry.set(RUN_KEY, RUN_NAME, runner)
+    if len(launch) == 1:
+        registry.set(HELPER_KEY, "Executable", launch[0])
+        if os.name == "nt":
+            from .windows_shortcut import repair
+            repair(launch[0], registry)
     return [f"URL handler: HKCU\\{PROTOCOL}\\shell\\open\\command = {opener}",
             f"start at login: HKCU\\{RUN_KEY}\\{RUN_NAME} = {runner}",
             f"log file: {log}"]
@@ -50,5 +57,6 @@ def install(registry, launch, log):
 
 def uninstall(registry):
     registry.delete_tree(PROTOCOL)
+    registry.delete_tree(HELPER_KEY)
     registry.delete_value(RUN_KEY, RUN_NAME)
     return [f"removed HKCU\\{PROTOCOL}", f"removed HKCU\\{RUN_KEY}\\{RUN_NAME}"]

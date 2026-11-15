@@ -9,6 +9,18 @@ from .timing import Timing
 
 
 class SessionTransport:
+    async def set_window_access(self, enabled):
+        from .screen_access_toggle import set_window_access
+        await set_window_access(self, enabled)
+
+    async def pause_windows(self):
+        from .screen_access_toggle import pause_windows
+        await pause_windows(self)
+
+    def request_window_access(self, enabled, loop):
+        from .screen_access_toggle import request_window_access
+        return request_window_access(self, enabled, loop)
+
     async def send(self, kind, binary=None, before=None, **fields):
         """Send one message and its bytes (or a list of byte chunks); `before` runs under the lock, last."""
         timing = Timing(fields.setdefault("timing", {})) if kind in (

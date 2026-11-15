@@ -32,6 +32,8 @@ export const ScreenDeviceSchema = z.object({
   helper_version: z.string().nullable().optional(),
   /** True when the server's own (newer) version is ahead of the connected helper. */
   update_available: z.boolean().optional(),
+  auto_update: z.boolean().optional(),
+  updating: z.boolean().optional(),
 });
 export type ScreenDevice = z.infer<typeof ScreenDeviceSchema>;
 

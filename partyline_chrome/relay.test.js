@@ -18,7 +18,7 @@ function setup() {
 
 test('minimal manifest and tab/window queries do not attach', async () => {
   const manifest = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('./manifest.json', import.meta.url)));
-  assert.deepEqual(manifest.permissions, ['debugger', 'tabs', 'nativeMessaging']);
+  assert.deepEqual(manifest.permissions, ['debugger', 'tabs', 'nativeMessaging', 'storage']);
   assert.equal(manifest.host_permissions, undefined);
   assert.equal(manifest.content_scripts, undefined);
   const f = setup();

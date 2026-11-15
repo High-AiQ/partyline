@@ -159,7 +159,10 @@ def changes(tree, offset=0):
     tops = [tree.nodes[ident] for ident in added if tree.nodes[ident].parent not in fresh]
     body = page(tree, tops[offset:], offset, lambda node: tree.line(node, 0, extra=counted(tree, node)),
                 len(tops))
-    body["diff"] = f"+{len(added) - len(updated)} -{len(before - set(tree.nodes))}"
+    gone = sorted(before - set(tree.nodes))
+    body["diff"] = f"+{len(added) - len(updated)} -{len(gone)}"
+    if gone:
+        body["removed"] = gone[:10]
     if updated:
         body["diff"] += f" ~{len(updated)}"
     return body

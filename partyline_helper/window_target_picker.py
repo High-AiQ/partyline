@@ -4,6 +4,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from .prompt_processes import run as run_prompt
+
 
 
 def public_selection(line):
@@ -30,7 +32,7 @@ def public_lines(lines):
     return result
 
 
-def select_target(lines, run=subprocess.run):
+def select_target(lines, run=run_prompt):
     """The one line the person chose, or None; lines may have no process attached yet."""
     if not lines:
         return None

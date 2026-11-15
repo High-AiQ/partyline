@@ -76,6 +76,8 @@ class HelperHello(HelperMessage):
     chrome: ChromeState | None = None
     window_access: bool = False  # helper-owned standing permission; fail closed for older helpers
     update_check: bool = False
+    auto_update: bool = False
+    update_recovery: bool = False
 
 
 class WindowAccessChanged(HelperMessage):

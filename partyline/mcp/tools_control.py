@@ -3,6 +3,7 @@
 from urllib.parse import quote
 
 from .client import ApiError
+from .tools_point import NAMES as POINT_NAMES, path as point_path, tools as point_tools
 from .validation import validate_arguments
 
 FRAME = "integer frame pixel of the latest screen_frame image, (0, 0) at its top left"
@@ -12,11 +13,13 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 
 ELEMENT_ACTION_NOTE = (
-    "Act on screen_elements IDs with CDP/UIA. set_files: 1–10 media IDs/local paths to CDP file inputs "
-    "(media cap per file, 200 MiB total; helper data refused). select uses value; set_value edits; "
-    "press: enter/tab/escape; force overrides disabled. then reads after CDP settles. "
+    "Act on screen_elements IDs with CDP/UIA: the first choice (precise, cheap); never script clicks. "
+    "set_files: 1–10 media IDs/local paths to CDP file inputs (media cap per file, 200 MiB total; helper "
+    "data refused). select uses value; set_value edits; press: enter/tab/escape; force overrides disabled. "
+    'then reads after CDP settles, changes only; then.snapshot adds a picture. A failure a picture '
+    "explains carries `screenshot` (marks, snapshot id): use screen_window_click/_scroll/_drag/_type/_key. "
     'reload element_id="page" recovers Chrome. UIA window_* targets the window; drag: screen_drag.')
-ELEMENT_ACTION_TIMEOUT = 100  # a 20s capture deadline may be followed by a 35s exchange, then action
+ELEMENT_ACTION_TIMEOUT = 125  # a 20s capture, a 35s exchange, the action, then a 20s failure picture
 WINDOW_CLICK_TIMEOUT = 130  # up to 70 s for the helper (the person is asked), then a thumb
 ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and event barrier
 ELEMENT_ACTION_PROPERTIES = {
@@ -55,15 +58,19 @@ ELEMENT_ACTION_PROPERTIES = {
                  "control_type": {"type": "string", "maxLength": 40},
                  "root": {"type": "string", "maxLength": 128}, "id": {"type": "string", "maxLength": 128},
                  "text": {"type": "boolean"}, "context": {"type": "integer", "minimum": 0, "maximum": 5},
-                 "depth": {"type": "integer", "minimum": 1, "maximum": 3}}},
+                 "depth": {"type": "integer", "minimum": 1, "maximum": 3},
+                 "snapshot": {"type": "boolean", "description": (
+                     "Only a thumb picture of the window afterwards, no tree read.")}}},
 }
 
 
 WINDOW_CLICK_NOTE = (
-    "Click a point you see in a screen_window_snapshot of a shared window, only when screen_elements and "
-    "screen_element_action cannot do it (a canvas, an odd widget, a control the tree misses). Prefer "
-    "element actions. Take screen_window_snapshot first (marks=true numbers the elements and adds a "
-    "coordinate grid) and pass its id; x and y are that image's pixels, (0, 0) at its top left. Refused "
+    "Last resort: click a point you see in a screen_window_snapshot of a shared window, only when "
+    "screen_elements and screen_element_action cannot do it (a canvas, an odd widget, a control the tree "
+    "misses) or an action failed (its answer then carries a `screenshot` with marks and a snapshot id to "
+    "use here). Never click with page scripts. Take screen_window_snapshot first (marks=true numbers the "
+    "elements and adds a coordinate grid) and pass its id; x and y are that image's pixels, (0, 0) at its "
+    "top left. Refused "
     "when the window moved, resized, closed or was re-granted since the snapshot, or when the point is "
     "outside the window's client area. A Chrome page with a debugging connection is clicked without the "
     "mouse; any other window moves the real cursor after the person agrees on their computer, once per "
@@ -80,7 +87,8 @@ WINDOW_CLICK_PROPERTIES = {
     "capture": {"type": "string", "enum": ["none", "thumb"],
                 "description": "thumb: also return a thumbnail picture taken after the click."},
 }
-NO_FRAME = ("screen_control_request", "screen_element_action", "screen_eval", "screen_window_click")
+NO_FRAME = ("screen_control_request", "screen_element_action", "screen_eval", "screen_window_click",
+            *sorted(POINT_NAMES))
 
 
 def _int(description):
@@ -102,7 +110,7 @@ def tool_list(state):
             return []
         allowed = set()
         if state.get("screen_windows"):
-            allowed.update({"screen_element_action", "screen_eval", "screen_window_click"})
+            allowed.update({"screen_element_action", "screen_eval", "screen_window_click", *POINT_NAMES})
         if state.get("screen_control"):
             allowed.update({"screen_click", "screen_move", "screen_drag", "screen_scroll",
                             "screen_type", "screen_key"})
@@ -127,6 +135,7 @@ def tool_list(state):
         _tool("screen_element_action", ELEMENT_ACTION_NOTE, ELEMENT_ACTION_PROPERTIES,
               ["element_id", "action"]),
         _tool("screen_window_click", WINDOW_CLICK_NOTE, WINDOW_CLICK_PROPERTIES, ["snapshot", "x", "y"]),
+        *point_tools(),
         _tool("screen_control_request",
               "Ask the person sharing their screen to let you drive its mouse and keyboard. "
               "Returns at once; you are @mentioned when they answer on their computer.", {}, []),
@@ -171,6 +180,8 @@ def call(client, name, args, state):
         return client.request("POST", base.removesuffix("/screen-control") + "/screen-eval", args, timeout=60)
     if name == "screen_window_click":
         return client.request("POST", base + "/window-click", args, timeout=WINDOW_CLICK_TIMEOUT)
+    if name in POINT_NAMES:
+        return client.request("POST", base + point_path(name), args, timeout=WINDOW_CLICK_TIMEOUT)
     if name == "screen_control_request":
         return client.request("POST", base + "/request")
     if name == "screen_element_action":

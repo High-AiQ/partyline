@@ -5,6 +5,7 @@
   import SettingsSection from "../SettingsSection.svelte";
   import SettingRow from "../SettingRow.svelte";
   import PairingSteps from "../../PairingSteps.svelte";
+  import AutoUpdateSetting from "../../AutoUpdateSetting.svelte";
   import WindowAccessLine from "../../WindowAccessLine.svelte";
   import WindowAccessAudit from "../../WindowAccessAudit.svelte";
   const devices = $derived(screenStatus.devices);
@@ -40,6 +41,7 @@
         {device.name} ({device.online ? "online" : "offline"})
         <button type="button" onclick={() => void revoke(device.id)}>Revoke</button>
       </p>
+      <AutoUpdateSetting {device} />
       <WindowAccessLine {device} />
       <WindowAccessAudit {device} />
     {/each}
