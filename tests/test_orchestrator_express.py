@@ -9,7 +9,7 @@ from partyline.machine_scope import allows
 from partyline.mcp.tools_tasks import tool_list
 from partyline.orchestrator_contracts import DeliverIn, ReopenIn, ReviewRequestIn, TaskIn
 from partyline.orchestrator_express import deliver
-from partyline.orchestrator_pack import LIGHT, task_pack
+from partyline.orchestrator_pack import task_pack
 from partyline.orchestrator_reopen import reopen_task
 from partyline.orchestrator_service import create_task, request_review
 from partyline.pack_blocks import ORCHESTRATOR
@@ -162,7 +162,7 @@ class ExpressTest(TaskFixture):
         self.assertLess(len(express), len(full))
 
     async def test_captain_pack_documents_the_choice(self):
-        for text in ('mode="express"', 'its commits cannot be merged', '"light"', '"full" (default)'):
+        for text in ('mode="express"', 'its commits cannot be merged', 'mode="suite"', '"full" (default)'):
             self.assertIn(text, ORCHESTRATOR)
 
     async def test_mode_column_migration_is_idempotent(self):
@@ -207,25 +207,25 @@ class LightTest(TaskFixture):
 
     async def test_light_keeps_the_given_policy_and_the_review_cycle(self):
         row = await self.light(review='inspector')
-        self.assertEqual((row['mode'], row['policy']), ('light', 'inspector'))
+        self.assertEqual((row['mode'], row['policy']), ('full', 'inspector'))
         self.assertFalse(allows(self.db, self.worker, self.conv_id, 'deliver'))
         self.assertTrue(allows(self.db, self.worker, self.conv_id, 'request_review'))
-        self.assertEqual(self.db.get_conversation(self.conv_id)['task_mode'], 'light')
+        self.assertEqual(self.db.get_conversation(self.conv_id)['task_mode'], 'full')
 
     async def test_light_without_review_uses_the_root_default(self):
         row = await self.light()
-        self.assertEqual((row['mode'], row['policy']), ('light', 'captain'))
+        self.assertEqual((row['mode'], row['policy']), ('full', 'captain'))
 
     async def test_light_pack_adds_only_the_gate_guidance_to_the_full_pack(self):
         await self.light()
         light = task_pack(self.db, self.conv_id, 'implementer')
-        self.assertIn('Light task: gates scale with the diff', light)
+        self.assertIn('Full task: gates scale with the diff', light)
         self.assertIn('partyline.task_gates', light)
         self.assertIn('request_review(sha, what, where)', light)
         self.db._exec("UPDATE task_reviews SET mode='full' WHERE conv_id=?", (self.conv_id,))
         full = task_pack(self.db, self.conv_id, 'implementer')
         self.assertNotIn('Light task', full)
-        self.assertEqual(light.replace(LIGHT, ''), full)
+        self.assertEqual(light, full)
 
     async def test_light_cannot_deliver_and_reopen_keeps_the_mode(self):
         await self.light(review='none')
@@ -236,11 +236,11 @@ class LightTest(TaskFixture):
             sha=self.commit(), what='typo', where='README'))
         self.assertEqual(self.row()['status'], 'done')
         row = await reopen_task(self.runtime, self.captain, self.conv_id, ReopenIn(goal='again'))
-        self.assertEqual(row['mode'], 'light')
+        self.assertEqual(row['mode'], 'full')
 
     async def test_conversation_payload_carries_the_mode_for_every_task(self):
         await self.light()
         light = self.conv_id
         full = (await self.create('captain'))['conv_id']
         listed = {c['id']: c.get('task_mode') for c in self.db.list_conversations()}
-        self.assertEqual((listed[light], listed[full], listed['root']), ('light', 'full', None))
+        self.assertEqual((listed[light], listed[full], listed['root']), ('full', 'full', None))

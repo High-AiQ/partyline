@@ -49,11 +49,14 @@ def guide(state):
     return {"doors": DOORS,
             "goal_decisions": [
                 {"need": "New task",
-                 "operation": "create_task(name, goal, implementer, review, mode=full|light|express)"},
+                 "operation": "create_task(name, goal, implementer, review, mode=full|express|suite, "
+                              "repository?, batch?)"},
                 {"need": "Change active task goal", "operation": "set_task_goal(conv_id, goal)"},
                 {"need": "New work on approved/done task", "operation": "reopen_task(conv_id, goal)"},
                 {"need": "Sub-captain line", "operation": "create_child(parent_conv_id, name, goal); "
                               "later set_goal(child_conv_id, goal)"}],
+            "suite_rule": "Before every batch PR run suite on the merged accepted batch; never ask task "
+                          "sublines for full suites. After a pass the captain pushes and opens the PR.",
             "goal_context": ("Task participants receive the goal in their joining pack and on wakes until "
                              "delivery is proven, then on goal change or restart. Live participants "
                              "receive a durable update message. "

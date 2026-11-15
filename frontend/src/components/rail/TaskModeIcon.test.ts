@@ -15,15 +15,16 @@ function icon(props: ComponentProps<typeof TaskModeIcon>) {
 describe("task mode icon", () => {
   it.each([
     ["express", "Express task: no review, no gates", "text-copper"],
-    ["light", "Light task: review, gates scale with the diff", "text-green"],
-    ["full", "Full task: review and every gate", "text-sky"],
+    ["suite", "Suite run: every test suite on the merged batch", "text-green"],
+    ["full", "Full task: review, gates scale with the diff", "text-sky"],
   ] as const)("renders the %s marker with its tooltip label", async (mode, label, tone) => {
     const { marker, stop } = icon({ line: { task_status: "implementing", task_mode: mode } });
     try {
       expect(marker?.getAttribute("aria-label")).toBe(label);
       expect(marker?.classList.contains(`task-mode-${mode}`)).toBe(true);
       expect(marker?.classList.contains(tone)).toBe(true);
-      expect(marker?.querySelector("svg path")?.tagName).toBe("path");
+      if (mode === "suite") expect(marker?.textContent).toContain("🧪");
+      else expect(marker?.querySelector("svg path")?.tagName).toBe("path");
     } finally {
       await stop();
     }
@@ -31,7 +32,7 @@ describe("task mode icon", () => {
 
   it("draws a different glyph per mode", async () => {
     const shapes: string[] = [];
-    for (const mode of ["express", "light", "full"] as const) {
+    for (const mode of ["express", "suite", "full"] as const) {
       const { marker, stop } = icon({ line: { task_status: "done", task_mode: mode } });
       shapes.push(marker?.querySelector("path")?.getAttribute("d") ?? "");
       await stop();

@@ -37,6 +37,10 @@ import sys
 import tempfile
 import uuid
 
+# Running this executable directly and through runpy must resolve the same policy helper.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scripts.capped_test_policy import task_suite_refusal, whole_suite
+
 DEFAULT_COMMAND = ["uv", "run", "--locked", "python", "-m", "scripts.parallel_test"]
 DEFAULT_LIMIT = "4G"
 DEFAULT_WORKERS = min(8, max(1, (os.cpu_count() or 2) // 2))
@@ -223,13 +227,16 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--workers must be positive")
 
     command = [arg for arg in args.command if arg != "--"]
+    if whole_suite(command) and (refusal := task_suite_refusal()):
+        print(f'capped-test: refusing to run: {refusal}', file=sys.stderr)
+        return 125
     if not command:
         command = [*DEFAULT_COMMAND, "--workers", str(args.workers)]
     limit = parse_size(args.memory)
     env = os.environ.copy()
     for key in (
         "PARTYLINE_DB", "PARTYLINE_API", "PARTYLINE_TOKEN", "PARTYLINE_MEDIA_DIR",
-        "PARTYLINE_CONV_ID", "PARTYLINE_HANDLE",
+        "PARTYLINE_CONV_ID", "PARTYLINE_HANDLE", "PARTYLINE_TASK_MODE",
     ):
         env.pop(key, None)
     with tempfile.TemporaryDirectory(prefix="partyline-capped-test-") as temp_dir:

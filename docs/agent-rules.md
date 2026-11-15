@@ -31,17 +31,44 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 | --- | --- |
 | Regenerate `partyline/static/` with `npm run build` | Edit `partyline/static/` by hand |
 
-## Gates — all must pass before every commit
+## Gates
+
+Full task implementers and reviewers run only tests reaching changed code. Never run the
+full suite, e2e suites or whole-suite coverage in a task pair. List the commands and results
+in the report. Express is the captain's choice when a task needs no review and no tests,
+whether a person says so or the captain decides.
+
+Before a full task commit:
 
 ```bash
-./scripts/check-no-polling          # classified event/deadline waits
-uv run --locked ruff check .        # lint (no autoformatter: match surrounding style by hand)
-./scripts/capped-test               # parallel full suite under a 4 GB memory cap
-uv run --locked coverage report     # ≥90% combined (statements + branches, fail_under in pyproject), nothing omitted
-./check-code-lines                  # production files ≤300 lines
-./scripts/check-no-media            # no screenshots, renders or binary assets in any new commit
-cd frontend && npm run verify       # format:check + lint + svelte-check + tests
+uv run --locked python -m partyline.task_gates  # prints scoped commands; run those commands
+./scripts/check-no-polling
+uv run --locked ruff check .
+./check-code-lines                             # production files ≤300 lines
+./scripts/check-no-media
 ```
+
+The mapper selects affected Python/helper/packaging tests and matching Chrome Node tests.
+Unknown paths get lint and “no direct tests; covered by the suite run”, never a full-suite
+fallback. Frontend changes get format/lint on changed files, check, related Vitest tests
+and build; commit the generated bundle.
+
+After tasks are accepted, start one **suite** subline on the entire merged batch before
+creating its PR. Only that line (or a person outside Partyline) runs full gates:
+
+```bash
+./scripts/capped-test                           # parallel full suite, 4 GB memory cap
+uv run --locked coverage report                 # ≥90% combined statements + branches
+cd frontend && npm run verify && npm run build
+node --test partyline_chrome/*.test.js
+# Run all repository e2e suites too (partyline: tests/ui/).
+```
+
+Run backend tests and frontend builds sequentially. A full or express task calling
+`./scripts/capped-test` without test arguments is refused; use the scoped gates. Suite
+runners report each suite's pass/fail and best-effort failure attribution. The captain
+reopens responsible tasks or creates fixes and repeats the suite run, then pushes and
+opens the PR from the passing integration branch. Suite runners never push or open PRs.
 
 A hung allocating test has twice taken this whole machine down (19 GB and 31 GB incidents,
 `docs/lessons.md`); `./scripts/capped-test` exits 137 when a test *allocated without bound*,
@@ -73,7 +100,7 @@ bundle is committed. TypeScript is strict through compiler and ESLint. Full conv
 
 | DO | DO NOT |
 | --- | --- |
-| Run `npm run verify` green, then `npm run build` → `partyline/static/`, and commit the bundle | Ship frontend changes without the rebuilt bundle |
+| Run scoped frontend gates on task lines; run full `npm run verify` on suite lines; rebuild `partyline/static/` and commit the bundle | Ship frontend changes without the rebuilt bundle |
 | Prefer Tailwind utilities for component looks; depth in `docs/frontend.md` | Grow scoped `<style>` for layout/color/typography Tailwind already covers |
 | Give every boundary-crossing value a named contract — Zod in the browser, Pydantic v2 on the server | Use `any`, double casts, or blanket suppressions |
 | Keep the release version single-sourced in `partyline/__init__.py` | Treat `static/build.json` as anything but a bundle identifier |
@@ -175,7 +202,7 @@ time and the banner must not mention the captain with unusable decision links.
 | Write one-line Conventional Commits — `type(scope): subject` with `feat`, `fix`, `docs`, `refactor`, `test`, `chore` | Add a commit body |
 | Bump semver in `partyline/__init__.py` in the same commit: feature → minor, fix → patch, breaking → major | Bump for docs, test, refactor, or chore commits |
 | Branch and open a PR; pass `backend`, `frontend`, `code-line-limits`, `conventional-commits`, `version-policy` | Push to `main` — it is protected |
-| Ensure an adversarial review in a throwaway worktree pinned to the exact SHA is completed before accepting — the same bar for a child line's branch/report and a same-line worker's hand-off — and review again at your own scope when work pops up, reusing evidence only for the same unchanged SHA (`skills/adversarial-review/SKILL.md`) | Review on a shared workbench or a mutable branch, accept a report or a delegate's "done" without the review having happened, or treat a lower captain's acceptance as your own |
+| For full tasks, ensure an adversarial review in a throwaway worktree pinned to the exact SHA is completed before accepting — the same bar for a child line's branch/report and a same-line worker's hand-off — and review again at your own scope when work pops up, reusing evidence only for the same unchanged SHA (`skills/adversarial-review/SKILL.md`) | Review on a shared workbench or a mutable branch, accept a report or a delegate's "done" without the review having happened, or treat a lower captain's acceptance as your own |
 | On a captained line, push only as the captain, after review; a worker commits locally and hands over the SHA | Let a worker push on a captained line, or push before the review is completed |
 | Let CI create tags — tags are the release record | Hand-create a GitHub Release (`docs/releases.md`) |
 | Before clearing a goal, detaching the final workers, or retiring a line, persist every deliverable, asset, and piece of unfinished work in its intended durable repository or application storage, or an accessible handoff location; verify the read-back and record the locations in the handoff | Rely on a git commit for generated non-git assets, leave a temp directory, worktree, or child-only upload as the sole copy, or run destructive cleanup over unfinished work instead of preserving it and reporting the blocker |

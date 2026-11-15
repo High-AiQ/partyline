@@ -22,6 +22,7 @@ from .orchestrator_revive import (
     brief_reviewer, reviewer_is_live, revive_reviewer, staffed_by_preset, task_lock)
 from .orchestrator_repin import repin, review_entries, verdict_matches
 from .orchestrator_handles import pick_tag
+from .orchestrator_suite import resolve_batch, save_batch, suite_brief
 from .memory_live_raise import check_task_memory
 from .orchestrator_staff import ensure_reviewer, restart, spawn
 from .orchestrator_store import (
@@ -44,9 +45,10 @@ async def _create_task(runtime, actor, root_id, body):
     from .preset_roles import require_named_role
     require_named_role(db, body.implementer, 'implementer')
     check_task_memory(db, actor, body.memory_limit)
-    if body.mode == 'express':
+    suite = resolve_batch(db, root_id, body.repository, body.batch) if body.mode == 'suite' else None
+    if body.mode in ('express', 'suite'):
         if body.review not in (None, 'none'):
-            raise HTTPException(422, "an express task has no review: omit review or pass 'none'")
+            raise HTTPException(422, f"a {body.mode} task has no review: omit review or pass 'none'")
         policy = 'none'
     else:
         policy = validate_policy(db, body.review or root['default_review_policy'])
@@ -58,7 +60,8 @@ async def _create_task(runtime, actor, root_id, body):
     if existing_line:
         if (not pending or pending['goal'] != body.goal.strip()
                 or pending['implementer_preset'] != body.implementer or pending['policy'] != policy
-                or pending['mode'] != body.mode):
+                or pending['mode'] != body.mode
+                or (suite and (pending['suite_repository'], pending['suite_batch']) != suite)):
             raise HTTPException(409, f"line {existing_line['id']} already uses this task name; "
                                 'inspect it or choose a different name for new work')
         att = db.get_attachment(pending['implementer_id'])
@@ -80,6 +83,8 @@ async def _create_task(runtime, actor, root_id, body):
                 'created_at,mode) VALUES(?,?,?,?,?,?,?,?)',
                 (conv_id, root_id, ident, body.implementer, policy, pick_tag(db, conv_id), time.time(),
                  body.mode))
+            if suite:
+                save_batch(db, conv_id, *suite)
 
         try:
             await create_child(runtime, actor, root_id,
@@ -117,6 +122,7 @@ async def _create_task(runtime, actor, root_id, body):
     if not spawn_failed:
         try:
             await tell(runtime, ident, f'Implement this task: {body.goal}. ' + (
+                suite_brief(task(db, conv_id)) if body.mode == 'suite' else
                 EXPRESS_BRIEF if body.mode == 'express' else
                 "Commit on this line's branch (in each repository folder you change); never push. "
                 'Call request_review(sha, what, where) when ready. The server owns review staffing.'))
@@ -138,8 +144,9 @@ async def _create_task(runtime, actor, root_id, body):
 async def request_review(runtime, actor, conv_id, body):
     db = runtime.db
     row = require_task(db, actor, conv_id)
-    if row['mode'] == 'express':
-        raise HTTPException(409, EXPRESS_NO_REVIEW)
+    if row['mode'] in ('express', 'suite'):
+        raise HTTPException(409, EXPRESS_NO_REVIEW if row['mode'] == 'express' else
+                            'suite run: no review — report results with deliver(what, where)')
     # A task lock spans worktree creation, admission and notification: duplicate
     # calls cannot spawn two reviewers or produce two terminal reports.
     async with task_lock(runtime, conv_id):

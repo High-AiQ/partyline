@@ -150,6 +150,7 @@ def child_env(env: Mapping[str, str], att: dict) -> dict[str, str]:
     result["PARTYLINE_API"] = api_base
     result["PARTYLINE_CONV_ID"] = str(att.get("conv_id", ""))
     result["PARTYLINE_HANDLE"] = str(att.get("name", ""))
+    result["PARTYLINE_TASK_MODE"] = str(att.get("task_mode", ""))
     # The current activation's machine credential. Only absent for an
     # attachment dict that predates the auth migration's backfill.
     if token := att.get("api_token"):

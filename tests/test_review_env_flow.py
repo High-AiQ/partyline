@@ -93,3 +93,31 @@ class ReviewEnvFlowTest(TaskFixture):
                 await operate(self.runtime, self.captain, 'root', body)
         self.assertIn('first failed', both.exception.detail)
         self.assertIn('second failed', both.exception.detail)
+
+    async def test_round_brief_and_environment_update_scope_configured_suite_commands(self):
+        await self.create()
+        self.db._exec('INSERT INTO review_environments VALUES(?,?,?,?,?,?)',
+                      (self.repo, '.', '', 'npm test', 'person', 1))
+        cwd = self.db.get_conversation(self.conv_id)['cwd']
+        Path(cwd, 'changed.txt').write_text('change')
+        git(cwd, 'add', 'changed.txt')
+        with patch('partyline.task_review_checkout.provision'):
+            row = await request_review(self.runtime, self.worker, self.conv_id,
+                                      ReviewRequestIn(sha=self.commit(), what='change', where='code'))
+        brief = next(message['body'] for message in self.db.list_messages(self.conv_id)
+                     if message['audience_attachment_id'] == row['reviewer_id']
+                     and 'Review round' in message['body'])
+        self.runtime.post_message = AsyncMock()
+        with patch('partyline.review_env_operations.provision'), patch(
+                'partyline.review_env_operations.tell', new_callable=AsyncMock) as tell:
+            await operate(self.runtime, self.captain, 'root', ReviewEnvOperation(
+                operation='set', repository=self.repo, test='pytest'))
+        updated = tell.await_args.args[2]
+        self.assertIn('npm test', brief)
+        self.assertIn('pytest', updated)
+        for notice in [brief, updated]:
+            self.assertIn('scope the configured test command', notice)
+            self.assertIn('only tests reaching changed code', notice)
+            self.assertIn('Never run full suites, e2e suites or whole-suite coverage', notice)
+            self.assertIn('Call env_gap only when affected tests cannot run', notice)
+            self.assertIn('List the test commands run and their results', notice)

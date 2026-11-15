@@ -12,8 +12,8 @@ PROPERTY = 90
 
 # Hand-written lines for tools whose first sentence is not enough to choose them by.
 SHORT = {
-    "create_task": "START new work: create a task line with an implementer and a reviewer "
-                   "(mode=express: no reviewer). Retrying the same name recovers it.",
+    "create_task": "START work: full=scoped tests/review; express=no tests/review; "
+                   "suite=all suites on merged batch (repository + ordered batch).",
     "set_task_goal": "CHANGE the direction of an existing active task (conv_id = task line id).",
     "reopen_task": "CONTINUE an approved or done task with a new goal (conv_id = task line id).",
     "attach_worker": "Staff an implementer (or staffing_role=captain, or successor=true on your own line).",
@@ -26,12 +26,12 @@ SHORT = {
     "render_check": "Ask which renders need a closer look (needs consent).",
     "acquire_resource": "Take an advisory lease before a job needing a declared resource; release when done.",
     "review_verdict": "Give the verdict on the requested review: approve or changes, with findings.",
-    "request_review": "Hand a full task to review: sha, what, where. Refused on an express task.",
+    "request_review": "Hand a full task to review: sha, what, where. Refused on express or suite tasks.",
     "blocked": "Tell the root captain you are blocked, with the reason.",
     "env_gap": "Report a review test environment gap to the root captain.",
     "waiting": "Tell the server a long command is running, so you are not called stalled.",
     "resume_work": "Say you resumed work after being blocked, with a note.",
-    "deliver": "END an express task: report what and where as text; there is no SHA or review.",
+    "deliver": "END express/suite: report what and where; suite names branch/SHA and per-suite results.",
 }
 
 

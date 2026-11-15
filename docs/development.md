@@ -51,7 +51,7 @@ intentionally has no independent version field.
 ### Running the tests
 
 ```bash
-./scripts/capped-test                    # parallel suite + combined coverage, under a 4 GB cap
+./scripts/capped-test                    # suite lines or people outside Partyline only; parallel suite + combined coverage, under a 4 GB cap
 ./scripts/capped-test --workers 4        # override the default min(8, cores/2) workers
 uv run --locked coverage report          # fails under 90% line+branch coverage
 uv run --locked ruff check .             # lint; must be clean before every commit
@@ -107,3 +107,10 @@ with ui_session(["alpha line", "beta line"]) as ui:
     ui.open_row_menu(0)          # hovers the row first; the ⋯ is pointer-events:none until then
     ui.shot("menu-open")
 ```
+
+Task implementers and reviewers use `uv run --locked python -m partyline.task_gates` and
+run its printed scoped commands, plus the static gates in `AGENTS.md`. Never run full
+suites, e2e suites or whole-suite coverage in task pairs. Full frontend verify belongs
+to the merged batch suite run; task frontend gates check changed files, types, related
+Vitest tests and build. Before every batch PR the captain starts a `suite` subline on
+all accepted changes together, fixes attributed failures and repeats until passing.

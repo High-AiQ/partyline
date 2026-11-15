@@ -19,16 +19,16 @@ const MODES: Record<TaskMode, TaskModeInfo> = {
     tooltip: "Express task: no review, no gates",
     tone: "text-copper",
   },
-  light: {
-    mode: "light",
-    label: "Light task",
-    tooltip: "Light task: review, gates scale with the diff",
+  suite: {
+    mode: "suite",
+    label: "Suite run",
+    tooltip: "Suite run: every test suite on the merged batch",
     tone: "text-green",
   },
   full: {
     mode: "full",
     label: "Full task",
-    tooltip: "Full task: review and every gate",
+    tooltip: "Full task: review, gates scale with the diff",
     tone: "text-sky",
   },
 };

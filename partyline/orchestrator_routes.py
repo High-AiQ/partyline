@@ -8,7 +8,7 @@ from .machine_scope import deny_unless
 from .orchestrator_contracts import (
     BlockedIn, EnvGapIn, CaptainStyleIn, DeliverIn, MessageTaskIn, NudgeReviewerIn, ReopenIn, ResumeIn,
     ReviewRequestIn, ShareRefIn,
-    ShareRefOut, TaskIn, TaskReview, TaskStatus, VerdictIn, WaitingIn)
+    ShareRefOut, SuiteReopenIn, TaskIn, TaskReview, TaskStatus, VerdictIn, WaitingIn)
 from .orchestrator_handles import message_task, task_line
 from .orchestrator_stall import blocked, resume_work
 from .orchestrator_wait import waiting as declare_wait
@@ -77,7 +77,7 @@ def orchestrator_router(runtime):
         return await restart_implementer(runtime, actor, task_line(db, actor, conv_id))
 
     @router.post('/api/conversations/{conv_id}/task/reopen', response_model=TaskStatus)
-    async def reopen(request: Request, conv_id: str, body: ReopenIn):
+    async def reopen(request: Request, conv_id: str, body: SuiteReopenIn):
         actor = request_principal(request)
         row = await reopen_task(runtime, actor, task_line(db, actor, conv_id), body)
         return {**row, 'goal_chars': len(body.goal.strip())}

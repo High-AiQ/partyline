@@ -1,60 +1,90 @@
-"""The one mapping from changed paths to a light task's gate commands."""
+"""Task gates select direct tests and never fall back to full suites."""
 
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from partyline.task_gates import FRONTEND, FULL, RUFF, TESTS, changed_paths, gates_for, main
+from partyline.task_gates import NO_DIRECT, RUFF, TESTS, changed_paths, frontend_gates, gates_for, main
 
 
 class GatesTest(unittest.TestCase):
-    def test_docs_markdown_and_skills_only_run_no_gates(self):
-        self.assertEqual(gates_for(['docs/hierarchy.md', 'README.md', 'skills/x/SKILL.md',
-                                    'docs/img.txt']), [])
+    def test_docs_and_empty_diff_need_no_gates(self):
+        self.assertEqual(gates_for(['docs/hierarchy.md', 'README.md', 'skills/x/SKILL.md']), [])
         self.assertEqual(gates_for([]), [])
 
-    def test_python_runs_ruff_and_the_tests_for_the_touched_module(self):
-        gates = gates_for(['partyline/task_gates.py'])
+    def test_python_and_test_changes_are_deduplicated(self):
+        gates = gates_for(['partyline/task_gates.py', 'tests/test_task_gates.py'])
         self.assertEqual(gates[0], RUFF)
         self.assertTrue(gates[1].startswith(TESTS))
-        self.assertIn('tests.test_task_gates', gates[1])
+        self.assertEqual(gates[1].count('tests.test_task_gates'), 1)
+        self.assertFalse(any('coverage' in gate for gate in gates))
+        self.assertEqual(gates_for(['partyline/__init__.py']), [RUFF])
 
-    def test_a_test_file_runs_itself_and_a_module_finds_its_importers(self):
-        self.assertEqual(gates_for(['tests/test_task_gates.py']),
-                         [RUFF, f'{TESTS} tests.test_task_gates'])
-        gates = gates_for(['partyline/orchestrator_pack.py'])
-        self.assertIn('tests.test_orchestrator_express', gates[1])
+    def test_unmapped_paths_and_modules_get_lint_and_an_explicit_suite_deferral(self):
+        for path in ['unknown.bin', 'partyline/nobody_imports_me.py', 'tests/unknown_helper.py']:
+            with self.subTest(path=path):
+                with tempfile.TemporaryDirectory() as root:
+                    self.assertEqual(gates_for([path], root), [RUFF, NO_DIRECT])
 
-    def test_frontend_and_its_bundle_run_verify_and_build(self):
-        self.assertEqual(gates_for(['frontend/src/a.ts']), [FRONTEND])
-        self.assertEqual(gates_for(['partyline/static/index.html']), [FRONTEND])
+    def test_direct_tests_for_helpers_packaging_and_chrome(self):
+        helper = gates_for(['partyline_helper/windows.py'])
+        self.assertIn('tests.test_helper_windows', ' '.join(helper))
+        self.assertIn('tests.test_windows_packaging', ' '.join(gates_for(['packaging/windows/entry.py'])))
+        chrome = gates_for(['partyline_chrome/wire.js'])
+        self.assertIn('node --test partyline_chrome/wire.test.js', chrome)
+        self.assertNotIn('./scripts/capped-test', chrome)
+        self.assertIn('partyline_chrome/wire.test.js', ' '.join(gates_for(['partyline_chrome/wire.test.js'])))
 
-    def test_mixed_changes_are_the_union_without_repeats(self):
-        gates = gates_for(['docs/a.md', 'frontend/src/a.ts', 'partyline/task_gates.py',
-                           'tests/test_task_gates.py', 'frontend/src/b.svelte'])
-        self.assertEqual((gates[0], gates[-1], len(gates)), (RUFF, FRONTEND, 3))
-        self.assertIn('tests.test_task_gates', gates[1])
+    def test_frontend_never_runs_whole_vitest_or_verify(self):
+        paths = ['frontend/src/a.ts', 'frontend/src/b.svelte']
+        with tempfile.TemporaryDirectory() as root:
+            for path in paths:
+                file = Path(root, path)
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.touch()
+            gates = gates_for(paths, root)
+            self.assertEqual(gates, frontend_gates(paths, root))
+        self.assertIn('npx prettier --check --ignore-unknown src/a.ts src/b.svelte', gates[0])
+        self.assertIn('npx eslint --no-warn-ignored src/a.ts src/b.svelte', gates[1])
+        self.assertIn('vitest related src/a.ts src/b.svelte --run', gates[3])
+        self.assertEqual(gates[2], 'cd frontend && npm run check')
+        self.assertEqual(gates[-1], 'cd frontend && npm run build')
+        self.assertFalse(any('npm run verify' in gate or 'coverage' in gate for gate in gates))
+        self.assertEqual(gates_for(['partyline/static/index.html']), [gates[2], gates[-1]])
 
-    def test_unknown_paths_and_untested_modules_fall_back_to_the_full_gates(self):
-        self.assertEqual(gates_for(['pyproject.toml']), FULL)
-        self.assertEqual(gates_for(['partyline/no_such_module_anywhere.py']), FULL)
-        self.assertEqual(gates_for(['tests/helper_nobody_imports.py']), FULL)
+    def test_deleted_frontend_paths_only_reach_related_tests_not_file_checkers(self):
+        with tempfile.TemporaryDirectory() as root:
+            Path(root, 'frontend/src').mkdir(parents=True)
+            Path(root, 'frontend/src/present.ts').touch()
+            gates = gates_for(['frontend/src/deleted.ts', 'frontend/src/present.ts'], root)
+            for checker in gates[:2]:
+                self.assertIn('src/present.ts', checker)
+                self.assertNotIn('deleted.ts', checker)
+            self.assertIn('vitest related src/deleted.ts src/present.ts --run', gates[3])
+            deleted_only = frontend_gates(['frontend/src/deleted.ts'], root)
+            self.assertFalse(any('prettier' in gate or 'eslint' in gate for gate in deleted_only))
+            self.assertIn('vitest related src/deleted.ts --run', deleted_only[1])
 
-    def test_the_version_bump_adds_lint_only_and_keeps_a_focused_fix_focused(self):
-        bump = gates_for(['partyline/__init__.py'])
-        self.assertEqual(bump, [RUFF])
-        fix = gates_for(['partyline/task_gates.py', 'tests/test_task_gates.py',
-                         'partyline/__init__.py', 'docs/hierarchy.md'])
-        self.assertEqual(fix[0], RUFF)
-        self.assertEqual(len(fix), 2)
-        self.assertNotIn('./scripts/capped-test', fix)
-        self.assertIn('tests.test_task_gates', fix[1])
+    def test_browser_tests_are_deferred_and_paths_are_shell_quoted(self):
+        self.assertEqual(gates_for(['tests/ui/test_layout.py']), [RUFF, NO_DIRECT])
+        self.assertIn("'src/a;echo.ts'", ' '.join(gates_for(['frontend/src/a;echo.ts'])))
 
-    def test_a_shared_test_helper_runs_the_tests_that_import_it(self):
+    def test_shared_test_helpers_select_importers(self):
         gates = gates_for(['tests/orchestrator_fixture.py'])
-        self.assertEqual(gates[0], RUFF)
         self.assertIn('tests.test_orchestrator_express', gates[1])
         self.assertIn('tests.test_orchestrator_reopen', gates[1])
-        self.assertNotIn('tests.test_task_gates', gates[1])
 
-    def test_cli_prints_gates_and_the_changed_paths_come_from_git(self):
-        self.assertEqual(main(['docs/a.md']), 0)
+    def test_chrome_tests_importing_changed_files_are_included(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'partyline_chrome').mkdir()
+            (root / 'partyline_chrome/flow.test.js').write_text("import './shared.js';")
+            self.assertEqual(gates_for(['partyline_chrome/shared.js'], root),
+                             [RUFF, 'node --test partyline_chrome/flow.test.js'])
+
+    def test_cli_and_git_diff(self):
+        with patch('builtins.print') as output, patch('partyline.task_gates._tests_for', return_value=[]):
+            self.assertEqual(main(['unknown.bin']), 0)
+        self.assertIn('no direct tests; covered by the suite run', output.call_args.args[0])
         self.assertIsInstance(changed_paths(), list)

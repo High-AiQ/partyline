@@ -122,7 +122,9 @@ def _task_goal_delivery(db, att, runtime):
 def bind_role_delivery(db, att: dict, runtime=None) -> None:
     from .captain_handover import state_text
     from .screen_window_notices import line_window_text
+    from .orchestrator_store import task
     initial = current_role(db, att["id"])
+    att["task_mode"] = (task(db, initial.conv_id) or {}).get("mode", "")
     att["role_briefing"] = "\n\n".join(
         part for part in (_instructions(initial, db), pack_for(db, att["id"]),
                           state_text(db, att["id"], runtime), line_window_text(db, initial.conv_id)) if part)

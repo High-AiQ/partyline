@@ -108,3 +108,19 @@ Every @ spends a turn and a wake. Acknowledge with a 👀 reaction, not a
 "standing by" message, and never trade thanks between processes. A reaction
 on a machine's message reaches it privately; it wakes nobody unless it
 raises something new.
+
+## Scoped tasks and batch suites
+
+Choose `full` for the review cycle, scaled to changed code, or `express` when no review
+and no tests are needed; a person may say so or the captain decides. Never ask task
+implementers or reviewers for full suites, e2e suites or whole-suite coverage. Their
+reports list the affected tests actually run. Legacy `light` means `full`.
+
+Before every batch PR, accept the tasks then create a reviewer-free `suite` line with
+`repository` and an ordered `batch` of task IDs/tags (accepted SHAs) and/or explicit SHAs.
+It creates an integration branch from current main, cherry-picks the batch and runs every
+repository suite. Put batch version numbers in its goal to settle version conflicts.
+The runner delivers the branch/SHA, pass/fail per suite and best-effort failure attribution
+to tasks; it never pushes or opens a PR. Reopen responsible tasks or create fixes, then
+repeat the suite (or reopen it with a new batch). After a pass, the captain pushes and
+opens the PR from that integration branch.

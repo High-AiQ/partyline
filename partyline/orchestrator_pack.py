@@ -2,6 +2,7 @@
 
 from .mention_relay import task_root_captain
 from .orchestrator_store import task
+from .orchestrator_suite import suite_brief
 from .task_workspaces import workspaces
 from .worker_pack import FILE_ALL_PATHS
 
@@ -21,7 +22,8 @@ def _handles(row, role):
     own = row['reviewer_handle'] if role == 'reviewer' else row['implementer_handle']
     other_role = 'implementer' if role == 'reviewer' else 'reviewer'
     other = row['implementer_handle'] if role == 'reviewer' else (
-        row['reviewer_handle'] or (f'review-{tag}' if tag and row['mode'] != 'express' else None))
+        row['reviewer_handle'] or (f'review-{tag}'
+                                   if tag and row['mode'] not in ('express', 'suite') else None))
     text = f'Your handle is {own}. ' if own else ''
     if other:
         text += f'The {other_role} of this task is {other}. '
@@ -42,6 +44,8 @@ def _workspace_sentence(db, conv_id, role):
 EXPRESS = (
     'Express task: do the assignment and report results with deliver. No tests, no test suite, '
     'no gates, no commits or review required unless the goal explicitly asks. '
+    'If the goal requests tests, run only tests reaching changed code; never full suites, e2e suites '
+    'or whole-suite coverage. List any test commands run in the report. '
     'deliver(what, where) takes text only, posts your report to the root captain and finishes the task. ')
 RESOURCES = (
     'Before starting a job needing a captain-declared resource, call acquire_resource(name, note). '
@@ -74,9 +78,22 @@ def _express_pack(db, conv_id, role, row):
 
 
 LIGHT = (
-    'Light task: gates scale with the diff and the full suite is not required. Run '
-    '`uv run --locked python -m partyline.task_gates` for the gates your changed paths need '
-    '(docs, markdown and skills only: none). ')
+    'Full task: gates scale with the diff. Run only tests that reach the changed code; '
+    'never the full suite, never e2e suites, never whole-suite coverage. '
+    'List every test command run and its result in your report or verdict. '
+    'For partyline, `uv run --locked python -m partyline.task_gates` prints the scoped gates '
+    '(docs, markdown and skills only: none). This applies to implementers and reviewers. ')
+
+
+def _suite_pack(db, conv_id, role, row):
+    return (
+        '\n\n## Task line pack\n'
+        f"You are the {role}. Your task line id is {conv_id}; its root line id is {row['root_id']}. "
+        f"{_handles(row, role)}{_root_sentence(db, conv_id, row['root_id'])}"
+        f'{suite_brief(row)}{RESOURCES}{FENCE}{UPKEEP}'
+        'Never archive or retire this task line. '
+        f"Task goal: {row['goal']}\n"
+        f"Current state: {row['status']}. Full current task state: GET /api/conversations/{conv_id}/task.")
 
 
 def task_pack(db, conv_id, role):
@@ -85,6 +102,8 @@ def task_pack(db, conv_id, role):
     row = task(db, conv_id)
     if not row:
         return ''
+    if row['mode'] == 'suite':
+        return _suite_pack(db, conv_id, role, row)
     if row['mode'] == 'express':
         return _express_pack(db, conv_id, role, row)
     return (
@@ -113,7 +132,7 @@ def task_pack(db, conv_id, role):
         'While reviewing, hand off only between the implementer and reviewer. '
         'The root captain receives one terminal report and always merges and pushes. '
         'Never archive or retire this task line. Processes detach after work ships. '
-        f"{LIGHT if row['mode'] == 'light' else ''}"
+        f'{LIGHT}'
         f"Task goal: {row['goal']}\n"
         f"Current state: {row['status']}, round {row['round']}, SHA {row['sha']}, "
         f"review checkout {row['review_worktree']}. "

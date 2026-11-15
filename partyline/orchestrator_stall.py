@@ -80,8 +80,9 @@ def _named(path):
 def reminder(db, att):
     """What this line's state owes next, or GENERIC when no workspace state could be read."""
     conv_id = att['conv_id']
-    if (task(db, conv_id) or {}).get('mode') == 'express':
-        return EXPRESS_GENERIC
+    if (task(db, conv_id) or {}).get('mode') in ('express', 'suite'):
+        return (EXPRESS_GENERIC.replace('express task', 'suite run')
+                if task(db, conv_id)['mode'] == 'suite' else EXPRESS_GENERIC)
     try:
         spaces = workspaces(db, conv_id)
         if spaces:
@@ -152,7 +153,8 @@ async def settle(runtime, att, review=None):
         await runtime.broadcast(att['conv_id'], MessageEvent(message=MessageResponse.model_validate(notice)))
         await runtime.route_mentions(att['conv_id'], notice, force=True)
     else:
-        handoff = 'deliver' if (task(db, att['conv_id']) or {}).get('mode') == 'express' else 'request_review'
+        handoff = ('deliver' if (task(db, att['conv_id']) or {}).get('mode') in ('express', 'suite')
+                   else 'request_review')
         db._exec("UPDATE task_reviews SET stall_stage=3,findings=?,overridden_by=NULL WHERE conv_id=?",
                  (f'stalled: implementer returned again without {handoff} or blocked(reason)',
                   att['conv_id']))

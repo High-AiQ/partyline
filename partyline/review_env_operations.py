@@ -12,6 +12,7 @@ from .orchestrator_store import require_root, task
 from .review_dependencies import provision, sources_for
 from .review_environments import Environment, changed_files, entries_for, normalize, repository_key
 from .review_scope import ReviewError
+from .review_test_guidance import SCOPED_REVIEW_TESTS
 
 
 class ReviewEnvOperation(BaseModel):
@@ -100,5 +101,5 @@ async def refresh_task(runtime, row, entry):
         if row['reviewer_id']:
             await tell(runtime, row['reviewer_id'], f"Review environment updated in {repo['path']}/"
                        f"{entry.subpath}. Test command: {entry.test_command or '(none set)'}. "
-                       'Continue this review and report what ran.')
+                       'Continue this review. ' + SCOPED_REVIEW_TESTS)
     return failures

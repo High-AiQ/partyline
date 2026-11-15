@@ -4,7 +4,7 @@
 
 | Goal decision | MCP operation |
 | --- | --- |
-| New task | `create_task(name, goal, implementer, review, mode)` (`mode=light`: scaled gates; `mode=express`: no review, ends with `deliver`) |
+| New task | `create_task(name, goal, implementer, review, mode)` (`mode=full`: scoped tests/review; `mode=express`: no tests/review; `mode=suite`: every suite on a merged batch, repository + ordered batch required; ends with `deliver`) |
 | Change active task direction | `set_task_goal(conv_id, goal)` |
 | New work on an approved or done task | `reopen_task(conv_id, goal)` |
 | New sub-captain | `create_child(parent_conv_id, name, goal)`; later `set_goal(child_conv_id, goal)` |
@@ -222,8 +222,9 @@ config that holds a credential.
    The regression test names for the shipping review findings are listed in
    [`review-disposition.md`](review-disposition.md). Historical runs from earlier MCP commits are not
    evidence for a replacement tip.
-4. Run all gates from `AGENTS.md` on the final unchanged SHA: Ruff, one `./scripts/capped-test` run
-   with coverage ≥90%, `./check-code-lines`, then the frontend verify and build sequentially. Record
+4. Run scoped gates from `AGENTS.md` on the final unchanged SHA: Ruff, `./scripts/capped-test`
+   with explicit affected tests, `./check-code-lines`, then scoped frontend checks and build
+   sequentially. Never run full/e2e suites or whole-suite coverage in task reviews. Record
    the exact SHA and gate results in the handoff; do not point tests at a real database.
 5. For a client behavior claim, use `compat-matrix.md` and distinguish retained fixture logs from the
    associated run report. The logs record protocol methods and calls, not attachment IDs or CLI versions.
@@ -250,3 +251,10 @@ Reviewers use `env_gap(repository, subpath, what_failed, tried)` when tests cann
 The root captain uses `captain(op="review_env", args={operation, repository, subpath,
 setup, test})` to list, set, or delete environments. A set re-runs setup for affected
 open reviews and wakes their reviewers without changing the review round.
+
+Before every batch PR use `create_task(mode="suite", repository=..., batch=[...], ...)`.
+Batch entries are task IDs/tags resolving to accepted SHAs or explicit SHAs in order.
+The runner integrates from main, runs every suite and delivers branch/SHA, per-suite
+pass/fail and best-effort failure attribution. It never pushes or creates a PR: the captain
+does both after a pass. On failure reopen responsible tasks or create fixes, then repeat
+suite, or `reopen_task(suite_id, goal, batch=[new SHAs])` on the existing suite line.

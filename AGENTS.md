@@ -13,10 +13,13 @@ from structured transcripts, never screen scrapes; `partyline/static/` is built,
 | Keep code, tests, fixtures, docs and commits generic: follow web, platform and accessibility standards | Name or special-case a website, a client project or a site's components, selectors or URLs — even in a test fixture |
 | Upload screenshots, mockups and renders to the line (or `/var/tmp`) | Commit them to the repo — CI rejects it |
 
-**Gates before every commit** (`docs/agent-rules.md`, Gates): `uv run --locked ruff check .`,
-`./scripts/capped-test` (never the suite uncapped), coverage ≥90%, `./check-code-lines`
-(≤300 lines per production file), `./scripts/check-no-media` (no screenshots, renders or binaries in any commit), `cd frontend && npm run verify && npm run build` and commit
-the bundle. Tests get their own database automatically; never point one at a real database.
+**Task gates** (`docs/agent-rules.md`, Gates): `uv run --locked python -m
+partyline.task_gates` prints scoped commands; run only tests reaching changed code,
+never full/e2e suites or whole-suite coverage. Also run ruff, `./check-code-lines`,
+`./scripts/check-no-media` and `./scripts/check-no-polling`; build changed frontend
+and commit the bundle. Only a **suite** subline (or a person outside Partyline) runs
+full `./scripts/capped-test`, ≥90% coverage and full frontend verify on the merged
+batch before its PR. Tests get an isolated database; never use a real database.
 
 **Ship:** one-line Conventional Commit, semver bump in `partyline/__init__.py` in the same
 commit (feat → minor, fix → patch; none for docs/test/chore), branch + PR, CI green. Schema
