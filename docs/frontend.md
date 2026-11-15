@@ -172,6 +172,12 @@ or revoked control, another agent's grant, or no share at all draws nothing, and
 grant (no named holder) badges the share status only. The pulse stops under
 `prefers-reduced-motion`; the colour is the `--color-pink` token, tuned for both themes.
 
+The management dialog's only metrics panel is `ComputerUseSection`: one compact response/token/action/read
+summary with a disclosure for image, model-token and timing details. It offers last hour, today and since-line-started
+periods plus include-sublines, and disappears when the selected scope has no computer use. The older per-tool and
+per-response browser tables were removed to keep management uncluttered; their collection and REST read APIs remain
+for agents. `lib/computer-usage-api.ts` owns the Zod response contract and local-day period calculation.
+
 Orchestrator controls live in `CaptainStyleSection` (root-line management only)
 and `TaskHistorySetting` (beside the resource budget). Line responses carry derived
 task status, round and participant names, shared by `TaskStatusChip` and

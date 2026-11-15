@@ -59,7 +59,29 @@ def dimensions(value, *, delivered=False):
                 yield from dimensions(item, delivered=delivered or inline)
 
 
-def record(name, args, text, value, error, started, adapter=""):
+class ScreenMedia:
+    """Remember only screen media IDs in memory, so a later download has a fixed source label."""
+
+    def __init__(self, capacity=64):
+        self.capacity, self.ids, self.seen = capacity, deque(), set()
+
+    def source(self, name, args, value):
+        if name == "get_media":
+            return "screen" if args.get("file_id") in self.seen else "other"
+        if name not in catalog.SCREEN:
+            return "other"
+        file = value.get("file", {}) if isinstance(value, dict) else {}
+        ident = file.get("id") if isinstance(file, dict) else None
+        if isinstance(ident, str) and len(ident) <= 128:
+            if ident not in self.seen:
+                self.ids.append(ident)
+                self.seen.add(ident)
+                while len(self.ids) > self.capacity:
+                    self.seen.remove(self.ids.popleft())
+        return "screen"
+
+
+def record(name, args, text, value, error, started, adapter="", media=None):
     names = operation_names()
     tool = name if isinstance(name, str) and name in names else "unknown"
     op = args.get("op", "") if tool in ("extras", "captain") else ""
@@ -70,6 +92,11 @@ def record(name, args, text, value, error, started, adapter=""):
     allowed = tools_control.ELEMENT_ACTION_PROPERTIES["action"]["enum"]
     action = action if (op or tool) == "screen_element_action" and action in allowed else ""
     sub_op = op or action
+    canonical = op or tool
+    status = value.get("status") if canonical in catalog.SCREEN and isinstance(value, dict) else None
+    outcome = "error" if error else status if status in ("failed", "unconfirmed") else "ok"
+    media_source = media.source(canonical, args, value) if media else (
+        "screen" if canonical in catalog.SCREEN else "other")
     then = inner.get("then")
     flags = {"then": isinstance(then, dict), "refresh": inner.get("refresh") is True,
              "query": bool(inner.get("query")) or (isinstance(then, dict) and bool(then.get("query"))),
@@ -79,7 +106,8 @@ def record(name, args, text, value, error, started, adapter=""):
         value, delivered=(op or tool) == "get_media"), 32)] if not error else []
     return {"tool": tool, "sub_op": sub_op, "action": action, **flags, "result_bytes": size,
             "result_chars": len(text), "estimated_tokens": estimate_text_tokens(size),
-            "is_error": error, "latency_ms": max(0, (time.perf_counter() - started) * 1000),
+            "is_error": error, "outcome": outcome, "media_source": media_source,
+            "latency_ms": max(0, (time.perf_counter() - started) * 1000),
             "timestamp": time.time(), "images": images, "timing": extract(value)}
 
 

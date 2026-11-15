@@ -12,7 +12,7 @@ from .. import __version__
 from .client import ApiError, PartylineClient
 from .render import render
 from . import catalog
-from .telemetry import Telemetry, record
+from .telemetry import ScreenMedia, Telemetry, record
 
 logger = logging.getLogger(__name__)
 MAX_LINE = 1_000_000
@@ -27,6 +27,7 @@ class MCPServer:
         self.output = output or sys.stdout
         self._write_lock = threading.Lock()
         self.telemetry = Telemetry(client)
+        self.screen_media = ScreenMedia()
         self._state_signature = None
         self._revoked = False
         self._dynamic_screen_tools = None
@@ -161,7 +162,7 @@ class MCPServer:
             args = args if isinstance(args, dict) else {}
             self.telemetry.enqueue(record(
                 params.get("name"), args, result["content"][0]["text"],
-                self._telemetry_value, bool(result.get("isError")), started))
+                self._telemetry_value, bool(result.get("isError")), started, media=self.screen_media))
         except Exception:
             logger.debug("dropping invalid tool telemetry", exc_info=True)
         finally:
