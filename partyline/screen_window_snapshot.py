@@ -21,6 +21,7 @@ from .screen_frame_store import frame_reference
 from .screen_grants import require_window, resolve_window
 from .screen_protocol import HEARTBEAT_TIMEOUT
 from .screen_timing import timed, phase, locked
+from .screen_window_marks import NO_TREE, USE, Geometries, clean_marks, mark_inputs
 
 MAX_CHUNKS = 8  # binary messages one screenshot may travel in; the image itself is capped by the media store
 MIN_WINDOWS = 2  # the helper's `windows` hello value that can take window screenshots
@@ -53,10 +54,12 @@ class WindowSnapshots:
         self.last = {}  # window grant id -> {"at": epoch seconds, "by": handle} of its latest capture
         self.shares = {}  # window grant id -> what frame_reference needs to say "unchanged"
         self.locks = {}
+        self.geometry = Geometries()  # window grant id -> the geometry of its latest snapshots
 
     def end(self, grant_id):
         for table in (self.last, self.shares, self.locks):
             table.pop(grant_id, None)
+        self.geometry.end(grant_id)
 
     def last_screenshot(self, grant_id):
         return self.last.get(grant_id)
@@ -73,14 +76,16 @@ class WindowSnapshots:
         self.hub.elements.receive(device, {**message, "data": data})
 
     @timed
-    async def take(self, principal, store, window=None, device_name=None):
+    async def take(self, principal, store, window=None, device_name=None, marks=False):
         grant, device = resolve_window(self.hub, principal, window, device_name)
         if device.get("windows", 0) < MIN_WINDOWS:
             raise HTTPException(409, OLD_HELPER)
         async with locked(self.locks.setdefault(grant["id"], asyncio.Lock())):
+            tree = self.hub.elements.snapshots.get(grant["id"]) if marks else None
+            extra = {"overlay": True, "marks": mark_inputs(tree) if tree is not None else []} if marks else {}
             try:
                 answer = await self.hub.elements.exchange(principal, grant, device, "snapshot_window",
-                                                          agent=principal.name)
+                                                          agent=principal.name, **extra)
             except (TimeoutError, OSError, RuntimeError) as exc:
                 raise screen_error(exc if isinstance(exc, TimeoutError) else ValueError(
                     "the computer did not take the screenshot")) from exc
@@ -88,7 +93,12 @@ class WindowSnapshots:
                 reason = answer.get("error") or "the computer could not take the screenshot"
                 raise HTTPException(409, str(reason)[:300])
             with phase("image_store_ms"):
-                return await self.keep(store, principal, grant, answer)
+                result = await self.keep(store, principal, grant, answer)
+                if marks:
+                    result["marks"] = clean_marks(answer.get("marks")) if tree is not None else []
+                    if tree is None:
+                        result["marks_note"] = NO_TREE
+                return result
 
     async def keep(self, store, principal, grant, answer):
         data, mime = answer.get("data"), answer.get("mime")
@@ -121,6 +131,8 @@ class WindowSnapshots:
                   "use": "slim is the usual choice; full is the window's own pixels", "unchanged": unchanged}
         if answer.get("blank") is True:
             result["note"] = BLANK
+        if self.geometry.keep(grant["id"], answer.get("snapshot_id"), answer.get("geometry")):
+            result.update(snapshot=answer["snapshot_id"], coordinates=USE)
         return result
 
     async def audit(self, principal, grant, ref):
@@ -143,9 +155,9 @@ def snapshot_router(runtime, hub, store):
     @router.post("/api/conversations/{conv_id}/screen-window-snapshot")
     @timed
     async def window_snapshot(conv_id: str, request: Request, device: str | None = None,
-                              window: str | None = None):
+                              window: str | None = None, marks: bool = False):
         principal = request_principal(request)
         deny_unless(runtime.db, principal, conv_id, "read")
-        return await hub.snapshots.take(principal, store, window, device)
+        return await hub.snapshots.take(principal, store, window, device, marks)
 
     return router

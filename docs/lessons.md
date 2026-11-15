@@ -1,5 +1,12 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — Audit redaction tests must distinguish identifiers from content
+
+The false assumption was that a short file-content substring could never appear in a random media
+UUID. A legitimate ID contained that substring and made the audit test fail. The regression in
+`tests/test_cdp_file_input.py` uses a deterministic overlapping ID and checks the parsed audit's
+exact permitted fields, rather than searching the serialized record for incidental characters.
+
 ## 2026-11-15 — Capability flags must survive response serialization
 
 The false assumption was that adding a flag to attachment capability state made it visible to MCP.
@@ -7,6 +14,16 @@ FastAPI silently dropped `window_access` because the response model did not decl
 window tools despite an authorized connected helper. The real-route regression in
 `tests/test_capability_window_route.py` exercises inherited access through MCP and guards the response
 model against missing capability assignments.
+
+## 2026-11-15 — Filters are text, and screen refresh is separate from chat delivery
+
+The false assumptions in multi-line window access were that Space always means selection in a
+combobox and that snapshot errors mean a chat socket is dead. Typing a multiword filter must never
+change desktop permission: Space toggles only with an empty filter, while Enter explicitly selects a
+filtered option. Screen refresh now runs after chat delivery with independent error handling and one
+owner-state calculation across every tab. Regression tests type a multiword filter without a save,
+throw from snapshot construction and delivery without evicting chat sockets, and verify owner isolation
+and shared computation across lines.
 
 ## 2026-11-15 — Standing access needs local revocation and an explicit line binding
 

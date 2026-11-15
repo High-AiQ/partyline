@@ -31,7 +31,7 @@ class Page:
 
     async def call(self, method, params=None):
         self.guard()
-        if method.startswith("Input."):
+        if method.startswith("Input.") or method == "DOM.setFileInputFiles":
             self.dispatched = True
         return await self.browser.call(method, params, self.session, self.guard)
 

@@ -17,7 +17,10 @@ async def update_mirror(hub, device, message):
     from .capability_versions import bump_runtime
     bump_runtime(hub.runtime)
     if not state.enabled:
+        from .screen_audit import reset_window_access_notices
+        reset_window_access_notices(hub.runtime, device["id"])
         await hub.window_grants.revoke_standing(device["id"])
+    await hub._device_event(device, device["id"] in hub.devices)
 
 
 class StandingWindows:

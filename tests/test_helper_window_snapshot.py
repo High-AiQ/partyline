@@ -10,6 +10,7 @@ from PIL import Image
 from partyline_helper import __version__
 from partyline_helper.client import Session
 from partyline_helper.window_grab import GrabError, WindowGrab
+from partyline_helper.uia_gate import DispatchGate
 from partyline_helper.window_shares import WINDOWS_VERSION, WindowShares
 from partyline_helper import window_snapshot
 from partyline_helper.window_snapshot import MINIMIZED, SNAPSHOT_VERSION, prepare
@@ -46,7 +47,8 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.shares.snapshots.backend = self.backend
         self.shares.snapshots.clock = lambda: 1_700_000_000.0
         self.access = SimpleNamespace(grant=dict(GRANT), generation=3, check=AsyncMock(return_value=None),
-                                      revoke=Mock())
+                                      revoke=Mock(), gate=DispatchGate())
+        self.access.gate.grant()
         self.entry = {"access": self.access, "target": {"line_name": "Alpha"}, "title": "Editor",
                       "worker": SimpleNamespace(cancel=Mock(), close=AsyncMock())}
         self.shares.grants["g1"] = self.entry
@@ -219,9 +221,9 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("r10", "unsupported: snapshot_window"), (error["request_id"], error["message"]))
 
     async def test_the_hello_announces_screenshots_and_the_minor_version_moved(self):
-        self.assertEqual(2, WINDOWS_VERSION)
-        self.assertEqual(SNAPSHOT_VERSION, WINDOWS_VERSION)
-        self.assertEqual("1.3.1", __version__)
+        self.assertEqual(3, WINDOWS_VERSION)
+        self.assertEqual(2, SNAPSHOT_VERSION)
+        self.assertEqual("1.4.0", __version__)
 
 
 class WindowGrabTests(unittest.TestCase):

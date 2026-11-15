@@ -23,7 +23,7 @@ from .message_routing import post_human_message, route_message
 from .notice_policy import digest_candidates
 from .reattach import ReattachCoordinator
 from .settled_mail import drop_settled
-from .ws_push import push_event
+from .ws_push import push_event, push_all
 from .runtime_delivery_credit import DeliveryCreditMixin
 from .task_privacy import hidden_from_people
 from .attachment_stop_audit import status_update
@@ -97,8 +97,7 @@ class ChatRuntime(DeliveryCreditMixin):
         await push_event(self, conv_id, event.model_dump(exclude_none=True))
 
     async def broadcast_all(self, event: Event) -> None:
-        for conv_id in list(self.sockets):
-            await self.broadcast(conv_id, event)
+        await push_all(self, event)
 
     async def post_message(self, conv_id: str, sender: str, sender_type: str, body: str):
         msg = self.db.add_message(conv_id, sender, sender_type, body)

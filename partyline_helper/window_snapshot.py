@@ -2,17 +2,23 @@
 import asyncio
 import contextlib
 import time
+import uuid
+from collections import OrderedDict
 from io import BytesIO
 
 from websockets.exceptions import ConnectionClosed
 
+from partyline.point_geometry import GeometryError, clean
+
 from .window_grab import GrabError, WindowGrab
 from .timing import Timing
+from .window_marks import boxes, clean_inputs, draw, listed
 
 SNAPSHOT_VERSION = 2  # the `windows` hello value that includes window screenshots
 MAX_BYTES = 20 * 1024 * 1024  # the media store's own image limit: a larger one loses quality, never size
 CHUNK = 4 * 1024 * 1024  # one binary message; a bigger image travels as several in a row
 QUALITIES = (95, 90, 80, 70, 50)
+KEPT = 8  # snapshots per grant a later click may still name
 MINIMIZED = ("the window is minimised; Partyline never restores it. Ask the person to bring it back, "
              "then try again")
 
@@ -70,12 +76,17 @@ class WindowSnapshots:
         grant = access.grant if access else None
         if not grant:
             raise GrabError("consent revoked")
-        generation = access.generation
+        generation, gate_generation = access.generation, access.gate.generation
         await self.check(access, grant, generation)
         if await asyncio.to_thread(self.backend.minimized, grant["hwnd"]):
             raise GrabError(MINIMIZED)
         with timing.phase("capture_ms"):
             image = await asyncio.to_thread(self.backend.grab, grant["hwnd"])
+        ident, geometry = self.remember(entry, grant, image, gate_generation)
+        found = None
+        if message.get("overlay") and geometry:
+            found = boxes(clean_inputs(message.get("marks")), geometry, await self.page(access, grant))
+            image = draw(image, found)
         with timing.phase("encode_ms"):
             binary, mime, black = await asyncio.to_thread(prepare, image)
         agent = str(message.get("agent") or "an agent")[:80]
@@ -98,7 +109,41 @@ class WindowSnapshots:
         chunks = [binary[i:i + CHUNK] for i in range(0, len(binary), CHUNK)]
         await self.reply(request_id, chunks, gate, ok=True, mime=mime, width=image.width,
                          height=image.height, media=True, chunks=len(chunks), timing=timing.values,
-                         **({"blank": True} if black else {}))
+                         **({"blank": True} if black else {}),
+                         **({"snapshot_id": ident, "geometry": {k: geometry[k] for k in (
+                             "rect", "size", "regions", "dpi")}} if ident else {}),
+                         **({"marks": listed(found)} if found is not None else {}))
+
+    @staticmethod
+    def remember(entry, grant, image, generation):
+        """Keep what a later click needs to convert this picture; `(id, geometry)` or `(None, None)`."""
+        rect, regions = image.info.get("rect"), image.info.get("regions")
+        if not rect or not regions:
+            return None, None
+        try:
+            geometry = clean({"rect": list(rect), "size": [image.width, image.height],
+                              "dpi": image.info.get("dpi", 96), "regions": [list(r) for r in regions]})
+        except GeometryError:
+            return None, None
+        ident = uuid.uuid4().hex[:16]
+        rows = entry.setdefault("snapshots", OrderedDict())
+        rows[ident] = {"geometry": geometry, "grant": grant, "generation": generation}
+        while len(rows) > KEPT:
+            rows.popitem(last=False)
+        return ident, geometry
+
+    async def page(self, access, grant):
+        """Where a Chrome page's CSS pixels are on screen, for marks on page elements; None when unknown."""
+        chrome = getattr(self.shares, "chrome", None)
+        if not chrome or str(grant.get("process", "")).lower() != "chrome.exe":
+            return None
+        from .cdp_transport import CDPError
+        from .point_cdp import page_frame
+        try:
+            page = await chrome.page(access)
+            return (await page_frame(page, grant["hwnd"]))[:3] if page else None
+        except (CDPError, OSError):
+            return None
 
     @staticmethod
     def audit(entry, message, result):

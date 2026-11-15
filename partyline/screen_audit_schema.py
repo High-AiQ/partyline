@@ -7,6 +7,7 @@ MIGRATIONS = [
         entry_hash TEXT NOT NULL, message_id INTEGER
     )""",
     "CREATE INDEX IF NOT EXISTS idx_screen_audit_pending ON screen_control_audit(share_id, message_id, id)",
+    "ALTER TABLE screen_control_audit ADD COLUMN created_at REAL NOT NULL DEFAULT 0",
     """CREATE TRIGGER IF NOT EXISTS delete_screen_audit AFTER DELETE ON conversations
         BEGIN DELETE FROM screen_control_audit WHERE conv_id=OLD.id; END""",
 ]

@@ -12,11 +12,12 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 
 ELEMENT_ACTION_NOTE = (
-    "Act on a screen_elements id using its provider (CDP or UIA). select value=option name; "
-    "set_value edits text; press key=enter/tab/escape commits. force overrides reported disabled. "
-    "then re-reads after an event quiet deadline for CDP, reporting quiet/changing/deadline. "
-    "UIA window_* actions target the shared window. Drag: screen_drag.")
+    "Act on a screen_elements id with CDP or UIA. set_files uploads 1–10 media IDs and/or local paths "
+    "to a CDP file input (media cap per file, 200 MiB total; helper data is refused). "
+    "select uses value; set_value edits text; press uses enter/tab/escape. force overrides disabled. "
+    "then re-reads after CDP settles. UIA window_* targets the shared window; drag: screen_drag.")
 ELEMENT_ACTION_TIMEOUT = 100  # a 20s capture deadline may be followed by a 35s exchange, then action
+WINDOW_CLICK_TIMEOUT = 130  # up to 70 s for the helper (the person is asked), then a thumb
 ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and event barrier
 ELEMENT_ACTION_PROPERTIES = {
     "window": {"type": "string",
@@ -24,10 +25,16 @@ ELEMENT_ACTION_PROPERTIES = {
     "force": {"type": "boolean", "description": "Try a reported-disabled control the person confirms works."},
     "element_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "action": {"type": "string", "enum": [
-        "invoke", "toggle", "set_value", "press", "select", "add_to_selection",
+        "invoke", "toggle", "set_value", "set_files", "press", "select", "add_to_selection",
         "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent", "scroll_into_view",
         "set_range_value", "window_close",
         "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize"]},
+    "files": {"type": "array", "minItems": 1, "maxItems": 10,
+              "items": {"type": "string", "minLength": 1, "maxLength": 128},
+              "description": "For set_files: readable Partyline media IDs."},
+    "paths": {"type": "array", "minItems": 1, "maxItems": 10,
+              "items": {"type": "string", "minLength": 1, "maxLength": 32767},
+              "description": "For set_files: absolute file paths on the paired computer."},
     "value": {"type": "string", "maxLength": 500,
               "description": "Text for set_value; option name for ComboBox select."},
     "key": {"type": "string", "enum": ["enter", "tab", "escape"], "description": "For press; no modifiers."},
@@ -52,12 +59,36 @@ ELEMENT_ACTION_PROPERTIES = {
 }
 
 
+WINDOW_CLICK_NOTE = (
+    "Click a point you see in a screen_window_snapshot of a shared window, only when screen_elements and "
+    "screen_element_action cannot do it (a canvas, an odd widget, a control the tree misses). Prefer "
+    "element actions. Take screen_window_snapshot first (marks=true numbers the elements and adds a "
+    "coordinate grid) and pass its id; x and y are that image's pixels, (0, 0) at its top left. Refused "
+    "when the window moved, resized, closed or was re-granted since the snapshot, or when the point is "
+    "outside the window's client area. A Chrome page with a debugging connection is clicked without the "
+    "mouse; any other window moves the real cursor after the person agrees on their computer, once per "
+    "window grant. Never a terminal, password manager or system dialog. Answers with route (cdp or "
+    "cursor), settle and what changed; capture=thumb adds a picture afterwards.")
+WINDOW_CLICK_PROPERTIES = {
+    "window": ELEMENT_ACTION_PROPERTIES["window"],
+    "snapshot": {"type": "string", "minLength": 1, "maxLength": 64,
+                 "description": "The id returned by screen_window_snapshot; the click uses its pixels."},
+    "x": {"type": "integer", "minimum": 0, "maximum": 100000, "description": "X in the snapshot image."},
+    "y": {"type": "integer", "minimum": 0, "maximum": 100000, "description": "Y in the snapshot image."},
+    "button": {"type": "string", "enum": ["left", "right"], "description": "Mouse button; default left."},
+    "clicks": {"type": "integer", "enum": [1, 2], "description": "1, or 2 for a double-click."},
+    "capture": {"type": "string", "enum": ["none", "thumb"],
+                "description": "thumb: also return a thumbnail picture taken after the click."},
+}
+NO_FRAME = ("screen_control_request", "screen_element_action", "screen_eval", "screen_window_click")
+
+
 def _int(description):
     return {"type": "integer", "description": description}
 
 
 def _tool(name, description, properties, required):
-    if name not in ("screen_control_request", "screen_element_action", "screen_eval"):
+    if name not in NO_FRAME:
         properties = {**properties, "frame": {"type": "string", "enum": ["none", "thumb", "full"],
                       "description": "Frame tier: none, thumb (default), or full (original)."}}
     return {"name": name, "description": description, "inputSchema": {
@@ -71,7 +102,7 @@ def tool_list(state):
             return []
         allowed = set()
         if state.get("screen_windows"):
-            allowed.update({"screen_element_action", "screen_eval"})
+            allowed.update({"screen_element_action", "screen_eval", "screen_window_click"})
         if state.get("screen_control"):
             allowed.update({"screen_click", "screen_move", "screen_drag", "screen_scroll",
                             "screen_type", "screen_key"})
@@ -95,6 +126,7 @@ def tool_list(state):
                "window": ELEMENT_ACTION_PROPERTIES["window"]}, ["expression"]),
         _tool("screen_element_action", ELEMENT_ACTION_NOTE, ELEMENT_ACTION_PROPERTIES,
               ["element_id", "action"]),
+        _tool("screen_window_click", WINDOW_CLICK_NOTE, WINDOW_CLICK_PROPERTIES, ["snapshot", "x", "y"]),
         _tool("screen_control_request",
               "Ask the person sharing their screen to let you drive its mouse and keyboard. "
               "Returns at once; you are @mentioned when they answer on their computer.", {}, []),
@@ -137,9 +169,12 @@ def call(client, name, args, state):
     base = f"/api/conversations/{quote(client.home, safe='')}/screen-control"
     if name == "screen_eval":
         return client.request("POST", base.removesuffix("/screen-control") + "/screen-eval", args, timeout=60)
+    if name == "screen_window_click":
+        return client.request("POST", base + "/window-click", args, timeout=WINDOW_CLICK_TIMEOUT)
     if name == "screen_control_request":
         return client.request("POST", base + "/request")
     if name == "screen_element_action":
-        wait = ELEMENT_ACTION_THEN_TIMEOUT if args.get("then") is not None else ELEMENT_ACTION_TIMEOUT
+        wait = (700 if args.get("action") == "set_files" else
+                ELEMENT_ACTION_THEN_TIMEOUT if args.get("then") is not None else ELEMENT_ACTION_TIMEOUT)
         return client.request("POST", base + "/element-action", args, timeout=wait)
     return client.request("POST", base + "/action", {"kind": name.removeprefix("screen_"), **args})

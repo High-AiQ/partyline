@@ -24,7 +24,7 @@ from .screen_elements import ElementsHub
 from .screen_window_snapshot import WindowSnapshots
 from .screen_window_grants import MESSAGES as WINDOW_MESSAGES, WindowGrants
 from .screen_standing import StandingWindows, update_mirror
-from .screen_device_access import connected_device
+from .screen_device_access import connected_device, initialize_standing
 from .screen_pair_limits import PairLimits
 from .screen_requests import capture, preview
 from .walkthrough_takes import Takes
@@ -75,8 +75,7 @@ class ScreenHub:
                               "VALUES(?,?,?,?,?,?,?)",
                               (device_id, owner_id, None, name[:120], os_name[:40], self.digest(token),
                                time.time()))
-        self.runtime.db._exec("INSERT INTO screen_device_window_access(device_id,enabled,owner_conv_id) "
-                              "VALUES(?,0,?)", (device_id, conv_id))
+        initialize_standing(self.runtime.db, device_id, conv_id)
         return device_id, token, owner_id, None
 
     async def connect(self, ws: WebSocket, device: dict) -> None:

@@ -35,13 +35,13 @@ class ElementsHub(ElementState):
         self.change_versions = {}
         self.after_action = set()
 
-    async def exchange(self, principal, grant, device, kind, **fields):
+    async def exchange(self, principal, grant, device, kind, wait=35, **fields):
         require_window(self.hub, principal, grant["id"])
         ident = str(uuid.uuid4())
         future = asyncio.get_running_loop().create_future()
         self.waiters[ident] = (device["id"], future)
         try:
-            async with asyncio.timeout(35):
+            async with asyncio.timeout(600 if fields.get("action") == "set_files" else wait):
                 line_id = getattr(principal, "conv_id", None) or grant.get("conv_id", "")
                 line = self.hub.runtime.db.get_conversation(line_id) if line_id else None
                 with phase("send_ms"):

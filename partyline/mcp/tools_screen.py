@@ -79,9 +79,14 @@ WINDOW_SNAPSHOT_NOTE = (
     "read screen_elements first, and its deltas after each screen_element_action. Use this when layout or "
     "visuals matter, or when elements do not explain what is on screen. Returns variants full, slim and "
     "thumb (url, size, image tokens); slim is the usual choice; get_media fetches one. Protected content "
-    "shows black; the person sees each capture."
+    "shows black; the person sees each capture. The answer's snapshot id and pixels are what "
+    "screen_window_click takes, for a point elements cannot reach."
 )
-WINDOW_SNAPSHOT_PROPERTIES = {key: ELEMENTS_PROPERTIES[key] for key in ("device", "window")}
+WINDOW_SNAPSHOT_PROPERTIES = {
+    **{key: ELEMENTS_PROPERTIES[key] for key in ("device", "window")},
+    "marks": {"type": "boolean", "description": (
+        "Overlay a light coordinate grid and numbered boxes for the elements of the latest "
+        "screen_elements read, listed as {n, id, name, box}. Use with screen_window_click.")}}
 
 
 def screen_window_snapshot_tool():
@@ -116,8 +121,8 @@ def call(client, name, args, state, conv):
     if name == "screen_elements":
         return client.request("POST", base + "/screen-elements" + elements_query(args), timeout=60)
     if name == "screen_window_snapshot":
-        pairs = [f"{key}={quote(str(args[key]), safe='')}" for key in WINDOW_SNAPSHOT_PROPERTIES
-                 if args.get(key)]
+        pairs = [f"{key}={quote(str(args[key]), safe='')}" for key in ("device", "window") if args.get(key)]
+        pairs += ["marks=true"] if args.get("marks") else []
         query = "?" + "&".join(pairs) if pairs else ""
         return client.request("POST", base + "/screen-window-snapshot" + query, timeout=60)
     query = "?mark_pointer=true" if args.get("mark_pointer") else ""

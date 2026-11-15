@@ -72,6 +72,10 @@ class Chrome:
         info = {"grant": access.session.window_grant_id, "line": message.get("line_id", ""),
                 "process": message.get("agent", ""), "operation": operation,
                 "input_length": len(message.get("expression", message.get("value", "")) or "")}
+        if message.get("action") == "set_files":
+            info.update(operation="set_files", file_count=len(message.get("files", [])),
+                        total_bytes=sum(f["bytes"] for f in message.get("files", [])),
+                        media_ids=[f["id"] for f in message.get("files", [])])
         self.session.tools.audit.append("action", "window", str(info["process"])[:120], "chrome",
                                         json.dumps(info, separators=(",", ":")))
 
@@ -191,6 +195,8 @@ class Chrome:
         self.audit(access, message, "screen_eval" if message.get("type") == "window_eval" else
                    "screen_element_action")
         page = await self.page(access)
+        if message.get("action") == "set_files" and (not page or self.sources.get(access) != "cdp"):
+            return {"status": "failed", "error": "CDP unavailable; use the Open dialog path instead"}
         if message.get("type") == "window_eval":
             if not page:
                 return {"status": "failed", "error": "screen_eval needs a mapped Chrome window",
@@ -206,8 +212,11 @@ class Chrome:
         try:
             return await act(page, message)
         except CDPError as exc:
+            error = str(exc)
+            if message.get("action") == "set_files" and (not page.live or "revoked" in error):
+                error += "; use the Open dialog path instead"
             return {"status": "unconfirmed" if page.dispatched else "failed",
-                    "source": "cdp", "error": str(exc), "revoked_during": not page.live}
+                    "source": "cdp", "error": error, "revoked_during": not page.live}
         finally:
             page.operation_epoch = None
 

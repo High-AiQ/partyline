@@ -29,6 +29,20 @@ const HelperInstallerSchema = z.object({
 export type HelperInstaller = z.infer<typeof HelperInstallerSchema>;
 const PairClaimSchema = z.object({ device_id: z.string(), token: z.string() });
 const StartSchema = z.object({ share_id: z.string(), status: z.string() });
+const WindowAccessEntrySchema = z.object({
+  agent: z.string(),
+  call: z.string(),
+  app: z.string(),
+  title: z.string(),
+  result: z.string(),
+  time: z.number(),
+  entry_hash: z.string(),
+});
+const WindowAccessAuditSchema = z.object({
+  entries: z.array(WindowAccessEntrySchema),
+  chain_head: z.string().nullable(),
+});
+export type WindowAccessEntry = z.infer<typeof WindowAccessEntrySchema>;
 const PreviewSchema = z.object({
   out_width: z.number().int().positive(),
   out_height: z.number().int().positive(),
@@ -80,11 +94,19 @@ export const screenApi = {
       schema: z.object({ ok: z.literal(true) }),
       method: "DELETE",
     }),
-  authorizeWindowLine: (deviceId: string, convId: string | null) =>
-    request("/api/screen/devices/" + encodeURIComponent(deviceId) + "/window-access-line", {
+  windowLineOptions: (deviceId: string) =>
+    request(`/api/screen/devices/${encodeURIComponent(deviceId)}/window-access-lines`, {
+      schema: z.object({ lines: z.array(z.object({ id: z.string(), name: z.string() })) }),
+    }),
+  authorizeWindowLines: (deviceId: string, convIds: string[]) =>
+    request(`/api/screen/devices/${encodeURIComponent(deviceId)}/window-access-lines`, {
       schema: z.object({ ok: z.literal(true) }),
       method: "PUT",
-      body: { conv_id: convId },
+      body: { conv_ids: convIds },
+    }),
+  windowAccessAudit: (convId: string) =>
+    request("/api/conversations/" + encodeURIComponent(convId) + "/window-access-audit?limit=50", {
+      schema: WindowAccessAuditSchema,
     }),
   preview: (deviceId: string, monitorId: string | number) =>
     request(

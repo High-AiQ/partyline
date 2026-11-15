@@ -96,13 +96,6 @@ def require_window(hub, principal, grant_id):
     return resolve_window(hub, principal, grant_id)
 
 
-def window_share_indicators(db, owner_id):
-    return [{"conv_id": g["conv_id"], "device_name": g["device_name"], "kind": "window",
-             "label": f"window → «{g['line_name']}» (and its sublines): {g['title']}"} for g in
-            db._exec(GRANTS + " AND d.owner_id=?",
-                     (owner_id,)).fetchall()]
-
-
 def grant_router(runtime, hub):
     router = APIRouter()
 

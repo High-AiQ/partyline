@@ -31,6 +31,7 @@ class Status:
         self.window_access_enabled = False
         self.window_access_active = None
         self.window_calls = {}
+        self.window_mouse = set()  # ids of the window calls that are using the real mouse
         self.window_call_ids = itertools.count()
         self.window_access_toggle = None
         self.window_access_pause = None
@@ -40,7 +41,7 @@ class Status:
     def label(self):
         if self.window_access_active:
             line, agent = self.window_access_active
-            return f"Active: {line} / {agent}"
+            return f"Active: {line} / {agent}" + (" (using your mouse)" if self.window_mouse else "")
         if self.state != "offline":
             permission = LABELS["window_on" if self.window_access_enabled else "window_off"]
             return f"{LABELS[self.state]}; {permission.lower()}"
@@ -110,8 +111,15 @@ class Status:
         self.changed()
         return ident
 
+    def mark_mouse(self, ident):
+        """The window call `ident` is moving the real mouse: the tray and its tooltip say so."""
+        if ident in self.window_calls:
+            self.window_mouse.add(ident)
+            self.changed()
+
     def end_window_call(self, ident):
         self.window_calls.pop(ident, None)
+        self.window_mouse.discard(ident)
         self.window_access_active = next(iter(self.window_calls.values()), None)
         self.changed()
 

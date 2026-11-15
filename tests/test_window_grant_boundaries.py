@@ -211,16 +211,17 @@ class WindowBoundaryTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         response = await self.client.get(url, headers=self.human(self.owner))
         indicators = response.json()["indicators"]
         self.assertEqual({"alpha", "beta"}, {g["conv_id"] for g in indicators})
-        self.assertEqual({"window"}, {g["kind"] for g in indicators})
+        self.assertEqual({"window", "standing"}, {g["kind"] for g in indicators})
         response = await self.client.get(url, headers=self.human(self.other_user))
         self.assertEqual([], response.json()["indicators"])
         self.assertEqual(403, (await self.client.get(url, headers=self.machine("a"))).status_code)
         await self.client.delete("/api/screen/window-grants/g1", headers=self.human(self.owner))
         indicators = (await self.client.get(url, headers=self.human(self.owner))).json()["indicators"]
-        self.assertEqual(["beta"], [g["conv_id"] for g in indicators])
+        self.assertEqual(["beta"], [g["conv_id"] for g in indicators if g["kind"] == "window"])
         self.db.set_attachment_status("b", "exited", "activation-b")  # the line keeps its grant
         response = await self.client.get(url, headers=self.human(self.owner))
-        self.assertEqual(["beta"], [g["conv_id"] for g in response.json()["indicators"]])
+        self.assertEqual(["beta"], [g["conv_id"] for g in response.json()["indicators"]
+                                   if g["kind"] == "window"])
 
     async def test_account_migration_repeats_safely_with_window_grants(self):
         from partyline.db import Db

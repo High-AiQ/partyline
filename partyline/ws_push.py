@@ -21,3 +21,12 @@ async def push_event(runtime, conv_id: str, payload: dict) -> None:
                 runtime.human_handles.pop(conv_id, None)
         finally:  # a slow send that then fails was still slow
             op_timing.record(name, op_timing.clock() - enqueued)
+
+
+async def push_all(runtime, event):
+    """Chat delivery and screen refresh have independent failure handling."""
+    for conv_id in list(runtime.sockets):
+        await runtime.broadcast(conv_id, event)
+    if event.type == "conversations_changed":
+        from .screen_snapshot import refresh_snapshots
+        await refresh_snapshots(runtime)

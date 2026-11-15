@@ -29,6 +29,13 @@ class WindowGrab:
         from .window_grab_owned import grab_owned
         return grab_owned(hwnd, self.grab_one)
 
+    def layout(self, hwnd):
+        """The rectangle a capture of the window and its owned popups covers now, and their client areas."""
+        if sys.platform != "win32":
+            raise GrabError("window screenshots need Windows")
+        from .window_grab_owned import layout
+        return layout(hwnd)
+
     def grab_one(self, hwnd):
         try:
             return self.wgc(hwnd)

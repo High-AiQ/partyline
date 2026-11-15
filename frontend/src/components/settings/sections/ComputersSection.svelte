@@ -6,6 +6,7 @@
   import SettingRow from "../SettingRow.svelte";
   import PairingSteps from "../../PairingSteps.svelte";
   import WindowAccessLine from "../../WindowAccessLine.svelte";
+  import WindowAccessAudit from "../../WindowAccessAudit.svelte";
   const devices = $derived(screenStatus.devices);
   let code = $state("");
   let error = $state("");
@@ -40,7 +41,12 @@
         <button type="button" onclick={() => void revoke(device.id)}>Revoke</button>
       </p>
       <WindowAccessLine {device} />
+      <WindowAccessAudit {device} />
     {/each}
+    {#if devices.length}<small
+        >Selected lines and their sublines can see and use windows while the computer's window access toggle
+        is on.</small
+      >{/if}
     {#if error}<p role="alert">{error}</p>{/if}
     <PairingSteps origin={window.location.origin} code={code || "YOUR-CODE"} />
   </SettingRow>

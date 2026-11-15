@@ -20,14 +20,18 @@ async def act(page, message):
         raise CDPError("element reports disabled (DOM/ARIA/inert)")
     if action == "set_value" and (state.get("readonly") or state.get("password")):
         raise CDPError("element is read-only or a password field")
-    if action not in ("invoke", "toggle", "select", "set_value", "press", "scroll_into_view"):
+    if action not in ("invoke", "toggle", "select", "set_value", "set_files", "press", "scroll_into_view"):
         raise CDPError("action unavailable for CDP page element")
-    await page.call("DOM.scrollIntoViewIfNeeded", {"backendNodeId": backend})
-    await page.call("DOM.focus", {"backendNodeId": backend})
+    if action != "set_files":
+        await page.call("DOM.scrollIntoViewIfNeeded", {"backendNodeId": backend})
+        await page.call("DOM.focus", {"backendNodeId": backend})
     navigation, released = page.navigations, False
     try:
         extra = {}
-        if action == "select" and state.get("tag") == "SELECT":
+        if action == "set_files":
+            from .cdp_files import set_files
+            extra = await set_files(page, message, backend)
+        elif action == "select" and state.get("tag") == "SELECT":
             if not isinstance(message.get("value"), str):
                 raise CDPError("select requires an option name or value")
             extra = await select_option(page, backend, message["value"])
@@ -54,6 +58,10 @@ async def act(page, message):
         settle = await page.quiet.wait()
         counter = page.access.event_status()["event_counter"]
         observed = await page.function(backend, STATE)
+        if action == "set_files":
+            if not isinstance(observed.get("files"), list) or not isinstance(observed.get("file_count"), int):
+                raise CDPError("file input read-back unavailable")
+            extra = {"files": observed.pop("files"), "count": observed["file_count"]}
         if page.access.event_status()["event_counter"] != counter and settle == "quiet":
             settle = "changing"
         return {"status": "completed", "source": "cdp", "settle": settle,

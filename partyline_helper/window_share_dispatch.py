@@ -1,11 +1,16 @@
 """Recheck helper-side window authority before routing a server call."""
 
 
+def label(message):
+    """The audit name of a window call."""
+    return {"snapshot_window": "screenshot", "read_window_elements": "uia_read",
+            "window_click": "point_click"}.get(message["type"], "uia_action")
+
+
 async def dispatch(shares, message):
     entry = shares.grants.get(message.get("grant_id"))
     if entry and entry.get("standing_access") and not shares.session.window_access_enabled:
-        call = "screenshot" if message["type"] == "snapshot_window" else (
-            "uia_read" if message["type"] == "read_window_elements" else "uia_action")
+        call = label(message)
         shares.session.window_access_audit.append(message.get("line", ""), message.get("agent", ""),
             call, entry.get("process", ""), entry.get("title", ""), "denied: toggle off")
         if message["type"] == "snapshot_window":
@@ -22,18 +27,19 @@ async def dispatch(shares, message):
         shares.spawn(shares.snapshots.handle(entry, message))
     elif not entry:
         shares.session.window_access_audit.append(message.get("line", ""), message.get("agent", ""),
-            "screenshot" if message["type"] == "snapshot_window" else
-            "uia_read" if message["type"] == "read_window_elements" else "uia_action",
-            message.get("process", ""), message.get("title", ""), "denied: grant unavailable")
+            label(message), message.get("process", ""), message.get("title", ""), "denied: grant unavailable")
         if message["type"] == "snapshot_window":
             await shares.session.send("window_snapshot", request_id=message["request_id"],
                                       ok=False, error="consent revoked")
         else:
             kind = ("window_elements" if message["type"] == "read_window_elements"
                     else "window_element_result")
+            error = ("consent revoked; use the Open dialog path instead"
+                     if message.get("action") == "set_files" else "consent revoked")
             await shares.session.send(kind, request_id=message["request_id"],
-                                      elements_unavailable="consent revoked",
-                                      status="failed", error="consent revoked")
+                                      elements_unavailable=error, status="failed", error=error)
+    elif message["type"] == "window_click":
+        shares.spawn(shares.clicks.handle(entry, message))
     elif message.get("event_status"):
         await _event_status(shares, entry, message)
     elif message["type"] == "read_window_elements":
