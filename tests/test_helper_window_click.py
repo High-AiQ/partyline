@@ -245,6 +245,35 @@ class CdpRouteTests(ClickFixture):
         reply = await self.click()
         self.assertEqual(("unconfirmed", "cdp"), (reply["status"], reply["route"]))
 
+    def press_fails(self, release_fails=False):
+        async def call(method, params=None):
+            self.page.calls.append((method, params))
+            if method == "Runtime.evaluate":
+                return {"result": {"value": self.page.viewport}}
+            self.page.dispatched = True
+            kind = params["type"]
+            if kind == "mousePressed" or (kind == "mouseReleased" and release_fails):
+                raise CDPError("Chrome command interrupted")
+            return {}
+        self.page.call = call
+
+    def kinds(self):
+        return [p["type"] for m, p in self.page.calls if m == "Input.dispatchMouseEvent"]
+
+    async def test_a_press_whose_answer_failed_is_still_released_and_stays_unconfirmed(self):
+        self.press_fails()
+        reply = await self.click()
+        self.assertEqual(["mouseMoved", "mousePressed", "mouseReleased"], self.kinds())
+        self.assertEqual(("unconfirmed", "cdp"), (reply["status"], reply["route"]))
+        self.assertIn("interrupted; the button was released", reply["error"])
+
+    async def test_a_release_that_cannot_be_confirmed_is_not_reported_as_released(self):
+        self.press_fails(release_fails=True)
+        reply = await self.click()
+        self.assertEqual("unconfirmed", reply["status"])
+        self.assertIn("a button may still be down", reply["error"])
+        self.assertNotIn("was released", reply["error"])
+
     async def test_a_changing_page_is_reported_as_changing(self):
         counters = iter([4, 5])
         self.page.access = SimpleNamespace(event_status=lambda: {"event_counter": next(counters)})

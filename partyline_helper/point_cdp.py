@@ -68,15 +68,28 @@ def to_page(frame, sx, sy):
 async def click(page, frame, point, button, clicks, guard=lambda: None):
     """Move, press and release `clicks` times at the screen pixel `point` through the page's own input.
 
-    `guard` may refuse (raise CDPError) before the move and before each press; a button that was pressed is
-    always released, unguarded."""
+    `guard` may refuse (raise CDPError) before the move and before each press. When a press may have reached
+    the page but its answer failed, a release is still attempted (the page's own call refuses it once access
+    is revoked) and the error says whether it went through; it is never reported as released when unknown."""
     x, y = to_page(frame, *point)
     base = {"x": x, "y": y, "button": button, "buttons": 0}
     guard()
     await page.call("Input.dispatchMouseEvent", {**base, "type": "mouseMoved", "button": "none"})
     for count in range(1, clicks + 1):
         guard()
-        await page.call("Input.dispatchMouseEvent", {**base, "type": "mousePressed", "clickCount": count,
-                                                     "buttons": BUTTONS[button]})
+        try:
+            await page.call("Input.dispatchMouseEvent", {**base, "type": "mousePressed", "clickCount": count,
+                                                         "buttons": BUTTONS[button]})
+        except CDPError as exc:  # the press may have been delivered although its answer failed
+            raise CDPError(f"{exc}; {await release(page, base, count)}") from exc
         await page.call("Input.dispatchMouseEvent", {**base, "type": "mouseReleased", "clickCount": count})
     return {"page_point": [round(x, 1), round(y, 1)]}
+
+
+async def release(page, base, count):
+    """Best-effort release after a press whose answer failed; says what is known about the button."""
+    try:
+        await page.call("Input.dispatchMouseEvent", {**base, "type": "mouseReleased", "clickCount": count})
+    except CDPError:
+        return "the button release could not be confirmed, so a button may still be down"
+    return "the button was released"
