@@ -218,6 +218,9 @@ async def _resume_adapter_locked(
         runtime.db, att_id, runtime_owner, lease, grandfathered=grandfathered
     ):
         raise HTTPException(409, claim_refusal_detail(runtime, att))
+    if not att["resume"]:
+        from .context_epoch import start_fresh_context
+        start_fresh_context(runtime.db, att)
     try:
         await asyncio.to_thread(wire_attachment, att, runtime, hook_url, resume=True)
         history = await asyncio.to_thread(delivered_history, runtime.db, att)
@@ -267,6 +270,13 @@ async def _resume_adapter_locked(
     )
     from .memory_events import lifecycle_changed
     lifecycle_changed(runtime)
+    from .compaction_events import compaction_count
+    from .compaction_limit import limit_for
+    from .compaction_rotation import arm
+    limit = limit_for(runtime.db, att)
+    count = compaction_count(runtime.db, att_id)
+    if limit and count >= limit:
+        arm(runtime, att, f"{count} compactions, limit {limit}", count, limit)
     await runtime.post_message(
         att["conv_id"],
         "system", "system",

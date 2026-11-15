@@ -10,6 +10,16 @@ snapshot-to-screen-to-input round trip at 100%, 125%, 150% and 200% DPI. Replies
 foreground observations and a marked crop on unchanged outcomes, so completion alone is not evidence of
 an effective page click.
 
+## 2026-11-15 — A restart that resumes a session is not a fresh context
+
+The false assumption was that a new runtime owner meant the process had a new context. A Partyline
+restart changes activation ownership but resumes the same CLI session, whose earlier compactions
+still contribute context rot. Track compactions in a durable context epoch that advances only on a
+fresh CLI session; keep the thrash window activation-scoped, and let an already-due resumed process
+rotate at a safe turn end after sequential reattachment. Regressions in
+`tests/test_compaction_events.py`, `tests/test_attachment_resume.py` and
+`tests/test_compaction_rotation.py` cover this boundary.
+
 ## 2026-11-15 — An installer step runs the previous helper, not the new one
 
 The false assumption was that every helper the installer finds knows the newest commands. The upgrade's

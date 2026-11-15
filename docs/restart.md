@@ -108,6 +108,10 @@ host usable, while the latter makes an OOM kill only the affected attachment.
    recreated at its last round's SHAs on resume; any other missing working folder fails with a
    message naming it (`partyline/resume_folder.py`).
 
+   Reattachment resumes the existing CLI session, so it retains the same context epoch and
+   compaction count. If that count has reached the rotation limit, Partyline waits for a safe
+   turn end after the ordered reattachment work; a resumed restart is not a fresh context.
+
 The plan machinery — `restart_plan` table and columns, `reattach.py`, the claim/renew/release/complete
 lease lifecycle — is unchanged from the earlier operator-CLI-driven procedure; only that naming
 retired. Do not rename the table or its columns: live databases carry them.

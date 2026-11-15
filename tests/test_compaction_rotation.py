@@ -64,6 +64,9 @@ class RotationFixture(TaskFixture):
             self.db._exec(
                 "INSERT INTO compaction_events(attachment_id,runtime_owner,trigger,turn,created_at)"
                 " VALUES('worker',?,'manual',1,?)", (owner, now))
+        # Those rows belong to prior fresh contexts, not the live worker's epoch.
+        self.db._exec(
+            "INSERT INTO attachment_context_epochs(attachment_id,epoch) VALUES('worker',2)")
 
     def go_live(self, ident):
         att = self.db.get_attachment(ident)
@@ -76,6 +79,9 @@ class RotationFixture(TaskFixture):
             att=att, stop=stop, proc=None, deliver=AsyncMock(return_value=True))
 
     async def start(self, att, **kwargs):
+        if kwargs.get("fresh"):
+            from partyline.context_epoch import start_fresh_context
+            start_fresh_context(self.db, att)
         self.starts.append((dict(att), kwargs))
         self.db.set_attachment_status(att["id"], "running", att["runtime_owner"])
         self.go_live(att["id"])

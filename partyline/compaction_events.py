@@ -55,8 +55,13 @@ def current_turns(db, att_id: str) -> int:
 
 def compaction_count(db, att_id: str) -> int:
     row = db._exec(
-        "SELECT COUNT(*) AS n FROM compaction_events WHERE attachment_id=?",
-        (att_id,)).fetchone()
+        "SELECT epoch FROM attachment_context_epochs WHERE attachment_id=?", (att_id,)
+    ).fetchone()
+    epoch = row["epoch"] if row else 1
+    row = db._exec(
+        "SELECT COUNT(*) AS n FROM compaction_events e LEFT JOIN compaction_context_events c "
+        "ON c.event_id=e.id WHERE e.attachment_id=? AND COALESCE(c.epoch,1)=?",
+        (att_id, epoch)).fetchone()
     return row["n"] if row else 0
 
 
@@ -64,8 +69,10 @@ def compaction_counts(db) -> dict[str, int]:
     """Compaction events per attachment, for the staffing line's badge."""
     try:
         rows = db._exec(
-            "SELECT attachment_id, COUNT(*) AS n FROM compaction_events "
-            "GROUP BY attachment_id").fetchall()
+            "SELECT e.attachment_id, COUNT(*) AS n FROM compaction_events e "
+            "LEFT JOIN compaction_context_events c ON c.event_id=e.id "
+            "LEFT JOIN attachment_context_epochs a ON a.attachment_id=e.attachment_id "
+            "WHERE COALESCE(c.epoch,1)=COALESCE(a.epoch,1) GROUP BY e.attachment_id").fetchall()
     except AttributeError:
         return {}  # a minimal db (the staffing tests' fake) has no events
     return {row["attachment_id"]: row["n"] for row in rows}
@@ -120,20 +127,27 @@ async def note_hook_compaction(runtime, att: dict, trigger: str) -> dict:
     """
     db = runtime.db
     ident, owner, conv_id = att["id"], att.get("runtime_owner") or "", att["conv_id"]
+    epoch_row = db._exec(
+        "SELECT epoch FROM attachment_context_epochs WHERE attachment_id=?", (ident,)
+    ).fetchone()
+    epoch = epoch_row["epoch"] if epoch_row else 1
     row = db._exec("SELECT turns FROM hook_turns WHERE attachment_id=?", (ident,)).fetchone()
     turn = row["turns"] if row else 0
     with db.lock, db.conn:
-        db.conn.execute(
+        event = db.conn.execute(
             "INSERT INTO compaction_events"
             "(attachment_id,runtime_owner,trigger,turn,created_at) VALUES(?,?,?,?,?)",
             (ident, owner, trigger, turn, time.time()))
-    # The ordinal and the thrash window are this activation's story: a fresh
-    # owner starts at 1st again, and an old activation's high turn numbers
-    # must not make the first compaction after a restart read as thrash. The
-    # lifetime count across owners is the staffing badge's business.
+        db.conn.execute(
+            "INSERT INTO compaction_context_events(event_id,attachment_id,epoch) VALUES(?,?,?)",
+            (event.lastrowid, ident, epoch))
+    # The ordinal follows the context epoch across resumed activations. The
+    # thrash window remains activation-scoped: old turn numbers after restart
+    # must not make the first compaction in this activation read as thrash.
     count = db._exec(
-        "SELECT COUNT(*) AS n FROM compaction_events WHERE attachment_id=? "
-        "AND runtime_owner=?", (ident, owner)).fetchone()["n"]
+        "SELECT COUNT(*) AS n FROM compaction_events e LEFT JOIN compaction_context_events c "
+        "ON c.event_id=e.id WHERE e.attachment_id=? AND COALESCE(c.epoch,1)=?",
+        (ident, epoch)).fetchone()["n"]
     notice = f"⚠ @{att['name']} compacted ({trigger}, {_ordinal(count)} time)"
     message = db.add_owned_message(ident, owner, conv_id, "system", "system", notice)
     if message is not None:

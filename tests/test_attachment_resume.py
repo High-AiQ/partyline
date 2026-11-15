@@ -310,6 +310,63 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
 
     @patch("partyline.attachment_wiring.bind_role_delivery")
     @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
+    async def test_resume_keeps_epoch_and_arms_rotation_at_the_safe_point(self, *_mocks):
+        from partyline.compaction_rotation import Armed
+        self.db._exec(
+            "INSERT INTO attachment_context_epochs(attachment_id,epoch) VALUES('one',7)")
+        for index in range(2):
+            self.db._exec(
+                "INSERT INTO compaction_events(attachment_id,runtime_owner,trigger,turn,created_at) "
+                "VALUES('one',?,'auto',?,0)", (f"old-{index}", index + 1))
+            event_id = self.db._exec(
+                "SELECT id FROM compaction_events WHERE attachment_id='one' AND runtime_owner=?",
+                (f"old-{index}",)).fetchone()["id"]
+            self.db._exec(
+                "INSERT INTO compaction_context_events(event_id,attachment_id,epoch) "
+                "VALUES(?,'one',7)", (event_id,))
+        self.db.set_setting("max_compactions_per_process", "2")
+        await resume_adapter("one", None, **self.resume_arguments())
+        from partyline.compaction_events import compaction_count
+        self.assertEqual(compaction_count(self.db, "one"), 2)
+        epoch = self.db._exec(
+            "SELECT epoch FROM attachment_context_epochs WHERE attachment_id='one'").fetchone()
+        self.assertEqual(epoch["epoch"], 7)
+        armed = self.runtime.rotations["one"]
+        self.assertIsInstance(armed, Armed)
+        self.assertEqual((armed.count, armed.limit), (2, 2))
+        self.runtime.reattaching.add("one")
+        from partyline.compaction_rotation import blocker
+        self.assertEqual(blocker(self.runtime, self.db.get_attachment("one")),
+                         "it is being restored")
+
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
+    @patch("partyline.attachment_wiring.provision_connection")
+    async def test_fresh_restart_path_advances_epoch(self, *_mocks):
+        from partyline.reattach import ReattachCoordinator, create_restart_plan
+        from partyline.contracts import RestartPlanRequest
+        metadata = {"raw": {"capabilities": {"listens": False, "resume": False}}}
+        self.db._exec("UPDATE attachments SET adapter='raw', status='running' WHERE id='one'")
+        self.runtime.live["one"] = object()
+        create_restart_plan(self.runtime, metadata,
+                            RestartPlanRequest(conversation_id="line", mode="automatic"))
+        self.runtime.live.clear()
+        self.db._exec("UPDATE attachments SET status='exited' WHERE id='one'")
+        arguments = self.resume_arguments()
+        arguments["adapter_metadata"] = metadata
+
+        async def restart(ident, pending):
+            return await resume_adapter(ident, pending, **arguments)
+
+        await ReattachCoordinator(self.runtime, restart).run_automatic()
+        self.assertFalse(self.captured["att"]["resume"])
+        epoch = self.db._exec(
+            "SELECT epoch FROM attachment_context_epochs WHERE attachment_id='one'").fetchone()
+        self.assertEqual(epoch["epoch"], 2)
+
+    @patch("partyline.attachment_wiring.bind_role_delivery")
+    @patch("partyline.attachment_wiring.bind_connection_hint")
     async def test_resume_resumes_into_the_same_temp_directory(self, *_mocks):
         # provision_connection runs for real: it is the seam that re-ensures
         # the attachment's private temp directory (5.12), and its connection

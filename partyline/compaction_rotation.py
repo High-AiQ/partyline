@@ -4,8 +4,8 @@ Each compaction is a lossy summary of the last, so after a few the cheapest
 good move is to start over from a short, deliberate hand-off. The flow is
 event-driven end to end — no timer decides anything:
 
-1. A compaction event (`compaction_events`) counts the activation's
-   compactions. At the limit, or when the thrash rule fires, the process is
+1. A compaction event (`compaction_events`) counts the current context epoch's
+   compactions. At the limit, or when the activation-scoped thrash rule fires, the process is
    *armed*. Nothing happens mid-turn.
 2. At the end of the turn that follows (`Presence.ended`, the harness receipt)
    an armed process is asked, once and privately, to write its hand-off note

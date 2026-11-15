@@ -116,6 +116,10 @@ class LifecycleTest(unittest.TestCase):
         self.db._exec("UPDATE attachments SET is_lead=1 WHERE id='old'")
         response = self.fresh()
         self.assertEqual(response.status_code, 200, response.text)
+        epoch = self.db._exec(
+            "SELECT epoch FROM attachment_context_epochs WHERE attachment_id=?",
+            (response.json()['id'],)).fetchone()
+        self.assertEqual(epoch["epoch"], 2)
         self.assertTrue(self.db.get_attachment(response.json()['id'])['is_lead'])
 
     def test_fresh_replaces_identity_and_revokes_old_token_without_chat_replay(self):

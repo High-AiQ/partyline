@@ -19,6 +19,20 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_compaction_events_att "
     "ON compaction_events(attachment_id, turn)",
+    # A context epoch changes only when an attachment starts a new CLI session.
+    # Runtime owners still mark activations for the independent thrash window.
+    """CREATE TABLE IF NOT EXISTS attachment_context_epochs(
+        attachment_id TEXT PRIMARY KEY,
+        epoch INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE TABLE IF NOT EXISTS compaction_context_events(
+        event_id INTEGER PRIMARY KEY,
+        attachment_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL
+    )""",
+    # Existing events predate epochs. Conservatively keep their history in epoch 1.
+    """INSERT OR IGNORE INTO compaction_context_events(event_id,attachment_id,epoch)
+        SELECT id,attachment_id,1 FROM compaction_events""",
     # The turn counter the thrash window counts, from the harness's own
     # UserPromptSubmit/Stop receipts. A fresh activation (new owner) starts
     # over, so a replaced process is judged on its own turns.
