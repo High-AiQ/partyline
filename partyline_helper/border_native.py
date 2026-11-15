@@ -6,7 +6,7 @@ import queue
 import sys
 import threading
 
-from .window_zorder import seat_strips
+from .window_zorder import next_command, seat_strips
 
 WINDOWS_CAPTURE_BUILD = 19041  # Windows 10 2004: WDA_EXCLUDEFROMCAPTURE
 WDA_EXCLUDEFROMCAPTURE = 0x11
@@ -92,33 +92,19 @@ class TkBackend(ThreadBackend):
         failure = None
         try:
             while True:
-                try:
-                    command = self.commands.get(timeout=.02)
-                except queue.Empty:
-                    command = (None,)
-                closed = command[0] == "close"
-                while True:
-                    try:
-                        newer = self.commands.get_nowait()
-                    except queue.Empty:
-                        break
-                    if newer[0] == "close":
-                        command, closed = newer, True
-                    elif not closed:
-                        command = newer
+                command, reseat = next_command(self.commands, .02)
                 if command[0] == "show":
                     clear()
                     for rectangle in command[1]:
                         strips.append(self.make_window(tk, root, rectangle, command[2]))
                     if self.above:
                         self.seat(strips)
-                elif command[0] == "place":
-                    if self.above and strips:
-                        self.seat(strips)
                 elif command[0] == "hide":
                     clear()
                 elif command[0] == "close":
                     break
+                if reseat and self.above and strips and command[0] != "show":
+                    self.seat(strips)
                 if self.windows:
                     root.update()
                 else:

@@ -183,7 +183,7 @@ class WindowOutlineEvents:
             user.PeekMessageW(ctypes.byref(message), None, 0, 0, 0)
             self.thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
             for event in self.EVENTS:
-                hook = user.SetWinEventHook(event, event, None, keepalive, self.pid or 0, 0, 0x0000)
+                hook = user.SetWinEventHook(event, event, None, keepalive, self.hook_pid(event), 0, 0x0000)
                 if not hook:
                     raise ctypes.WinError(ctypes.get_last_error())
                 self.hooks.append(hook)
@@ -198,6 +198,10 @@ class WindowOutlineEvents:
             for hook in self.hooks:
                 user.UnhookWinEvent(hook)
             self.hooks.clear()
+
+    def hook_pid(self, event):
+        """Z-order hooks are global: the window in front is usually another process's."""
+        return 0 if event in Z_ORDER_EVENTS else self.pid or 0
 
     def dispatch(self, event, hwnd, object_id, child_id):
         """Filter WinEvent's HWND, window object id, and non-child event target."""

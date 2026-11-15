@@ -1,4 +1,5 @@
 """Window outline stacking uses a fake user32 z-order list; nothing touches a desktop or a clock."""
+import queue
 import unittest
 from unittest.mock import Mock, patch
 
@@ -7,7 +8,9 @@ from partyline_helper.window_outline import (
     EVENT_OBJECT_REORDER, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZESTART,
     WindowOutline, WindowOutlineEvents,
 )
-from partyline_helper.window_zorder import HWND_TOP, HWND_TOPMOST, PLACE_FLAGS, place_above
+from partyline_helper.window_zorder import (
+    HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, PLACE_FLAGS, next_command, place_above,
+)
 
 TARGET, STRIPS = 100, [201, 202]
 
@@ -30,13 +33,19 @@ class FakeUser32:
 
     def set_window_pos(self, hwnd, after, x, y, width, height, flags):
         self.calls.append((hwnd, after, flags))
+        index = self.order.index(hwnd)
         self.order.remove(hwnd)
         if after == HWND_TOPMOST:
             self.topmost.add(hwnd)
             self.order.insert(0, hwnd)
-        elif after == HWND_TOP:
-            self.topmost.discard(hwnd)
-            self.order.insert(len([h for h in self.order if h in self.topmost]), hwnd)
+        elif after == HWND_NOTOPMOST:
+            if hwnd in self.topmost:
+                self.topmost.discard(hwnd)
+                self.order.insert(len([h for h in self.order if h in self.topmost]), hwnd)
+            else:
+                self.order.insert(index, hwnd)  # documented no-op for a non-topmost window
+        elif after == HWND_TOP:  # top of the window's own band
+            self.order.insert(0 if hwnd in self.topmost else len(self.topmost & set(self.order)), hwnd)
         else:
             (self.topmost.add if after in self.topmost else self.topmost.discard)(hwnd)
             self.order.insert(self.order.index(after) + 1, hwnd)
@@ -92,12 +101,52 @@ class PlaceAboveTests(unittest.TestCase):
         place_above(user32, TARGET, STRIPS)
         self.assertEqual(user32.order, [700, 202, 201, TARGET])
 
+    def test_strips_follow_target_out_of_the_topmost_band(self):
+        user32 = FakeUser32([202, 201, TARGET, 50], topmost={201, 202})
+        self.assertTrue(place_above(user32, TARGET, STRIPS))
+        self.assertEqual(user32.topmost, set())
+        self.assertEqual(user32.order, [202, 201, TARGET, 50])
+        self.assertEqual([call[1] for call in user32.calls[:2]], [HWND_NOTOPMOST] * 2)
+        user32.SetWindowPos.reset_mock()
+        self.assertFalse(place_above(user32, TARGET, STRIPS))
+        user32.SetWindowPos.assert_not_called()
+
     def test_gone_target_or_no_strips_is_a_no_op(self):
         user32 = FakeUser32([TARGET, 201])
         user32.IsWindow.return_value = False
         self.assertFalse(place_above(user32, TARGET, STRIPS))
         self.assertFalse(place_above(FakeUser32([TARGET]), TARGET, []))
         user32.SetWindowPos.assert_not_called()
+
+
+class CommandTests(unittest.TestCase):
+    @staticmethod
+    def queued(*commands):
+        queue_ = queue.Queue()
+        for command in commands:
+            queue_.put(command)
+        return queue_
+
+    def test_place_never_replaces_a_pending_show_or_hide(self):
+        show, hide = ("show", [(0, 0, 5, 3)], "#4a90e2"), ("hide",)
+        self.assertEqual(next_command(self.queued(show, ("place",)), 0), (show, True))
+        self.assertEqual(next_command(self.queued(("place",), show), 0), (show, True))
+        self.assertEqual(next_command(self.queued(show, ("place",), hide), 0), (hide, True))
+        self.assertEqual(next_command(self.queued(("place",)), 0), ((None,), True))
+        self.assertEqual(next_command(self.queued(), 0), ((None,), False))
+        self.assertEqual(next_command(self.queued(show, ("close",), hide), 0), (("close",), False))
+
+    def test_queued_show_then_place_still_creates_every_strip_and_seats_once(self):
+        tk = Mock()
+        backend = TkBackend(Mock(), windows=True, above=TARGET)
+        for command in (("show", [(0, 0, 5, 3), (0, 9, 5, 3)], "#4a90e2"), ("place",)):
+            backend.commands.put(command)
+        tk.Tk.return_value.update.side_effect = lambda: backend.commands.put(("close",))
+        with patch.dict("sys.modules", {"tkinter": tk}), patch.object(backend, "make_window") as make, \
+                patch.object(backend, "seat") as seat:
+            backend.run()
+        self.assertEqual(make.call_count, 2)
+        seat.assert_called_once()
 
 
 class OutlineNativeTests(unittest.TestCase):
@@ -183,6 +232,13 @@ class OutlineEventTests(unittest.TestCase):
         events.dispatch(EVENT_SYSTEM_FOREGROUND, 555, 0, 0)
         events.dispatch(EVENT_OBJECT_REORDER, 556, -4, 0)
         self.assertEqual(changed.call_count, 2)
+
+    def test_z_order_hooks_are_global_while_window_hooks_keep_the_process_filter(self):
+        events = WindowOutlineEvents(TARGET, Mock(), Mock(), user32=Mock(), pid=42)
+        self.assertEqual(events.hook_pid(EVENT_SYSTEM_FOREGROUND), 0)
+        self.assertEqual(events.hook_pid(EVENT_OBJECT_REORDER), 0)
+        self.assertEqual(events.hook_pid(EVENT_SYSTEM_MINIMIZESTART), 42)
+        self.assertEqual(WindowOutlineEvents(TARGET, Mock(), Mock()).hook_pid(EVENT_SYSTEM_MINIMIZESTART), 0)
 
     def test_default_backend_seats_above_the_granted_window(self):
         outline = WindowOutline(TARGET, user32=Mock(), dwmapi=Mock())
