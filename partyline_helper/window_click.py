@@ -27,6 +27,8 @@ HIDDEN = ("the tab this window grant selected is not the tab shown in the window
           "of its picture could land on another page: take a fresh screen_window_snapshot")
 LATE = ("the click was not started in time (the person took too long or the server stopped waiting); "
         "nothing was sent")
+PARTLY = ("the click ran out of time after it had started; it may be only partly delivered "
+          "(no button is left down)")
 FLOOR = "that window is never clickable (terminal, password manager, security or Partyline's own window)"
 AUDIT = "the helper could not write its audit log"
 TIMEOUT = 20  # a click that started finishes within this
@@ -173,8 +175,13 @@ class PointClicks:
         self.late(message)
         self.begin(entry, message, "cdp")
         page.dispatched, page.operation_epoch = False, None
+        limit = min(message["deadline"], self.clock() + TIMEOUT)  # no new press after the budget or the cap
+
+        def guard():
+            if self.clock() >= limit:
+                raise CDPError(PARTLY if page.dispatched else LATE)
         try:
-            info = await cdp_click(page, frame, point, message["button"], message["clicks"])
+            info = await cdp_click(page, frame, point, message["button"], message["clicks"], guard)
             counter = page.access.event_status()["event_counter"]
             settle = await page.quiet.wait()
             if page.access.event_status()["event_counter"] != counter and settle == "quiet":
@@ -192,14 +199,17 @@ class PointClicks:
         record = entry["snapshots"][message["snapshot"]]
 
         def ready():
-            """The cheap last word, run once the window is in front and the cursor is on the point."""
+            """The window is where the snapshot saw it, now that it is in front (a blocking call)."""
+            self.shifted(record, grant)
+
+        def last():
+            """Cheap and last: nothing blocks between this and the input."""
             self.late(message)
             if access.gate.revoked.is_set() or access.gate.generation != generation:
                 raise PointRefused("revoked")
             if (not entry.get("mouse_approved") or self.shares.generation != epoch
                     or self.shares.grants.get(message.get("grant_id")) is not entry):
                 raise Refused(GONE)  # access was switched off, paused or ended after the person said yes
-            self.shifted(record, grant)
 
         def alive():
             self.late(message)
@@ -214,7 +224,7 @@ class PointClicks:
 
         def call():
             return cursor_click(self.pointer(grant["hwnd"]), grant, point, message["button"],
-                                message["clicks"], alive, getattr(access, "event_state", None), ready)
+                                message["clicks"], alive, getattr(access, "event_state", None), ready, last)
         try:
             result, revoked = await asyncio.wait_for(
                 asyncio.to_thread(access.gate.dispatch, generation, call), TIMEOUT)

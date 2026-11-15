@@ -669,7 +669,9 @@ through elements or CDP.
   refuses with nothing sent. The slow checks run first; then, with the window in front, the helper re-checks
   revocation, the person's consent and the window's place against the snapshot, and the point's target, with
   nothing slow before the input. One `SendInput` call moves to that checked point and does every press and
-  release, so a cursor moved meanwhile cannot redirect it and no button stays down. Real-cursor clicks run one
+  release, so a cursor moved meanwhile cannot redirect it and no button stays down. The deadline and the person's consent are judged
+  last, after every blocking call. A CDP click is also bounded: no press starts after the budget or after 20 s
+  of input, and a pressed button is always released. Real-cursor clicks run one
   at a time across all grants. It
   then puts the cursor and the previous foreground back where it can; `cursor_restored`,
   `foreground_restored` and `target_came_forward` report what happened.

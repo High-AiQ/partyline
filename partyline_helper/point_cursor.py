@@ -21,10 +21,10 @@ class PointRefused(Exception):
     """Nothing was sent; the message is for the agent."""
 
 
-def click(api, grant, point, button, clicks, alive, events=None, ready=lambda: None):
-    """`alive` is the slow liveness check, run early; `ready` is the cheap last word (revocation, deadline,
-    consent, the window's place), run after the cursor is in position. Between the checks of what is under
-    the point and the input there is nothing slow, and the input itself moves to the checked point."""
+def click(api, grant, point, button, clicks, alive, events=None, ready=lambda: None, last=lambda: None):
+    """`alive` is the slow liveness check, run early; `ready` the window's-place check (blocking), run
+    once the cursor is in position; `last` the cheap authority guard (deadline, revocation, consent), run
+    after every blocking call and immediately before the input, which itself moves to the checked point."""
     hwnd, report = grant["hwnd"], {}
     with ONE_AT_A_TIME, api.session():
         alive()
@@ -54,6 +54,7 @@ def click(api, grant, point, button, clicks, alive, events=None, ready=lambda: N
                 raise PointRefused(CHANGED)
             if tuple(api.cursor() or ()) != tuple(point):
                 raise PointRefused(MOVED)
+            last()
             sent, wanted = api.send(point, button, clicks)
             if sent != wanted:
                 api.release(button)

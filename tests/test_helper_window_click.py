@@ -13,7 +13,7 @@ from partyline_helper.client import Session
 from partyline_helper import point_cursor
 from partyline_helper.point_consent import COOLDOWN
 from partyline_helper.uia_gate import DispatchGate
-from partyline_helper.window_click import BUDGET, FLOOR, GONE, LATE, STALE, PointClicks
+from partyline_helper.window_click import BUDGET, FLOOR, GONE, LATE, PARTLY, STALE, PointClicks
 from partyline_helper.window_marks import boxes, clean_inputs, draw, listed
 from partyline_helper.window_shares import WindowShares
 from partyline_helper.window_snapshot import WindowSnapshots
@@ -89,7 +89,7 @@ class FakePage:
         self.calls, self.dispatched, self.live, self.operation_epoch = [], False, True, None
         self.viewport = [width, height, zoom]
         self.quiet = SimpleNamespace(wait=AsyncMock(return_value="quiet"))
-        self.shown = True
+        self.shown, self.on_input = True, None
         self.access = SimpleNamespace(event_status=lambda: {"event_counter": 4})
         self.fail = None
 
@@ -98,6 +98,10 @@ class FakePage:
 
     async def call(self, method, params=None):
         self.calls.append((method, params))
+        if method == "Input.dispatchMouseEvent":
+            self.dispatched = True
+            if self.on_input:
+                self.on_input()
         if method == "Runtime.evaluate":
             return {"result": {"value": self.viewport}}
         if self.fail:
@@ -487,6 +491,70 @@ class DispatchTimeTests(ClickFixture):
         self.shares.clicks.rect_of = moving
         self.assertEqual(STALE, (await self.click())["error"])
         self.assertEqual([], [c for c in self.page.calls if c[0] == "Input.dispatchMouseEvent"])
+
+
+class FinalGuardTests(ClickFixture):
+    """Authority and time are judged after the last blocking call, not before it."""
+
+    def on_layout(self, action, nth):
+        original, count = self.backend.layout, []
+
+        def layout(hwnd):
+            count.append(1)
+            if len(count) == nth:
+                action()
+            return original(hwnd)
+        self.backend.layout = layout
+
+    async def test_access_switched_off_during_the_final_layout_read_stops_the_click(self):
+        self.on_layout(self.shares.revoke_standing, 3)  # run, after consent, then the one at dispatch
+        reply = await self.click()
+        self.assertEqual(("failed", GONE), (reply["status"], reply["error"]))
+        self.assertEqual([], self.sends())
+        self.assertNotIn("mouse_approved", self.entry)
+
+    async def test_a_deadline_passing_during_the_final_layout_read_stops_the_click(self):
+        def later():
+            self.clock[0] += 100
+        self.on_layout(later, 3)
+        self.assertEqual(LATE, (await self.click(budget=40))["error"])
+        self.assertEqual([], self.sends())
+
+    async def test_the_cdp_deadline_covers_the_setup_and_the_audit_write_before_the_first_input(self):
+        self.access.grant["process"] = "chrome.exe"
+        self.snapshot = self.take()
+        self.shares.chrome.page = AsyncMock(return_value=self.page)
+
+        def slow_frame(hwnd):
+            self.clock[0] += 39.9
+            return (108, 80, 492, 342)
+        self.shares.clicks.rect_of = slow_frame
+
+        def slow_audit(*args, **kwargs):
+            self.clock[0] += 1
+        self.audit.append.side_effect = slow_audit
+        reply = await self.click(clicks=2, budget=40)
+        self.assertEqual(("failed", LATE), (reply["status"], reply["error"]))
+        self.assertEqual([], [c for c in self.page.calls if c[0] == "Input.dispatchMouseEvent"])
+
+    async def test_a_double_click_stops_before_a_press_past_the_dispatch_cap_and_never_leaves_one_down(self):
+        self.access.grant["process"] = "chrome.exe"
+        self.snapshot = self.take()
+        self.shares.chrome.page = AsyncMock(return_value=self.page)
+        self.page.on_input = lambda: self.clock.__setitem__(0, self.clock[0] + 9.9)
+        reply = await self.click(clicks=2, budget=100)
+        kinds = [p["type"] for m, p in self.page.calls if m == "Input.dispatchMouseEvent"]
+        self.assertEqual(["mouseMoved", "mousePressed", "mouseReleased"], kinds)
+        self.assertEqual(("unconfirmed", "cdp", PARTLY), (reply["status"], reply["route"], reply["error"]))
+        self.assertEqual(kinds.count("mousePressed"), kinds.count("mouseReleased"))
+
+    async def test_a_double_click_inside_the_cap_still_completes(self):
+        self.access.grant["process"] = "chrome.exe"
+        self.snapshot = self.take()
+        self.shares.chrome.page = AsyncMock(return_value=self.page)
+        self.page.on_input = lambda: self.clock.__setitem__(0, self.clock[0] + 3)
+        reply = await self.click(clicks=2, budget=100)
+        self.assertEqual("completed", reply["status"])
 
 
 class DeadlineTests(ClickFixture):

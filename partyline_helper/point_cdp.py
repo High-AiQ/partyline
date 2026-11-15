@@ -65,12 +65,17 @@ def to_page(frame, sx, sy):
     return (sx - left) / factor, (sy - top) / factor
 
 
-async def click(page, frame, point, button, clicks):
-    """Move, press and release `clicks` times at the screen pixel `point` through the page's own input."""
+async def click(page, frame, point, button, clicks, guard=lambda: None):
+    """Move, press and release `clicks` times at the screen pixel `point` through the page's own input.
+
+    `guard` may refuse (raise CDPError) before the move and before each press; a button that was pressed is
+    always released, unguarded."""
     x, y = to_page(frame, *point)
     base = {"x": x, "y": y, "button": button, "buttons": 0}
+    guard()
     await page.call("Input.dispatchMouseEvent", {**base, "type": "mouseMoved", "button": "none"})
     for count in range(1, clicks + 1):
+        guard()
         await page.call("Input.dispatchMouseEvent", {**base, "type": "mousePressed", "clickCount": count,
                                                      "buttons": BUTTONS[button]})
         await page.call("Input.dispatchMouseEvent", {**base, "type": "mouseReleased", "clickCount": count})
