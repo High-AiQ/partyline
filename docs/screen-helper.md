@@ -659,7 +659,20 @@ through elements or CDP.
   own session (hover, then press and release, `clickCount` 2 for a double-click). The helper maps the point to
   CSS pixels from the page area's rectangle and the viewport width, so browser zoom and DPI are exact; a
   point on the browser's own controls, a pinch-zoomed page, or a grant on a tab that is not the one
-  shown in the window is refused. No cursor moves, no window comes
+  shown in the window is refused.
+  **Finding the page area.** The helper takes the visible `Chrome_RenderWidgetHostHWND` child windows of the
+  granted window. One is the page. Of several (side panel, split view, embedded surface) the page is the one
+  whose size is the viewport's (`innerWidth` and `innerHeight` times `devicePixelRatio`, within 2%) and that
+  holds the clicked point; a point on none of them is on the browser's own controls, and the click is
+  refused as ambiguous only when two of the same size both hold it. Recent Chrome builds can drop the
+  renderer child window altogether; the helper then uses, in order, the UI Automation `Document` element of
+  the active tab inside the granted window (its `BoundingRectangle`, chosen the same way if there are several)
+  and, failing that, the window's CDP bounds (`Browser.getWindowForTarget`) with the window's DPI scale and
+  the page's viewport metrics. The last source assumes a thin window frame (at most 32 screen pixels at each
+  side) and refuses otherwise. Every source goes through the same pinch-zoom and resize check, and
+  `screen_window_snapshot` marks use the same resolver, so a snapshot and a click agree. When nothing is
+  found the error says what was seen, for example "found 0 renderer windows and no page document" or
+  "found 3 renderer windows, none matching the viewport". No cursor moves, no window comes
   forward and no consent prompt is shown: it is allowed under standing access and under any window grant, as
   CDP element actions are. It works over iframes, since the events enter at the top-level page.
 - **Route 2, any other window (or Chrome without CDP).** A real-cursor click with `SendInput`, confined to the

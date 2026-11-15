@@ -13,7 +13,8 @@ import time
 from partyline.point_geometry import GeometryError, locate
 
 from .cdp_transport import CDPError
-from .point_cdp import click as cdp_click, page_frame, render_rect
+from .page_windows import PageSources
+from .point_cdp import click as cdp_click, page_frame
 from .point_consent import MouseConsent, clear
 from .point_cursor import PointRefused, click as cursor_click
 from .point_win32 import Win32Pointer
@@ -45,8 +46,8 @@ def hard_floor(grant):
 
 
 class PointClicks:
-    def __init__(self, shares, pointer=None, ask=None, clock=None, rect_of=render_rect):
-        self.shares, self.rect_of, self.clock = shares, rect_of, clock or time.monotonic
+    def __init__(self, shares, pointer=None, ask=None, clock=None, sources=None):
+        self.shares, self.sources, self.clock = shares, sources or PageSources(), clock or time.monotonic
         self.pointer = pointer or (lambda hwnd: Win32Pointer(hwnd))
         self.consent = MouseConsent(ask, self.clock)
 
@@ -151,7 +152,7 @@ class PointClicks:
         page = (await self.shares.chrome.page(access)
                 if str(grant.get("process", "")).lower() == "chrome.exe" else None)
         if page:
-            return "cdp", await self.by_cdp(entry, message, page, access, grant, generation)
+            return "cdp", await self.by_cdp(entry, message, page, access, grant, generation, point)
         epoch = self.shares.generation
         reason = await self.consent.check(entry, message)
         if self.shares.generation != epoch:  # access was switched off or paused while the person was asked
@@ -167,10 +168,10 @@ class PointClicks:
             active[0].mark_mouse(active[1])
         return "cursor", await self.by_cursor(entry, message, access, grant, generation, point, epoch)
 
-    async def by_cdp(self, entry, message, page, access, grant, generation):
+    async def by_cdp(self, entry, message, page, access, grant, generation, point):
         if grant.get("target_id") and not await page.visible():  # a picked tab may be behind the shown one
             raise Refused(HIDDEN)
-        frame = await page_frame(page, grant["hwnd"], self.rect_of)
+        frame = await page_frame(page, grant["hwnd"], point, self.sources)
         point = await self.current(entry, access, grant, generation, message)  # the window may have moved
         self.late(message)
         self.begin(entry, message, "cdp")

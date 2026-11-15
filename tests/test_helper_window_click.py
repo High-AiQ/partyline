@@ -11,6 +11,7 @@ from PIL import Image
 from partyline_helper.cdp_transport import CDPError
 from partyline_helper.client import Session
 from partyline_helper import point_cursor
+from partyline_helper.page_windows import PageSources
 from partyline_helper.point_consent import COOLDOWN
 from partyline_helper.uia_gate import DispatchGate
 from partyline_helper.window_click import BUDGET, FLOOR, GONE, LATE, PARTLY, STALE, PointClicks
@@ -20,6 +21,12 @@ from partyline_helper.window_snapshot import WindowSnapshots
 from tests.screen_helper_fakes import FakeDesktop, FakeSocket, FakeTerminal
 
 RECT, REGION = (100, 50, 500, 350), (108, 80, 492, 342)
+
+
+def areas(*rects, documents=(), scale=None):
+    """Page-area sources that report these renderer rectangles, UIA documents and window scale."""
+    return PageSources(renderers=lambda hwnd: list(rects), documents=lambda hwnd: list(documents),
+                       scale=lambda hwnd: scale)
 GRANT = {"hwnd": 10, "pid": 42, "title": "Editor", "process": "editor.exe"}
 
 
@@ -142,7 +149,7 @@ class ClickFixture(unittest.IsolatedAsyncioTestCase):
         self.shares.clicks.pointer = lambda hwnd: self.pointer
         self.shares.clicks.consent.ask = self.ask
         self.shares.clicks.clock = self.shares.clicks.consent.clock = lambda: self.clock[0]
-        self.shares.clicks.rect_of = lambda hwnd: (108, 80, 492, 342)
+        self.shares.clicks.sources = areas((108, 80, 492, 342))
         self.shares.chrome.page = AsyncMock(return_value=None)
         self.snapshot = self.take()
 
@@ -214,17 +221,18 @@ class CdpRouteTests(ClickFixture):
 
     async def test_a_point_on_the_browsers_own_controls_or_a_pinch_zoomed_page_is_refused(self):
         self.page.viewport = [192, 131, 1]
-        self.shares.clicks.rect_of = lambda hwnd: (300, 80, 492, 211)  # page area starts right of the point
+        self.shares.clicks.sources = areas((300, 80, 492, 211))  # page area starts right of the point
         self.assertIn("browser's own controls", (await self.click())["error"])
-        self.shares.clicks.rect_of = lambda hwnd: (108, 80, 492, 342)
+        self.shares.clicks.sources = areas((108, 80, 492, 342))
         self.page.viewport = [384, 262, 1.5]
         self.assertIn("pinch-zoomed", (await self.click())["error"])
         self.page.viewport = [384, 100, 1]
         self.assertIn("pinch-zoomed", (await self.click())["error"])
         self.page.viewport = "bad"
         self.assertIn("could not be read", (await self.click())["error"])
-        self.shares.clicks.rect_of = lambda hwnd: None
-        self.assertIn("could not be found", (await self.click())["error"])
+        self.page.viewport = [192, 131, 1]
+        self.shares.clicks.sources = areas()
+        self.assertEqual("found 0 renderer windows and no page document", (await self.click())["error"])
         self.assertEqual([], [c for c in self.page.calls if c[0] == "Input.dispatchMouseEvent"])
 
     async def test_a_failure_after_input_started_is_unconfirmed_and_one_before_is_a_refusal(self):
@@ -516,8 +524,8 @@ class DispatchTimeTests(ClickFixture):
 
         def moving(hwnd):
             self.backend.rect = (120, 70, 520, 370)
-            return (108, 80, 492, 342)
-        self.shares.clicks.rect_of = moving
+            return [(108, 80, 492, 342)]
+        self.shares.clicks.sources = PageSources(renderers=moving, documents=lambda hwnd: [])
         self.assertEqual(STALE, (await self.click())["error"])
         self.assertEqual([], [c for c in self.page.calls if c[0] == "Input.dispatchMouseEvent"])
 
@@ -556,8 +564,8 @@ class FinalGuardTests(ClickFixture):
 
         def slow_frame(hwnd):
             self.clock[0] += 39.9
-            return (108, 80, 492, 342)
-        self.shares.clicks.rect_of = slow_frame
+            return [(108, 80, 492, 342)]
+        self.shares.clicks.sources = PageSources(renderers=slow_frame)
 
         def slow_audit(*args, **kwargs):
             self.clock[0] += 1
@@ -633,8 +641,8 @@ class DeadlineTests(ClickFixture):
 
         def slow(hwnd):
             self.clock[0] += 41
-            return (108, 80, 492, 342)
-        self.shares.clicks.rect_of = slow
+            return [(108, 80, 492, 342)]
+        self.shares.clicks.sources = PageSources(renderers=slow)
         reply = await self.click(budget=40)
         self.assertEqual(LATE, reply["error"])
         self.assertEqual([], [c for c in page.calls if c[0] == "Input.dispatchMouseEvent"])
