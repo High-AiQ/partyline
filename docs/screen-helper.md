@@ -1478,7 +1478,10 @@ or `debugger_already_attached` changes transport; every other grant keeps the ex
 tells the extension to drop that grant, and, when Chrome's remote debugging is enabled
 (`DevToolsActivePort` exists), reads continue over remote debugging after Chrome's normal Allow prompt
 (UIA answers meanwhile; the read reports `transport: remote_debugging`). The tray's Chrome row keeps
-describing the extension. When remote debugging is off the grant stays on UIA with the actionable
+describing the extension. A grant for one picked tab is bound once, when it first maps over remote
+debugging, to the one remote target in its window with the same URL and title; from then on only that
+target is the grant's tab (navigating it keeps the grant). If no tab or several match, or the bound tab
+closes, the grant selects nothing and says *pick a tab again*; it never re-matches by content. When remote debugging is off the grant stays on UIA with the actionable
 `source_reason`. Ending the grant closes the remote connection. The extension's own service worker
 console logs each refused command's method and Chrome's raw error text for the person at that machine;
 that text is never sent to the helper.

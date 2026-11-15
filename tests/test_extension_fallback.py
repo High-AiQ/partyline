@@ -96,6 +96,16 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.read_after_prompt())  # never falls back to some other active tab
         self.assertEqual(self.f.chrome.pages.get(self.f.access), {})
         self.assertNotIn("Target.attachToTarget", [m["method"] for m in self.remote_socket.calls])
+        self.assertIn("pick a tab again", self.f.chrome.reasons[self.f.access])
+
+    async def test_an_ambiguous_match_at_bind_time_selects_nothing(self):
+        self.f.access.grant["target_id"] = "1"
+        self.peer.refuse = {1: "other_extension_frame"}
+        self.remote_socket.urls["b"], self.remote_socket.titles["b"] = "https://example.test", "Lab"
+        self.assertIsNone(await self.read_after_prompt())  # two tabs look like the picked one
+        self.assertEqual(self.remote_attaches(), [])
+        self.assertIsNone(self.f.chrome.fallback.bound[self.f.access])
+        self.assertIn("pick a tab again", self.f.chrome.reasons[self.f.access])
 
     async def test_a_late_attach_reply_is_cleaned_up_on_the_connection_that_sent_it(self):
         self.peer.refuse = {1: "other_extension_frame"}
@@ -114,3 +124,37 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
         detached = [m for m in self.remote_socket.calls if m["method"] == "Target.detachFromTarget"]
         self.assertEqual([m["params"]["sessionId"] for m in detached], ["a"])
         self.assertFalse([m for m in self.peer.calls if m["method"] == "Target.detachFromTarget"])
+
+    async def bound_to_the_picked_tab(self):
+        self.f.access.grant["target_id"] = "1"
+        self.peer.refuse = {1: "other_extension_frame"}
+        await self.read_after_prompt()
+        self.assertEqual(self.f.chrome.selected[self.f.access], "a")
+
+    def tab_b_takes_over_the_picked_tabs_content(self):
+        sock = self.remote_socket
+        sock.urls["b"], sock.titles["b"] = "https://example.test", "Lab"
+        sock.urls["a"], sock.titles["a"] = "https://moved.test", "Moved"
+
+    def remote_attaches(self):
+        calls = self.remote_socket.calls
+        return [m["params"]["targetId"] for m in calls if m["method"] == "Target.attachToTarget"]
+
+    async def test_the_bound_tab_stays_the_grants_tab_after_it_navigates_and_a_lookalike_appears(self):
+        await self.bound_to_the_picked_tab()
+        self.tab_b_takes_over_the_picked_tabs_content()
+        result = await self.f.read()
+        self.assertEqual(result["source"], "cdp")
+        self.assertEqual(self.f.chrome.selected[self.f.access], "a")
+        self.assertEqual(self.remote_attaches(), ["a"])  # the look-alike tab is never touched
+
+    async def test_a_closed_bound_tab_fails_closed_instead_of_moving_to_a_look_alike(self):
+        await self.bound_to_the_picked_tab()
+        self.tab_b_takes_over_the_picked_tabs_content()
+        del self.remote_socket.windows["a"]  # the picked tab closed
+        self.f.chrome.pages.pop(self.f.access).clear()
+        self.assertIsNone(await self.f.read())
+        self.assertEqual(self.remote_attaches(), ["a"])
+        self.assertIn("The picked tab closed; pick a tab again", self.f.chrome.reasons[self.f.access])
+        self.assertIsNone(await self.f.read())  # still nothing: never re-matched by content
+        self.assertEqual(self.remote_attaches(), ["a"])

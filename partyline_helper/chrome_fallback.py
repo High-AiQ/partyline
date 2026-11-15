@@ -6,10 +6,10 @@ keeps using the extension. Chrome's own error text never reaches here, only the 
 """
 import contextlib
 
-from .cdp_transport import BrowserConnection, ExtensionRefused
+from .cdp_transport import BrowserConnection, CDPError, ExtensionRefused
 
 SETTINGS = "chrome://inspect/#remote-debugging"
-UNMATCHED = "\0unmatched"  # selects no remote target
+PICK_AGAIN = "pick a tab again"
 REASONS = {
     "other_extension_frame": ("Chrome won't let extensions debug this page because another extension's frame "
                               f"is in it; enable remote debugging at {SETTINGS} or disable the extension "
@@ -23,7 +23,7 @@ REASONS = {
 class Fallback:
     def __init__(self, chrome, factory=BrowserConnection):
         self.chrome, self.factory = chrome, factory
-        self.remote, self.grants, self.picked = None, set(), {}
+        self.remote, self.grants, self.picked, self.bound = None, set(), {}, {}
 
     def of(self, access, default):
         """The connection that serves this grant."""
@@ -54,14 +54,25 @@ class Fallback:
         return True
 
     def selected(self, access, target_id, targets):
-        """A picked tab's id belongs to the extension; find the same tab (url and title) among remote targets.
+        """A picked tab's id belongs to the extension, so it is bound once to a remote target id.
 
-        Never widens consent: a tab that is not found exactly once selects nothing."""
+        The first mapping finds the tab by url and title among the granted window's targets, and only
+        when exactly one matches. From then on only that target id is the grant's tab, never whatever tab
+        later shows the same content. If it was not found, or has since closed, the grant selects nothing
+        (never another tab) until the person picks again."""
         if not target_id or access not in self.grants:
             return target_id
-        want = self.picked.get(access)
-        found = [t["targetId"] for t in targets if want and (t.get("url"), t.get("title")) == want]
-        return found[0] if len(found) == 1 else UNMATCHED
+        if access not in self.bound:
+            want = self.picked.get(access)
+            found = [t["targetId"] for t in targets if want and (t.get("url"), t.get("title")) == want]
+            self.bound[access] = found[0] if len(found) == 1 else None
+            if self.bound[access] is None:
+                raise CDPError(f"The picked tab could not be found over remote debugging; {PICK_AGAIN}")
+        if not any(t["targetId"] == self.bound[access] for t in targets):
+            self.bound[access] = None  # closed: never re-matched by content
+        if self.bound[access] is None:
+            raise CDPError(f"The picked tab closed; {PICK_AGAIN}")
+        return self.bound[access]
 
     def changed(self, state, detail=""):
         """Remote debugging's own state: a grant's reason, never the tray's extension row."""
@@ -76,6 +87,7 @@ class Fallback:
     def drop(self, access):
         self.grants.discard(access)
         self.picked.pop(access, None)
+        self.bound.pop(access, None)
         if not self.grants and self.remote:
             remote, self.remote = self.remote, None
             self.chrome.shares.spawn(remote.close())
