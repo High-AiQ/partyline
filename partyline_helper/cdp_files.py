@@ -1,6 +1,7 @@
 """Download authorized media to private temporary files and assign them to a CDP input."""
 import asyncio
 import contextlib
+import json
 import re
 import shutil
 import tempfile
@@ -87,47 +88,74 @@ def schedule_cleanup(directory, delay=LIFETIME):
     asyncio.get_running_loop().call_later(delay, cleanup)
 
 
+def cleanup_old():
+    root = config_path().parent / 'file-input'
+    if root.is_dir():
+        for old in root.iterdir():
+            if old not in ACTIVE and old.is_dir():
+                remaining = LIFETIME - (time.time() - old.stat().st_mtime)
+                if remaining <= 0:
+                    shutil.rmtree(old, ignore_errors=True)
+                else:
+                    schedule_cleanup(old, remaining)
+    return root
+
+
 async def set_files(page, message, backend):
-    files = message['files']
-    state = await page.function(backend, START, (len(files),))
+    files = message.get('files', [])
+    local_paths = message.get('paths', [])
+    count = len(files) + len(local_paths)
+    state = await page.function(backend, START, (count,))
     if state.get('error'):
         raise CDPError(state['error'])
-    if len(files) > 1 and not state.get('multiple'):
+    if count > 1 and not state.get('multiple'):
         raise CDPError('file input does not accept multiple files')
     session = page.access.session
-    root = config_path().parent / 'file-input'
-    root.mkdir(parents=True, exist_ok=True)
-    for old in root.iterdir():
-        if old not in ACTIVE and old.is_dir():
-            remaining = LIFETIME - (time.time() - old.stat().st_mtime)
-            if remaining <= 0:
-                shutil.rmtree(old, ignore_errors=True)
-            else:
-                schedule_cleanup(old, remaining)
-    directory = Path(tempfile.mkdtemp(dir=root))
-    ACTIVE.add(directory)
-    task = asyncio.create_task(asyncio.to_thread(
-        download, session, page, message['file_ticket'], files, directory))
+    directory = None
+    paths = []
     try:
-        try:
-            paths = await asyncio.shield(task)
-        except (OSError, URLError) as exc:
-            raise CDPError("media download failed; use the Open dialog path instead") from exc
-        except asyncio.CancelledError:
-            with contextlib.suppress(Exception):
-                await task
-            raise
+        root = cleanup_old()
+        if local_paths:
+            from .cdp_local_files import audit_remote, prepare
+            local, total = await asyncio.to_thread(prepare, local_paths, files, message['file_limits'])
+            page.guard()
+            info = {'grant': session.window_grant_id, 'line': message.get('line_id', ''),
+                    'process': message.get('agent', ''), 'operation': 'set_files', 'file_count': count,
+                    'total_bytes': total, 'media_ids': [f['id'] for f in files], 'paths': local}
+            session.tools.audit.append('action', 'window', str(info['process'])[:120], 'chrome',
+                                       json.dumps(info, separators=(',', ':')))
+            await asyncio.to_thread(audit_remote, session, page, message['file_ticket'], local)
+        if files:
+            root.mkdir(parents=True, exist_ok=True)
+            directory = Path(tempfile.mkdtemp(dir=root))
+            ACTIVE.add(directory)
+            task = asyncio.create_task(asyncio.to_thread(
+                download, session, page, message['file_ticket'], files, directory))
+            try:
+                paths = await asyncio.shield(task)
+            except (OSError, URLError) as exc:
+                raise CDPError("media download failed; use the Open dialog path instead") from exc
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    await task
+                raise
         page.guard()
         if await session.chrome.page(page.access) is not page:
             raise CDPError('Chrome page changed during download; read the window again')
+        if local_paths:
+            checked, _ = await asyncio.to_thread(prepare, local_paths, files, message['file_limits'])
+            if checked != local:
+                raise CDPError('local files changed during upload; read them again')
+            paths.extend(item['path'] for item in local)
         page.guard()
         await page.call('DOM.setFileInputFiles', {'files': paths, 'backendNodeId': backend})
         observed = await page.function(backend, FINISH)
         # Chrome can hold File references after this command; remove staged bytes on a deadline.
-        directory.touch()
-        schedule_cleanup(directory)
-        ACTIVE.discard(directory)
-        directory = None
+        if directory is not None:
+            directory.touch()
+            schedule_cleanup(directory)
+            ACTIVE.discard(directory)
+            directory = None
         return observed
     finally:
         if directory is not None:

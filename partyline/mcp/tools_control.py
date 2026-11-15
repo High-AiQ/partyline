@@ -12,11 +12,10 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 
 ELEMENT_ACTION_NOTE = (
-    "Act on a screen_elements id using its provider (CDP or UIA). select value=option name; "
-    "set_value edits text; set_files uploads readable Partyline media to CDP file inputs; "
-    "press key=enter/tab/escape commits. force overrides reported disabled. "
-    "then re-reads after an event quiet deadline for CDP, reporting quiet/changing/deadline. "
-    "UIA window_* actions target the shared window. Drag: screen_drag.")
+    "Act on a screen_elements id with CDP or UIA. set_files uploads 1–10 media IDs and/or local paths "
+    "to a CDP file input (media cap per file, 200 MiB total; helper data is refused). "
+    "select uses value; set_value edits text; press uses enter/tab/escape. force overrides disabled. "
+    "then re-reads after CDP settles. UIA window_* targets the shared window; drag: screen_drag.")
 ELEMENT_ACTION_TIMEOUT = 100  # a 20s capture deadline may be followed by a 35s exchange, then action
 ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and event barrier
 ELEMENT_ACTION_PROPERTIES = {
@@ -31,7 +30,10 @@ ELEMENT_ACTION_PROPERTIES = {
         "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize"]},
     "files": {"type": "array", "minItems": 1, "maxItems": 10,
               "items": {"type": "string", "minLength": 1, "maxLength": 128},
-              "description": "For set_files: readable Partyline media IDs, never local paths."},
+              "description": "For set_files: readable Partyline media IDs."},
+    "paths": {"type": "array", "minItems": 1, "maxItems": 10,
+              "items": {"type": "string", "minLength": 1, "maxLength": 32767},
+              "description": "For set_files: absolute file paths on the paired computer."},
     "value": {"type": "string", "maxLength": 500,
               "description": "Text for set_value; option name for ComboBox select."},
     "key": {"type": "string", "enum": ["enter", "tab", "escape"], "description": "For press; no modifiers."},

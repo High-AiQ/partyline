@@ -197,7 +197,7 @@ class Session(SessionTransport):
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
                         helper_version=helper_version(), monitors=self.desktop.monitors(),
                         control=CONTROL_VERSION, tools=TOOLS_VERSION, windows=WINDOWS_VERSION,
-                        press=PRESS_VERSION, chrome_dom=2, chrome={"state": "not_enabled",
+                        press=PRESS_VERSION, chrome_dom=3, chrome={"state": "not_enabled",
                         "detail": self.windows.chrome.browser.detail},
                         window_access=self.window_access_enabled, update_check=True)
         self.status.chrome = "Chrome: not enabled — " + self.windows.chrome.browser.detail

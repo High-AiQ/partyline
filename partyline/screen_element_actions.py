@@ -18,7 +18,7 @@ ACTIONS = Literal["invoke", "toggle", "set_value", "press", "select", "add_to_se
                   "scroll_into_view", "set_range_value", "window_close", "window_minimize", "window_maximize",
                   "window_restore", "window_move", "window_resize", "set_files"]
 # Parameters each action takes; "set_scroll_percent" needs at least one of its two.
-PARAMS = {"set_files": ("files",), "press": ("key",), "select": ("value",), "set_value": ("value",),
+PARAMS = {"set_files": ("files", "paths"), "press": ("key",), "select": ("value",), "set_value": ("value",),
           "scroll": ("direction", "amount"),
           "set_scroll_percent": ("horizontal_percent", "vertical_percent"),
           "set_range_value": ("number",), "window_move": ("x", "y"), "window_resize": ("width", "height")}
@@ -46,6 +46,8 @@ class ElementAction(BaseModel):
     window: str | None = Field(default=None, min_length=1, max_length=500)
     files: list[Annotated[str, Field(min_length=1, max_length=128)]] | None = Field(
         default=None, min_length=1, max_length=10)
+    paths: list[Annotated[str, Field(min_length=1, max_length=32767)]] | None = Field(
+        default=None, min_length=1, max_length=10)
     value: str | None = Field(default=None, max_length=500)
     key: Literal["enter", "tab", "escape"] | None = None
     direction: Literal["up", "down", "left", "right"] | None = None
@@ -65,6 +67,10 @@ class ElementAction(BaseModel):
             raise ValueError("force is supported only for invoke, toggle, select and expand")
         given = {name for name in ALL_PARAMS if getattr(self, name) is not None}
         wanted = set(PARAMS.get(self.action, ()))
+        if self.action == "set_files":
+            if not 1 <= len(self.files or []) + len(self.paths or []) <= 10:
+                raise ValueError("set_files requires 1–10 files and/or paths total")
+            wanted = given & wanted
         if self.action == "select":
             wanted = given & wanted
         if self.action == "set_scroll_percent":
@@ -112,8 +118,10 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
                              "use the Open dialog path instead")
         if body.action == "set_files":
             from .screen_file_input import resolve_files, audit_files
-            files, total = resolve_files(hub, principal, body.files)
-            audit_files(hub, principal, grant, body.files, total)
+            if body.paths and device.get("chrome_dom", 0) < 3:
+                raise ValueError("update the helper to use local paths")
+            files, total = resolve_files(hub, principal, body.files or [])
+            audit_files(hub, principal, grant, body.files or [], total)
         with phase("target_ms"):
             target, _ = await hub.elements.action_target(principal, grant, body.element_id)
         if target is None:
@@ -127,9 +135,13 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
             hub.window_grants.spend(grant)
             if body.action == "set_files":
                 from .screen_file_input import ticket
-                with ticket(hub, principal, grant, files) as key:
+                with ticket(hub, principal, grant, files, len(body.paths or [])) as key:
                     message["files"] = [{k: f[k] for k in ("id", "name", "bytes")} for f in files]
                     message["file_ticket"] = key
+                    if body.paths:
+                        from .screen_file_input import MAX_TOTAL
+                        from .media_files import MAX_FILE_BYTES
+                        message["file_limits"] = {"file": MAX_FILE_BYTES, "total": MAX_TOTAL}
                     response = await hub.elements.exchange(principal, grant, device, "window_element_action",
                         agent=principal.name, title=grant.get("title", ""),
                         process=grant.get("process", ""), **message)

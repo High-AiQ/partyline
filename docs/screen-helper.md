@@ -1207,21 +1207,25 @@ Also read `tests/test_windows_capture_events.py` including its native Tk capture
 applicable. This is a source audit; native Windows execution is still required by CI, and
 these UIA fixtures do not establish Chrome popup/event-trust behavior for the checklist above.
 
-### Upload Partyline media to a Chrome file input
+### Upload files to a Chrome file input
 
 For a shared Chrome window whose `screen_elements` result has `source: cdp`, call
 `screen_element_action` with `action: "set_files"`, the `window`, `element_id`, and
-`files` containing 1–10 Partyline media IDs. The input must be a file input and
-must allow multiple files when more than one ID is supplied. Request `then` for
-an observation that includes the names and count read back from Chrome, together
-with the usual settle state. If CDP is unavailable, use the Open dialog path.
+one or both of `files` (readable Partyline media IDs) and `paths` (absolute file
+paths on the paired computer). Supply 1–10 files total. Media files appear first,
+followed by local paths, in the order supplied in each list. The input must be a
+file input and must allow multiple files when more than one file is supplied.
+Request `then` for the names and count read back from Chrome and the usual settle
+state. If CDP is unavailable, use the Open dialog path.
 
-Only media the caller can read through `get_media` is accepted. Local paths are
-never accepted: allowing them would let an agent upload arbitrary files from the
-person's computer. The existing general per-file media cap applies, with a
-200 MiB total per call; the same file types as normal uploads are accepted. The
-helper downloads the authorized files into a fresh directory under its data
-folder, preserving sanitized file names. Staged files are deleted after ten
-minutes, or on a later call if the helper was restarted before the deadline.
-The helper and server record the grant, caller, media IDs, count and total size,
-not file contents.
+The person authorizes use through window access; the captain or agent decides
+what to upload. Local paths must resolve to readable regular files. Symlinks are
+followed, and files inside the helper's own data and config directory are refused,
+including paths that reach it through a symlink; this protects pairing credentials
+and audit files. This is the only path restriction. Local files are passed directly
+to Chrome without copying. Media IDs must be readable through `get_media` and are
+downloaded into a fresh helper data directory with sanitized names. Staged media
+files are deleted after ten minutes, or on a later call if the helper was restarted.
+The existing general media per-file cap applies to every file, with a 200 MiB total
+per call. The helper and server audit media IDs, resolved local paths and their sizes,
+the grant, caller, file count and total size, without recording file contents.
