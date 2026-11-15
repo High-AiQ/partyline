@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from partyline.helper_release import installer_info
+from partyline_helper.chrome_identity import HOST
 
 ROOT = Path(__file__).resolve().parent.parent
 ISS = (ROOT / "packaging/windows/installer.iss").read_text()
@@ -81,6 +82,12 @@ class InstallerScriptTests(unittest.TestCase):
         uninstall = code[code.index("function InitializeUninstall"):]
         self.assertIn("Result := HelperStopped;", uninstall)  # ... and the uninstall
         self.assertIn("CloseApplications=no", ISS)
+
+    def test_an_upgrade_from_a_helper_without_the_chrome_host_never_asks_it_to_pause_chrome(self):
+        code = ISS[ISS.index("function HelperStopped"):ISS.index("function PrepareToInstall")]
+        suspend = code[code.index("RegKeyExists"):code.index("'suspend-chrome'")]
+        self.assertIn("Software\\Google\\Chrome\\NativeMessagingHosts\\" + HOST, suspend)
+        self.assertLess(code.index("'stop'"), code.index("RegKeyExists"))  # the stop is always required
 
     def test_it_has_a_start_menu_entry_and_an_uninstaller(self):
         self.assertIn("{autoprograms}", section("Icons"))

@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — An installer step runs the previous helper, not the new one
+
+The false assumption was that every helper the installer finds knows the newest commands. The upgrade's
+stop step runs the already installed executable, so a new `suspend-chrome` call sent to a 1.4.x helper was
+refused as an unknown command and the installer reported the helper as still running. Steps that call the
+installed helper must be gated on evidence that it has the capability (here, the Chrome native host
+registration that only 1.5.0+ writes); `tests/test_windows_packaging.py` checks the gate.
+
 ## 2026-11-15 — Zero-size boxes do not negate AX exposure
 
 The false assumption was that zero width or height meant an AX-exposed control should disappear.
