@@ -4,10 +4,19 @@ Windows Graphics Capture takes a single HWND, so a covered or partly off-screen 
 `PrintWindow(PW_RENDERFULLCONTENT)` is the fallback for a window it cannot take. Neither restores or raises a
 window: a minimised one is refused. Protected (DRM) content is drawn black by Windows itself.
 """
+import ctypes
 import sys
 import threading
+from ctypes import wintypes
 
 WGC_SECONDS = 3  # how long one frame may take to arrive from Graphics Capture
+
+
+class Header(ctypes.Structure):  # module level: ctypes types must not be redefined per call
+    _fields_ = [("size", wintypes.DWORD), ("width", wintypes.LONG), ("height", wintypes.LONG),
+                ("planes", wintypes.WORD), ("bits", wintypes.WORD), ("compression", wintypes.DWORD),
+                ("image", wintypes.DWORD), ("x", wintypes.LONG), ("y", wintypes.LONG),
+                ("used", wintypes.DWORD), ("important", wintypes.DWORD)]
 
 
 class GrabError(Exception):
@@ -103,12 +112,6 @@ class WindowGrab:
                                ctypes.c_void_p, wintypes.UINT], ctypes.c_int)):
             function = getattr(gdi32, name)
             function.argtypes, function.restype = args, result
-
-        class Header(ctypes.Structure):
-            _fields_ = [("size", wintypes.DWORD), ("width", wintypes.LONG), ("height", wintypes.LONG),
-                        ("planes", wintypes.WORD), ("bits", wintypes.WORD), ("compression", wintypes.DWORD),
-                        ("image", wintypes.DWORD), ("x", wintypes.LONG), ("y", wintypes.LONG),
-                        ("used", wintypes.DWORD), ("important", wintypes.DWORD)]
 
         rect = wintypes.RECT()
         if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):

@@ -133,11 +133,21 @@ async def browser_tabs_for_window(access, chrome):
     return await chrome.tabs(access)
 
 
+# Module-level ctypes types: argtypes on a shared DLL handle are process-wide, so a class defined per
+# call makes concurrent callers pass "the wrong" structure type (ctypes.ArgumentError).
+class Elevation(ctypes.Structure):
+    _fields_ = [("token_is_elevated", wintypes.DWORD)]
+
+
+class ProcessEntry(ctypes.Structure):
+    _fields_ = [("size", wintypes.DWORD), ("usage", wintypes.DWORD), ("pid", wintypes.DWORD),
+                ("heap", ctypes.c_size_t), ("module", wintypes.DWORD), ("threads", wintypes.DWORD),
+                ("parent", wintypes.DWORD), ("priority", ctypes.c_long), ("flags", wintypes.DWORD),
+                ("exe", wintypes.WCHAR * 260)]
+
+
 def elevated(process):
     """Unknown token state is excluded because an elevated or security window is hard floor."""
-    class Elevation(ctypes.Structure):
-        _fields_ = [("token_is_elevated", wintypes.DWORD)]
-
     advapi = ctypes.windll.advapi32
     advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
     advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
@@ -157,12 +167,7 @@ def elevated(process):
 
 
 def descendants(roots):  # pragma: no cover - Win32 process snapshot
-    class ProcessEntry(ctypes.Structure):
-        _fields_ = [("size", wintypes.DWORD), ("usage", wintypes.DWORD), ("pid", wintypes.DWORD),
-                    ("heap", ctypes.c_size_t), ("module", wintypes.DWORD), ("threads", wintypes.DWORD),
-                    ("parent", wintypes.DWORD), ("priority", ctypes.c_long), ("flags", wintypes.DWORD),
-                    ("exe", wintypes.WCHAR * 260)]
-    kernel = ctypes.windll.kernel32
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)  # private handle: argtypes are per handle
     kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
