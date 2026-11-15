@@ -792,7 +792,7 @@ person is refused.
 
 A line can declare the commands every hand-off must pass:
 `PUT /api/conversations/<id>/gates` with
-`{"commands": ["uv run --locked ruff check .", "./scripts/capped-test"],
+`{"commands": ["uv run --locked ruff check .", "./scripts/capped-test uv run --locked python -m unittest tests.test_goal"],
 "timeout_s": 1800}` (the line's captain, or a person; `GET …/gates` reads
 them back). `accept` with `{"sha": "...", "run_gates": true}` then makes a
 fenced scratch checkout at the SHA and runs each command there, in order,
@@ -1276,7 +1276,7 @@ All captains use the orchestrator pack. Existing lines are migrated to
 `manager_tree` value. Hierarchies and sub-captains remain available. A person can
 set a root's `default_review_policy` using `PUT /api/conversations/<root>/captain-style`;
 it defaults to `captain` and may also be `none` or an exact reviewer preset name.
-A task's mode (full, light or express) is chosen separately at creation.
+A task's mode (full, express or suite) is chosen separately at creation.
 
 Preset role traits govern agent staffing: implementers need **Fast implementer**; captains,
 sub-captains and reviewers need **Can manage a line**. Choose a free Fast implementer
@@ -1474,31 +1474,48 @@ the implementer can prompt progress but cannot steer the verdict. A dead reviewe
 returns 409 directing the implementer to the root captain's `restart_reviewer`.
 Root captains and people retain `message_task` for free-text messages.
 
-## Task modes: full, light and express
+## Task modes: full, express and suite
 
-`create_task(..., mode="full"|"light"|"express")` picks how much process a task carries. The
-mode is fixed at creation (`reopen_task` keeps it) and shows as `mode` in `tasks()`, on the
-task row and as `task_mode` in the conversation payload, which the rail and the task header
-render as a colour-coded icon with a tooltip (bolt for express, feather for light, shield for
-full); lines that are not tasks show none.
+`create_task(..., mode="full"|"express"|"suite")` fixes the mode at creation; `reopen_task`
+keeps it. The task row and conversation payload carry it. The rail and task header show
+shield (full), bolt (express) or 🧪 (suite). Legacy `light` API inputs and stored rows mean
+`full`; it is no longer a separate choice.
 
-- **full** (default) is the review cycle described above, with every gate in `AGENTS.md`.
-- **light** is the same review cycle and the policy as given, but gates scale with the diff.
-  The one mapping from changed paths to gate commands is `partyline/task_gates.py`
-  (`uv run --locked python -m partyline.task_gates [path ...]`, default: the diff against
-  main): docs, markdown and skills only run none; Python runs ruff plus the tests that
-  touch the changed modules; `frontend/` runs `npm run verify && npm run build`; a path or
-  module the table cannot place falls back to the full gates. CI and the required checks on
-  main are unchanged. The light task pack points the implementer at this helper.
-- **express** has no reviewer and no review cycle, for mockups, explorations, assets and
-  one-off investigations. Its policy is forced to `none`; `create_task` refuses any other
-  `review` with 422. The implementer ends with `deliver(what, where)`
-  (`POST /api/conversations/<task>/deliver`): text only, no SHA. That posts the terminal
-  report to the root captain and marks the task `done`; no SHA is read, so the
-  unverified-SHA warning never fires. `request_review` on an express task is refused with
-  409 (`express task: no review — report results with deliver(what, where)`), and `deliver`
-  on any other task with 409. `blocked`, `waiting` and `resume_work` work as before.
-  Merging an express task's commits is not supported: use light or full for that.
+- **full** (default) uses the review cycle, with as many rounds as needed and gates scaled
+  to the diff. Implementers and reviewers run only tests that reach changed code: never
+  full suites, e2e suites or whole-suite coverage. List tests run in reports and verdicts.
+  `uv run --locked python -m partyline.task_gates [path ...]` prints the scoped commands.
+  Python, helper, packaging and Chrome paths map to direct tests. Unknown paths get lint
+  and “no direct tests; covered by the suite run”. Frontend gates format/lint changed files,
+  check, run related Vitest tests, and build. Docs/markdown/skills-only changes need no gates.
+- **express** is the captain's choice for any task needing no review and no tests: a person
+  may say so, or the captain decides. Behavior is unchanged: policy `none`, no reviewer,
+  `deliver(what, where)` ends the task with a text report; `request_review` is refused.
+  Merging its commits through the task acceptance workflow is unsupported.
+- **suite** tests an accepted batch together, without a reviewer. Pass `repository` and
+  `batch=[task_line_id_or_tag, explicit_sha, ...]` in cherry-pick order. Task references
+  resolve to their accepted SHAs for that repository; foreign or unaccepted tasks are
+  refused. The resolved batch is stored and repeated in the runner's pack across restarts.
+  Use a suite run **before every batch PR**; never ask task sublines to run full suites.
+
+The flow is **tasks accepted → suite on the merged batch → reopen failures or create fixes →
+suite again → PR**. The suite implementer creates an integration branch from current main
+in its worktree and cherry-picks commits in order. Report conflicts that cannot be resolved
+trivially; version conflicts keep the batch numbers the captain supplies in the goal.
+Run every suite named by the repository's `AGENTS.md`. For partyline that means the capped
+full suite, ≥90% coverage, full frontend verify and build, `node --test partyline_chrome/*.test.js`
+and every e2e suite (`tests/ui/`). Keep frontend builds sequential with backend tests.
+
+End with `deliver(what, where)`: integration branch and SHA, pass/fail for each suite, and
+each failure mapped to tasks whose changed files the failing test touches. Call attribution
+best-effort and identify unknown ownership. Delivery records the integration tip and keeps
+it reachable. A suite runner **never pushes or opens the PR**. After a pass the captain
+pushes and creates the PR from the integration branch.
+
+On failure reopen the responsible task with `reopen_task`, or create a new task. Then create
+a new suite run, or `reopen_task(suite_id, goal, batch=[new SHAs or task IDs/tags], repository=...)`;
+repository is optional when unchanged. Without a new batch a reopen reuses its recorded
+SHAs. `blocked`, `waiting` and `resume_work` remain available in all modes.
 
 ## Captain handover
 
@@ -1607,6 +1624,7 @@ Managed task reviews provision the nearest supported lockfile for each changed f
 including npm, pnpm, yarn, and uv. Setup runs before the reviewer starts in a sandbox
 limited to the review checkout and package caches; setup failures reach the captain.
 Instance settings can supply setup and test commands per repository and subpath; they
-are not read from the reviewed repository. Reviewers run the listed tests and report
-what ran and passed, or call `env_gap` when the suite cannot run. A root captain can
+are not read from the reviewed repository. Reviewers scope configured commands to only
+tests reaching changed code, never full/e2e suites or whole-suite coverage. They list test
+commands and results, and call `env_gap` only when affected tests cannot run. A root captain can
 set an environment and wake the reviewer in the same round.

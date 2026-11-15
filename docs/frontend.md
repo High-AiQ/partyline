@@ -3,7 +3,7 @@
 
 | DO | DO NOT |
 | --- | --- |
-| Run `npm run verify` before every frontend commit, and commit the rebuilt `partyline/static/` bundle with the source | Ship UI source whose bundle matches nothing, or a bundle without its source |
+| Run scoped frontend gates on task lines and full `npm run verify` on suite lines, and commit the rebuilt `partyline/static/` bundle with the source | Ship UI source whose bundle matches nothing, or a bundle without its source |
 | Keep rules in `src/lib/` (pure, unit-tested), state in runes stores, looks in components | Bury business logic inside components where no test can reach it |
 | Prefer Tailwind utility classes on markup for layout, spacing, color, typography, and simple states | Add new hand-written rules in `<style>` for anything a utility already expresses |
 | Keep design tokens in `src/app.css` `@theme` and use the generated utilities (`bg-ink`, `text-copper`, …) | Invent parallel color or spacing constants inside component CSS |
@@ -13,7 +13,7 @@
 
 The client is a Svelte 5 app built by Vite into `partyline/static/`, which the server serves:
 `/` is `index.html` and `/assets/*` is mounted `StaticFiles`. AGENTS.md carries the musts
-(`npm run verify`, rebuild before committing UI changes); this file is the depth behind them.
+(scoped task checks, full suite verification, rebuild before committing UI changes); this file is the depth behind them.
 
 ```bash
 cd frontend
@@ -24,8 +24,9 @@ npm run dev       # hot reload against a partyline on $PARTYLINE_PORT (default 8
 npm run format    # apply Prettier; `lint:fix` for the auto-fixable lint
 ```
 
-**`npm run verify` must pass before every frontend commit**, and it is what CI
-runs — the same command, so the two can never disagree. It is four gates:
+**Task commits run format and lint on changed files, `npm run check`, related Vitest tests
+(`npx vitest related <files> --run --passWithNoTests`), and `npm run build`.** Full `npm run
+verify` belongs to the merged batch suite line (or a person outside Partyline) and CI. It is four gates:
 Prettier formatting, ESLint, `svelte-check` at zero errors *and zero warnings*,
 and the unit tests.
 
@@ -170,6 +171,12 @@ holder's process card and mention row. `lib/screen-control.ts` decides when it s
 or revoked control, another agent's grant, or no share at all draws nothing, and a line-wide
 grant (no named holder) badges the share status only. The pulse stops under
 `prefers-reduced-motion`; the colour is the `--color-pink` token, tuned for both themes.
+
+The management dialog's only metrics panel is `ComputerUseSection`: one compact response/token/action/read
+summary with a disclosure for image, model-token and timing details. It offers last hour, today and since-line-started
+periods plus include-sublines, and disappears when the selected scope has no computer use. The older per-tool and
+per-response browser tables were removed to keep management uncluttered; their collection and REST read APIs remain
+for agents. `lib/computer-usage-api.ts` owns the Zod response contract and local-day period calculation.
 
 Orchestrator controls live in `CaptainStyleSection` (root-line management only)
 and `TaskHistorySetting` (beside the resource budget). Line responses carry derived

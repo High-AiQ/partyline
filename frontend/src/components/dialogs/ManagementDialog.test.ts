@@ -1,11 +1,16 @@
 import { mount, unmount } from "svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ManagementDialog from "./ManagementDialog.svelte";
 import { api } from "../../lib/api";
 import { orchestratorApi } from "../../lib/orchestrator-api";
 import { hierarchyApi } from "../../lib/hierarchy-api";
 import { ConversationDetailSchema } from "../../lib/contracts";
 import { room } from "../../state/room.svelte";
+import * as usage from "../../lib/computer-usage-api";
+
+beforeEach(() => {
+  vi.spyOn(usage, "computerUsage").mockReturnValue(new Promise<usage.ComputerUseSummary>(() => undefined));
+});
 
 function detailWith(parentId: string | null) {
   return ConversationDetailSchema.parse({
@@ -20,6 +25,26 @@ function detailWith(parentId: string | null) {
     attachments: [],
   });
 }
+
+describe("management dialog metrics", () => {
+  it("offers only the compact computer-use section", async () => {
+    vi.spyOn(api, "conversation").mockResolvedValue(detailWith("parent"));
+    vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: null });
+    const dialog = mount(ManagementDialog, {
+      target: document.body,
+      props: { conversation: detailWith("parent").conversation, close: vi.fn() },
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector("[data-computer-usage]")).not.toBeNull();
+      });
+      expect(document.querySelector('[aria-label="Model usage"]')).toBeNull();
+      expect(document.querySelector('[aria-label="Usage"]')).toBeNull();
+    } finally {
+      await unmount(dialog);
+    }
+  });
+});
 
 describe("management dialog captain control", () => {
   it("appoints the chosen live process as captain", async () => {

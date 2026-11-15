@@ -8,6 +8,7 @@ from .mention_relay import LIVE, live_manager
 from .orchestrator_notices import tell
 from .orchestrator_revive import task_lock
 from .orchestrator_staff import restart
+from .orchestrator_suite import resolve_batch, save_batch, suite_brief
 from .orchestrator_store import EXPRESS_BRIEF, require_root, task
 
 
@@ -22,6 +23,13 @@ async def reopen_task(runtime, actor, conv_id, body):
         raise HTTPException(404, 'task not found')
     require_root(db, actor, row['root_id'])
     goal = body.goal.strip()
+    batch = getattr(body, 'batch', None)
+    repository = getattr(body, 'repository', None)
+    if row['mode'] != 'suite' and (batch is not None or repository is not None):
+        raise HTTPException(422, 'batch and repository are for suite tasks')
+    suite = resolve_batch(db, row['root_id'], repository or row['suite_repository'], batch) if batch else None
+    if repository and not batch:
+        raise HTTPException(422, 'repository requires a new batch')
     async with task_lock(runtime, conv_id):
         from .preset_roles import require_named_role
         require_named_role(db, row['implementer_preset'], 'implementer')
@@ -37,11 +45,14 @@ async def reopen_task(runtime, actor, conv_id, body):
             raise HTTPException(
                 409, 'only an approved or done task can be reopened; a blocked or implementing task '
                 'takes new direction through resume_work(conv_id, note) or message_task')
+        if suite:
+            save_batch(db, conv_id, *suite)
         set_goal(db, conv_id, goal)
         att = db.get_attachment(row['implementer_id'])
         if att and att['status'] not in LIVE:
             await restart(runtime, att, 'implementer', row['implementer_preset'])
-    ending = (EXPRESS_BRIEF if row['mode'] == 'express' else
+    row = task(db, conv_id)
+    ending = (suite_brief(row) if row['mode'] == 'suite' else EXPRESS_BRIEF if row['mode'] == 'express' else
               "Commit on this line's branch; never push. Call request_review(sha, what, where) when ready.")
     await tell(runtime, row['implementer_id'],
                f'New work on this task, reopened by the root captain: {goal}. {ending}')

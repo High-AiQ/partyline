@@ -65,7 +65,7 @@ class FakePointer:
         return self.under
 
     def root(self, hwnd):
-        return hwnd
+        return 10 if hwnd == 11 else hwnd
 
     def describe(self, hwnd, granted):
         return {"hwnd": hwnd, "class": "TestWindow" if hwnd == granted else "TestChild",
@@ -102,6 +102,7 @@ class FakePage:
         self.calls, self.dispatched, self.live, self.operation_epoch = [], False, True, None
         self.viewport = [width, height, zoom]
         self.quiet = SimpleNamespace(wait=AsyncMock(return_value="quiet"))
+        self.snapshot = AsyncMock(return_value={"elements": []})
         self.shown, self.on_input = True, None
         self.access = SimpleNamespace(event_status=lambda: {"event_counter": 4})
         self.fail = None
@@ -143,11 +144,13 @@ class ClickFixture(unittest.IsolatedAsyncioTestCase):
         self.backend = self.shares.snapshots.backend = Backend()
         self.pointer, self.page, self.clock = FakePointer(), FakePage(), [1000.0]
         self.ask = AsyncMock(return_value=True)
-        self.events = SimpleNamespace(status=lambda: {"event_counter": 1}, settle=lambda counter: "quiet")
+        self.events = SimpleNamespace(status=lambda: {"event_counter": 1},
+                                      settle=lambda counter, **kwargs: "quiet")
         self.windows = [{"hwnd": 10, "pid": 42}]
         self.access = SimpleNamespace(grant=dict(GRANT), generation=3, check=AsyncMock(return_value=None),
                                       revoke=Mock(), gate=DispatchGate(), event_state=self.events,
-                                      list_windows=lambda: self.windows)
+                                      list_windows=lambda: self.windows,
+                                      snapshot=AsyncMock(return_value={"elements": []}))
         self.access.gate.grant()
         self.entry = {"access": self.access, "target": {"line_name": "Alpha"}, "title": "Editor",
                       "worker": SimpleNamespace(cancel=Mock(), close=AsyncMock())}
@@ -305,9 +308,13 @@ class CdpRouteTests(ClickFixture):
         self.assertNotIn("was released", reply["error"])
 
     async def test_a_changing_page_is_reported_as_changing(self):
-        counters = iter([4, 5])
-        self.page.access = SimpleNamespace(event_status=lambda: {"event_counter": next(counters)})
-        self.assertEqual("changing", (await self.click())["settle"])
+        async def deadline(**kwargs):
+            self.clock[0] += kwargs["deadline"]
+            return "deadline"
+        self.page.quiet.wait.side_effect = deadline
+        result = await self.click()
+        self.assertEqual("changing", result["settle"])
+        self.assertIn("still changing after", result["settle_note"])
 
 
 class CursorRouteTests(ClickFixture):

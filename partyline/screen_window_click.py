@@ -21,6 +21,7 @@ from .screen_audit import publish, record, record_standing_window_access
 from .screen_grants import resolve_window
 from .screen_failure_snapshot import attach, failed
 from .screen_point_landing import unavailable
+from .screen_point_changes import apply as point_changes
 
 POINT_VERSION = 3  # the `windows` hello value that can click at a point
 INPUT_VERSION = 4  # ... and scroll, drag, type and press keys
@@ -115,6 +116,7 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
             return result
     name = f"point_{body.operation}"
     result = {"status": "unconfirmed"}
+    retained = False
     try:
         async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window
             if mark is not None:
@@ -130,7 +132,15 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
             response = await hub.elements.exchange(
                 principal, grant, device, kind, agent=principal.name, **extra, **body.wire(points),
                 budget=BUDGET, wait=WAIT, **({"look_generation": generation} if generation else {}))
-        result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
+            result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
+            if "point_observation" in result:
+                try:
+                    deny_unless(runtime.db, principal, conv_id, "read")
+                except HTTPException:
+                    result.pop("point_observation")
+                    result["changes"] = "unavailable: read permission required"
+                else:
+                    retained = point_changes(hub.elements, grant["id"], result)
     except (TimeoutError, OSError, RuntimeError):
         result = {"status": "unconfirmed", "note": "The helper did not confirm the input; it may have run. "
                   "Do not retry automatically."}
@@ -139,15 +149,17 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
     await audit(runtime, grant, principal, body, result.get("route", "none"), status, points)
     await record_standing_window_access(runtime, hub, principal, conv_id, name, body.window, None, status)
     if status in ("completed", "no_effect") and not result.get("grant_ended"):
-        hub.elements.action_completed(grant["id"])
+        hub.elements.action_completed(grant["id"], retain_snapshot=retained)
         if body.capture == "thumb":  # asked for: the picture after, with no tree read
             await attach(runtime, hub, store, principal, conv_id, grant, result, "after", marks=False)
     unchanged = (status == "no_effect" or result.get("settle") == "unchanged"
                  or result.get("after", {}).get("unchanged") is True)
-    if unchanged and points and not result.get("grant_ended"):
+    needs_crop = result.get("settle") in ("changing", "deadline") or (
+        unchanged and not result.get("changes_observed"))
+    if needs_crop and points and not result.get("grant_ended"):
         await attach(runtime, hub, store, principal, conv_id, grant, result, "landing_thumb", marks=False,
                      landing=points[-1])
-    if failed(result):  # a failure a picture explains carries one, with marks: a point can be tried at once
+    if failed(result) and not (needs_crop and points):  # use only one diagnostic picture
         await attach(runtime, hub, store, principal, conv_id, grant, result)
     return result
 

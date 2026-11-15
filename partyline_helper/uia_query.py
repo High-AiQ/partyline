@@ -46,7 +46,12 @@ def condition(provider, query):
                      if name.lower() == query['control_type'].lower()), None)
         if kind is None:
             return automation.CreateFalseCondition()
-        conditions.append(automation.CreatePropertyCondition(30003, kind))
+        wanted = automation.CreatePropertyCondition(30003, kind)
+        if kind == 50003:  # role-less ARIA triggers; unrelated text must not consume the query cap
+            for hint in ('haspopup=', 'expanded=', 'controls=', 'owns='):
+                wanted = automation.CreateOrCondition(
+                    wanted, automation.CreatePropertyConditionEx(30102, hint, 3))
+        conditions.append(wanted)
     if not conditions:
         return automation.CreateTrueCondition()
     return (conditions[0] if len(conditions) == 1 else

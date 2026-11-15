@@ -23,7 +23,8 @@ def usage(grant_id, title, computer, shared_by, line_name=None):
             "Every process on this line and its sublines can use this window; actions run one at a time. "
             "UIA changes "
             "invalidate snapshots; pass refresh=true for a fresh read.\n"
-            "Read elements first, and the deltas after each action. When text does not explain the screen, "
+            "Read elements first; after a click, read changes before deciding it failed. "
+            "Read landed_in for point landing. When text does not explain the screen, "
             f"use screen_window_look(window={window}) for one fresh image with numbered state; thumb "
             "is the default (~930 image tokens). Act with screen_element_action(mark=n, action=...); "
             "old marks require a fresh look.")
@@ -49,7 +50,8 @@ def line_window_text(db, conv_id):
             "; ".join(parts) +
             ". Read text with screen_elements(window=...), act with screen_element_action. Use "
             "screen_window_look when text does not explain the screen; its default thumb combines "
-            "one fresh image and numbered state. Act by mark; take a fresh look for stale marks.")
+            "one fresh image and numbered state. Act by mark; take a fresh look for stale marks. "
+            "After a click, read changes before deciding it failed; read landed_in for point landing.")
 
 
 async def announce(runtime, entry, grant_id, reason=None):

@@ -11,12 +11,15 @@ from .border_native import TkBackend
 OUTLINE_COLOR = MODE_COLORS["window"]
 OUTLINE_THICKNESS = 3
 EVENT_OBJECT_DESTROY = 0x8001
+EVENT_OBJECT_REORDER = 0x8004
 EVENT_OBJECT_LOCATIONCHANGE = 0x800B
 EVENT_OBJECT_CLOAKED = 0x8017
 EVENT_OBJECT_UNCLOAKED = 0x8018
+EVENT_SYSTEM_FOREGROUND = 0x0003
 EVENT_SYSTEM_MINIMIZESTART = 0x0016
 EVENT_SYSTEM_MINIMIZEEND = 0x0017
 OBJID_WINDOW = 0
+Z_ORDER_EVENTS = (EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_REORDER)  # Any window may change our stacking.
 
 
 class WindowOutline:
@@ -25,7 +28,7 @@ class WindowOutline:
     def __init__(self, hwnd, warning=None, backend_factory=None, user32=None, dwmapi=None, pid=None):
         self.hwnd, self.pid = hwnd, pid
         self.warning = warning or (lambda message: print(message, flush=True))
-        self.backend_factory = backend_factory or (lambda error: TkBackend(error, windows=True))
+        self.backend_factory = backend_factory or (lambda error: TkBackend(error, windows=True, above=hwnd))
         self.user32, self.dwmapi = user32, dwmapi
         self.backend = None
         self.failed = False
@@ -97,6 +100,10 @@ class WindowOutline:
     def handle_event(self, event, hwnd, object_id=OBJID_WINDOW):
         """Apply one already-filtered test/native event without waiting for time."""
         with self.lock:
+            if event in Z_ORDER_EVENTS:
+                if self.backend and not self.hidden and not self.closed:
+                    self.backend.place()  # The backend only moves strips that are not already in place.
+                return
             if int(hwnd or 0) != int(self.hwnd) or object_id != OBJID_WINDOW or self.closed:
                 return
             if event in (EVENT_SYSTEM_MINIMIZESTART, EVENT_OBJECT_CLOAKED):
@@ -139,7 +146,8 @@ class WindowOutline:
 class WindowOutlineEvents:
     """One out-of-context WinEvent hook set for a single HWND."""
 
-    EVENTS = (EVENT_OBJECT_LOCATIONCHANGE, EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND,
+    EVENTS = (EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_REORDER, EVENT_OBJECT_LOCATIONCHANGE,
+              EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND,
               EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_DESTROY)
 
     def __init__(self, hwnd, changed, warning, user32=None, pid=None):
@@ -175,7 +183,7 @@ class WindowOutlineEvents:
             user.PeekMessageW(ctypes.byref(message), None, 0, 0, 0)
             self.thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
             for event in self.EVENTS:
-                hook = user.SetWinEventHook(event, event, None, keepalive, self.pid or 0, 0, 0x0000)
+                hook = user.SetWinEventHook(event, event, None, keepalive, self.hook_pid(event), 0, 0x0000)
                 if not hook:
                     raise ctypes.WinError(ctypes.get_last_error())
                 self.hooks.append(hook)
@@ -191,9 +199,15 @@ class WindowOutlineEvents:
                 user.UnhookWinEvent(hook)
             self.hooks.clear()
 
+    def hook_pid(self, event):
+        """Z-order hooks are global: the window in front is usually another process's."""
+        return 0 if event in Z_ORDER_EVENTS else self.pid or 0
+
     def dispatch(self, event, hwnd, object_id, child_id):
         """Filter WinEvent's HWND, window object id, and non-child event target."""
-        if (int(hwnd or 0) == int(self.hwnd) and object_id == OBJID_WINDOW and child_id == 0):
+        if event in Z_ORDER_EVENTS:
+            self.changed(event, hwnd, object_id)
+        elif (int(hwnd or 0) == int(self.hwnd) and object_id == OBJID_WINDOW and child_id == 0):
             self.changed(event, hwnd, object_id)
 
     def close(self):

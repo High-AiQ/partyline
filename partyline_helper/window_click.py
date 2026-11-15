@@ -20,6 +20,7 @@ from .point_cursor import CHANGED, COVERED, MOVED, PointRefused, run as cursor_r
 from .point_ops import KEYBOARD, NEEDS_CLICK, POINTED, arguments, by_cdp, for_cursor, which
 from .point_win32 import Win32Pointer
 from .point_landing import evidence, landing_session
+from .point_feedback import Feedback
 from .uia_window_list import HARD_FLOOR
 from .uia_window_identity import live
 
@@ -194,6 +195,8 @@ class PointClicks:
         page = (await self.shares.chrome.page(access)
                 if str(grant.get("process", "")).lower() == "chrome.exe" else None)
         if page:
+            feedback = Feedback(access, page, message["deadline"], self.clock)
+            await feedback.start()
             route, result = "cdp", await self.via_cdp(entry, message, page, access, grant, generation, args)
         else:
             for_cursor(operation, points, args)  # refuses what the real keyboard never sends, before asking
@@ -210,11 +213,13 @@ class PointClicks:
             points = await self.current(entry, access, grant, generation, message)  # it may have changed
             if active:
                 active[0].mark_mouse(active[1])
+            feedback = Feedback(access, None, message["deadline"], self.clock)
+            await feedback.start()
             route, result = "cursor", await self.via_cursor(entry, message, access, grant, generation,
                                                             points, epoch, args)
         if operation == "click" and result.get("status") == "completed":
             entry["point_clicked"] = generation  # typing and keys may follow in this grant
-        return route, result
+        return route, await feedback.finish(result)
 
     async def via_cdp(self, entry, message, page, access, grant, generation, args):
         operation = which(message)
@@ -237,12 +242,7 @@ class PointClicks:
         with landing_session(api, grant, landing, page):
             try:
                 info = await by_cdp(operation, page, frame, points, args, guard)
-                counter = page.access.event_status()["event_counter"]
-                settle = await page.quiet.wait()
-                if page.access.event_status()["event_counter"] != counter and settle == "quiet":
-                    settle = "changing"
-                return {"status": "completed", "source": "cdp", "settle": settle,
-                        "settled_event_counter": counter, **info}
+                return {"status": "completed", "source": "cdp", **info}
             except CDPError as exc:
                 if not page.dispatched:
                     raise Refused(str(exc)) from exc
@@ -282,7 +282,7 @@ class PointClicks:
 
         def call():
             return cursor_run(self.pointer(grant["hwnd"]), grant, spots, send, alive,
-                              getattr(access, "event_state", None), ready, last, check, partial, operation,
+                              None, ready, last, check, partial, operation,  # Feedback owns the UIA barrier
                               message["landing"])
         try:
             result, revoked = await asyncio.wait_for(

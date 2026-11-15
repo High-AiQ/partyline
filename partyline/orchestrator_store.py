@@ -21,6 +21,8 @@ def _parsed(row, db=None, visibility=False):
     if row is None:
         return None
     record = dict(row)
+    record['mode'] = 'full' if record.get('mode') == 'light' else record.get('mode', 'full')
+    record['suite_batch'] = json.loads(record.get('suite_batch') or '[]')
     conv = db.get_conversation(record['conv_id']) if db else None
     record['goal'] = (conv or {}).get('goal', '')
     record['creation_error'] = None
@@ -165,10 +167,12 @@ def task_actions(db, actor, conv_id):
         return set()
     actions = set()
     if actor.attachment_id == row['implementer_id']:
-        actions.update(('request_review', 'blocked', 'resume_work', 'waiting'))
+        actions.update(('blocked', 'resume_work', 'waiting'))
+        if row['mode'] != 'suite':
+            actions.add('request_review')
         if row['status'] == 'in_review':
             actions.add('nudge_reviewer')
-        if row['mode'] == 'express':
+        if row['mode'] in ('express', 'suite'):
             actions.add('deliver')
     if actor.attachment_id == row['reviewer_id']:
         actions.update(('review_verdict', 'env_gap', 'waiting'))

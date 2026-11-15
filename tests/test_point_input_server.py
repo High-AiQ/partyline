@@ -215,7 +215,9 @@ class FailurePictureTests(PointFixture, unittest.IsolatedAsyncioTestCase):
     async def test_a_page_that_never_settled_carries_a_picture_though_the_input_went_through(self):
         await self.ready()
         self.click_answer = {"status": "completed", "route": "cdp", "settle": "deadline"}
-        self.assertIn("screenshot", (await self.call("scroll", snapshot="s1", x=100, y=100, dy=1)).json())
+        result = (await self.call("scroll", snapshot="s1", x=100, y=100, dy=1)).json()
+        self.assertIn("landing_thumb", result)
+        self.assertNotIn("screenshot", result)
 
     async def test_a_caller_without_read_access_gets_the_failure_without_a_picture(self):
         await self.ready()

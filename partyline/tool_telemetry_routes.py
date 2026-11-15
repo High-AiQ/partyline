@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from .auth_guard import request_principal
+from .computer_usage_routes import computer_usage_router
 from .hierarchy import descendants
 from .tool_telemetry import store, summary
 from .tool_telemetry_contracts import ToolBatch, ToolIngest, UsageSummary
@@ -36,4 +37,5 @@ def telemetry_router(runtime):
         ids = [conv_id, *(descendants(db, conv_id) if include_descendants else [])]
         return await asyncio.to_thread(summary, db, conv_id, ids, since, group, include_descendants)
 
+    router.include_router(computer_usage_router(runtime))
     return router

@@ -3,7 +3,7 @@ import asyncio
 import contextlib
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from partyline_helper import chrome_operations
 from partyline_helper.cdp_transport import BrowserConnection, CDPError
@@ -284,3 +284,49 @@ class ExtensionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(page.session, fresh.session)
         self.assertEqual(fresh.page_state, 'alive')
         self.assertTrue(fresh.live)
+
+
+class WholeBrowserRemoteTests(unittest.IsolatedAsyncioTestCase):
+    """The pre-extension default (remote debugging for everything) hands back to the extension and lets go."""
+    async def asyncSetUp(self):
+        self.f, self.peer = fixture()
+        self.addAsyncCleanup(self.f.close)
+        self.remote = BrowserConnection(discovery=lambda: 'ws://fake',
+                                        connector=AsyncMock(return_value=self.f.socket))
+        self.remote.changed = self.f.chrome.report
+        self.f.chrome.browser, self.f.chrome.auto_transport = self.remote, True
+
+    async def test_the_last_grant_leaving_closes_the_remote_connection(self):
+        await self.remote.ensure()
+        self.assertIsNotNone(self.remote.socket)
+        self.f.shares.grants.pop('g')  # the shares drop the grant, then ask the provider to forget it
+        self.f.chrome.revoke(self.f.access)
+        await asyncio.gather(*list(self.f.shares.tasks))
+        self.assertIsNone(self.remote.socket)  # Chrome's automation infobar goes away
+        self.assertEqual(self.remote.next_attempt, 0)
+
+    async def test_the_extension_returning_replaces_remote_debugging_and_closes_it(self):
+        await self.remote.ensure()
+        with patch.object(chrome_operations, 'discover', return_value={'port': 1234, 'token': 'x' * 64}):
+            browser = await chrome_operations.select_extension(self.f.chrome)
+        self.assertIsInstance(browser, ExtensionTransport)
+        self.assertTrue(self.remote.closed)
+        self.assertIsNone(self.remote.socket)
+
+    async def test_another_applications_share_does_not_keep_remote_debugging_open(self):
+        await self.remote.ensure()
+        self.f.shares.grants['editor'] = {'access': SimpleNamespace(grant={'process': 'editor.exe'})}
+        self.f.shares.grants.pop('g')
+        self.f.chrome.revoke(self.f.access)
+        await asyncio.gather(*list(self.f.shares.tasks))
+        self.assertIsNone(self.remote.socket)
+
+    async def test_a_known_extension_between_hosts_replaces_an_idle_remote_default_but_not_a_live_one(self):
+        with patch.object(chrome_operations, 'discover', return_value=None), \
+                patch.object(chrome_operations, 'seen', return_value=True):
+            await self.remote.ensure()  # remote debugging is serving a grant right now: it is not swapped out
+            self.assertIs(await chrome_operations.select_extension(self.f.chrome), self.remote)
+            await self.remote.disconnect()
+            browser = await chrome_operations.select_extension(self.f.chrome)
+        self.assertIsInstance(browser, ExtensionTransport)  # idle: the extension is waited for, never remote
+        self.assertTrue(self.remote.closed)

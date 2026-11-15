@@ -1,12 +1,35 @@
 # Telemetry
 
+## Computer use totals
+
+`GET /api/telemetry/computer-use/summary?conv_id=...&since=...&include_descendants=false` combines the existing
+response and tool-call records without writing either table. A person may read any line; a process may read its own
+line and descendants. The line management dialog shows this as its only metrics section: one compact summary, with
+period and include-sublines controls plus the breakdown behind a disclosure. It offers the last hour, local-calendar
+today, or since the line started (subject to the roughly 30-day telemetry retention), and hides when there is no use.
+
+A computer-use response is counted once when its labels include a known `screen_*` tool, including an `extras`
+operation and the element-action shorthand. Calling other tools in the same response does not duplicate its tokens.
+The response reports actual input, cache-read, cache-write, output and total tokens, and recorded model thinking time.
+The canonical screen vocabulary is `mcp.catalog.SCREEN`; the summary partitions it into device actions, reads, and
+control/attachment calls. Direct and `extras` calls both count. Inline images and screen-referenced images later
+delivered by `get_media` are summed, with unknown estimates counted separately rather than treated as zero. A bounded
+in-memory reference set supplies only the fixed `media_source=screen` label; media IDs are never persisted. Screen
+latency is totalled over those calls. Errors/refusals include MCP errors and structured failed outcomes; unconfirmed
+and legacy-unknown outcomes are reported separately. Action p50/p95 use nearest rank over intervals between
+consecutive action-completion timestamps
+within each process; an interval includes the intervening model/tool time and any pause, so the detail labels it
+“between actions” rather than claiming a response-to-call join that the tables do not store.
+
+`cost_usd` is explicitly `null`: there is no price table, and subscription usage is not billed per token. It is the
+extension point if pricing is added later. All existing tool-call and turn collection/read endpoints remain intact.
+
 ## Tool usage telemetry
 
 Partyline measures the rendered text returned by every MCP tool call, including
 errors and refused operations. This measures estimated context added by tools,
 not model turn usage, billed tokens, tool input tokens or a provider tokenizer.
-The line management dialog's **Usage** section and
-`extras(op="tool_usage", args={})` show the same summary, sorted by total.
+`extras(op="tool_usage", args={})` shows the same summary, sorted by total.
 Use `include_descendants=true` to include sublines, `since` (Unix seconds) to
 narrow the interval, and `group="tool"` to merge operations. The default is
 `group="sub_op"`, separating operations, screen actions and then/refresh/query/more
@@ -15,7 +38,7 @@ latency p50 is calculated independently.
 
 Records contain tool and known operation/action names, booleans for then,
 refresh, query and more, rendered UTF-8 bytes and characters, estimated text
-tokens, error status, elapsed milliseconds and timestamp. The server attributes
+tokens, error status, fixed outcome and media-source categories, elapsed milliseconds and timestamp. The server attributes
 them to the authenticated attachment, its line and adapter. Unknown names become
 `unknown`; unknown operation labels are discarded. No argument values, result
 bodies, error messages, window titles, file names, paths or media IDs are stored.
@@ -118,8 +141,8 @@ Not measured:
 
 `GET /api/telemetry/turns/summary?conv_id=...&since=...&group=sub_op&include_descendants=false`.
 A person may read any line; a process its own line and descendants, with or without a captain.
-`extras(op="turn_usage", args={})` calls the same route. The management dialog's **Model usage**
-section shows it under the estimated results, with the same `tool · operation` label.
+`extras(op="turn_usage", args={})` calls the same route. These existing collection and read APIs remain
+available to agents even though the line management dialog now shows only the compact **Computer use** total.
 
 It returns:
 

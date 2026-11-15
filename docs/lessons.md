@@ -1,5 +1,31 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — A path-bound UIA ID is not a persistent comparison identity
+
+The false assumption was that a new helper ID necessarily means a control appeared. UIA helper IDs bind
+runtime identity to the control-view path, so inserting a popup before existing siblings re-IDs those
+siblings and their subtrees. Pair unmatched non-provider rows by type, name, automation ID and duplicate
+order for the diagnostic diff; keep provider identities authoritative and native dispatch IDs unchanged.
+`tests/test_point_delta_identity.py` covers sibling insertion, shifted subtree state, duplicates, actual
+removals and provider replacement through both helper compaction and server formatting.
+
+## 2026-11-15 — Bounded tree parts do not make a bounded action reply
+
+The false assumption was that two ordinary tree reads could safely ride together on a point reply.
+Their individually paginated results can exceed the helper socket's message limit when combined. Diff
+locally and cap the changed rows and wire bytes before sending. Read-only diagnostics also need a budget
+separate from starting input, and settling must reserve a final read instead of spending the whole budget
+waiting for quiet. `tests/test_point_delta.py` pins large and Unicode-heavy payloads; fake-clock regressions
+in `tests/test_point_feedback.py` pin slow consent and continuously changing windows.
+
+## 2026-11-15 — Events during a click do not prove a page is still changing
+
+The false assumption was that an event arriving during a quiet barrier invalidated its eventual quiet
+result. That made successful popup clicks look inconclusive. Point actions now wait on the existing
+change events, compare read-only observations, and return actionable changes before pixels. A raw child
+HWND is also not a wrong-window verdict: GA_ROOT ownership determines the landing. Regressions in
+`tests/test_point_feedback.py` cover settled and continuously changing actions on both routes.
+
 ## 2026-11-15 — A checked cursor point is not proof of the dispatched pixel
 
 The false assumption was that normalising physical coordinates with `65535 / (size - 1)` preserves the

@@ -28,6 +28,8 @@ class ToolCall(BaseModel):
     result_chars: int = Field(ge=0, le=10000000)
     estimated_tokens: int = Field(ge=0, le=10000000)
     is_error: bool
+    outcome: Literal["ok", "failed", "unconfirmed", "error", "unknown"] = "unknown"
+    media_source: Literal["screen", "other"] = "other"
     latency_ms: float = Field(ge=0, le=86400000)
     timestamp: float = Field(ge=0)
     timing: dict[TimingKey, TimingValue] = Field(default_factory=dict, max_length=64)

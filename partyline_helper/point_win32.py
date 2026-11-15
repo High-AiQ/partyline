@@ -6,7 +6,6 @@ from pathlib import PureWindowsPath
 
 from .foreground_swap import activate
 from .point_cursor import PointRefused
-from .page_windows import RENDERER
 from .uia_popups import WindowScope, configure, process_image
 from .window_dpi import per_monitor
 
@@ -78,7 +77,7 @@ class Win32Pointer:  # pragma: no cover - Windows only
         name = self.scope.window_class(hwnd) if hwnd else ""
         return {"hwnd": hwnd, "class": name, "granted_window": hwnd == granted,
                 "page_area_child": bool(hwnd and self.user.GetAncestor(hwnd, 2) == granted
-                                        and hwnd != granted and name == RENDERER)}
+                                        and hwnd != granted)}
 
     def image_name(self, hwnd):
         path = process_image(self.scope.process(hwnd))

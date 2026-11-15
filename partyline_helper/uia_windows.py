@@ -7,6 +7,7 @@ from .uia_press_state import PressState
 from .uia_com_timing import track
 from .uia_popups import WindowScope, configure, popup_name
 from .uia_expand_events import structure_call
+from .popup_triggers import controlled_types, uia_popup
 
 PATTERNS = {10000: "Invoke", 10015: "Toggle", 10002: "Value", 10010: "SelectionItem",
             10005: "ExpandCollapse", 10003: "RangeValue", 10004: "Scroll", 10017: "ScrollItem",
@@ -18,7 +19,8 @@ AVAILABLE = {10000: 30031, 10015: 30041, 10002: 30043, 10010: 30036, 10005: 3002
 CACHED = {"RuntimeId": 30000, "BoundingRectangle": 30001, "ControlType": 30003, "Name": 30005,
           "HasKeyboardFocus": 30008,
           "IsEnabled": 30010, "AutomationId": 30011, "IsPassword": 30019, "NativeWindowHandle": 30020,
-          "IsOffscreen": 30022, "ProcessId": 30002, "AriaProperties": 30102, "IsKeyboardFocusable": 30009}
+          "IsOffscreen": 30022, "ProcessId": 30002, "AriaProperties": 30102, "IsKeyboardFocusable": 30009,
+          "ControllerFor": 30104, "AriaRole": 30101}
 PATTERN_STATE = {"value": 30045, "toggle": 30086, "selected": 30079, "expand_state": 30070}
 SUBTREE, SHALLOW = 7, 3  # TreeScope_Subtree; TreeScope_Element | TreeScope_Children
 MAX_CHILDREN = 20000  # runaway guard for one node's children; far beyond any real list
@@ -185,6 +187,7 @@ class WindowsProvider(PatternState, PressState):  # pragma: no cover - Windows f
         return [node for node in self.popup_roots if self.same_window(node)]
 
     def refresh(self):
+        self.popup_target_types = None
         self.top, self.popup_roots = None, None
         self.__dict__.pop("_popup_names", None)
 
@@ -219,8 +222,15 @@ class WindowsProvider(PatternState, PressState):  # pragma: no cover - Windows f
                   "offscreen": bool(self.prop(node, "IsOffscreen")), "patterns": patterns}
         if name := popup_name(self, node):
             result["scope_window"] = name
-        if not result["enabled"]:
-            result["aria_properties"] = str(self.prop(node, "AriaProperties") or "")[:160]
+        aria = str(self.prop(node, "AriaProperties") or "")
+        if aria:
+            result["aria_properties"] = aria[:160]
+        if result["control_type"] in ("Group", "Pane", "Custom"):
+            result["aria_role"] = str(self.prop(node, "AriaRole") or "")
+            kinds = controlled_types(self, node, aria)
+        else:
+            kinds = ()
+        uia_popup(result, aria, kinds)
         handle = self.prop(node, "NativeWindowHandle")
         if handle and handle != self.hwnd and self.user32.GetAncestor(handle, 2) == handle:
             result["name"] = "popup: " + (result["name"] or result["control_type"])

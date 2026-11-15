@@ -7,11 +7,18 @@ STATE = r"""function() {
  const disabled=e.matches(':disabled');
  const password=e.tagName==='INPUT' && e.type==='password';
  const file=e.tagName==='INPUT' && e.type==='file';
+ const expanded=e.getAttribute?.('aria-expanded');
+ const haspopup=e.getAttribute?.('aria-haspopup');
+ const root=e.getRootNode();
+ const targets=['aria-controls','aria-owns'].flatMap(a=>(e.getAttribute?.(a)||'').split(/\s+/));
+ const popup=['true','listbox','menu'].includes(haspopup)||expanded!=null||targets.some(id=>{
+   const target=root.getElementById?.(id);return ['listbox','menu'].includes(target?.getAttribute('role'));});
  const ariaSelected=e.getAttribute?.('aria-selected');
  const focusable=e.tabIndex>=0||(!disabled&&e.matches(
    'button,input:not([type="hidden"]),select,textarea,a[href],area[href],summary,iframe,audio[controls],video[controls]'))
    ||e.isContentEditable===true;
- return {focusable, tabindex:e.getAttribute?.('tabindex'), role:e.getAttribute?.('role'),
+ return {popup, expanded, haspopup, focusable, tabindex:e.getAttribute?.('tabindex'),
+   role:e.getAttribute?.('role'),
    aria_label:e.getAttribute?.('aria-label')?.slice(0,240),
    title:e.getAttribute?.('title')?.slice(0,240),
    native_disabled:disabled, aria_disabled:!!aria, readonly:!!e.readOnly,
@@ -103,6 +110,11 @@ def normalize(node, ident, parent, dom=None):
     if aria_role in (None, "generic", "none"):
         aria_role = dom.get("role") or aria_role
     role = ROLES.get(aria_role, "Group")
+    popup_trigger = (dom.get("popup") and aria_role in (None, "", "none", "generic", "presentation")
+                     and dom.get("tag") not in
+                     ("BUTTON", "INPUT", "SELECT", "TEXTAREA", "A", "AREA", "SUMMARY"))
+    if popup_trigger:
+        role = "ComboBox"
     widget = aria_role in WIDGET_ROLES or aria_role == "gridcell" and (
         dom.get("focusable") or dom.get("tabindex") is not None
         or props.get("focusable") or "selected" in props or dom.get("selected") is not None)
@@ -127,20 +139,26 @@ def normalize(node, ident, parent, dom=None):
     selected = dom.get("selected") if dom.get("selected") is not None else props.get("selected")
     if selected is not None:
         item["selected"] = selected
+    if dom.get("popup"):
+        item["popup"] = dom.get("haspopup") or "true"
+    if dom.get("expanded") in ("true", "false"):
+        item["expand_state"] = "expanded" if dom["expanded"] == "true" else "collapsed"
+    custom_popup = popup_trigger and dom.get("tag") not in (
+        "INPUT", "TEXTAREA", "SELECT")
     actions = []
     if node.get("backendDOMNodeId") and dom.get("tag"):
         actions = ["scroll_into_view", "press"]
         if (role in ("Hyperlink", "Button", "MenuItem", "TabItem", "RadioButton", "ListItem")
-                or dom.get("focusable") or widget):
+                or dom.get("focusable") or widget or custom_popup):
             actions.append("invoke")
         if dom.get("tag") == "INPUT" and dom.get("type") == "file":
             actions.append("set_files")
         if (role in ("Edit", "ComboBox") and not dom.get("readonly") and not dom.get("password")
-                and dom.get("tag") != "SELECT"):
+                and dom.get("tag") != "SELECT" and not custom_popup):
             actions.append("set_value")
         if role == "CheckBox":
             actions.append("toggle")
-        if role in ("ComboBox", "ListItem") or widget:
+        if role in ("ComboBox", "ListItem") and not custom_popup or widget:
             actions.append("select")
     item["actions"] = actions
     if node.get("file_input_discovered"):

@@ -158,3 +158,40 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("The picked tab closed; pick a tab again", self.f.chrome.reasons[self.f.access])
         self.assertIsNone(await self.f.read())  # still nothing: never re-matched by content
         self.assertEqual(self.remote_attaches(), ["a"])
+
+    async def navigate_remote_tab(self):
+        frame = {"id": "root", "url": "https://example.test/next"}
+        self.remote_socket.event("Page.frameNavigated", session="a", frame=frame)
+        await self.made[0].call("Browser.getVersion")  # the event is queued before this reply
+
+    async def test_a_refused_grant_reports_why_and_returns_to_the_extension_on_navigation(self):
+        self.peer.refuse = {1: "other_extension_frame"}
+        result = await self.read_after_prompt()
+        self.assertEqual((result["transport"], result["fallback_reason"]), ("remote_debugging",
+                                                                            "other_extension_frame"))
+        self.peer.refuse = {}  # the page no longer hosts the other extension's frame
+        await self.navigate_remote_tab()
+        result = await self.f.read()
+        self.assertEqual((result["source"], result["transport"]), ("cdp", "extension"))
+        self.assertNotIn("fallback_reason", result)
+        self.assertEqual(self.f.chrome.fallback.grants, set())
+        self.assertTrue(self.made[0].closed or self.made[0].socket is None)  # nothing needs remote debugging
+        self.assertIsNone(self.f.chrome.fallback.remote)
+
+    async def test_a_repeated_refusal_stays_on_remote_debugging_without_asking_again(self):
+        self.peer.refuse = {1: "other_extension_frame"}
+        await self.read_after_prompt()
+        await self.navigate_remote_tab()
+        result = await self.f.read()  # the extension refuses again: the open connection serves the grant
+        self.assertEqual((result["transport"], result["fallback_reason"]), ("remote_debugging",
+                                                                            "other_extension_frame"))
+        self.assertEqual(len(self.made), 1)
+        self.assertEqual(self.made[0].connector.await_count, 1)  # no second Allow prompt
+        self.assertIn(self.f.access, self.f.chrome.fallback.grants)
+
+    async def test_without_a_navigation_a_refused_grant_does_not_retry_the_extension(self):
+        self.peer.refuse = {1: "other_extension_frame"}
+        await self.read_after_prompt()
+        self.peer.refuse = {}
+        result = await self.f.read()
+        self.assertEqual(result["transport"], "remote_debugging")

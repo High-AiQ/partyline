@@ -33,10 +33,10 @@ class Timer:
 
 
 class CaptureTests(unittest.TestCase):
-    def measure(self, name="screen_elements", args=None, value=None, error=False):
+    def measure(self, name="screen_elements", args=None, value=None, error=False, media=None):
         with patch.object(telemetry.time, "perf_counter", return_value=1.125), \
                 patch.object(telemetry.time, "time", return_value=500):
-            return telemetry.record(name, args or {}, "éhello", value, error, 1, "claude")
+            return telemetry.record(name, args or {}, "éhello", value, error, 1, "claude", media)
 
     def test_sizes_flags_and_no_content(self):
         record = self.measure(args={"query": "private title", "value": "password", "refresh": True,
@@ -70,6 +70,27 @@ class CaptureTests(unittest.TestCase):
         self.assertTrue(self.measure("screen_element_action", {"action": "invoke", "then": {}})["then"])
         self.assertEqual(self.measure("secret")["tool"], "unknown")
         self.assertEqual(self.measure([])["tool"], "unknown")
+
+    def test_screen_outcomes_and_bounded_media_attribution(self):
+        media = telemetry.ScreenMedia(capacity=1)
+        frame = self.measure("screen_frame", value={"file": {"id": "screen-ref"}}, media=media)
+        self.assertEqual((frame["outcome"], frame["media_source"], frame["images"]), ("ok", "screen", []))
+        self.assertNotIn("screen-ref", json.dumps(frame))
+        fetched = self.measure("get_media", args={"file_id": "screen-ref"},
+                               value={"width": 750, "height": 1000}, media=media)
+        self.assertEqual((fetched["media_source"], len(fetched["images"])), ("screen", 1))
+        other = self.measure("get_media", args={"file_id": "other"},
+                             value={"width": 10, "height": 10}, media=media)
+        self.assertEqual(other["media_source"], "other")
+        self.assertEqual(self.measure("screen_click", value={"status": "failed"})["outcome"], "failed")
+        self.assertEqual(self.measure("screen_eval", value={"status": "unconfirmed"})["outcome"],
+                         "unconfirmed")
+        self.assertEqual(self.measure("screen_click", value={"status": "failed"}, error=True)["outcome"],
+                         "error")
+        self.assertEqual(self.measure("Bash", value={"status": "failed"})["outcome"], "ok")
+        self.measure("screen_window_snapshot", value={"file": {"id": "new-ref"}}, media=media)
+        evicted = self.measure("get_media", args={"file_id": "screen-ref"}, value={}, media=media)
+        self.assertEqual(evicted["media_source"], "other")
 
     def test_image_estimators_and_delivery_boundary(self):
         self.assertEqual(telemetry.estimate_image(750, 1000, "claude")["estimated_tokens"], 1000)

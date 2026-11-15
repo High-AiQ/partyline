@@ -7,6 +7,7 @@ import { hierarchyApi } from "../../lib/hierarchy-api";
 import { ConversationDetailSchema } from "../../lib/contracts";
 import { room } from "../../state/room.svelte";
 import { onRoomWireEvent } from "../../state/room-wire-events";
+import * as usage from "../../lib/computer-usage-api";
 
 const conversation = {
   id: "line",
@@ -68,6 +69,7 @@ describe("Board captain status", () => {
     const detail = ConversationDetailSchema.parse({ conversation, messages: [], attachments: [attachment] });
     vi.spyOn(api, "conversation").mockResolvedValue(detail);
     vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: null });
+    vi.spyOn(usage, "computerUsage").mockReturnValue(new Promise<usage.ComputerUseSummary>(() => undefined));
     const appoint = vi.spyOn(hierarchyApi, "appoint").mockResolvedValue({
       attachment_id: attachment.id,
     });

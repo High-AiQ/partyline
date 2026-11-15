@@ -15,7 +15,7 @@ export function fixture() {
     [2, { id: 2, url: 'chrome://settings', title: 'Settings', windowId: 9 }]]);
   const calls = [], messages = [];
   const api = {
-    tabs: { get: async id => { if (!tabs.has(id)) throw Error('Missing'); return tabs.get(id); }, onUpdated: event(), onAttached: event(), onRemoved: event() },
+    tabs: { get: async id => { if (!tabs.has(id)) throw Error('Missing'); return tabs.get(id); }, onUpdated: event(), onAttached: event(), onRemoved: event(), onActivated: event() },
     windows: { getAll: async () => [{ id: 9, left: 10, top: 20, width: 800, height: 600,
       focused: true, state: 'normal', tabs: [...tabs.values()] }] },
     debugger: { onEvent: event(), onDetach: event(),
@@ -30,3 +30,14 @@ export function fixture() {
   };
   return { api, clock, tabs, calls, messages, performance };
 }
+// chrome.alarms and chrome.storage.session: alarms never fire by themselves; the test fires them.
+export function alarms() {
+  const pending = new Map(), listeners = event(), session = {};
+  return { pending, onAlarm: listeners,
+    create: async (name, info) => { pending.set(name, info); },
+    clear: async name => pending.delete(name),
+    get: async name => pending.get(name),
+    fire(name) { assert(pending.delete(name), `no ${name} alarm is pending`); listeners.fire({ name }); },
+    storage: { get: async () => ({ ...session }), set: async fields => Object.assign(session, fields) } };
+}
+function assert(ok, message) { if (!ok) throw Error(message); }

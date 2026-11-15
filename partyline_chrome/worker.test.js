@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture, event } from './fakes.test.js';
+import { fixture, event, alarms } from './fakes.test.js';
 
 const flush = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 
@@ -18,6 +18,8 @@ test('self disconnect cleanup, toolbar recovery and bounded automatic reconnect 
   const saved = {};
   f.api.storage = { local: { get: async () => ({ ...saved }), set: async fields => Object.assign(saved, fields) } };
   f.api.action = { onClicked: event() };
+  f.api.alarms = alarms();
+  f.api.storage.session = f.api.alarms.storage;
   globalThis.chrome = f.api;
   const { shouldReload } = await import('./worker.js'); await flush();
   assert.equal(ports.length, 1);
@@ -42,17 +44,17 @@ test('self disconnect cleanup, toolbar recovery and bounded automatic reconnect 
   await flush(); assert.equal(ports.length, 2);
   f.api.action.onClicked.fire(); await flush();
   assert.equal(ports.length, 3);
-  // Receiving hello must not replenish the automatic retry budget.
+  // A greeted port that closes reconnects at once; one that never greets is retried by alarm, then clicks restart.
   ports[2].onMessage.fire({ method: 'Partyline.hello' });
   ports[2].remoteDisconnect(); await flush();
   assert.equal(ports.length, 4);
-  ports[3].onMessage.fire({ method: 'Partyline.hello' });
-  ports[3].remoteDisconnect(); await flush();
+  ports[3].remoteDisconnect(); await flush(); // no hello this time: the next try waits for its alarm
   assert.equal(ports.length, 4);
-  f.api.action.onClicked.fire(); await flush();
+  assert.ok(f.api.alarms.pending.has('partyline-reconnect'));
+  f.api.alarms.fire('partyline-reconnect'); await flush();
   assert.equal(ports.length, 5);
-  ports[4].remoteDisconnect(); await flush(); // absent host has no hello, so no retry
-  assert.equal(ports.length, 5);
+  f.api.action.onClicked.fire(); await flush(); // a click replaces a port that never greeted
+  assert.equal(ports.length, 6);
   for (const [version, installed, enabled, expected] of [
     ['1.6.0', '1.7.0', true, true], ['1.6.0', '1.6.0', true, false],
     ['1.7.0', '1.6.0', true, false], ['1.6.0', '1.7.0', false, false],

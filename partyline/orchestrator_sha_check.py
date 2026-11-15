@@ -172,6 +172,9 @@ def report_text(db, row) -> str:
         return clip(f"Task {row['conv_id']}: express {status}; {row['what'] or ''} — "
                     f"{row['location'] or ''}\n{row['findings'] or ''}".rstrip(),
                     reports.MAX_BODY, TRUNCATED)
+    if row.get("mode") == "suite":
+        return clip(f"Task {row['conv_id']}: suite {status}; SHA {row['sha']}; "
+                    f"{row['what']} — {row['location']}", reports.MAX_BODY, TRUNCATED)
     repos = row["repositories"]
     where = (' ' + '; '.join(f"{item['repository']} {item['sha']}" for item in repos)
              if len(repos) > 1 else '')

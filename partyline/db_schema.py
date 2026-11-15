@@ -57,13 +57,9 @@ MIGRATIONS = [
         secret TEXT NOT NULL,
         created_at REAL NOT NULL
     )""",
-    # api_token: the current per-attachment activation credential, injected
-    # as PARTYLINE_TOKEN and rotated whenever a stopped process resumes.
+    # api_token: per-activation PARTYLINE_TOKEN, rotated on resume.
     "ALTER TABLE attachments ADD COLUMN api_token TEXT",
-    # report_token: the plan's failure-report capability. The restart watchdog
-    # runs outside any attachment or user session, so it authenticates its one
-    # allowed act — posting a failure notice to the planned line — with a
-    # credential minted for exactly that, the same shape as the hooks token.
+    # report_token: the restart watchdog's failure-notice-only credential, shaped like a hooks token.
     "ALTER TABLE restart_plan ADD COLUMN report_token TEXT",
     # Digests a CLI proved it skipped have already advanced last_seen. Keep
     # their exact message ids until a later real turn boundary can replay them.
@@ -295,6 +291,10 @@ MIGRATIONS.append("""CREATE TABLE IF NOT EXISTS storage_cleanup_decisions(
     evidence TEXT NOT NULL
 )""")
 MIGRATIONS.extend(RETIRE_MANAGER_TREE)  # after EXTENSIONS: it drops their old triggers
-MIGRATIONS.extend(REVIEW_ENVIRONMENTS)
-MIGRATIONS.extend(TOOL_TELEMETRY)
-MIGRATIONS.extend(TURN_USAGE + REVIEWER_PROGRESS + HELPER_UPDATES)
+MIGRATIONS.extend(REVIEW_ENVIRONMENTS + TOOL_TELEMETRY + TURN_USAGE + REVIEWER_PROGRESS + HELPER_UPDATES)
+# Suite inputs survive restarts; older light rows use the full scoped-review mode.
+MIGRATIONS += [
+    "UPDATE task_reviews SET mode='full' WHERE mode='light'",
+    "ALTER TABLE task_reviews ADD COLUMN suite_repository TEXT",
+    "ALTER TABLE task_reviews ADD COLUMN suite_batch TEXT NOT NULL DEFAULT '[]'",
+]

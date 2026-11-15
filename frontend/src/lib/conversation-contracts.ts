@@ -32,7 +32,12 @@ export const ConversationSchema = z.object({
     .optional()
     .catch(null),
   task_round: z.number().int().nonnegative().nullable().optional(),
-  task_mode: z.enum(["full", "light", "express"]).nullable().optional().catch(null),
+  task_mode: z
+    .enum(["full", "light", "express", "suite"])
+    .transform((mode) => (mode === "light" ? "full" : mode))
+    .nullable()
+    .optional()
+    .catch(null),
   task_root_name: z.string().nullable().optional(),
   task_implementer_name: z.string().nullable().optional(),
   task_reviewer_name: z.string().nullable().optional(),

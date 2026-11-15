@@ -82,8 +82,13 @@ keep their existing chat behavior.
 
 Each granted window has a thin blue outline just outside its visible frame. It follows the window and
 hides while the window is minimized or on another virtual desktop. It is click-through, does not take
-focus, and supported Windows versions exclude it from screen capture. The outline stays above other
-windows while the grant is active and is removed as soon as the grant ends.
+focus, and supported Windows versions exclude it from screen capture. The outline is not always-on-top: it sits
+in the z-order directly above its granted window, so anything in front of that window (a game, a
+dialog, another browser window) covers the outline exactly as it covers the window. The helper re-seats
+the outline just above its window on foreground and z-order WinEvents (no polling, no timers), moves it
+only when it is not already directly above, never moves the granted window, and never activates the
+outline. It is removed as soon as the grant ends. The whole-monitor capture border is unchanged and
+stays topmost.
 
 Some UI Automation actions can bring the granted window forward. When an action does that, the helper
 attempts to restore the window that was in front, provided the granted window is still in front when
@@ -424,6 +429,13 @@ no new read:
 | paging | a long answer ends with `more` and `next_offset`; pass `offset` to continue |
 | `refresh` | `refresh=true` takes a new snapshot now; ids of unchanged elements stay valid |
 
+Role-less popup triggers with standard ARIA `haspopup` (`listbox`, `menu`, `true`), `expanded`, or
+`controls`/`owns` targeting a List/Menu are mapped to ComboBox (with a popup hint), so
+`screen_elements(control_type="ComboBox")` can find them on CDP and UIA. Existing computed/native widget
+roles (Button, Hyperlink, Edit, TreeItem, etc.) stay intact and can expose the popup hint. A hint adds no
+input capability; use the listed actions or a look mark's guarded point fallback. UIA resolves IDREFs
+through one cached List/Menu index per provider read, rather than a descendant search per trigger.
+
 There is no regex search: a backtracking pattern over tens of thousands of names could stall the server, so `find` and `text` take the plain terms above only.
 
 Lines read `id Type "name" ="value" [actions] flags`; `bounds=true` adds screen and frame-pixel
@@ -739,7 +751,10 @@ leave the granted window.
 - **Landing evidence.** Every point-operation reply has `landing`, with `snapshot` and `points` (both
   endpoints for a drag; empty for typing and keys). Each point reports `snapshot_point`, `screen_point`
   (physical screen pixels), the raw `hwnd` and `class` returned by `WindowFromPoint`, `granted_window`
-  (the handle is the grant itself), and `page_area_child` (its renderer child belongs to the grant).
+  (the handle is the grant itself), and `page_area_child` (a child belongs to the grant).
+  Read each point's `landed_in` verdict: `granted_page` means a child whose `GA_ROOT` is the granted HWND,
+  `granted_window` means the grant's own chrome/frame, and `other_window` means another root, with the hit
+  class and a warning. This ownership check works for every app; renderer class names are not authority.
   `dpi` and `dpi_scale` (DPI / 96) describe the named snapshot; `image_scale` is image pixels per physical
   screen pixel on each axis. DPI is never multiplied into the physical mapping a second time.
   `foreground_before` and `foreground_after` say whether the grant or its owned dialog was foreground,
@@ -747,8 +762,27 @@ leave the granted window.
   distinguishes observed input from a refused attempt. Unknown observations are `null`, including old
   helpers and transport timeouts; these fields contain no page text. On CDP, `screen_point` is the mapped
   physical equivalent: input goes to the page in CSS pixels and the hit window is observational only.
-- **Reading a miss.** `settle: unchanged`, `status: no_effect`, or an unchanged requested `after` image
-  attaches `landing_thumb`: a crop of at most 240 × 240 pixels of the granted window around the last
+- **What changed.** After a click, read `changes` before deciding it failed. Every point operation,
+  including a look mark falling back to a point, compares read-only element observations before and after
+  input, on CDP and UIA. `changes` lists appeared/disappeared elements and state transitions (for example,
+  `expand_state collapsed→expanded`), with ordinary actionable element IDs. New Lists/Menus include option
+  IDs and names. The reply caps the delta at 20 lines plus a `more` note; read `screen_elements` for the rest.
+  The helper computes this delta locally, sending only changed rows and option samples under a 128 KiB
+  wire cap; whole before/after trees are never combined into a reply. UIA path shifts are paired by control
+  type, name, automation ID and duplicate order when comparing rows. Input keeps its original runtime/path
+  validation, and CDP provider identities remain authoritative. Partial observations are labelled and
+  never claim missing elements disappeared. Read failures are explicit; the text delta needs read permission.
+  The pre-input read has its own 500 ms cap and is skipped with at most one second of input budget left,
+  so a diagnostic read cannot consume the approved input's whole start budget.
+- **Settling.** Quiet barriers reset on real change events; they never poll. Waiting stays within the
+  existing two-second CDP / 200 ms UIA settle limits, plus at most 500 ms for a final read, and never exceeds
+  the action's existing deadline. The final read has reserved time even when quiet waiting expires; a busy
+  page does not hold the window lock for the full consent/input budget. Events during a read can restart
+  the barrier within this short bound. If the window keeps changing, `settle: changing` and
+  `still changing after N ms` accompany that final observation's delta (or an explicit read failure).
+- **Reading a miss.** Unchanged outcomes (`settle: unchanged`, `status: no_effect`, or an unchanged requested
+  `after` image) with no clear element change, and windows still changing at the deadline, attach
+  `landing_thumb`: a crop of at most 240 × 240 pixels of the granted window around the last
   landing point, with a red crosshair edged in white. It needs read permission, captures no desktop pixels,
   and supplies no new coordinate snapshot. Compare the crosshair with the intended control. An unexpected
   physical point suggests image scale or offset; an unexpected handle/class suggests a covering window or
@@ -756,7 +790,7 @@ leave the granted window.
   activates first, confirms foreground, and then sends a separate page click. A correct crosshair and
   target with unchanged pixels suggests the component ignored input; it does not prove that no state changed.
   Do not repeat input automatically. If the window moved away from the landing point, the crop reports that
-  failure instead. A missing renderer child alone does not prove a miss; some windows expose only a root.
+  failure instead. At most one crosshair crop is attached; a clear settled delta needs no image.
 - **Stale pictures.** The click is refused, with "take a fresh `screen_window_snapshot`", when the snapshot
   is unknown or older than the last eight for that grant, or when the window moved, resized, closed, or was
   re-granted, or when the secure desktop is up. The check compares the live rectangle and client areas with the
@@ -1396,8 +1430,9 @@ the unique hyperlink in each card (copy its exact accessible name from the lab p
 
 The script performs no artificial waits. A live result must include the actual JSON/verdict; fake
 provider tests establish invariants but cannot decide which side of Greg's real page reports disabled.
-Tool result sizes and image estimates can be compared in the line's Usage section;
-see [tool telemetry](telemetry.md) for estimators, privacy and retention.
+Aggregate screen activity and image estimates appear in the line's **Computer use** section; per-tool
+estimates remain available through `extras(op="tool_usage", args={})`. See [tool telemetry](telemetry.md)
+for estimators, privacy and retention.
 
 #### Chrome page state with Partyline Chrome (recommended)
 
@@ -1424,9 +1459,9 @@ for the reason in plain words. It uses `chrome.action` only, which needs no extr
 
 | Badge | Colour | Meaning |
 | --- | --- | --- |
-| `…` | grey | Connecting to the native host, or the extension is **ready and the helper is away** (not started yet, quit, restarting or updating). Nothing to do: the extension keeps its port to Chrome's native host, and the helper attaches by itself when it starts. Start the helper if it stays grey. |
+| `…` | grey | Connecting to the native host; **reconnecting** after the host went away (the title names why, for example *the helper bridge stopped*); or the extension is **ready and the helper is away** (not started yet, quit, restarting or updating). Nothing to do: the extension reconnects by itself and the helper attaches by itself when it starts. Start the helper if it stays grey. |
 | `✓` | green | Connected: the helper greeted the extension (`Partyline: connected to helper <version>`). The tray's **Chrome** row reads *extension connected*. |
-| `!` | red | Not connected; the title says why. *Native host not found*: Chrome has no registration for the helper's host, so reinstall or restart the helper. *Access forbidden*: the extension id does not match; load the extension from the helper's own folder. *Native host has exited*: the native host process ended, so click the button (Chrome starts a new one) and make sure the helper is running. *Paused for a helper update*: a manual install or uninstall asked the host to release its files; click the button to reconnect. |
+| `!` | red | Not connected; the title says why. *Native host not found*: Chrome has no registration for the helper's host, so reinstall or restart the helper. *Access forbidden*: the extension id does not match; load the extension from the helper's own folder. *Native host has exited* (shown only after every automatic retry below failed): the native host process kept ending, so make sure the helper is running and click the button. *Paused for a helper update*: a manual install or uninstall asked the host to release its files; click the button to reconnect. |
 
 Click the button to retry; the badge turns grey straight away and then green or red. A click while
 no helper is attached, or on a port that never greeted, replaces the native port instead of doing
@@ -1442,13 +1477,28 @@ the host lets the newest authenticated helper replace a stale one. The host also
 Chrome closes its port, even while a helper is still attached, so the next host can start.
 
 **Helper restarts need no click.** Chrome starts the native host only when the extension connects, so the
-host outlives the helper. When the helper quits, restarts or auto-updates, the host keeps Chrome's port
-and tells the extension the helper is away (grey badge; the extension drops its debugger attachments).
-The next helper finds the host through its endpoint file, authenticates, and the host greets the
-extension again: the badge goes green with no click, no timer and no retry loop. Only an installer that
-has to replace the host's files (a manual install or uninstall; an automatic update does not) sends
-`Partyline.suspend` with `release`, which makes the extension close the port; that is the one case that
-shows red *paused* and needs a click (or Chrome restart) to reconnect.
+host usually outlives the helper. When the helper quits or restarts, the host keeps Chrome's port and tells
+the extension the helper is away (grey badge; the extension drops its debugger attachments). The next
+helper finds the host through its endpoint file, authenticates, and the host greets the extension again:
+the badge goes green with no click.
+
+**Automatic updates and a host that goes away.** An automatic update stops the helper and replaces files
+without asking the host to release them, so the host process (started from the old install) can still exit
+or be killed, and Chrome then closes the extension's native port ("Native host has exited"). The extension
+reconnects by itself, event-driven and bounded: at once when the port closes, then one `chrome.alarms`
+alarm per failure after 1 s, 5 s, 30 s, 2 min and 5 min, and a try on browser start, on a toolbar click, and
+on tab activation (at most every 30 s, never while an alarm is waiting). The step is kept in
+`chrome.storage.session`, so a worker woken by an alarm, or started while the helper is still restarting,
+continues the schedule instead of starting over; a greeting from the host ends it. This is not polling: an
+attempt follows a transport failure, one alarm exists at a time, success or a click stops the schedule, and
+after the last step nothing runs until a click, a browser start or a tab activation. The badge stays grey
+while attempts remain and turns red only when they are spent; *host not found* and *access forbidden* are red
+at once (the schedule still runs quietly in case an installer is replacing the registration). The
+alarms are why the extension needs the `alarms` permission. Chrome's 30 s minimum alarm delay applies
+only to a packed extension; the extension is loaded unpacked, so the short steps run as listed. Only an
+installer that must replace the host's files (a manual install or uninstall) sends `Partyline.suspend`
+with `release`, which makes the extension close the port; that one case shows red *paused* and needs a
+click (or Chrome restart).
 
 **Extension refusal codes.** A refused extension command returns one fixed code, never Chrome's own
 text (it can name a URL). The helper reports it as `Chrome extension refused <CDP method>:
@@ -1474,7 +1524,8 @@ text (it can name a URL). The helper reports it as `Chrome extension refused <CD
 | `debugger_detached` | Chrome detached the debugger (the tab closed or navigated away). Reload the page and read again. |
 
 **Remote-debugging fallback, per grant.** Only a grant whose tab Chrome refuses with `other_extension_frame`
-or `debugger_already_attached` changes transport; every other grant keeps the extension. The helper
+or `debugger_already_attached` changes transport; every other grant keeps the extension. A disconnected or
+reconnecting extension is never a reason (see below). The helper
 tells the extension to drop that grant, and, when Chrome's remote debugging is enabled
 (`DevToolsActivePort` exists), reads continue over remote debugging after Chrome's normal Allow prompt
 (UIA answers meanwhile; the read reports `transport: remote_debugging`). The tray's Chrome row keeps
@@ -1482,7 +1533,12 @@ describing the extension. A grant for one picked tab is bound once, when it firs
 debugging, to the one remote target in its window with the same URL and title; from then on only that
 target is the grant's tab (navigating it keeps the grant). If no tab or several match, or the bound tab
 closes, the grant selects nothing and says *pick a tab again*; it never re-matches by content. When remote debugging is off the grant stays on UIA with the actionable
-`source_reason`. Ending the grant closes the remote connection. The extension's own service worker
+`source_reason`. Read replies carry `transport` and, off the extension, a short `fallback_reason` (the
+refusal code, or `extension_not_installed`). A refused grant tries the extension again on the next read after
+its remote tab navigates or reloads, keeping the remote connection open until the extension serves the page;
+a repeated refusal moves it back with no second Allow prompt. When no grant needs remote debugging any more
+(the grant ended, or the extension served it again) the helper closes the remote connection, so Chrome's
+automation infobar goes away. The extension's own service worker
 console logs each refused command's method and Chrome's raw error text for the person at that machine;
 that text is never sent to the helper.
 
@@ -1497,14 +1553,22 @@ helper. The Windows installer includes a dedicated console-subsystem native exec
 its stdout carries binary protocol frames, never log messages. The host allows only
 `chrome-extension://plbehhebbdldlggkkpafpepcobmkojeb/`, fixed by the extension's public
 manifest key. There are no content scripts or host permissions: the only permissions are
-`debugger`, `tabs`, `nativeMessaging`, and `storage` (the local reload-attempt marker). A Web Store listing is a possible later step;
+`debugger`, `tabs`, `nativeMessaging`, `alarms` (the bounded reconnect schedule above), and `storage` (the
+local reload-attempt marker and the reconnect step). A Web Store listing is a possible later step;
 loading the installed folder works without one.
 
 The extension is preferred when connected. The tray has a dedicated **Chrome: extension
 connected / extension disconnected / not installed / remote debugging** status row, and provider state includes
-`transport: extension|remote_debugging`. Read results also name their transport. When no
-extension is connected the helper explicitly falls back to the approved remote-debugging
-flow below. A failed page command is never automatically replayed through the fallback.
+`transport: extension|remote_debugging`. Read results also name their transport. Remote
+debugging is the default only when the extension was never installed: no native host has ever run for this
+user (the host's `chrome-native.lock` in the helper's config folder does not exist and no host is up), which
+is the behaviour before the extension existed, with the approved remote-debugging flow below. Once a host
+has run, a helper that starts, or an extension that is disconnected or reconnecting (an update, a restart, a
+reload), never chooses remote debugging: the first read of the outage waits up to 3 s for the host (woken by
+its endpoint file, not a timer), later reads in the same outage do not wait, and a read that cannot use the
+extension answers through UIA with the `source_reason` *Partyline Chrome is reconnecting*. Remote debugging
+then appears only through the per-grant refusal fallback above. `partyline-helper uninstall` forgets that a
+host ever ran. A failed page command is never automatically replayed through the fallback.
 
 Only tabs named by a live HWND grant may be attached. Mapping checks the Chrome process
 that launched the native host, the granted process/HWND identity, window bounds and active
@@ -1538,8 +1602,8 @@ connection; it is stored beside the helper's private pairing configuration. Disc
 the endpoint and PID files to name the same live native-host process. It never takes the
 host's startup lock, so discovery cannot reject a concurrently starting Chrome host, and a
 crashed host's stale file cannot reopen remote-debugging approval on every operation. Authentication accepts one unchunked
-frame of at most 1 KiB. Automatic native-port reconnect is limited to one attempt per startup
-or toolbar gesture; a failed decode and an explicit installer suspension clean up locally.
+frame of at most 1 KiB. Automatic native-port reconnect follows the bounded schedule above; a failed decode and an
+explicit installer suspension clean up locally and wait for a click.
 An automatic extension reload starts a fresh worker and reconnects without a gesture.
 The toolbar can also connect again without restarting Chrome.
 
@@ -1692,7 +1756,13 @@ and any difference. Upload sanitized evidence to the line; keep host/account det
    <version>`) and the tray row reads *extension connected* without restarting the helper. Quit
    the helper: the badge stays grey (*helper away*). Start it again with no
    click: green again. Restart the helper, and let it auto-update: green again each time with no
-   click. Reload the extension and restart Chrome: both reconnect. Run the manual installer over a
+   click. Reload the extension and restart Chrome: both reconnect.
+   **Auto-update with Chrome open:** run an automatic update from the previous version while Chrome and
+   a shared Chrome window are open: the badge goes grey (*reconnecting*) and returns to green by itself,
+   no click and no Allow prompt, and a read taken meanwhile reports `source: uia` with *Partyline Chrome is
+   reconnecting*, never `transport: remote_debugging`. A grant whose page Chrome refused returns to the
+   extension after that tab navigates, and Chrome's automation infobar disappears once nothing needs remote
+   debugging. Run the manual installer over a
    running helper (it asks the host to release its files): the badge shows *paused for a helper
    update* and the button reconnects. On a page that hosts another extension's frame, expect
    `other_extension_frame` and, with remote debugging on, a read over `remote_debugging`. Open the service worker console and

@@ -12,6 +12,7 @@ import time
 from fastapi import HTTPException
 
 from . import reports
+from .review_test_guidance import SCOPED_REVIEW_TESTS
 from .orchestrator_notices import handed_to, tell
 from .orchestrator_staff import ensure_reviewer, restart
 from .reattach_queue import is_queued, queued_detail
@@ -55,9 +56,7 @@ async def brief_reviewer(runtime, row, reviewer):
         f"\n- {item['path']}/{entry['subpath']}: {entry['command'] or '(no test command set)'}"
         for item in repos for entry in item.get('test_commands', []))
     guidance = (f"\nReview environment test commands:{commands}\n" if commands else '')
-    guidance += ('Run the configured test commands and state in verdict findings what ran and '
-                 'what passed, or why it could not run. If the suite cannot run, call env_gap instead of '
-                 'approving on code reading alone. ')
+    guidance += SCOPED_REVIEW_TESTS
     await tell(runtime, reviewer['id'],
                where + guidance + f"{row['what']} — {row['location']}. "
                'Call review_verdict(approve|changes, findings, sha=SHA); for multiple repositories, '

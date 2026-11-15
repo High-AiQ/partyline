@@ -43,7 +43,7 @@ and tests needed to challenge the change's claims.
 
 | DO | DO NOT |
 | --- | --- |
-| Run the repository gates relevant to the review | Claim a command that was not actually run |
+| Run only tests reaching changed code and scoped repository gates; list each command/result | Run full suites, e2e suites or whole-suite coverage in a task review, or claim an unrun command |
 | Reuse a recorded gate or test result only at the same unchanged exact SHA, and re-run any gate a finding warrants | Carry a recorded result to a new SHA, or skip a gate the review needs because a result already exists |
 | Mutate inside the disposable worktree for evidence — e.g. swap in an old file to prove a regression test fails on prior code | Fix the change under review unless the coordinator explicitly assigns it |
 | Separate merge blockers from scoped, non-blocking observations | Blur findings into one undifferentiated list |

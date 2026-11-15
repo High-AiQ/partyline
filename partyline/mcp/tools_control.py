@@ -13,13 +13,13 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 
 ELEMENT_ACTION_NOTE = (
-    "Act on screen_elements IDs or latest screen_window_look mark=n. Named actions use CDP/UIA; "
-    "invoke/click on a mark without that action uses guarded point input. Never reuse old marks; "
-    "never script clicks. "
-    "set_files: 1–10 media IDs/local paths to CDP file inputs (media cap per file, 200 MiB total; helper "
-    "data refused). select uses value; set_value edits; press: enter/tab/escape; force overrides disabled. "
-    'then reads after CDP settles, changes only; then.snapshot adds a picture. A failure a picture '
-    "explains carries `screenshot` (marks, snapshot id): use screen_window_click/_scroll/_drag/_type/_key. "
+    "Act on screen_elements IDs or latest screen_window_look mark=n. CDP/UIA named actions; "
+    "invoke/click on an unsupported mark uses guarded point input. "
+    "Never reuse old marks; never script clicks. "
+    "After a click, read changes before deciding it failed; point fallback reports landed_in. "
+    "set_files: 1–10 media IDs/local paths, 200 MiB total; helper data refused. select takes value; "
+    "set_value edits; press: enter/tab/escape; force overrides disabled. then reads changes; "
+    "then.snapshot adds a picture. Failures carry screenshot (marks, snapshot id) for screen_window_click. "
     'reload element_id="page" recovers Chrome. UIA window_* targets the window; drag: screen_drag.')
 ELEMENT_ACTION_TIMEOUT = 125  # a 20s capture, a 35s exchange, the action, then a 20s failure picture
 WINDOW_CLICK_TIMEOUT = 150  # helper 70s, requested after/crosshair/failure pictures 20s each, plus margin
@@ -79,7 +79,10 @@ WINDOW_CLICK_NOTE = (
     "mouse; any other window moves the real cursor after the person agrees on their computer, once per "
     "window grant. Never a terminal, password manager or system dialog. Answers with route (cdp or "
     "cursor), settle, and landing evidence (image/screen point, DPI, hit HWND/class, foreground). "
-    "Unchanged outcomes include a crosshair landing_thumb; capture=thumb adds a picture afterwards.")
+    "Read each point’s landed_in verdict: granted_page, granted_window or other_window (warning). "
+    "After a click, read changes before deciding it failed. Changes contain actionable element IDs. "
+    "Settling waits on events within the action deadline; still changing is explicit. Unchanged or "
+    "still-changing outcomes include one crosshair landing_thumb; capture=thumb adds a picture afterwards.")
 WINDOW_CLICK_PROPERTIES = {
     "window": ELEMENT_ACTION_PROPERTIES["window"],
     "snapshot": {"type": "string", "minLength": 1, "maxLength": 64,

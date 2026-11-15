@@ -195,7 +195,7 @@ class WindowsTests(unittest.TestCase):
         events = []
         window.update_idletasks.side_effect = lambda: events.append("idle")
         with patch("partyline_helper.border_native.windows_options",
-                   side_effect=lambda native: events.append("options")):
+                   side_effect=lambda native, **_: events.append("options")):
             TkBackend(Mock(), windows=True).make_window(tk, Mock(), (10, 10, 100, 4), "#f6c344")
         self.assertEqual(events, ["idle", "options"])
 

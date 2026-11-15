@@ -456,7 +456,7 @@ describe("conversation rail task mode marker", () => {
     const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
     room.conversations = [
       { ...base, id: "e", name: "mock", task_status: "implementing", task_mode: "express" },
-      { ...base, id: "l", name: "typo", task_status: "in_review", task_mode: "light" },
+      { ...base, id: "l", name: "typo", task_status: "in_review", task_mode: "suite" },
       { ...base, id: "f", name: "feature", task_status: "done", task_mode: "full" },
       { ...base, id: "p", name: "plain" },
     ];
@@ -475,8 +475,8 @@ describe("conversation rail task mode marker", () => {
       );
       expect(labels.sort()).toEqual([
         "Express task: no review, no gates",
-        "Full task: review and every gate",
-        "Light task: review, gates scale with the diff",
+        "Full task: review, gates scale with the diff",
+        "Suite run: every test suite on the merged batch",
       ]);
       const plain = [...document.querySelectorAll(".conv-row")].find((row) =>
         row.textContent.includes("plain"),

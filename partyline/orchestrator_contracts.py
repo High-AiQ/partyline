@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .goal import MAX_TASK_GOAL
+from .task_modes import TaskMode
 
 
 class CaptainStyleIn(BaseModel):
@@ -20,12 +21,17 @@ class TaskIn(BaseModel):
     implementer: str = Field(min_length=1, max_length=120)
     review: str | None = Field(default=None, min_length=1, max_length=120)
     base: Literal['head', 'upstream'] = 'head'
-    mode: Literal['full', 'light', 'express'] = Field(
+    mode: TaskMode = Field(
         default='full',
-        description='full (default): the review cycle. light: the review cycle with gates scaled to the '
-                    'diff (partyline/task_gates.py). express: no reviewer or review cycle (mockups, '
-                    'explorations, assets, one-off investigations); the implementer ends with '
-                    'deliver(what, where). Fixed at creation.')
+        description='full (default): review as needed, with only affected tests. express: no review '
+                    'and no tests, when a person says so or the captain decides. suite: every suite '
+                    'on an ordered merged batch, no reviewer; deliver results, never push or open a PR. '
+                    'Fixed at creation; legacy light is accepted as full.')
+    repository: str | None = Field(default=None, min_length=1, max_length=4096)
+    batch: list[str] = Field(default_factory=list, max_length=128,
+                            description='Suite only: task line IDs/tags (accepted SHAs) and/or explicit '
+                                        'commit SHAs, in cherry-pick order, in repository.')
+
     memory_limit: str | None = Field(default=None, pattern=r'^[1-9][0-9]{0,5}[KMG]$')
     write_set: list[str] = Field(
         default_factory=list, max_length=32,
@@ -33,6 +39,13 @@ class TaskIn(BaseModel):
                     'never stalls to ask: the same validation and authority as approving a write-set '
                     'request (inside your own grants or checkout; a person decides anything wider).')
 
+    @model_validator(mode='after')
+    def suite_inputs(self):
+        if self.mode == 'suite' and (not self.repository or not self.batch):
+            raise ValueError('suite tasks require repository and a non-empty ordered batch')
+        if self.mode != 'suite' and (self.repository or self.batch):
+            raise ValueError('repository and batch are for suite tasks')
+        return self
 
 class RepositoryShaIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -64,7 +77,7 @@ class ReviewRequestIn(BaseModel):
 
 
 class DeliverIn(BaseModel):
-    """An express task's report: what was done and where it is. No commit is named."""
+    """Text delivery; a suite run also records its integration tip from the workspace."""
 
     model_config = ConfigDict(extra='forbid')
     what: str = Field(min_length=1, max_length=1000)
@@ -92,6 +105,16 @@ class ResumeIn(BaseModel):
 class ReopenIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
     goal: str = Field(min_length=1, max_length=MAX_TASK_GOAL, pattern=r'\S')
+
+
+class SuiteReopenIn(ReopenIn):
+    repository: str | None = Field(default=None, min_length=1, max_length=4096)
+    batch: list[str] | None = Field(default=None, min_length=1, max_length=128)
+
+
+class SuiteCommit(BaseModel):
+    sha: str
+    task: str | None = None
 
 
 class VerdictIn(BaseModel):
@@ -125,7 +148,9 @@ class TaskReview(BaseModel):
     implementer_id: str
     implementer_preset: str
     policy: str
-    mode: Literal['full', 'light', 'express'] = 'full'
+    mode: TaskMode = 'full'
+    suite_repository: str | None = None
+    suite_batch: list[SuiteCommit] = Field(default_factory=list)
     reviewer_id: str | None = None
     status: Literal['implementing', 'idle', 'in_review', 'approved', 'done', 'blocked']
     round: int
@@ -166,7 +191,9 @@ class TaskStatus(BaseModel):
     implementer_handle: str | None = None
     reviewer_handle: str | None = None
     policy: str
-    mode: Literal['full', 'light', 'express'] = 'full'
+    mode: TaskMode = 'full'
+    suite_repository: str | None = None
+    suite_batch: list[SuiteCommit] = Field(default_factory=list)
     status: Literal['implementing', 'idle', 'in_review', 'approved', 'done', 'blocked']
     round: int
     sha: str | None = None

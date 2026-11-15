@@ -4,14 +4,14 @@ from urllib.parse import quote
 
 from ..orchestrator_contracts import (
     BlockedIn, EnvGapIn, DeliverIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn,
-    TaskIn, VerdictIn, WaitingIn)
+    SuiteReopenIn, TaskIn, VerdictIn, WaitingIn)
 from .client import ApiError
 from .validation import validate_arguments
 
 _MODELS = {'env_gap': EnvGapIn, 'blocked': BlockedIn, 'deliver': DeliverIn, 'create_task': TaskIn,
            'request_review': ReviewRequestIn,
            'review_verdict': VerdictIn,
-           'resume_work': ResumeIn, 'reopen_task': ReopenIn, 'message_task': MessageTaskIn,
+           'resume_work': ResumeIn, 'reopen_task': SuiteReopenIn, 'message_task': MessageTaskIn,
            'waiting': WaitingIn, 'set_task_goal': ReopenIn}
 _PATHS = {'env_gap': ('POST', 'env-gap'), 'blocked': ('POST', 'blocked'), 'deliver': ('POST', 'deliver'),
           'create_task': ('POST', 'tasks'), 'tasks': ('GET', 'tasks'),
@@ -24,7 +24,7 @@ _PATHS = {'env_gap': ('POST', 'env-gap'), 'blocked': ('POST', 'blocked'), 'deliv
 OPERATIONS = tuple(_PATHS)
 
 
-_WHO = {'env_gap': "the task's reviewer", 'deliver': 'the implementer of an express task',
+_WHO = {'env_gap': "the task's reviewer", 'deliver': 'the implementer of an express or suite task',
         'resume_work': "the task's implementer and the root captain",
         'blocked': "the task's implementer", 'request_review': "the task's implementer",
         'review_verdict': "the task's reviewer, or the root captain under captain review "
@@ -45,19 +45,29 @@ _DESCRIBE = {
                     'Optional memory_limit (e.g. "8G") starts a heavy line with a bigger budget, '
                     'within the host ceiling and, for a captain, the captain approval ceiling '
                     '(above it: 403, file a memory request for a person). '
-                    'mode is full (default), light (review cycle, gates scaled to the diff) or express '
-                    '(no reviewer, no review; the implementer ends with deliver; review omitted or '
-                    'none); it cannot change later. '
+                    'mode is full (default: review as needed, only affected tests), express '
+                    '(no review or tests, when a person says so or the captain decides), or suite '
+                    '(no reviewer: run every suite on the merged batch before every batch PR). '
+                    'Suite requires repository and batch: task line IDs/tags resolving to accepted '
+                    'SHAs and/or explicit SHAs in cherry-pick order. The runner creates an integration '
+                    'branch from current main, cherry-picks, and ends with deliver naming the branch '
+                    'and SHA, each suite pass/fail, and best-effort failure attribution to tasks. '
+                    'It never pushes or opens a PR; the captain does both after a pass. Full tasks '
+                    'never run full suites, e2e suites or whole-suite coverage; list scoped tests run. '
+                    'Express and suite end with deliver; omit review or pass none. Mode is fixed. '
                     'Retry with the same name and assignment to recover the existing task; '
                     'conflicting names are refused. '
                     'A creation_error means the task exists but staffing or notification needs attention.'),
-    'deliver': ('END an express task: report results as text (what, where), no SHA. Posts the report '
-                'to the root captain and marks the task done. Express tasks have no review.'),
-    'request_review': 'Hand a full task to review (sha, what, where). Refused (409) on an express task.',
+    'deliver': ('END an express or suite task: report results as text (what, where). Posts the report '
+                'to the root captain and marks the task done. Suite reports name branch/SHA, pass/fail per '
+                'suite and best-effort failure attribution. Neither mode has a reviewer.'),
+    'request_review': ('Hand a full task to review (sha, what, where). '
+                       'Refused (409) on an express or suite task.'),
     'set_task_goal': ('CHANGE the direction of an EXISTING active task. conv_id is the task line id (from '
                       'create_task or tasks), never your root id. Does not start work or create anything; '
                       'refused for approved or done tasks (use reopen_task).'),
-    'reopen_task': 'CONTINUE an approved or done EXISTING task with a new goal; conv_id is the task line id.',
+    'reopen_task': 'CONTINUE an approved or done EXISTING task with a new goal; conv_id is the task line id. '
+                   'For suite mode, pass batch (new ordered task IDs/tags or SHAs) and optional repository.',
     'nudge_reviewer': 'Ask your reviewer to continue, once per round, with fixed text and no arguments.',
     'message_task': 'Message an existing task participant privately; it does not change the goal.',
 }
@@ -141,6 +151,8 @@ def tool_list(state):
 
 
 def call(client, name, args, state):
+    if name == 'create_task' and args.get('mode') == 'light':
+        args = dict(args, mode='full')  # retired callers work without advertising a fourth choice
     available = {item['name']: item for item in tool_list(state)}
     if name not in available:
         raise ApiError(_refusal(name))
