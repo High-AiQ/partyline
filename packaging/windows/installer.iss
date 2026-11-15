@@ -82,7 +82,10 @@ begin
   Result := True;
   if FileExists(Exe) then
     Result := Exec(Exe, 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
-  if Result and (ExpandConstant('{param:AUTOUPDATE|0}') <> '1') and FileExists(Exe) then
+  // Only a helper that registered the Chrome native host (1.5.0 or later) has one to pause; an older helper does
+  // not know `suspend-chrome`, and its refusal must not block the upgrade.
+  if Result and (ExpandConstant('{param:AUTOUPDATE|0}') <> '1') and FileExists(Exe)
+     and RegKeyExists(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\io.partyline.chrome') then
     Result := Exec(Exe, 'suspend-chrome', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
 end;
 
