@@ -1,4 +1,5 @@
 """screen_window_click on the server: snapshot geometry, conversion, refusals, routing, audit, marks."""
+import asyncio
 import json
 import unittest
 from types import SimpleNamespace
@@ -7,7 +8,8 @@ from unittest.mock import patch
 from partyline.mcp import catalog, tools_control, tools_screen
 
 from partyline.point_geometry import GeometryError, clean, locate, to_image, to_screen
-from partyline.screen_window_click import STALE
+from partyline.screen_window_click import BUDGET, DISPATCH, MARGIN, STALE, WAIT
+from partyline_helper import window_click as helper
 from partyline.screen_window_marks import MAX_MARKS, Geometries, clean_marks, mark_inputs
 from tests.test_window_snapshot import SnapshotFixture
 
@@ -66,6 +68,39 @@ class WindowClickTests(ClickFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("g1", "s1", [200, 150], 100, 100, "left", 1),
                          (sent["grant_id"], sent["snapshot"], sent["screen"], sent["x"], sent["y"],
                           sent["button"], sent["clicks"]))
+
+    async def test_the_helper_gets_a_start_deadline_and_the_server_waits_longer_than_it_can_take(self):
+        await self.grant("a")
+        await self.snapshot()
+        waits = []
+        original = self.hub.elements.exchange
+
+        async def spying(*args, **kwargs):
+            waits.append(kwargs["wait"])
+            return await original(*args, **kwargs)
+        with patch.object(self.hub.elements, "exchange", spying):
+            await self.click()
+        self.assertEqual([WAIT], waits)
+        self.assertEqual(BUDGET, self.clicks[0]["budget"])
+        self.assertNotIn("wait", self.clicks[0])  # the server's own timeout is not a field of the request
+        # a click starts within BUDGET of arriving and takes at most DISPATCH more; the server outwaits both
+        self.assertGreaterEqual(WAIT, BUDGET + helper.TIMEOUT + MARGIN)
+        self.assertGreaterEqual(DISPATCH, helper.TIMEOUT)
+        self.assertGreater(WAIT, 35)
+
+    async def test_the_exchange_wait_is_the_deadline_used_and_other_calls_keep_35_seconds(self):
+        import inspect
+        await self.grant("a")
+        await self.snapshot()
+        seen, real = [], asyncio.timeout
+
+        def recording(delay):
+            seen.append(delay)
+            return real(delay)
+        with patch("partyline.screen_elements.asyncio.timeout", recording):
+            await self.click()
+        self.assertEqual([WAIT], seen)
+        self.assertEqual(35, inspect.signature(self.hub.elements.exchange).parameters["wait"].default)
 
     async def test_scale_and_dpi_convert_the_pixel_centre(self):
         await self.grant("a")

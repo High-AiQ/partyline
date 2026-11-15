@@ -17,7 +17,7 @@ ELEMENT_ACTION_NOTE = (
     "select uses value; set_value edits text; press uses enter/tab/escape. force overrides disabled. "
     "then re-reads after CDP settles. UIA window_* targets the shared window; drag: screen_drag.")
 ELEMENT_ACTION_TIMEOUT = 100  # a 20s capture deadline may be followed by a 35s exchange, then action
-WINDOW_CLICK_TIMEOUT = 100  # the person may be asked first; the helper answers within 35 s, then a thumb
+WINDOW_CLICK_TIMEOUT = 130  # up to 70 s for the helper (the person is asked), then a thumb
 ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and event barrier
 ELEMENT_ACTION_PROPERTIES = {
     "window": {"type": "string",

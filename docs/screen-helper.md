@@ -666,7 +666,11 @@ through elements or CDP.
   window. The helper brings the window forward the way UIA actions do (best effort, never restoring a
   minimised window), moves the cursor to the point, and checks that the window under the point is the granted
   window or a dialog it owns, is not a hard-floor program, and that the foreground has not changed. Any miss
-  refuses with nothing sent. All presses and releases go in one `SendInput` call, so no button stays down. It
+  refuses with nothing sent. The slow checks run first; then, with the window in front, the helper re-checks
+  revocation, the person's consent and the window's place against the snapshot, and the point's target, with
+  nothing slow before the input. One `SendInput` call moves to that checked point and does every press and
+  release, so a cursor moved meanwhile cannot redirect it and no button stays down. Real-cursor clicks run one
+  at a time across all grants. It
   then puts the cursor and the previous foreground back where it can; `cursor_restored`,
   `foreground_restored` and `target_came_forward` report what happened.
 - **Consent.** The first real-cursor click on a grant shows a prompt on that computer, "Allow
@@ -679,6 +683,9 @@ through elements or CDP.
   and screen pixels) and the result to the helper's tool audit before any input is sent (a log that cannot be
   written refuses the click), and again with the outcome; the server's screen control audit and the line
   notice carry the same, and the helper's recent-activity log lists `point_click`. No pixels are recorded.
+- **Deadline.** The server tells the helper how long it may take to *start* the click (`budget`, 40 s from
+  arrival) and waits 70 s for the answer, so a click never goes through after the server has reported it
+  `unconfirmed`. A consent answer that arrives after the budget is discarded and nothing is sent.
 - **Protocol.** The server sends `window_click` (`request_id`, `grant_id`, `snapshot`, `x`, `y`, `screen`,
   `button`, `clicks`) and the helper answers `window_element_result`. A snapshot reply carries `snapshot_id`,
   `geometry` and `marks`. Only a helper whose hello says `windows: 3` is asked; an older one is told to

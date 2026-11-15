@@ -4,6 +4,8 @@
 unless the granted window is in front, the window at the point belongs to it (or to a dialog it owns), is
 not a hard-floor program, and the foreground is still the same just before the button goes down.
 """
+import threading
+
 from .uia_window_list import HARD_FLOOR
 
 MINIMIZED = "the window is minimised; Partyline never restores it. Ask the person to bring it back"
@@ -11,15 +13,20 @@ NOT_FRONT = "the window could not be brought to the front; no click was sent"
 COVERED = "another window is on top at that point; no click was sent. Take a fresh snapshot"
 FLOOR = "that window is never clickable (terminal, password manager, security or Partyline's own window)"
 CHANGED = "the foreground window changed during the click; no click was sent"
+MOVED = "the cursor was moved by something else before the click; no click was sent"
+ONE_AT_A_TIME = threading.Lock()  # one real-cursor click at a time across every grant
 
 
 class PointRefused(Exception):
     """Nothing was sent; the message is for the agent."""
 
 
-def click(api, grant, point, button, clicks, alive, events=None):
+def click(api, grant, point, button, clicks, alive, events=None, ready=lambda: None):
+    """`alive` is the slow liveness check, run early; `ready` is the cheap last word (revocation, deadline,
+    consent, the window's place), run after the cursor is in position. Between the checks of what is under
+    the point and the input there is nothing slow, and the input itself moves to the checked point."""
     hwnd, report = grant["hwnd"], {}
-    with api.session():
+    with ONE_AT_A_TIME, api.session():
         alive()
         if api.iconic(hwnd):
             raise PointRefused(MINIMIZED)
@@ -37,15 +44,17 @@ def click(api, grant, point, button, clicks, alive, events=None):
             moved = api.move(*point)
             if not moved:
                 raise PointRefused("the cursor could not be moved; no click was sent")
+            ready()  # after the window was brought forward: it may have moved
             under = api.window_at(*point)
             if not under or not api.owns(under):
                 raise PointRefused(COVERED)
             if api.image_name(under) in HARD_FLOOR or api.is_helper(under):
                 raise PointRefused(FLOOR)
-            if api.foreground() != focus:
+            if api.foreground() != focus or not api.owns(api.foreground()):
                 raise PointRefused(CHANGED)
-            alive()
-            sent, wanted = api.send(button, clicks)
+            if tuple(api.cursor() or ()) != tuple(point):
+                raise PointRefused(MOVED)
+            sent, wanted = api.send(point, button, clicks)
             if sent != wanted:
                 api.release(button)
                 return {"status": "unconfirmed", "error": "the click was only partly delivered", **report}

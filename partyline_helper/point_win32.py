@@ -10,6 +10,7 @@ from .window_dpi import per_monitor
 
 DOWN = {"left": 0x2, "right": 0x8}
 UP = {"left": 0x4, "right": 0x10}
+MOVE_TO = 0x8001 | 0x4000  # MOVE | ABSOLUTE | VIRTUALDESK: to a point of the whole desktop
 
 
 class MouseInput(ctypes.Structure):
@@ -74,16 +75,25 @@ class Win32Pointer:  # pragma: no cover - Windows only
     def move(self, x, y):
         return bool(self.user.SetCursorPos(int(x), int(y)))
 
-    def events(self, flags):
+    def events(self, flags, spots=None):
         items = (Input * len(flags))()
-        for item, flag in zip(items, flags, strict=True):
-            item.type, item.union.mi.dwFlags = 0, flag  # INPUT_MOUSE, at the cursor's own position
+        for index, (item, flag) in enumerate(zip(items, flags, strict=True)):
+            item.type, item.union.mi.dwFlags = 0, flag  # INPUT_MOUSE
+            if spots and spots[index]:
+                item.union.mi.dx, item.union.mi.dy = spots[index]
         return items
 
-    def send(self, button, clicks):
-        """All presses and releases in one call, so nothing else's input can fall between them."""
-        flags = [DOWN[button], UP[button]] * clicks
-        return self.user.SendInput(len(flags), self.events(flags), ctypes.sizeof(Input)), len(flags)
+    def desktop(self, x, y):
+        """The point as 0..65535 across the virtual desktop, which SendInput's absolute moves use."""
+        left, top, wide, high = (self.user.GetSystemMetrics(index) for index in (76, 77, 78, 79))
+        return ((x - left) * 65535 // max(wide - 1, 1), (y - top) * 65535 // max(high - 1, 1))
+
+    def send(self, point, button, clicks):
+        """Move to `point` and press and release, all in one call: the input lands on the point that was
+        checked whatever the cursor did meanwhile, and nothing else's input can fall between the events."""
+        flags = [MOVE_TO] + [DOWN[button], UP[button]] * clicks
+        spots = [self.desktop(*point)] + [None] * (len(flags) - 1)
+        return self.user.SendInput(len(flags), self.events(flags, spots), ctypes.sizeof(Input)), len(flags)
 
     def release(self, button):
         self.user.SendInput(1, self.events([UP[button]]), ctypes.sizeof(Input))

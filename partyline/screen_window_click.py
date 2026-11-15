@@ -18,7 +18,12 @@ from .point_geometry import GeometryError, locate
 from .screen_audit import publish, record, record_standing_window_access
 from .screen_grants import resolve_window
 
-POINT_VERSION = 3  # the helper's `windows` hello value that can click at a point
+POINT_VERSION = 3  # the `windows` hello value that can click at a point
+# The helper starts no click later than BUDGET seconds after the request reaches it (a late consent is
+# discarded), and one it started finishes within DISPATCH more; the server waits longer than both, so a click
+# can never go through after the server has reported it unconfirmed.
+BUDGET, DISPATCH, MARGIN = 40, 20, 10
+WAIT = BUDGET + DISPATCH + MARGIN
 STALE = ("that snapshot is unknown or too old for this window: take a fresh screen_window_snapshot "
          "(marks=true for numbered boxes) and click in its pixels")
 OLD_HELPER = "update the Partyline helper to use screen_window_click"
@@ -73,7 +78,8 @@ async def window_click(runtime, hub, store, conv_id, body: WindowClick, request:
             hub.window_grants.spend(grant)
             response = await hub.elements.exchange(
                 principal, grant, device, "window_click", agent=principal.name, snapshot=body.snapshot,
-                x=body.x, y=body.y, screen=list(point), button=body.button, clicks=body.clicks)
+                x=body.x, y=body.y, screen=list(point), button=body.button, clicks=body.clicks,
+                budget=BUDGET, wait=WAIT)
         result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
     except (TimeoutError, OSError, RuntimeError):
         result = {"status": "unconfirmed", "note": "The helper did not confirm the click; it may have run. "

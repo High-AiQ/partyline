@@ -10,9 +10,10 @@ from PIL import Image
 
 from partyline_helper.cdp_transport import CDPError
 from partyline_helper.client import Session
+from partyline_helper import point_cursor
 from partyline_helper.point_consent import COOLDOWN
 from partyline_helper.uia_gate import DispatchGate
-from partyline_helper.window_click import FLOOR, GONE, STALE
+from partyline_helper.window_click import BUDGET, FLOOR, GONE, LATE, STALE, PointClicks
 from partyline_helper.window_marks import boxes, clean_inputs, draw, listed
 from partyline_helper.window_shares import WindowShares
 from partyline_helper.window_snapshot import WindowSnapshots
@@ -73,9 +74,11 @@ class FakePointer:
             self.front = self.foreground_after_focus
         return True
 
-    def send(self, button, clicks):
+    def send(self, point, button, clicks):
         self.calls.append(("send", button, clicks))
-        return self.sent or (2 * clicks, 2 * clicks)
+        self.sent_at, self.cursor_at = tuple(point), tuple(point)  # the input itself moves to the point
+        self.locked = point_cursor.ONE_AT_A_TIME.locked()
+        return self.sent or (2 * clicks + 1, 2 * clicks + 1)
 
     def release(self, button):
         self.calls.append(("release", button))
@@ -133,7 +136,8 @@ class ClickFixture(unittest.IsolatedAsyncioTestCase):
                       "worker": SimpleNamespace(cancel=Mock(), close=AsyncMock())}
         self.shares.grants["g1"] = self.entry
         self.shares.clicks.pointer = lambda hwnd: self.pointer
-        self.shares.clicks.consent.ask, self.shares.clicks.consent.clock = self.ask, lambda: self.clock[0]
+        self.shares.clicks.consent.ask = self.ask
+        self.shares.clicks.clock = self.shares.clicks.consent.clock = lambda: self.clock[0]
         self.shares.clicks.rect_of = lambda hwnd: (108, 80, 492, 342)
         self.shares.chrome.page = AsyncMock(return_value=None)
         self.snapshot = self.take()
@@ -269,9 +273,9 @@ class CursorRouteTests(ClickFixture):
         seen = []
         original = self.pointer.send
 
-        def spying(button, clicks):
+        def spying(point, button, clicks):
             seen.append(self.session.status.label)
-            return original(button, clicks)
+            return original(point, button, clicks)
         self.pointer.send = spying
         await self.click()
         self.assertIn("(using your mouse)", seen[0])
@@ -379,11 +383,165 @@ class CursorRouteTests(ClickFixture):
     async def test_a_revoke_during_the_click_is_reported(self):
         original = self.pointer.send
 
-        def revoking(button, clicks):
+        def revoking(point, button, clicks):
             self.access.gate.invalidate()
-            return original(button, clicks)
+            return original(point, button, clicks)
         self.pointer.send = revoking
         self.assertTrue((await self.click())["revoked_during"])
+
+
+class DispatchTimeTests(ClickFixture):
+    """What changes between the early checks and the button going down must be caught or be harmless."""
+
+    async def test_the_input_moves_to_the_checked_point_serialised_and_whatever_the_cursor_did_before(self):
+        reply = await self.click()
+        self.assertEqual("completed", reply["status"])
+        self.assertEqual((200, 150), self.pointer.sent_at)
+        self.assertTrue(self.pointer.locked)  # one real-cursor click at a time, across every grant
+        self.assertFalse(point_cursor.ONE_AT_A_TIME.locked())
+
+    async def test_a_cursor_moved_away_after_the_checks_refuses_the_click(self):
+        original = self.pointer.window_at
+
+        def moving(x, y):
+            self.pointer.cursor_at = (900, 900)
+            return original(x, y)
+        self.pointer.window_at = moving
+        self.assertEqual(point_cursor.MOVED, (await self.click())["error"])
+        self.assertEqual([], self.sends())
+
+    async def test_a_foreground_or_cover_change_during_the_slow_liveness_check_is_caught_after_it(self):
+        def covering():
+            self.pointer.under = 99
+            return self.windows
+        self.access.list_windows = covering
+        self.assertEqual(point_cursor.COVERED, (await self.click())["error"])
+        self.pointer.under = 10
+        self.pointer.front = 10
+
+        def stealing():
+            self.pointer.foreground_after_focus = 77  # applies when the cursor moves, after the check
+            return self.windows
+        self.access.list_windows = stealing
+        self.assertEqual(point_cursor.CHANGED, (await self.click())["error"])
+        self.assertEqual([], self.sends())
+
+    async def test_a_cursor_moved_during_the_slow_check_does_not_move_the_click(self):
+        def wandering():
+            self.pointer.cursor_at = (900, 900)
+            return self.windows
+        self.access.list_windows = wandering
+        self.assertEqual("completed", (await self.click())["status"])
+        self.assertEqual((200, 150), self.pointer.sent_at)
+
+    async def test_access_switched_off_while_the_window_was_being_checked_stops_the_click(self):
+        calls = []
+
+        async def check(grant):
+            calls.append(grant)
+            if len(calls) == 2:  # the second look, after the person said yes
+                self.shares.revoke_standing()
+            return None
+        self.access.check = check
+        reply = await self.click()
+        self.assertEqual(("failed", GONE), (reply["status"], reply["error"]))
+        self.assertNotIn("mouse_approved", self.entry)
+        self.assertEqual([], self.sends())
+
+    async def test_a_consent_cleared_while_the_window_comes_forward_stops_the_click(self):
+        self.pointer.front = 50
+        original = self.pointer.bring_forward
+
+        def forward(hwnd, prior):
+            self.shares.revoke_standing()
+            return original(hwnd, prior)
+        self.pointer.bring_forward = forward
+        self.assertEqual(GONE, (await self.click())["error"])
+        self.assertEqual([], self.sends())
+
+    async def test_a_window_that_moved_or_resized_while_coming_forward_is_stale_not_clicked(self):
+        for change in ("rect", "regions"):
+            self.pointer.front = 50
+            original = self.pointer.bring_forward
+
+            def forward(hwnd, prior, change=change, original=original):
+                if change == "rect":
+                    self.backend.rect = (120, 70, 520, 370)  # moved 20 pixels
+                else:
+                    self.backend.regions = [(108, 80, 492, 322)]
+                return original(hwnd, prior)
+            self.pointer.bring_forward = forward
+            self.assertEqual(STALE, (await self.click())["error"])
+            self.backend.rect, self.backend.regions = RECT, [REGION]
+            self.pointer.bring_forward = original
+        self.assertEqual([], self.sends())
+
+    async def test_a_window_that_moved_during_the_page_setup_is_not_clicked_through_cdp(self):
+        self.access.grant["process"] = "chrome.exe"
+        self.snapshot = self.take()
+        self.shares.chrome.page = AsyncMock(return_value=self.page)
+
+        def moving(hwnd):
+            self.backend.rect = (120, 70, 520, 370)
+            return (108, 80, 492, 342)
+        self.shares.clicks.rect_of = moving
+        self.assertEqual(STALE, (await self.click())["error"])
+        self.assertEqual([], [c for c in self.page.calls if c[0] == "Input.dispatchMouseEvent"])
+
+
+class DeadlineTests(ClickFixture):
+    """The server stops waiting at its deadline and reports the click unconfirmed; nothing may start after."""
+
+    def test_the_budget_is_the_servers_number_bounded_and_defaults_when_missing_or_wrong(self):
+        for given, expected in ((40, 40.0), (2.5, 2.5), (0, 1.0), (-5, 1.0), (500, 120.0), (None, BUDGET),
+                                (True, BUDGET), ("5", BUDGET)):
+            message = {} if given is None else {"budget": given}
+            self.assertEqual(float(expected), PointClicks.budget(message))
+
+    async def test_a_consent_that_arrives_after_the_deadline_is_discarded_and_nothing_is_sent(self):
+        async def slow(*args, **kwargs):
+            self.clock[0] += 41  # the person answered after the server's 40 s
+            return True
+        self.ask.side_effect = slow
+        reply = await self.click(budget=40)
+        self.assertEqual(("failed", LATE), (reply["status"], reply["error"]))
+        self.assertNotIn("mouse_approved", self.entry)
+        self.assertEqual([], self.pointer.calls)
+        self.ask.side_effect = None
+        self.assertEqual("completed", (await self.click(budget=40))["status"])
+
+    async def test_the_deadline_is_the_servers_budget_counted_from_arrival(self):
+        async def slow(*args, **kwargs):
+            self.clock[0] += 6
+            return True
+        self.ask.side_effect = slow
+        self.assertEqual(LATE, (await self.click(budget=5))["error"])
+        self.assertEqual("completed", (await self.click(budget=7))["status"])
+
+    async def test_a_deadline_that_passes_during_the_slow_checks_refuses_the_click(self):
+        def slow():
+            self.clock[0] += 50
+            return self.windows
+        self.access.list_windows = slow
+        reply = await self.click(budget=40)
+        self.assertEqual(LATE, reply["error"])
+        self.assertEqual([], self.sends())
+        self.assertEqual((5, 5), self.pointer.cursor_at)
+
+    async def test_a_cdp_click_is_not_started_after_the_deadline(self):
+        self.access.grant["process"] = "chrome.exe"
+        self.snapshot = self.take()
+        self.shares.chrome.page = AsyncMock(return_value=FakePage())
+        page = self.shares.chrome.page.return_value
+
+        def slow(hwnd):
+            self.clock[0] += 41
+            return (108, 80, 492, 342)
+        self.shares.clicks.rect_of = slow
+        reply = await self.click(budget=40)
+        self.assertEqual(LATE, reply["error"])
+        self.assertEqual([], [c for c in page.calls if c[0] == "Input.dispatchMouseEvent"])
+        self.assertEqual(["failed"], [row["result"] for row in self.rows()])  # no "dispatching" row
 
 
 class RefusalTests(ClickFixture):

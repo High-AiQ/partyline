@@ -25,9 +25,12 @@ STALE = ("the window moved, resized, closed or was re-granted since that snapsho
 GONE = "consent revoked"
 HIDDEN = ("the tab this window grant selected is not the tab shown in the window, so a click at a point "
           "of its picture could land on another page: take a fresh screen_window_snapshot")
+LATE = ("the click was not started in time (the person took too long or the server stopped waiting); "
+        "nothing was sent")
 FLOOR = "that window is never clickable (terminal, password manager, security or Partyline's own window)"
 AUDIT = "the helper could not write its audit log"
-TIMEOUT = 20
+TIMEOUT = 20  # a click that started finishes within this
+BUDGET = 30  # when the server names no deadline: seconds after the request arrives in which a click may start
 POINT_VERSION = 3  # the `windows` hello value that can click at a point of a snapshot
 
 
@@ -41,9 +44,9 @@ def hard_floor(grant):
 
 class PointClicks:
     def __init__(self, shares, pointer=None, ask=None, clock=None, rect_of=render_rect):
-        self.shares, self.rect_of = shares, rect_of
+        self.shares, self.rect_of, self.clock = shares, rect_of, clock or time.monotonic
         self.pointer = pointer or (lambda hwnd: Win32Pointer(hwnd))
-        self.consent = MouseConsent(ask, clock or time.monotonic)
+        self.consent = MouseConsent(ask, self.clock)
 
     async def handle(self, entry, message):
         from .screen_access_audit import audit_window, begin_window_call, end_window_call
@@ -52,6 +55,7 @@ class PointClicks:
         active = begin_window_call(session, message.get("agent", ""),
                                    message.get("line_name") or message.get("line"))
         route = "none"
+        message = {**message, "deadline": self.clock() + self.budget(message)}
         try:
             route, result = await self.run(entry, message, active)
         except (Refused, PointRefused, CDPError) as exc:
@@ -69,6 +73,18 @@ class PointClicks:
         except OSError:
             result = {"status": "failed", "error": AUDIT}
         await self.shares.session.send("window_element_result", request_id=message["request_id"], **result)
+
+    @staticmethod
+    def budget(message):
+        """Seconds, from now, in which a click may still start; the server's `budget`, bounded."""
+        value = message.get("budget")
+        ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+        return min(max(float(value), 1.0), 120.0) if ok else float(BUDGET)
+
+    def late(self, message):
+        """Refuse to start a click once the server's deadline has passed: it has reported it unconfirmed."""
+        if self.clock() >= message["deadline"]:
+            raise Refused(LATE)
 
     def record(self, entry, message, route, result, reason=None):
         """Grant, line, process, operation, route, point and result; never pixels. Raises OSError."""
@@ -115,12 +131,16 @@ class PointClicks:
             access.revoke(reason)
         if reason:
             raise Refused(reason)
-        layout = await asyncio.to_thread(self.shares.snapshots.backend.layout, grant["hwnd"])
+        await asyncio.to_thread(self.shifted, record, grant)
+        return point
+
+    def shifted(self, record, grant):
+        """Refuse unless the window is exactly where and as large as the snapshot recorded (blocking call)."""
+        layout = self.shares.snapshots.backend.layout(grant["hwnd"])
         wanted = record["geometry"]
         if (tuple(layout["rect"]) != tuple(wanted["rect"])
                 or sorted(map(tuple, layout["regions"])) != sorted(map(tuple, wanted["regions"]))):
             raise Refused(STALE)
-        return point
 
     async def run(self, entry, message, active):
         access = entry["access"]
@@ -129,23 +149,28 @@ class PointClicks:
         page = (await self.shares.chrome.page(access)
                 if str(grant.get("process", "")).lower() == "chrome.exe" else None)
         if page:
-            return "cdp", await self.by_cdp(entry, message, page, grant, point)
+            return "cdp", await self.by_cdp(entry, message, page, access, grant, generation)
         epoch = self.shares.generation
         reason = await self.consent.check(entry, message)
         if self.shares.generation != epoch:  # access was switched off or paused while the person was asked
             clear(entry)
             raise Refused(GONE)
+        if self.clock() >= message["deadline"]:  # the answer came too late: it counts for nothing
+            clear(entry)
+            raise Refused(LATE)
         if reason:
             raise Refused(reason)
         point = await self.current(entry, access, grant, generation, message)  # it may have changed meanwhile
         if active:
             active[0].mark_mouse(active[1])
-        return "cursor", await self.by_cursor(entry, message, access, grant, generation, point)
+        return "cursor", await self.by_cursor(entry, message, access, grant, generation, point, epoch)
 
-    async def by_cdp(self, entry, message, page, grant, point):
+    async def by_cdp(self, entry, message, page, access, grant, generation):
         if grant.get("target_id") and not await page.visible():  # a picked tab may be behind the shown one
             raise Refused(HIDDEN)
         frame = await page_frame(page, grant["hwnd"], self.rect_of)
+        point = await self.current(entry, access, grant, generation, message)  # the window may have moved
+        self.late(message)
         self.begin(entry, message, "cdp")
         page.dispatched, page.operation_epoch = False, None
         try:
@@ -162,10 +187,22 @@ class PointClicks:
             return {"status": "unconfirmed", "source": "cdp", "error": str(exc),
                     "revoked_during": not page.live}
 
-    async def by_cursor(self, entry, message, access, grant, generation, point):
+    async def by_cursor(self, entry, message, access, grant, generation, point, epoch):
         self.begin(entry, message, "cursor")
+        record = entry["snapshots"][message["snapshot"]]
+
+        def ready():
+            """The cheap last word, run once the window is in front and the cursor is on the point."""
+            self.late(message)
+            if access.gate.revoked.is_set() or access.gate.generation != generation:
+                raise PointRefused("revoked")
+            if (not entry.get("mouse_approved") or self.shares.generation != epoch
+                    or self.shares.grants.get(message.get("grant_id")) is not entry):
+                raise Refused(GONE)  # access was switched off, paused or ended after the person said yes
+            self.shifted(record, grant)
 
         def alive():
+            self.late(message)
             if access.gate.revoked.is_set() or access.gate.generation != generation:
                 raise PointRefused("revoked")
             windows = access.list_windows()
@@ -177,7 +214,7 @@ class PointClicks:
 
         def call():
             return cursor_click(self.pointer(grant["hwnd"]), grant, point, message["button"],
-                                message["clicks"], alive, getattr(access, "event_state", None))
+                                message["clicks"], alive, getattr(access, "event_state", None), ready)
         try:
             result, revoked = await asyncio.wait_for(
                 asyncio.to_thread(access.gate.dispatch, generation, call), TIMEOUT)
