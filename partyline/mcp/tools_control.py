@@ -87,7 +87,9 @@ def tool_list(state):
         return []
     point = {"x": _int("X, " + FRAME + "."), "y": _int("Y, " + FRAME + ".")}
     tools = [
-        _tool("screen_eval", "Run JavaScript in the active tab of a shared Chrome window; bounded JSON. "
+        _tool("screen_eval", "Read page state or navigate with location.assign in the active tab of a shared "
+              "Chrome window; bounded JSON. Never click or change the page with JavaScript. Interact with "
+              "screen_element_action, which sends trusted input. "
               "Requires an approved Chrome debugging connection. Calls are audited by input length.",
               {"expression": {"type": "string", "minLength": 1, "maxLength": 16000},
                "window": ELEMENT_ACTION_PROPERTIES["window"]}, ["expression"]),

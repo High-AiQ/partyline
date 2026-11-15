@@ -80,7 +80,10 @@ class Socket:
             backend = int(p["objectId"])
             if p["arguments"] or p["functionDeclaration"] == self.native_select.blur:
                 return {"result": {"value": self.native_select.function(backend, p)}}
-            return {"result": {"value": self.states.get(backend, {})}}
+            state = self.states.get(backend, {})
+            if state.get("hit") is False:
+                state = {**state, "hit_reason": state.get("hit_reason", 'covered by DIV "overlay"')}
+            return {"result": {"value": state}}
         if method == "DOM.focus":
             self.focused = p["backendNodeId"]
         if method == "Input.dispatchKeyEvent" and p["type"] == "keyDown":

@@ -1072,7 +1072,8 @@ ties. A uniquely matched tab stays on CDP when its HWND is covered and Chrome re
 tabs hidden. Missing or
 ambiguous evidence uses UIA; another Chrome window needs its own grant. Page actions are
 on by default. Ignored AX nodes are omitted before chunking; exposed descendants attach
-to the nearest exposed ancestor. Reads use Chrome AX plus live DOM native disabled, ARIA disabled, readonly,
+to the nearest exposed ancestor. Chrome hit testing descends open shadow roots and follows composed-tree
+ancestry, including assigned slots; an element covered by a separate subtree is still refused. Reads use Chrome AX plus live DOM native disabled, ARIA disabled, readonly,
 inert, value, checked and selected state. With `bounds=true`, CDP adds `viewport@` rectangles
 in CSS pixels; it does not infer screen/frame coordinates from browser decorations. A class-only link can look enabled while reporting
 `disabled(aria_disabled)`; that provenance is retained. Password values are omitted.
@@ -1093,8 +1094,10 @@ The picker-open probe uses Chrome's
 [CDP Input protocol](https://chromedevtools.github.io/devtools-protocol/tot/Input/).
 Unsupported CDP actions report an error; they never also run a UIA action.
 
-`screen_eval(expression=<JavaScript>, window=<grant>)` runs agent JavaScript in the active
-page and returns bounded JSON (a truncated preview for large results). It has the same
+`screen_eval(expression=<JavaScript>, window=<grant>)` reads page state or navigates with
+`location.assign` in the active page and returns bounded JSON (a truncated preview for large results).
+Never use it to click or change the page with JavaScript. Interact through
+`screen_element_action`, which sends trusted input. It has the same
 window grant and write authorization as page actions. It can access the page's signed-in
 session. Calls are audited with grant, calling line/process, operation and input length;
 code and typed text are not placed in this audit. The helper keeps its local chained audit,
@@ -1133,7 +1136,8 @@ and any difference. Upload sanitized evidence to the line; keep host/account det
    session deny once, confirm refused/UIA, then share again and approve.
 2. **Sync enable:** find the select and Sync target. Select B with `then={}`. Check the page
    logged trusted input/change and the target's native disabled flag cleared. Verify
-   `isTrusted` in a temporary lab event listener installed/read through `screen_eval`. Count
+   `isTrusted` in the lab's existing event log via `screen_elements`; do not install a listener
+   through `screen_eval`. Count
    trusted change events: moving from a middle option to an adjacent and a distant option
    should produce one commit in `keyboard_popup` mode, with no intermediate values. Record
    `selection_mode` and `trusted_change_events`. If the popup does not accept keys, verify

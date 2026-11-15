@@ -33,8 +33,10 @@ async def act(page, message):
             extra = await select_option(page, backend, message["value"])
         elif action in ("invoke", "toggle", "select"):
             state = await page.function(backend, STATE)
-            if not state.get("hit"):
-                raise CDPError("element is covered or outside the viewport")
+            hit = state.get("hit")
+            if hit is False or isinstance(hit, dict) and not hit.get("hit"):
+                reason = hit.get("reason") if isinstance(hit, dict) else state.get("hit_reason")
+                raise CDPError(reason or "element is covered or outside the viewport")
             box = await page.call("DOM.getBoxModel", {"backendNodeId": backend})
             quad = box["model"]["content"]
             point = {"x": sum(quad[::2]) / 4, "y": sum(quad[1::2]) / 4, "button": "left", "clickCount": 1}
