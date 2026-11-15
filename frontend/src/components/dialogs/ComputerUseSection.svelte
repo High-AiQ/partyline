@@ -13,6 +13,7 @@
   let descendants = $state(false);
   let summary = $state<ComputerUseSummary | null>(null);
   let hasComputerUse = $state(false);
+  let expanded = $state(false);
   let error = $state("");
   let loading = $state(true);
 
@@ -44,15 +45,17 @@
   }
 </script>
 
-{#if loading || error || hasComputerUse}
+{#if (!summary && (loading || error)) || hasComputerUse}
   <section class="mt-5 min-w-0 border-t border-line pt-4" aria-label="Computer use" data-computer-usage>
     <h3 class="text-sm font-semibold text-cream">Computer use</h3>
-    {#if loading}
-      <p class="dialog-note" role="status">loading computer use…</p>
-    {:else if error}
-      <p class="text-sm text-pink" role="alert">{error}</p>
+    {#if !summary}
+      {#if loading}
+        <p class="dialog-note" role="status">loading computer use…</p>
+      {:else if error}
+        <p class="text-sm text-pink" role="alert">{error}</p>
+      {/if}
     {:else if summary}
-      <details class="mt-1 text-sm" data-computer-details>
+      <details class="mt-1 text-sm" data-computer-details bind:open={expanded}>
         <summary class="cursor-pointer text-cream-faint">
           {#if summary.responses > 0 || summary.calls > 0}
             {summary.responses.toLocaleString()}
@@ -64,17 +67,23 @@
             No computer use in this period
           {/if}
         </summary>
+        {#if loading}
+          <p class="dialog-note" role="status">updating computer use…</p>
+        {/if}
+        {#if error}
+          <p class="text-sm text-pink" role="alert">{error}</p>
+        {/if}
         <div class="my-3 flex flex-wrap items-end gap-3">
           <label class="grid gap-1 text-xs text-cream-faint" for="computerUsePeriod">
             period
-            <select id="computerUsePeriod" bind:value={period} disabled={loading}>
+            <select id="computerUsePeriod" bind:value={period}>
               <option value="hour">last hour</option>
               <option value="today">today</option>
               <option value="all">since line started</option>
             </select>
           </label>
           <label class="dialog-check mb-2">
-            <input type="checkbox" bind:checked={descendants} disabled={loading} /> include sublines
+            <input type="checkbox" bind:checked={descendants} /> include sublines
           </label>
         </div>
         <dl class="space-y-2 text-xs tabular-nums text-cream-faint">
@@ -107,7 +116,7 @@
             </dd>
           </div>
           <div>
-            <dt class="inline font-medium text-cream">Between actions:</dt>
+            <dt class="inline font-medium text-cream">Between actions (includes pauses):</dt>
             <dd class="inline">
               {#if summary.p50_action_ms !== null && summary.p95_action_ms !== null}
                 p50 {duration(summary.p50_action_ms)} · p95 {duration(summary.p95_action_ms)} ·

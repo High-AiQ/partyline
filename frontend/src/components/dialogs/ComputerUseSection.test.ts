@@ -45,12 +45,14 @@ describe("ComputerUseSection", () => {
     const section = mount(ComputerUseSection, { target: document.body, props: { convId: "line" } });
     try {
       await vi.waitFor(() => {
-        expect(document.body.textContent?.replace(/\s+/g, " ")).toContain("3 responses · 136 tokens");
+        expect(document.body.textContent.replace(/\s+/g, " ")).toContain("3 responses · 136 tokens");
       });
       expect(read).toHaveBeenCalledWith("line", "all", false);
       const details = document.querySelector("details");
       if (!(details instanceof HTMLDetailsElement)) throw new Error("missing details disclosure");
       expect(details.open).toBe(false);
+      details.querySelector("summary")?.click();
+      expect(details.open).toBe(true);
       expect(document.body.textContent).toContain("68 cached");
       expect(document.body.textContent).toContain("1,200 estimated image tokens");
       expect(document.body.textContent).toContain("3.0 s model thinking");
@@ -60,12 +62,21 @@ describe("ComputerUseSection", () => {
       if (!(period instanceof HTMLSelectElement)) throw new Error("missing period selector");
       period.value = "today";
       period.dispatchEvent(new Event("change", { bubbles: true }));
+      await vi.waitFor(() => {
+        expect(read).toHaveBeenLastCalledWith("line", "today", false);
+      });
+      expect(document.querySelector("details")).toBe(details);
+      expect(details.open).toBe(true);
+      expect(document.querySelector("#computerUsePeriod")).toBe(period);
       const checkbox = document.querySelector('input[type="checkbox"]');
       if (!(checkbox instanceof HTMLInputElement)) throw new Error("missing sublines checkbox");
       checkbox.click();
       await vi.waitFor(() => {
         expect(read).toHaveBeenLastCalledWith("line", "today", true);
       });
+      expect(document.querySelector("details")).toBe(details);
+      expect(details.open).toBe(true);
+      expect(document.querySelector("#computerUsePeriod")).toBe(period);
     } finally {
       await unmount(section);
     }
@@ -77,7 +88,7 @@ describe("ComputerUseSection", () => {
     const section = mount(ComputerUseSection, { target: document.body, props: { convId: "line" } });
     try {
       await vi.waitFor(() => {
-        expect(document.body.textContent?.replace(/\s+/g, " ")).toContain("3 responses");
+        expect(document.body.textContent.replace(/\s+/g, " ")).toContain("3 responses");
       });
       const period = document.querySelector("#computerUsePeriod");
       if (!(period instanceof HTMLSelectElement)) throw new Error("missing period selector");
