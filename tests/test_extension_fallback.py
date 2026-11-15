@@ -13,6 +13,7 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
         self.f, self.peer = fixture()
         self.addAsyncCleanup(self.f.close)
         self.remote_socket = Socket()
+        self.remote_socket.urls = {"a": "https://example.test", "b": "https://background.test"}
         self.made = []
         self.discoverable = True
 
@@ -80,3 +81,36 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(*list(self.f.shares.tasks))
         self.assertTrue(self.made[0].closed)
         self.assertTrue(self.remote_socket.closed)
+
+    async def test_a_picked_tab_is_found_again_by_url_and_title_in_the_remote_namespace(self):
+        self.f.access.grant["target_id"] = "1"  # the extension's tab id for the picked tab
+        self.peer.refuse = {1: "other_extension_frame"}
+        result = await self.read_after_prompt()
+        self.assertEqual((result["source"], result["transport"]), ("cdp", "remote_debugging"))
+        self.assertEqual(self.f.chrome.selected[self.f.access], "a")  # the remote id of that same tab
+
+    async def test_a_picked_tab_that_is_not_found_exactly_once_selects_nothing(self):
+        self.f.access.grant["target_id"] = "1"
+        self.peer.refuse = {1: "other_extension_frame"}
+        self.remote_socket.urls["a"] = "https://moved.test"  # the picked tab's page is no longer there
+        self.assertIsNone(await self.read_after_prompt())  # never falls back to some other active tab
+        self.assertEqual(self.f.chrome.pages.get(self.f.access), {})
+        self.assertNotIn("Target.attachToTarget", [m["method"] for m in self.remote_socket.calls])
+
+    async def test_a_late_attach_reply_is_cleaned_up_on_the_connection_that_sent_it(self):
+        self.peer.refuse = {1: "other_extension_frame"}
+        await self.f.read()
+        await self.f.chrome.connecting
+        other = object()
+        self.f.chrome.fallback.grants.add(other)  # a second fallback grant keeps the remote connection open
+
+        def revoke_during_attach(message):
+            if message["method"] == "Target.attachToTarget":
+                self.f.access.gate.revoked.set()
+                self.f.chrome.revoke(self.f.access)
+        self.remote_socket.hook = revoke_during_attach
+        await self.f.read()
+        await asyncio.gather(*list(self.f.shares.tasks))
+        detached = [m for m in self.remote_socket.calls if m["method"] == "Target.detachFromTarget"]
+        self.assertEqual([m["params"]["sessionId"] for m in detached], ["a"])
+        self.assertFalse([m for m in self.peer.calls if m["method"] == "Target.detachFromTarget"])

@@ -9,6 +9,7 @@ import contextlib
 from .cdp_transport import BrowserConnection, ExtensionRefused
 
 SETTINGS = "chrome://inspect/#remote-debugging"
+UNMATCHED = "\0unmatched"  # selects no remote target
 REASONS = {
     "other_extension_frame": ("Chrome won't let extensions debug this page because another extension's frame "
                               f"is in it; enable remote debugging at {SETTINGS} or disable the extension "
@@ -22,7 +23,7 @@ REASONS = {
 class Fallback:
     def __init__(self, chrome, factory=BrowserConnection):
         self.chrome, self.factory = chrome, factory
-        self.remote, self.grants = None, set()
+        self.remote, self.grants, self.picked = None, set(), {}
 
     def of(self, access, default):
         """The connection that serves this grant."""
@@ -41,6 +42,8 @@ class Fallback:
             return False  # remote debugging is off: the caller reports the actionable reason
         self.remote = remote
         self.grants.add(access)
+        if target := (access.grant or {}).get("target_id"):  # a picked tab: remember what it was
+            self.picked[access] = getattr(self.chrome.browser, "tabinfo", {}).get(str(target))
         print(f"Chrome extension refused {error.method}: {error.code}; this grant uses remote debugging",
               flush=True)
         if hasattr(self.chrome.browser, "revoke"):
@@ -49,6 +52,16 @@ class Fallback:
         for page in self.chrome.pages.pop(access, {}).values():
             await page.close()
         return True
+
+    def selected(self, access, target_id, targets):
+        """A picked tab's id belongs to the extension; find the same tab (url and title) among remote targets.
+
+        Never widens consent: a tab that is not found exactly once selects nothing."""
+        if not target_id or access not in self.grants:
+            return target_id
+        want = self.picked.get(access)
+        found = [t["targetId"] for t in targets if want and (t.get("url"), t.get("title")) == want]
+        return found[0] if len(found) == 1 else UNMATCHED
 
     def changed(self, state, detail=""):
         """Remote debugging's own state: a grant's reason, never the tray's extension row."""
@@ -62,6 +75,7 @@ class Fallback:
 
     def drop(self, access):
         self.grants.discard(access)
+        self.picked.pop(access, None)
         if not self.grants and self.remote:
             remote, self.remote = self.remote, None
             self.chrome.shares.spawn(remote.close())

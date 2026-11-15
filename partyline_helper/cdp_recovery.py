@@ -104,12 +104,12 @@ async def reattach(chrome, access, page):
     except BaseException:
         if pages.get(target) is not page:
             page.stop()
-            chrome.shares.spawn(chrome.detach(page.session, access))
+            chrome.shares.spawn(chrome.detach(page.session, page.browser))
         raise
     fresh.url = url
     fresh.quiet = page.quiet
     page.stop()
-    await chrome.detach(page.session, access)
+    await chrome.detach(page.session, page.browser)
     fresh.guard(document=False, healthy=False)
     return fresh
 

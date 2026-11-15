@@ -19,6 +19,7 @@ class ExtensionTransport(BrowserConnection):
         super().__init__(changed, discovery, self.connect)
         self.opener = opener
         self.targets, self.grants, self.attached = {}, {}, set()
+        self.tabinfo = {}  # tab id -> (url, title) as last mapped, to find the same tab on another transport
         self.cancelled = set()
         self.listeners.add(self.event)
         self.detail = "Load Partyline Chrome once at chrome://extensions"
@@ -160,6 +161,7 @@ class ExtensionTransport(BrowserConnection):
         await self.control("Partyline.scope", {"tabs": [t["id"] for t in tabs],
                                                "windowId": window["id"]}, ident, guard)
         self.targets.update({str(t["id"]): ident for t in tabs})
+        self.tabinfo.update({str(t["id"]): (t.get("url"), t.get("title")) for t in tabs})
         return ((window["id"], [{"targetId": str(t["id"]), "type": "page", **t} for t in tabs]), native)
 
     async def resume(self, page):

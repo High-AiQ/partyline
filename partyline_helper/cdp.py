@@ -99,6 +99,7 @@ class Chrome:
         self.connecting = self.shares.spawn(browser.ensure())
 
     async def attach(self, access, target, pages, guard):
+        browser = self.browser_of(access)  # a late reply is cleaned up on the connection that sent it
         def arrived(result, abandoned):
             session = result.get("sessionId")
             if not session:
@@ -108,18 +109,17 @@ class Chrome:
                 if abandoned:
                     raise CDPError("attach abandoned")
             except CDPError:
-                self.shares.spawn(self.detach(session, access))
+                self.shares.spawn(self.detach(session, browser))
                 return
             # Own the session before waking the waiting command: revoke can now always find it.
-            pages[target] = Page(self.browser_of(access), access, target, session,
-                                 lambda: self.changed(access, target))
-        await self.browser_of(access).call("Target.attachToTarget", {"targetId": target, "flatten": True},
+            pages[target] = Page(browser, access, target, session, lambda: self.changed(access, target))
+        await browser.call("Target.attachToTarget", {"targetId": target, "flatten": True},
                                 guard=guard, on_result=arrived)
         return pages[target]
 
-    async def detach(self, session, access=None):
+    async def detach(self, session, browser=None):
         with contextlib.suppress(CDPError):
-            await self.browser_of(access).call("Target.detachFromTarget", {"sessionId": session})
+            await (browser or self.browser).call("Target.detachFromTarget", {"sessionId": session})
 
     @operation
     async def page(self, access):
@@ -159,7 +159,7 @@ class Chrome:
                     page = pages.pop(ident)
                     page.stop()
                     await page.close()
-            selected_target = grant.get("target_id")
+            selected_target = self.fallback.selected(access, grant.get("target_id"), targets)
             candidates = ([t for t in targets if t.get("targetId") == selected_target]
                           if selected_target else
                           [t for t in targets if t.get("active", True)
