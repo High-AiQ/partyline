@@ -29,6 +29,9 @@ def state(tree):
     result = {"source": getattr(tree, "source", "uia")}
     if reason := getattr(tree, "source_reason", None):
         result["source_reason"] = reason
+    for key in ("page_state", "recovery_hint"):
+        if value := getattr(tree, key, None):
+            result[key] = value
     if tree.partial:
         result["partial"] = tree.note or "the window is larger than one capture; call with more=true"
     if tree.old_helper:

@@ -129,6 +129,8 @@ class WindowSnapshots:
         result = {"file": ref.model_dump(mode="json"), "window": grant["id"], "title": grant["title"],
                   "width": ref.width, "height": ref.height, "variants": variants(ref),
                   "use": "slim is the usual choice; full is the window's own pixels", "unchanged": unchanged}
+        result.update({key: answer[key] for key in ("source", "page_state", "recovery_hint")
+                       if key in answer})
         if answer.get("blank") is True:
             result["note"] = BLANK
         if self.geometry.keep(grant["id"], answer.get("snapshot_id"), answer.get("geometry")):

@@ -2,6 +2,8 @@
 import asyncio
 import contextlib
 import json
+import math
+import time
 import os
 from pathlib import Path
 import re
@@ -9,6 +11,7 @@ import re
 from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
 
+RETRY_SECONDS = 60  # One Allow prompt attempt per helper per interval; driven only by requests.
 INSTRUCTION = "Enable remote debugging in Chrome at chrome://inspect/#remote-debugging"
 
 
@@ -18,6 +21,20 @@ class CDPError(ValueError):
 
 class DocumentChanged(CDPError):
     """The main document changed while element input was in flight."""
+
+
+class PageUnavailable(CDPError):
+    """A renderer crash or lost session, with a safe public recovery hint."""
+    def __init__(self, state):
+        self.state = state
+        super().__init__(f"Chrome page {state}; reload the page before acting")
+
+
+def command_error(error):
+    message = str(error.get("message", "")).lower()
+    if any(term in message for term in ("session with given id", "session closed", "target closed")):
+        return PageUnavailable("detached")
+    return CDPError("Chrome rejected the CDP command")
 
 
 def discover(root=None):
@@ -35,8 +52,11 @@ def discover(root=None):
 
 
 class BrowserConnection:
-    def __init__(self, changed=lambda state, detail: None, discovery=discover, connector=connect):
+    def __init__(self, changed=lambda state, detail: None, discovery=discover, connector=connect,
+                 timeout=asyncio.timeout, clock=time.monotonic):
         self.changed, self.discovery, self.connector = changed, discovery, connector
+        self.timeout, self.clock = timeout, clock
+        self.next_attempt, self.retry_requested = 0, False
         self.state, self.detail = "not_enabled", INSTRUCTION
         self.socket = self.reader = None
         self.pending, self.listeners, self.result_hooks = {}, set(), {}
@@ -50,16 +70,38 @@ class BrowserConnection:
         self.state, self.detail = state, detail
         self.changed(state, detail)
 
+    def request_retry(self):
+        """A new grant or explicit reload permits another refusal attempt, subject to the shared cap."""
+        self.retry_requested = True
+
+    def can_attempt(self):
+        return (not self.closed and not self.socket and self.clock() >= self.next_attempt
+                and (self.state != "refused" or self.retry_requested))
+
+    def reason(self):
+        if self.state == "disconnected":
+            detail = "Chrome connection dropped; reconnecting needs Chrome's Allow prompt"
+        elif self.state == "refused":
+            detail = "Chrome approval refused; share a window or use reload to retry Chrome's Allow prompt"
+        else:
+            return self.detail
+        remaining = max(0, math.ceil(self.next_attempt - self.clock()))
+        return detail + f" (next attempt allowed in {remaining} s)"
+
     async def ensure(self):
         async with self.lock:
-            if self.closed or self.state == "refused":
+            if self.closed:
                 return False
             if self.socket:
                 return True
+            if not self.can_attempt():
+                return False
             endpoint = self.discovery()
             if not endpoint:
                 self.report("not_enabled", INSTRUCTION)
                 return False
+            self.retry_requested = False
+            self.next_attempt = self.clock() + RETRY_SECONDS
             self.report("awaiting_approval", "Approve the remote debugging connection in Chrome")
             try:
                 socket = await self.connector(endpoint, open_timeout=None, max_size=16 * 1024 * 1024)
@@ -69,14 +111,17 @@ class BrowserConnection:
                 self.socket = socket
                 self.reader = asyncio.create_task(self.receive())
                 await self.call("Browser.getVersion")
+                await self.call("Target.setDiscoverTargets", {"discover": True})
+                if self.socket is not socket:
+                    raise CDPError("Chrome disconnected during approval")
             except asyncio.CancelledError:
                 await self.disconnect()
                 if not self.closed:
-                    self.report("refused", "Chrome connection cancelled; share again to retry")
+                    self.report("refused", "Chrome approval cancelled; share a window or use reload to retry")
                 raise
             except (OSError, TimeoutError, WebSocketException, CDPError):
                 await self.disconnect()
-                self.report("refused", "Chrome refused or closed the connection; share again to retry")
+                self.report("refused", "Chrome approval failed; share a window or use reload to retry")
                 return False
             self.report("connected")
             return True
@@ -95,7 +140,7 @@ class BrowserConnection:
         if session:
             message["sessionId"] = session
         try:
-            async with asyncio.timeout(10):
+            async with self.timeout(10):
                 guard()  # no await between consent check and websocket dispatch
                 await self.socket.send(json.dumps(message))
                 result = await future
@@ -115,7 +160,7 @@ class BrowserConnection:
                     hook(message.get("result", {}), future is None or future.done())
                 if future and not future.done():
                     if "error" in message:
-                        future.set_exception(CDPError("Chrome rejected the CDP command"))
+                        future.set_exception(command_error(message["error"]))
                     else:
                         future.set_result(message.get("result", {}))
                 elif "method" in message:
@@ -130,7 +175,9 @@ class BrowserConnection:
                 if not future.done():
                     future.set_exception(CDPError("Chrome disconnected"))
             if not self.closed:
-                self.report("refused", "Chrome disconnected; share again to retry")
+                connected = self.state == "connected"
+                self.report("disconnected" if connected else "refused",
+                            "Chrome connection dropped" if connected else "Chrome approval connection closed")
 
     async def disconnect(self):
         socket, self.socket = self.socket, None

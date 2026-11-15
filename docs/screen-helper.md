@@ -795,6 +795,8 @@ only during agent control, injects input and listens for the kill switch. Automa
 headless development server cannot verify real desktop capture; native interactive
 smoke testing is still required on each platform.
 
+Window reading and actions are generic. The helper follows DOM, shadow-DOM, accessibility-tree and UI Automation rules that hold on every site and app; it carries no selectors, names or special cases for a particular website. When a site misbehaves, fix the general rule and test it with a neutral fixture.
+
 ## Agent control
 
 An agent on the line can ask to drive the mouse and keyboard **inside the shared
@@ -1157,7 +1159,7 @@ Chrome, changes its command line, copies a profile, or installs an extension. De
 closing the prompt leaves UIA available. Share again to retry a refused connection.
 
 The tray and server device snapshot report `not_enabled` (with the setting instruction),
-`awaiting_approval`, `connected`, or `refused`. `screen_elements` includes `source: cdp|uia`
+`awaiting_approval`, `connected`, `disconnected`, or `refused`. `screen_elements` includes `source: cdp|uia`
 and an explanation when Chrome mapping falls back to UIA. Chrome discovery follows
 [Chrome's approved-session flow](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session)
 and the `DevToolsActivePort` reader in
@@ -1193,6 +1195,42 @@ The picker-open probe uses Chrome's
 [`:open` support](https://developer.chrome.com/release-notes/133), and keys use the
 [CDP Input protocol](https://chromedevtools.github.io/devtools-protocol/tot/Input/).
 Unsupported CDP actions report an error; they never also run a UIA action.
+
+Helper **1.4.2** observes renderer crashes (`Inspector.targetCrashed`,
+`Target.targetCrashed`), target information changes, and session detachment. AX/evaluate
+failures after a crash event retain that state. Reads may fall back: `screen_elements` returns Chrome's UIA window controls with `source: uia`,
+`page_state: crashed` (or `detached`), and `recovery_hint`. `screen_window_snapshot`
+includes the same metadata alongside the captured window pixels. UIA IDs from this
+read can invoke Chrome's Reload button, select another tab, or edit its address bar.
+Still-crashed reads go directly to UIA: renderer commands can hang until their deadline,
+so probes wait for Chrome's recovery event. Old page IDs cannot dispatch through UIA;
+page actions are refused with a reload hint.
+
+Use `screen_element_action(element_id="page", action="reload", window=<grant>)`
+to reload the mapped active tab without a page element ID or a working AX tree.
+It requires helper Chrome capability 4 (older helpers are refused before dispatch) and
+has the same write authorization, grant spending and audit as other element actions;
+`then={}` can read the recovered page. A live page uses `Page.reload`; a crashed or
+detached page uses `Page.navigate` to its last known URL. Recovery never repeats an
+interrupted write automatically. After the event quiet deadline, the helper attaches a
+fresh session to the same target and installs its isolated world, binding, observer and
+lifecycle subscription again. The next read returns to `source: cdp`. If the person
+reloads by hand, `Inspector.targetReloadedAfterCrash` permits the next requested read
+to probe the recovered renderer once and restore its session without a new grant or Chrome approval, provided the tab and browser connection remain
+the same. Ending the grant gates recovery commands and late attach responses too.
+
+Helper **1.4.2** distinguishes a dropped approved socket (`disconnected`) from a denied
+or failed approval (`refused`). A dropped socket reconnects on the next CDP need. A new
+local window share, a standing `screen_attach_window` grant, or an explicit `reload`
+permits retrying a refusal. All paths share one helper-wide limit: at most one connection
+attempt, and therefore one possible Chrome Allow prompt, per 60 seconds. The limit
+uses a monotonic clock and is checked only on requests; there is no retry timer.
+While waiting, reads remain on UIA and `source_reason` reports the state, the possible
+Allow prompt, and the seconds until another attempt is allowed. Approval remains
+Chrome's decision. A reload that starts or finds a pending approval returns `failed`
+immediately with an awaiting-approval reason; reads and UIA actions remain available.
+Call reload again after Chrome allows the connection. Approval never schedules a
+page reload automatically. An already dispatched page action is never replayed on reconnect.
 
 `screen_eval(expression=<JavaScript>, window=<grant>)` reads page state or navigates with
 `location.assign` in the active page and returns bounded JSON (a truncated preview for large results).
@@ -1232,6 +1270,19 @@ and any difference. Upload sanitized evidence to the line; keep host/account det
 1. Open `/lab/a11y` in the existing signed-in Chrome window. Disable remote debugging and
    share it. Run `screen_elements(refresh=true)`; expect `source: uia` and the Chrome setting
    instruction. Enable the setting, read again, approve Chrome's prompt, and expect `source: cdp`.
+   With helper 1.4.2, crash a disposable tab using Chrome's crash test page. Read with
+   `refresh=true`; expect `source: uia`, `page_state: crashed`, the reload hint and
+   Chrome's toolbar/tab controls. Invoke a UIA Reload control, then confirm the next
+   read returns to CDP without granting again. Repeat with
+   `screen_element_action(element_id="page", action="reload", then={})`, and with a
+   manual Reload. Confirm an old page ID is refused while crashed, another tab can
+   be selected through UIA, live reload works, and revoke during recovery prevents
+   subsequent session commands. Record helper version and returned metadata.
+   Drop the approved browser connection, then request another read: expect
+   `disconnected` and a retry countdown in `source_reason`, UIA while waiting, and
+   at most one new Allow prompt after 60 seconds. Deny once, then create a new
+   standing window grant or use `reload`; verify the same cooldown and recovery.
+   Repeated reads or attaches during that minute must not open more prompts.
    Verify tray/device states through not enabled, awaiting approval and connected. On a separate
    session deny once, confirm refused/UIA, then share again and approve.
 2. **Sync enable:** find the select and Sync target. Select B with `then={}`. Check the page

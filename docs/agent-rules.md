@@ -11,6 +11,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 | DO | DO NOT |
 | --- | --- |
 | Partyline never polls; it reacts to events. Deadlines are one-shot timers, keepalives are protocol pings; the browser learns state from websocket/stream pushes (snapshot on connect), never by polling or retry-fetching | Re-check state on a timer, or schedule browser fetches to learn state |
+| Keep partyline generic: every behavior follows a general rule (web, DOM, shadow DOM, UI Automation, platform) that any site or project gets; reproduce a site's quirk with a neutral fixture (`x-button`, `example.test`) | Name or special-case a particular website, client project or a site's components (custom-element tags, selectors, URLs, labels) in code, tests, fixtures, comments, docs or commit messages |
 | Keep every process a real interactive process in a pty | Substitute a headless invocation or an SDK call |
 | Post assistant speech from structured transcripts | Turn terminal screen contents into chat messages |
 | Post media and service links as host-relative paths (`/api/media/<id>/slim`) or the LAN host | Post `0.0.0.0`, `127.0.0.1`, or `localhost` URLs; people reach this over LAN or HTTPS |

@@ -69,6 +69,7 @@ async def attach(shares, message, generation=None):
         entry["outline_task"] = shares.spawn(outline.start())
         state = EventState()
         entry["event_state"], access.event_status = state, state.status
+        shares.chrome.start(access, retry=True)
         shares.spawn(shares.start_events(grant_id, selected["hwnd"]))
         shares.session.window_access_audit.append(line, agent, "attach", selected["process"],
                                                   selected["title"], "granted")

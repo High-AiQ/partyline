@@ -98,6 +98,8 @@ class WindowTask:
             result["source"] = "uia"
             if chrome and self.session.window in chrome.reasons:
                 result["source_reason"] = chrome.reasons[self.session.window]
+        if chrome:
+            result.update(chrome.metadata(self.session.window))
         return result
 
     async def _read(self, request_id, options=None, message=None, queued=None):

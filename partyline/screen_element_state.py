@@ -119,6 +119,8 @@ class ElementState:
                 return tree
             tree.source = response.get("source", "uia")
             tree.source_reason = response.get("source_reason")
+            tree.page_state = response.get("page_state")
+            tree.recovery_hint = response.get("recovery_hint")
             counter = response.get("captured_event_counter")
             if not started:
                 tree.event_counter = counter

@@ -3081,3 +3081,32 @@ scroll's rectangle shifts as updates can mark a Document changed and fold away t
 enabled state actually changed. The layout-shift regression in `tests/test_screen_state_truth.py`
 requires that link to remain visible. A live/snapshot mismatch also takes precedence over ancestor
 evidence in either direction; a disabled ancestor must never conceal stale state on the target.
+
+### Chrome renderer failure does not remove the browser UI
+
+A page session can stay attached after its renderer crashes. Assuming every mapped
+CDP target remains readable stranded the agent on “Aw, Snap!” and hid Chrome's own
+Reload button. Keep renderer health separate from consent, observe crash/detach events,
+and allow reads to use UIA. The no-fallback rule protects actions from double dispatch;
+it does not forbid read fallback. `tests/test_cdp_recovery.py` covers the dead renderer,
+UIA controls, reload, automatic read recovery and revoke races.
+
+A renderer command on a crashed Chrome session can remain unanswered rather than
+returning a crash error. Probe only after `Inspector.targetReloadedAfterCrash`;
+known-crashed reads must reach UIA without a renderer round trip. The recovery fake
+leaves evaluate/AX/frame-tree commands pending and drives their deadlines with a
+fake clock, so an immediate synthetic error cannot hide a ten-second stall.
+
+An approved browser socket dropping is distinct from approval refusal. Treating both
+as a permanent refusal stranded standing window grants because only the local picker
+reset the state. Dropped sockets may reconnect on demand; new grants and explicit
+reloads can retry refusals, all under one helper-wide 60-second prompt budget.
+`tests/test_cdp_reconnect.py` uses a fake clock for disconnect, standing/local regrant,
+reload, cooldown reporting and concurrent request storms.
+
+Starting Chrome approval outside the operation queue is insufficient if a page action
+then awaits that approval task. The Allow prompt has no deadline, so such a reload
+held the entire window queue and survived revocation. Reload now starts approval and
+returns a failed, explicit retry instruction immediately. The blocking-connector test
+in `tests/test_cdp_reconnect.py` proves reads and UIA actions continue while the prompt
+is unanswered, approval cannot silently reload, and revocation cancels the pending attempt.

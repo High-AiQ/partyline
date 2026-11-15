@@ -29,7 +29,7 @@ def same_bounds(bounds, rect):
                for key, value in zip(("left", "top", "width", "height"), rect, strict=True))
 
 
-async def map_window(connection, access, guard, bounds=frame):
+async def map_window(connection, access, guard, bounds=frame, recovery_target=None):
     grant = access.grant
     if not grant or grant.get("process", "").lower() != "chrome.exe":
         raise CDPError("not a Chrome window")
@@ -55,6 +55,9 @@ async def map_window(connection, access, guard, bounds=frame):
             groups.setdefault(result["windowId"], []).append(target)
     candidates = [(ident, pages) for ident, pages in groups.items()
                   if any(title_matches(page.get("title", ""), window["title"]) for page in pages)]
+    if not candidates and recovery_target:
+        candidates = [(ident, pages) for ident, pages in groups.items()
+                      if any(t["targetId"] == recovery_target for t in pages)]
     if len(candidates) != 1:
         raise CDPError("Chrome window mapping ambiguous or missing; using UIA")
     return candidates[0], window

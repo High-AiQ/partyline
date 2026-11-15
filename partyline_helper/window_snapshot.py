@@ -89,6 +89,8 @@ class WindowSnapshots:
             image = draw(image, found)
         with timing.phase("encode_ms"):
             binary, mime, black = await asyncio.to_thread(prepare, image)
+        chrome = getattr(getattr(access, "session", None), "chrome", None)
+        metadata = chrome.metadata(access) if chrome else {}
         agent = str(message.get("agent") or "an agent")[:80]
 
         async def gate():
@@ -108,7 +110,8 @@ class WindowSnapshots:
                 raise GrabError("the helper could not write its audit log") from exc
         chunks = [binary[i:i + CHUNK] for i in range(0, len(binary), CHUNK)]
         await self.reply(request_id, chunks, gate, ok=True, mime=mime, width=image.width,
-                         height=image.height, media=True, chunks=len(chunks), timing=timing.values,
+                         height=image.height, media=True, chunks=len(chunks),
+                         timing=timing.values, **metadata,
                          **({"blank": True} if black else {}),
                          **({"snapshot_id": ident, "geometry": {k: geometry[k] for k in (
                              "rect", "size", "regions", "dpi")}} if ident else {}),
@@ -140,8 +143,10 @@ class WindowSnapshots:
         from .cdp_transport import CDPError
         from .point_cdp import page_frame
         try:
-            page = await chrome.page(access)
-            return (await page_frame(page, grant["hwnd"]))[:3] if page else None
+            page = chrome.pages.get(access, {}).get(chrome.selected.get(access))
+            if not page or not page.live or page.page_state != "alive":
+                return None
+            return (await page_frame(page, grant["hwnd"]))[:3]
         except (CDPError, OSError):
             return None
 

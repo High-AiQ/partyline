@@ -6,7 +6,7 @@ from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, patch
 
 from partyline_helper.cdp_actions import evaluate
-from partyline_helper.cdp_recipes import SELECT_PLAN
+from partyline_helper.cdp_recipes import HIT, SELECT_PLAN
 from partyline_helper.cdp_transport import CDPError
 from tests.cdp_fakes import Fixture
 from tests.screen_helper_fakes import checkpoint
@@ -171,3 +171,40 @@ console.log(JSON.stringify({result,invalid,selected:e.selectedIndex}));
         self.assertEqual(value["result"], dict(index=3, current=1, label="C",
                                                direction="ArrowDown", steps=2, popup=True))
         self.assertIn("error", value["invalid"])
+
+
+class HitRecipe(TestCase):
+    def run_hit(self, scene):
+        script = r"""
+const innerWidth=800, innerHeight=600;
+const doc={host:null};
+const el=(tagName,parentNode=null,attrs={})=>({tagName,parentNode,assignedSlot:null,shadowRoot:null,
+  getAttribute:k=>attrs[k]??null,getRootNode(){let n=this;while(n.parentNode)n=n.parentNode;return n;},
+  getBoundingClientRect:()=>({x:10,y:10,width:100,height:40}),ownerDocument:doc});
+const shadow=(host,mode,hit)=>{const root={host,mode,parentNode:null,elementFromPoint:()=>hit(),
+  getRootNode:()=>host.getRootNode()};if(mode==='open')host.shadowRoot=root;return root;};
+const body=el('BODY',doc);
+const host=el('X-BUTTON',body);
+let target, top;
+switch(SCENE){
+ case 'open-host': {const root=shadow(host,'open',()=>host);target=el('BUTTON',root);top=host;break;}
+ case 'open-empty': {const root=shadow(host,'open',()=>null);target=el('BUTTON',root);top=host;break;}
+ case 'closed-host': {const root=shadow(host,'closed',()=>null);target=el('BUTTON',root);top=host;break;}
+ case 'slotted': {shadow(host,'open',()=>null);target=el('SPAN',host);top=host;break;}
+ case 'overlay': {target=el('BUTTON',body);top=el('DIV',body,{'aria-label':'Dialog'});break;}
+ case 'plain-ancestor': {const wrap=el('DIV',body);target=el('BUTTON',wrap);top=wrap;break;}
+}
+doc.elementFromPoint=()=>top;
+console.log(JSON.stringify((RECIPE).call(target)));
+""".replace("RECIPE", HIT).replace("SCENE", json.dumps(scene))
+        result = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True)
+        return json.loads(result.stdout)
+
+    def test_a_hit_on_the_targets_own_component_host_counts_as_the_target(self):
+        for scene in ("open-host", "open-empty", "closed-host", "slotted"):
+            with self.subTest(scene=scene):
+                self.assertEqual(self.run_hit(scene), {"hit": True})
+
+    def test_unrelated_overlays_and_plain_ancestors_still_cover_the_target(self):
+        self.assertEqual(self.run_hit("overlay"), {"hit": False, "reason": 'covered by DIV "Dialog"'})
+        self.assertEqual(self.run_hit("plain-ancestor"), {"hit": False, "reason": "covered by DIV"})

@@ -151,9 +151,7 @@ class WindowShares:
             outline = self.outline_factory(selected["hwnd"], pid=selected["pid"])
             self.grants[ident]["outline"] = outline
             self.grants[ident]["outline_task"] = self.spawn(outline.start())
-            if self.chrome.browser.state == "refused":
-                self.chrome.browser.state = "not_enabled"  # a new local share explicitly retries approval
-            self.chrome.start(access)
+            self.chrome.start(access, retry=True)
             self.spawn(self.start_events(ident, selected["hwnd"]))
             selected, registered = None, None
             self.changed()
