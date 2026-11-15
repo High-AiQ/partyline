@@ -195,8 +195,8 @@ class WindowShares:
         state = entry.setdefault("event_state", EventState())
         entry["access"].event_status = state.status
         entry["access"].event_state = state
-        def changed():
-            state.changed()  # UIA thread advances the barrier before scheduling any push
+        def changed(source=None):
+            state.changed(source)  # UIA thread advances the barrier before scheduling any push
             loop.call_soon_threadsafe(self.queue_change, ident)
         subscription = self.event_factory(hwnd, changed)
         state.subscription = subscription

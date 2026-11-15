@@ -72,6 +72,9 @@ class Snapshot:
         self.changed = False  # a resumed read found the page different: elements may be missing or repeated
         self.counts = None
         self.scope, self.scoped = None, False
+        self.sources = False  # the helper can say which elements events came from
+        self.moved = False  # events arrived while the parts were read
+        self.busy = frozenset()  # outermost elements still changing when the capture ended
         self.prior_helpers = {}
         self.action_ids = {}  # older IDs are for live action validation, never cached query answers
 

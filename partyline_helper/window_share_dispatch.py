@@ -71,4 +71,7 @@ async def _event_status(shares, entry, message):
     else:
         state = entry.get("event_state")
         status = state.status() if state else {}
+        since = message.get("events_since")
+        if state and isinstance(since, int) and not isinstance(since, bool):
+            status["event_sources"] = access.event_sources(since)
     await shares.session.send("window_elements", request_id=message["request_id"], **status)

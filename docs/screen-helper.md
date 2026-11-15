@@ -1081,6 +1081,28 @@ returned reply; the next read's barrier detects it even if its debounced push is
 A `more` across a counter change restarts from the root, or explicitly reports an inconsistent tree;
 it never silently combines epochs. A restarted continuation returns `continuation_restarted`.
 
+**Busy subtrees (helper 1.4.4).** A window whose one subtree raises events without end (a view that keeps
+enumerating) must still read and act. UIA handlers register with a cache request for the sender's runtime id
+(the element scope; UIA forbids a parent scope), so each event names its sender without a COM call; `EventState` keeps the distinct sources (a source
+that fires continuously is one entry, bounded at 512) and the helper maps runtime ids to element ids, with a
+wrapper standing for its nearest listed ancestor. `event_status` with `events_since=<counter>` adds
+`event_sources` (`ids`: each source with its listed ancestors from the read's child-index paths, nearest first;
+`unsure`: sources whose ancestry may be stale because an ancestor raised an event after they were listed;
+`unplaced`; `overflow`); status carries `event_sources_supported`. The server judges
+a capture by where events came from, not by whether any came:
+
+| Situation | Outcome |
+| --- | --- |
+| Events only from elements outside what the read answers (a `root`, an `id`, a query's matches) | The read is clean; `change_event_since_snapshot` is false |
+| Events from placed elements the read covers | One recapture, then the tree is returned with `busy`, naming the outermost busy subtrees and `root=<id>` of stable parts to read instead |
+| Events the helper cannot place (never listed, overflow, none named) | The old rule: up to eight attempts, then `partial` says to read the whole window once, then scope by `root` or `query` |
+| An action whose target, ancestors and descendants had no events | The action proceeds without a recapture, even while another subtree is busy; descendants count even when a query's tree kept no node for them |
+| An event at the target, above it or below it, or a source with stale ancestry (an ancestor event, or an event with no sender or an unlisted one, after it was listed) that the tree does not hold | The tree is read again; every action target is proved against the live event counter, fresh tree or not, retained ids included; the action is refused if the target is still changing |
+
+Continuation parts send `tolerate_events`, so the helper no longer refuses them for an unrelated event;
+the final judgement covers the whole capture. No polling or sleeps are added: each judgement is one
+status exchange after a capture.
+
 `uia_events.PROPERTIES` includes IsEnabled (30010), Value (30045), Toggle (30086), SelectionItem
 (30079), ExpandCollapse (30070), Name (30005), AriaRole (30101), AriaProperties (30102) and
 LegacyIAccessible State (30096). Persistent property and structure registration uses
