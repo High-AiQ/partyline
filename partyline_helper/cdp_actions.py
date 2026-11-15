@@ -1,7 +1,7 @@
 """Page input dispatched through a consent-guarded CDP session."""
 import json
 
-from .cdp_recipes import STATE
+from .cdp_recipes import HIT, STATE
 from .cdp_input import key
 from .cdp_select import select_option
 from .cdp_transport import CDPError, DocumentChanged
@@ -36,11 +36,10 @@ async def act(page, message):
                 raise CDPError("select requires an option name or value")
             extra = await select_option(page, backend, message["value"])
         elif action in ("invoke", "toggle", "select"):
-            state = await page.function(backend, STATE)
-            hit = state.get("hit")
-            if hit is False or isinstance(hit, dict) and not hit.get("hit"):
-                reason = hit.get("reason") if isinstance(hit, dict) else state.get("hit_reason")
-                raise CDPError(reason or "element is covered or outside the viewport")
+            hit = await page.function(backend, HIT)
+            if not hit.get("hit"):
+                raise CDPError(hit.get("reason") or hit.get("hit_reason")
+                               or "element is covered or outside the viewport")
             box = await page.call("DOM.getBoxModel", {"backendNodeId": backend})
             quad = box["model"]["content"]
             point = {"x": sum(quad[::2]) / 4, "y": sum(quad[1::2]) / 4, "button": "left", "clickCount": 1}
@@ -51,6 +50,8 @@ async def act(page, message):
         elif action == "set_value":
             await key(page, "a", 65, 2)  # select existing text using real keyboard input
             await page.call("Input.insertText", {"text": message.get("value", "")})
+        elif action == "scroll_into_view":
+            extra = {"hit": await page.function(backend, HIT)}
         elif action == "press":
             if message.get("key") not in KEYS:
                 raise CDPError("press requires enter, tab or escape")
