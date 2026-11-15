@@ -6,6 +6,7 @@ import json
 from websockets.exceptions import ConnectionClosed
 
 from .cdp_actions import act, evaluate
+from .cdp_dialogs import dialog_pointer
 from .cdp_mapping import frame, map_window, title_matches
 from .cdp_page import Page
 from .cdp_recovery import HINT, reload, read as read_page
@@ -13,11 +14,12 @@ from .cdp_transport import BrowserConnection, CDPError, INSTRUCTION
 
 
 class Chrome:
-    def __init__(self, shares, connection=None, bounds=frame):
+    def __init__(self, shares, connection=None, bounds=frame, dialogs=dialog_pointer):
         self.shares, self.session, self.bounds = shares, shares.session, bounds
         self.browser = connection or BrowserConnection(self.report)
         self.pages, self.reasons, self.selected, self.sources = {}, {}, {}, {}
         self.connecting = None
+        self.dialogs = dialogs
 
     def report(self, state, detail):
         self.session.status.chrome = f"Chrome: {state.replace('_', ' ')}" + (f" — {detail}" if detail else "")
@@ -196,7 +198,14 @@ class Chrome:
             self.shares.queue_change(access.session.window_grant_id)
 
     async def read(self, access, options, message):
-        return await read_page(self, access, options, message)
+        result = await read_page(self, access, options, message)
+        if result is not None:
+            page = self.pages[access][self.selected[access]]
+            pointer = await asyncio.to_thread(self.dialogs, access.grant)
+            page.guard()
+            if pointer:
+                result["source_reason"] = pointer
+        return result
 
     def metadata(self, access):
         page = self.pages.get(access, {}).get(self.selected.get(access))

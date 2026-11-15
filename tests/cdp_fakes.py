@@ -31,6 +31,7 @@ class Socket:
         self.states = {1: {}, 2: dict(tag="A", aria_disabled=True, hit=True),
                        3: dict(tag="SELECT", value="old", selected_index=0, selected_count=1, hit=True)}
         self.eval_value = {"ok": True}
+        self.document = {}
         self.options = [dict(label="Old", value="old"), dict(label="New", value="New")]
         self.focused = None
         self.input_events = []
@@ -74,6 +75,8 @@ class Socket:
             return {"executionContextId": 1}
         if method == "Accessibility.getFullAXTree":
             return {"nodes": self.nodes}
+        if method == "DOM.getDocument":
+            return {"root": self.document}
         if method == "DOM.resolveNode":
             return {"object": {"objectId": str(p["backendNodeId"])}}
         if method == "Runtime.callFunctionOn":
@@ -109,7 +112,8 @@ class Fixture:
         self.session = SimpleNamespace(status=Status(), send=AsyncMock(), tools=SimpleNamespace(audit=Mock()),
                                        share=None, accepted=False)
         self.shares = WindowShares(self.session)
-        self.chrome = Chrome(self.shares, self.browser, bounds=lambda hwnd: (10, 20, 800, 600))
+        self.chrome = Chrome(self.shares, self.browser, bounds=lambda hwnd: (10, 20, 800, 600),
+                             dialogs=lambda grant: None)
         self.shares.chrome = self.chrome
         self.browser.changed = self.chrome.report
         self.window = dict(hwnd=1, pid=12, title="Lab - Google Chrome", process="chrome.exe")
