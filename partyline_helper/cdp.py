@@ -8,6 +8,7 @@ from websockets.exceptions import ConnectionClosed
 from .cdp_actions import act, evaluate
 from .cdp_mapping import frame, map_window, title_matches
 from .cdp_page import Page
+from .cdp_recovery import HINT, reload, read as read_page
 from .cdp_transport import BrowserConnection, CDPError, INSTRUCTION
 
 
@@ -64,7 +65,7 @@ class Chrome:
         state = entry.get("event_state")
         result = state.status() if state else {"event_counter": 0, "events_supported": False,
                                                "subscription_live": False}
-        if any(p.live for p in self.pages.get(access, {}).values()):
+        if any(p.live and p.page_state == "alive" for p in self.pages.get(access, {}).values()):
             result.update(events_supported=True, subscription_live=True)
         return result
 
@@ -134,7 +135,9 @@ class Chrome:
                                         else self.browser.detail)
                 return None
             guard()
-            (_, targets), window = await map_window(self.browser, access, guard, self.bounds)
+            prior = self.pages.get(access, {}).get(self.selected.get(access))
+            recovery_target = prior.target if prior and prior.page_state != "alive" else None
+            (_, targets), window = await map_window(self.browser, access, guard, self.bounds, recovery_target)
             pages = self.pages.setdefault(access, {})
             scope = {target["targetId"] for target in targets}
             for ident in list(pages):
@@ -146,13 +149,16 @@ class Chrome:
             candidates = ([t for t in targets if t.get("targetId") == selected_target]
                           if selected_target else
                           [t for t in targets if title_matches(t.get("title", ""), window["title"])])
+            if not candidates and recovery_target:
+                candidates = [t for t in targets if t["targetId"] == recovery_target]
             matching = []
             for target in candidates:
                 ident = target["targetId"]
                 page = pages.get(ident) or await self.attach(access, ident, pages, guard)
+                page.url = target.get("url") or page.url
                 matching.append(page)
             if len(matching) > 1:
-                matching = [p for p in matching if await p.visible()]
+                matching = [p for p in matching if p.page_state == "alive" and await p.visible()]
             if len(matching) != 1:
                 raise CDPError("Chrome active tab title/visibility ambiguous; using UIA")
             page = matching[0]  # Windows occlusion can hide even the active tab of a covered HWND.
@@ -163,14 +169,19 @@ class Chrome:
                 access.forget()
                 self.selected[access] = page.target
                 self.changed(access)
-            if not page.initialized:
-                await page.initialize()
+            if not page.initialized and page.page_state == "alive":
+                try:
+                    await page.initialize()
+                except CDPError:
+                    if page.page_state == "alive":
+                        raise
             self.reasons.pop(access, None)
             return page
         except (CDPError, OSError, KeyError, TypeError) as exc:
             self.reasons[access] = (str(exc) + "; using UIA" if isinstance(exc, CDPError)
                                     else "Chrome mapping unavailable; using UIA")
-            self.invalidate(access)
+            if not any(p.live and p.page_state != "alive" for p in self.pages.get(access, {}).values()):
+                self.invalidate(access)
             return None
 
     def changed(self, access, target=None):
@@ -182,34 +193,48 @@ class Chrome:
             self.shares.queue_change(access.session.window_grant_id)
 
     async def read(self, access, options, message):
-        self.audit(access, message, "screen_elements")
-        page = await self.page(access)
-        if not page:
-            self.sources[access] = "uia"
-            return None
-        self.sources[access] = "cdp"
-        access.event_status = lambda: self.status(access)
-        return await page.snapshot(options)
+        return await read_page(self, access, options, message)
+
+    def metadata(self, access):
+        page = self.pages.get(access, {}).get(self.selected.get(access))
+        if page and page.page_state != "alive":
+            return {"source": "uia", "page_state": page.page_state, "recovery_hint": HINT}
+        return {}
 
     async def action(self, access, message):
         self.audit(access, message, "screen_eval" if message.get("type") == "window_eval" else
                    "screen_element_action")
+        if (message.get("action") not in ("reload", "set_files") and message.get("type") != "window_eval"
+                and self.sources.get(access) == "uia" and message.get("element_id") in access.elements):
+            return None
         page = await self.page(access)
         if message.get("action") == "set_files" and (not page or self.sources.get(access) != "cdp"):
             return {"status": "failed", "error": "CDP unavailable; use the Open dialog path instead"}
-        if message.get("type") == "window_eval":
-            if not page:
-                return {"status": "failed", "error": "screen_eval needs a mapped Chrome window",
-                        "source": "uia"}
-            return await evaluate(page, message["expression"])
+        if message.get("type") == "window_eval" and not page:
+            return {"status": "failed", "error": "screen_eval needs a mapped Chrome window",
+                    "source": "uia"}
         # An old CDP id can never dispatch through UIA after a provider switch.
+        if message.get("action") == "reload":
+            if page:
+                page.dispatched = False
+            try:
+                return await reload(self, access, page)
+            except CDPError as exc:
+                return {"status": "unconfirmed" if page and page.dispatched else "failed",
+                        "source": "cdp", "error": str(exc)}
+        if page and page.page_state != "alive":
+            return {"status": "failed", **self.metadata(access), "error": HINT}
         if not page:
-            if self.sources.get(access) == "cdp":
-                return {"status": "failed", "error": "CDP unavailable; read the window again"}
+            metadata = self.metadata(access)
+            if self.sources.get(access) == "cdp" or metadata:
+                return {"status": "failed", **metadata,
+                        "error": HINT if metadata else "CDP unavailable; read the window again"}
             return None
         page.dispatched = False
         page.operation_epoch = page.epoch
         try:
+            if message.get("type") == "window_eval":
+                return await evaluate(page, message["expression"])
             return await act(page, message)
         except CDPError as exc:
             error = str(exc)

@@ -5,10 +5,11 @@ import uuid
 from .cdp_recipes import OBSERVER, STATE, normalize
 from .cdp_ax import exposed
 from .cdp_settle import Quiet
-from .cdp_transport import CDPError, DocumentChanged
+from .cdp_transport import CDPError, DocumentChanged, PageUnavailable
+from .cdp_recovery import Recovery
 
 
-class Page:
+class Page(Recovery):
     def __init__(self, browser, access, target, session, changed):
         self.browser, self.access, self.target, self.session = browser, access, target, session
         self.grant, self.generation = access.grant, access.gate.generation
@@ -18,14 +19,18 @@ class Page:
         self.identity = uuid.uuid4().hex[:8]
         self.active, self.live, self.dispatched = False, True, False
         self.initialized = False
+        self.page_state, self.url = "alive", ""
+        self.recovery_ready = False
         self.operation_epoch = None
         self.quiet = Quiet()
         self.browser.listeners.add(self.event)
 
-    def guard(self, document=True):
+    def guard(self, document=True, healthy=True):
         if (not self.live or self.access.grant is not self.grant or self.access.gate.revoked.is_set()
                 or self.access.gate.generation != self.generation):
             raise CDPError("consent revoked")
+        if healthy and self.page_state != "alive":
+            raise PageUnavailable(self.page_state)
         if document and self.operation_epoch is not None and self.operation_epoch != self.epoch:
             raise DocumentChanged("Page document changed during input; read it again before acting")
 
@@ -33,10 +38,17 @@ class Page:
         self.guard()
         if method.startswith("Input.") or method == "DOM.setFileInputFiles":
             self.dispatched = True
-        return await self.browser.call(method, params, self.session, self.guard)
+        try:
+            return await self.browser.call(method, params, self.session, self.guard)
+        except PageUnavailable as exc:
+            self.unavailable(exc.state)
+            raise
 
     def event(self, message):
-        if not self.live or message.get("sessionId") != self.session:
+        if not self.live:
+            return
+        self.health_event(message)
+        if message.get("sessionId") != self.session:
             return
         method = message["method"]
         if method.startswith(("DOM.", "Accessibility.", "Page.")) or (
@@ -46,6 +58,7 @@ class Page:
             main_navigation = method == "Page.frameNavigated" and bool(frame) and not frame.get("parentId")
             if main_navigation:
                 self.navigations += 1
+                self.url = frame.get("url") or self.url
             if method == "DOM.documentUpdated" or main_navigation:
                 self.epoch += 1
                 self.nodes.clear()
@@ -53,7 +66,7 @@ class Page:
             self.changed()
 
     async def initialize(self):
-        for domain in ("Page", "DOM", "Accessibility", "Runtime"):
+        for domain in ("Inspector", "Page", "DOM", "Accessibility", "Runtime"):
             await self.call(domain + ".enable")
         await self.call("Page.setLifecycleEventsEnabled", {"enabled": True})
         await self.call("Runtime.addBinding", {"name": "__partylineChange",
@@ -61,6 +74,7 @@ class Page:
         await self.call("Page.addScriptToEvaluateOnNewDocument",
                         {"source": OBSERVER, "worldName": "partyline"})
         frames = await self.call("Page.getFrameTree")
+        self.url = frames["frameTree"]["frame"].get("url") or self.url
         async def observe(tree):
             context = await self.call("Page.createIsolatedWorld", {
                 "frameId": tree["frame"]["id"], "worldName": "partyline"})
@@ -83,7 +97,7 @@ class Page:
             return result.get("result", {}).get("value", {})
         finally:
             # Revocation forbids even cleanup calls; detaching releases the object group.
-            if (release and self.live and self.access.grant is self.grant
+            if (release and self.live and self.page_state == "alive" and self.access.grant is self.grant
                     and not self.access.gate.revoked.is_set()):
                 await self.call("Runtime.releaseObject", {"objectId": obj})
 
@@ -136,7 +150,8 @@ class Page:
                 elements.append(item)
                 self.nodes[ident] = node
         finally:
-            if self.live and self.access.grant is self.grant and not self.access.gate.revoked.is_set():
+            if (self.live and self.page_state == "alive" and self.access.grant is self.grant
+                    and not self.access.gate.revoked.is_set()):
                 await self.call("Runtime.releaseObjectGroup", {"objectGroup": "partyline"})
         await self.call("Runtime.evaluate", {"expression": "0", "returnByValue": True})  # renderer fence
         result = {"source": "cdp", "elements": elements, "snapshot_id": uuid.uuid4().hex,

@@ -1194,6 +1194,29 @@ The picker-open probe uses Chrome's
 [CDP Input protocol](https://chromedevtools.github.io/devtools-protocol/tot/Input/).
 Unsupported CDP actions report an error; they never also run a UIA action.
 
+Helper **1.4.1** observes renderer crashes (`Inspector.targetCrashed`,
+`Target.targetCrashed`), target information changes, and session detachment. AX/evaluate
+failures after a crash event retain that state. Reads may fall back: `screen_elements` returns Chrome's UIA window controls with `source: uia`,
+`page_state: crashed` (or `detached`), and `recovery_hint`. `screen_window_snapshot`
+includes the same metadata alongside the captured window pixels. UIA IDs from this
+read can invoke Chrome's Reload button, select another tab, or edit its address bar.
+Still-crashed reads go directly to UIA: renderer commands can hang until their deadline,
+so probes wait for Chrome's recovery event. Old page IDs cannot dispatch through UIA;
+page actions are refused with a reload hint.
+
+Use `screen_element_action(element_id="page", action="reload", window=<grant>)`
+to reload the mapped active tab without a page element ID or a working AX tree.
+It requires helper Chrome capability 4 (older helpers are refused before dispatch) and
+has the same write authorization, grant spending and audit as other element actions;
+`then={}` can read the recovered page. A live page uses `Page.reload`; a crashed or
+detached page uses `Page.navigate` to its last known URL. Recovery never repeats an
+interrupted write automatically. After the event quiet deadline, the helper attaches a
+fresh session to the same target and installs its isolated world, binding, observer and
+lifecycle subscription again. The next read returns to `source: cdp`. If the person
+reloads by hand, `Inspector.targetReloadedAfterCrash` permits the next requested read
+to probe the recovered renderer once and restore its session without a new grant or Chrome approval, provided the tab and browser connection remain
+the same. Ending the grant gates recovery commands and late attach responses too.
+
 `screen_eval(expression=<JavaScript>, window=<grant>)` reads page state or navigates with
 `location.assign` in the active page and returns bounded JSON (a truncated preview for large results).
 Never use it to click or change the page with JavaScript. Interact through
@@ -1232,6 +1255,14 @@ and any difference. Upload sanitized evidence to the line; keep host/account det
 1. Open `/lab/a11y` in the existing signed-in Chrome window. Disable remote debugging and
    share it. Run `screen_elements(refresh=true)`; expect `source: uia` and the Chrome setting
    instruction. Enable the setting, read again, approve Chrome's prompt, and expect `source: cdp`.
+   With helper 1.4.1, crash a disposable tab using Chrome's crash test page. Read with
+   `refresh=true`; expect `source: uia`, `page_state: crashed`, the reload hint and
+   Chrome's toolbar/tab controls. Invoke a UIA Reload control, then confirm the next
+   read returns to CDP without granting again. Repeat with
+   `screen_element_action(element_id="page", action="reload", then={})`, and with a
+   manual Reload. Confirm an old page ID is refused while crashed, another tab can
+   be selected through UIA, live reload works, and revoke during recovery prevents
+   subsequent session commands. Record helper version and returned metadata.
    Verify tray/device states through not enabled, awaiting approval and connected. On a separate
    session deny once, confirm refused/UIA, then share again and approve.
 2. **Sync enable:** find the select and Sync target. Select B with `then={}`. Check the page

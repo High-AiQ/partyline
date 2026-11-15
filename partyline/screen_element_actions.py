@@ -16,7 +16,7 @@ from .screen_timing import timed, phase
 ACTIONS = Literal["invoke", "toggle", "set_value", "press", "select", "add_to_selection",
                   "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent",
                   "scroll_into_view", "set_range_value", "window_close", "window_minimize", "window_maximize",
-                  "window_restore", "window_move", "window_resize", "set_files"]
+                  "window_restore", "window_move", "window_resize", "set_files", "reload"]
 # Parameters each action takes; "set_scroll_percent" needs at least one of its two.
 PARAMS = {"set_files": ("files", "paths"), "press": ("key",), "select": ("value",), "set_value": ("value",),
           "scroll": ("direction", "amount"),
@@ -63,6 +63,8 @@ class ElementAction(BaseModel):
 
     def parameters(self):
         """Reject missing or foreign parameters, so the helper only sees what the action takes."""
+        if self.action == "reload" and self.element_id != "page":
+            raise ValueError('reload requires element_id="page"')
         if self.force and self.action not in ("invoke", "toggle", "select", "expand"):
             raise ValueError("force is supported only for invoke, toggle, select and expand")
         given = {name for name in ALL_PARAMS if getattr(self, name) is not None}
@@ -113,6 +115,8 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
         message = body.parameters()
         if body.action == "press" and device.get("press", 0) < WINDOW_PRESS_VERSION:
             raise ValueError("update the Partyline helper to use press")
+        if body.action == "reload" and device.get("chrome_dom", 0) < 4:
+            raise ValueError("update the Partyline helper to use reload")
         if body.action == "set_files" and device.get("chrome_dom", 0) < 2:
             raise ValueError("CDP file upload unavailable; update the helper or "
                              "use the Open dialog path instead")
@@ -123,15 +127,20 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
             files, total = resolve_files(hub, principal, body.files or [])
             audit_files(hub, principal, grant, body.files or [], total)
         with phase("target_ms"):
-            target, _ = await hub.elements.action_target(principal, grant, body.element_id)
+            target = True
+            if body.action != "reload":
+                target, _ = await hub.elements.action_target(principal, grant, body.element_id)
         if target is None:
             return {"status": "failed", "error": REFRESH_FAILED}
         async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window
-            message["element_id"], known = hub.elements.locked_target(grant["id"], body.element_id)
+            known = True
+            if body.action != "reload":
+                message["element_id"], known = hub.elements.locked_target(grant["id"], body.element_id)
             if message["element_id"] is None:
                 return {"status": "failed", "error": REFRESH_FAILED}
             if not known:
-                return {"status": "failed", "error": STALE}
+                tree = hub.elements.snapshots.get(grant["id"])
+                return {"status": "failed", "error": getattr(tree, "recovery_hint", None) or STALE}
             hub.window_grants.spend(grant)
             if body.action == "set_files":
                 from .screen_file_input import ticket

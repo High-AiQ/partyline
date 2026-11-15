@@ -20,6 +20,20 @@ class DocumentChanged(CDPError):
     """The main document changed while element input was in flight."""
 
 
+class PageUnavailable(CDPError):
+    """A renderer crash or lost session, with a safe public recovery hint."""
+    def __init__(self, state):
+        self.state = state
+        super().__init__(f"Chrome page {state}; reload the page before acting")
+
+
+def command_error(error):
+    message = str(error.get("message", "")).lower()
+    if any(term in message for term in ("session with given id", "session closed", "target closed")):
+        return PageUnavailable("detached")
+    return CDPError("Chrome rejected the CDP command")
+
+
 def discover(root=None):
     """Chrome/Puppeteer's approved-session discovery file; never launch or copy a profile."""
     root = Path(root) if root else Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/User Data"
@@ -35,8 +49,10 @@ def discover(root=None):
 
 
 class BrowserConnection:
-    def __init__(self, changed=lambda state, detail: None, discovery=discover, connector=connect):
+    def __init__(self, changed=lambda state, detail: None, discovery=discover, connector=connect,
+                 timeout=asyncio.timeout):
         self.changed, self.discovery, self.connector = changed, discovery, connector
+        self.timeout = timeout
         self.state, self.detail = "not_enabled", INSTRUCTION
         self.socket = self.reader = None
         self.pending, self.listeners, self.result_hooks = {}, set(), {}
@@ -69,6 +85,7 @@ class BrowserConnection:
                 self.socket = socket
                 self.reader = asyncio.create_task(self.receive())
                 await self.call("Browser.getVersion")
+                await self.call("Target.setDiscoverTargets", {"discover": True})
             except asyncio.CancelledError:
                 await self.disconnect()
                 if not self.closed:
@@ -95,7 +112,7 @@ class BrowserConnection:
         if session:
             message["sessionId"] = session
         try:
-            async with asyncio.timeout(10):
+            async with self.timeout(10):
                 guard()  # no await between consent check and websocket dispatch
                 await self.socket.send(json.dumps(message))
                 result = await future
@@ -115,7 +132,7 @@ class BrowserConnection:
                     hook(message.get("result", {}), future is None or future.done())
                 if future and not future.done():
                     if "error" in message:
-                        future.set_exception(CDPError("Chrome rejected the CDP command"))
+                        future.set_exception(command_error(message["error"]))
                     else:
                         future.set_result(message.get("result", {}))
                 elif "method" in message:

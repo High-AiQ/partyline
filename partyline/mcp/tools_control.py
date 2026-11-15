@@ -12,10 +12,10 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 
 ELEMENT_ACTION_NOTE = (
-    "Act on a screen_elements id with CDP or UIA. set_files uploads 1–10 media IDs and/or local paths "
-    "to a CDP file input (media cap per file, 200 MiB total; helper data is refused). "
-    "select uses value; set_value edits text; press uses enter/tab/escape. force overrides disabled. "
-    "then re-reads after CDP settles. UIA window_* targets the shared window; drag: screen_drag.")
+    "Act on screen_elements IDs with CDP/UIA. set_files: 1–10 media IDs/local paths to CDP file inputs "
+    "(media cap per file, 200 MiB total; helper data refused). select uses value; set_value edits; "
+    "press: enter/tab/escape; force overrides disabled. then reads after CDP settles. "
+    'reload element_id="page" recovers Chrome. UIA window_* targets the window; drag: screen_drag.')
 ELEMENT_ACTION_TIMEOUT = 100  # a 20s capture deadline may be followed by a 35s exchange, then action
 WINDOW_CLICK_TIMEOUT = 130  # up to 70 s for the helper (the person is asked), then a thumb
 ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and event barrier
@@ -28,7 +28,7 @@ ELEMENT_ACTION_PROPERTIES = {
         "invoke", "toggle", "set_value", "set_files", "press", "select", "add_to_selection",
         "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent", "scroll_into_view",
         "set_range_value", "window_close",
-        "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize"]},
+        "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize", "reload"]},
     "files": {"type": "array", "minItems": 1, "maxItems": 10,
               "items": {"type": "string", "minLength": 1, "maxLength": 128},
               "description": "For set_files: readable Partyline media IDs."},

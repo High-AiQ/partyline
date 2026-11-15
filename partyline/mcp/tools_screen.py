@@ -22,6 +22,7 @@ ELEMENTS_NOTE = (
     "No arguments: "
     "summary. find by query/name, value, control_type; root=<id> lists children; text=true reads text; "
     "id=<id> reads one element; inspect=<id> compares live UIA with the stored snapshot and event clock. "
+    "Crashed/detached Chrome pages read UIA browser controls with page_state and a reload hint. "
     "Use screen_element_action on ids. Cache reuse requires a live event-counter barrier on new "
     "helpers; old helpers expire after 3 seconds. Answers include snapshot_age_seconds and "
     "change_event_since_snapshot. Refresh with refresh=true; unchanged ids survive. more=true continues."
@@ -80,7 +81,8 @@ WINDOW_SNAPSHOT_NOTE = (
     "visuals matter, or when elements do not explain what is on screen. Returns variants full, slim and "
     "thumb (url, size, image tokens); slim is the usual choice; get_media fetches one. Protected content "
     "shows black; the person sees each capture. The answer's snapshot id and pixels are what "
-    "screen_window_click takes, for a point elements cannot reach."
+    "screen_window_click takes, for a point elements cannot reach. Crashed Chrome includes source: uia, "
+    "page_state and a reload hint."
 )
 WINDOW_SNAPSHOT_PROPERTIES = {
     **{key: ELEMENTS_PROPERTIES[key] for key in ("device", "window")},

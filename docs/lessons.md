@@ -3081,3 +3081,18 @@ scroll's rectangle shifts as updates can mark a Document changed and fold away t
 enabled state actually changed. The layout-shift regression in `tests/test_screen_state_truth.py`
 requires that link to remain visible. A live/snapshot mismatch also takes precedence over ancestor
 evidence in either direction; a disabled ancestor must never conceal stale state on the target.
+
+### Chrome renderer failure does not remove the browser UI
+
+A page session can stay attached after its renderer crashes. Assuming every mapped
+CDP target remains readable stranded the agent on “Aw, Snap!” and hid Chrome's own
+Reload button. Keep renderer health separate from consent, observe crash/detach events,
+and allow reads to use UIA. The no-fallback rule protects actions from double dispatch;
+it does not forbid read fallback. `tests/test_cdp_recovery.py` covers the dead renderer,
+UIA controls, reload, automatic read recovery and revoke races.
+
+A renderer command on a crashed Chrome session can remain unanswered rather than
+returning a crash error. Probe only after `Inspector.targetReloadedAfterCrash`;
+known-crashed reads must reach UIA without a renderer round trip. The recovery fake
+leaves evaluate/AX/frame-tree commands pending and drives their deadlines with a
+fake clock, so an immediate synthetic error cannot hide a ten-second stall.
