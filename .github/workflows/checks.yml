@@ -120,6 +120,8 @@ jobs:
         working-directory: frontend
       - run: npm test
         working-directory: frontend
+      - name: Chrome extension unit tests
+        run: node --test partyline_chrome/*.test.js
 
   # partyline/static/ is committed so the app installs without Node, which
   # only works if it is actually the current build. Rebuilding and finding

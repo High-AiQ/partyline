@@ -1,28 +1,30 @@
-"""No-extension Chrome provider; UIA fallback keeps the existing window contract."""
+"""Chrome provider; UIA fallback keeps the existing window contract."""
 import asyncio
 import contextlib
-import json
 
 from websockets.exceptions import ConnectionClosed
 
 from .cdp_actions import act, evaluate
-from .cdp_dialogs import dialog_pointer
+from .cdp_dialogs import dialog_pointer, with_dialog_pointer
 from .cdp_mapping import frame, map_window, title_matches
 from .cdp_page import Page
 from .cdp_recovery import HINT, reload, read as read_page
-from .cdp_transport import BrowserConnection, CDPError, INSTRUCTION
+from .cdp_transport import CDPError, INSTRUCTION
+from .chrome_operations import audit, chrome_label, operation, preferred
 
 
 class Chrome:
     def __init__(self, shares, connection=None, bounds=frame, dialogs=dialog_pointer):
         self.shares, self.session, self.bounds = shares, shares.session, bounds
-        self.browser = connection or BrowserConnection(self.report)
+        self.auto_transport = connection is None
+        self.browser = connection or preferred(self.report)
         self.pages, self.reasons, self.selected, self.sources = {}, {}, {}, {}
-        self.connecting = None
-        self.dialogs = dialogs
+        self.connecting, self.dialogs = None, dialogs
+        self.transport_lock = asyncio.Lock()
 
     def report(self, state, detail):
-        self.session.status.chrome = f"Chrome: {state.replace('_', ' ')}" + (f" — {detail}" if detail else "")
+        label = chrome_label(self.browser, state)
+        self.session.status.chrome = "Chrome: " + label + (f" — {detail}" if detail else "")
         self.session.status.changed()
         self.shares.spawn(self.publish(state, detail))
         for entry in self.shares.grants.values():
@@ -40,7 +42,8 @@ class Chrome:
 
     async def publish(self, state, detail):
         with contextlib.suppress(ConnectionClosed, OSError):
-            await self.session.send("chrome_state", state=state, detail=detail)
+            await self.session.send("chrome_state", state=state, detail=detail,
+                                    transport=self.browser.transport)
 
     def invalidate(self, access):
         for page in self.pages.get(access, {}).values():
@@ -51,6 +54,8 @@ class Chrome:
             self.shares.queue_change(access.session.window_grant_id)
 
     def revoke(self, access):
+        if hasattr(self.browser, "revoke"):
+            self.browser.revoke(access)
         self.invalidate(access)  # synchronous: no more page commands or event payloads
         for page in self.pages.pop(access, {}).values():
             self.shares.spawn(page.close())
@@ -67,25 +72,21 @@ class Chrome:
         state = entry.get("event_state")
         result = state.status() if state else {"event_counter": 0, "events_supported": False,
                                                "subscription_live": False}
-        if any(p.live and p.page_state == "alive" for p in self.pages.get(access, {}).values()):
+        if any(p.live and p.page_state == "alive" and (not hasattr(self.browser, "is_attached")
+                          or self.browser.is_attached(p.session))
+               for p in self.pages.get(access, {}).values()):
             result.update(events_supported=True, subscription_live=True)
         return result
 
     def audit(self, access, message, operation):
-        info = {"grant": access.session.window_grant_id, "line": message.get("line_id", ""),
-                "process": message.get("agent", ""), "operation": operation,
-                "input_length": len(message.get("expression", message.get("value", "")) or "")}
-        if message.get("action") == "set_files":
-            info.update(operation="set_files", file_count=len(message.get("files", [])),
-                        total_bytes=sum(f["bytes"] for f in message.get("files", [])),
-                        media_ids=[f["id"] for f in message.get("files", [])])
-        self.session.tools.audit.append("action", "window", str(info["process"])[:120], "chrome",
-                                        json.dumps(info, separators=(",", ":")))
+        audit(self, access, message, operation)
 
     def start(self, access, retry=False):
         """Start approval outside the operation queue; reads continue through UIA while it is pending."""
         if (not access.grant or access.grant.get("process", "").lower() != "chrome.exe"
                 or access.gate.revoked.is_set()):
+            return
+        if access.grant.get("chrome_cancelled"):
             return
         if retry:
             self.browser.request_retry()
@@ -120,8 +121,15 @@ class Chrome:
         with contextlib.suppress(CDPError):
             await self.browser.call("Target.detachFromTarget", {"sessionId": session})
 
+    @operation
     async def page(self, access):
         if not access.grant or access.grant.get("process", "").lower() != "chrome.exe":
+            return None
+        if access.grant.get("chrome_cancelled"):
+            self.reasons[access] = "Debugging cancelled in Chrome; share this window again; using UIA"
+            return None
+        if hasattr(self.browser, "denial") and (reason := self.browser.denial(access)):
+            self.reasons[access] = reason + "; using UIA"
             return None
         grant, generation = access.grant, access.gate.generation
         def guard():
@@ -153,7 +161,8 @@ class Chrome:
             selected_target = grant.get("target_id")
             candidates = ([t for t in targets if t.get("targetId") == selected_target]
                           if selected_target else
-                          [t for t in targets if title_matches(t.get("title", ""), window["title"])])
+                          [t for t in targets if t.get("active", True)
+                           and title_matches(t.get("title", ""), window["title"])])
             if not candidates and recovery_target:
                 candidates = [t for t in targets if t["targetId"] == recovery_target]
             matching = []
@@ -174,6 +183,8 @@ class Chrome:
                 access.forget()
                 self.selected[access] = page.target
                 self.changed(access)
+            if hasattr(self.browser, "resume") and page.page_state == "alive":
+                await self.browser.resume(page)
             if not page.initialized and page.page_state == "alive":
                 try:
                     await page.initialize()
@@ -197,22 +208,19 @@ class Chrome:
             entry["event_state"].changed()
             self.shares.queue_change(access.session.window_grant_id)
 
+    @operation
     async def read(self, access, options, message):
-        result = await read_page(self, access, options, message)
-        if result is not None:
-            page = self.pages[access][self.selected[access]]
-            pointer = await asyncio.to_thread(self.dialogs, access.grant)
-            page.guard()
-            if pointer:
-                result["source_reason"] = pointer
-        return result
+        return await with_dialog_pointer(self, access, await read_page(self, access, options, message))
 
     def metadata(self, access):
+        if access.grant and access.grant.get("chrome_cancelled"):
+            return {}  # cancellation requires resharing, never the crash-recovery reload path
         page = self.pages.get(access, {}).get(self.selected.get(access))
         if page and page.page_state != "alive":
             return {"source": "uia", "page_state": page.page_state, "recovery_hint": HINT}
         return {}
 
+    @operation
     async def action(self, access, message):
         self.audit(access, message, "screen_eval" if message.get("type") == "window_eval" else
                    "screen_element_action")
@@ -265,6 +273,7 @@ class Chrome:
         finally:
             page.operation_epoch = None
 
+    @operation
     async def tabs(self, access):
         """Provider hook for standing-window enumeration: only call with a locally authorized HWND.
 

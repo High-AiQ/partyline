@@ -111,7 +111,8 @@ def snapshot(provider, query, frame=None, finder=matches):
                 changed = True
                 continue
     timing.values.update(nodes=len(rows), com_calls=getattr(provider, 'com_calls', 0))
-    result = {'elements': [rows[path] for path in sorted(rows)], 'paths': paths,
+    runtimes = [[list(runtime), ident] for runtime, (_, ident) in known.items() if ident]
+    result = {'elements': [rows[path] for path in sorted(rows)], 'paths': paths, 'runtimes': runtimes,
               'snapshot_id': uuid.uuid4().hex, 'truncated': truncated, 'scoped': True}
     if changed:
         result['changed'] = True

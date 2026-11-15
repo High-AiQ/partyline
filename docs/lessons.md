@@ -9,6 +9,36 @@ and their documentation now state the complete sequence. The fake-only regressio
 `tests/test_cdp_dialogs.py` follows the returned pointer, proves attach fails before discovery,
 and then runs the real discovery and attach functions with fake native boundaries to obtain a grant.
 
+## 2026-11-15 — A lock-holder probe can race the process it is discovering
+
+The false assumption was that `InstanceLock.holder()` is read-only. When the lock is free it
+briefly acquires it and rewrites the PID file; a Chrome-started native host can lose that race and
+exit before hello. Discovery now reads the PID file, checks process exit with a zero timeout, and
+requires the endpoint to name that same PID. The regression in `tests/test_native_host.py` starts a
+real host lock owner during the liveness probe and verifies that discovery never takes its lock or
+pairs a stale endpoint with a replacement host. Win32 structures used in shared DLL `argtypes` also
+live at module scope, covered by `tests/test_helper_ctypes_types.py`.
+
+## 2026-11-15 — Chrome profile visibility and native-port disconnects need real contracts
+
+The false assumptions were that one visible extension window proves HWND identity and that
+`Port.disconnect()` fires `onDisconnect` on the calling port. Other profiles and incognito windows
+can share Chrome's PID while being invisible to the extension. Mapping now checks the active tab
+and ambiguity in the native HWND list. A single local port-close path gates and detaches capabilities
+for both explicit disconnects and remote events. Regression tests cover hidden-profile collisions,
+held attachments during decode errors and installer suspension, and toolbar recovery with a fake
+whose local disconnect does not fire an event. Chrome's debugging-bar Cancel also requires a fresh
+window share; transport reconnects cannot restore the cancelled grant.
+
+## 2026-11-15 — Native-port lifetime is longer than helper request IDs
+
+The false assumption was that a CDP request ID identifies the same caller throughout a native
+messaging connection. Chrome keeps that port alive across helper restarts, while each helper starts
+its request counter again. A late result could satisfy a new helper's unrelated call. The bridge now
+allocates native request IDs for the port lifetime, maps them back only to their owning authenticated
+connection, and drops results from departed callers. The regression in `tests/test_native_host.py`
+injects both an unknown old result and a result owned by another connection before the fresh reply.
+
 ## 2026-11-15 — Audit redaction tests must distinguish identifiers from content
 
 The false assumption was that a short file-content substring could never appear in a random media

@@ -14,6 +14,7 @@ from .screen_eval import ScreenEval, audit_call, screen_eval  # noqa: F401
 from .screen_grants import require_window, resolve_window
 from .screen_tree import OUT_BYTES, Snapshot
 from .screen_element_state import ElementState, compare
+from .screen_event_scope import busy_note
 from .screen_tree_ids import IdSpace
 from .screen_tree_answer import answer
 from .op_timing import pushed
@@ -154,17 +155,24 @@ class ElementsHub(ElementState):
                         options[key] = tree.by_helper[options[key]]
                 with phase("answer_ms"):
                     result = await asyncio.to_thread(answer, tree, grant, options, max(256, budget - 600))
-                remote_changed = captured and await self.capture_status(principal, grant, device, tree)
+                top = self.scope_top(tree, options)
+                remote_changed = captured and await self.capture_status(principal, grant, device, tree, top)
+                busy = self.busy_in(tree, top)
+                if busy:
+                    result["busy"] = busy_note(tree, busy)
                 if restarting:
                     result["continuation_restarted"] = "capture restarted from the root"
                 capture_raced = getattr(tree, "capture_raced", False)
                 tree.capture_raced = False  # report the observed capture race once, not on later cache hits
+                if tree.sources:
+                    capture_raced = capture_raced and bool(busy)  # only events that touch this answer count
                 result.update(snapshot_event_counter=getattr(tree, "event_counter", None),
                               snapshot_age_seconds=max(0, round(self.clock() - tree.created, 3)),
                               change_event_since_snapshot=(remote_changed or tree.changed or
                                                            capture_raced or
-                                                           tree.event_version !=
-                                                           self.change_versions.get(grant["id"], 0)))
+                                                           (tree.event_version !=
+                                                            self.change_versions.get(grant["id"], 0)
+                                                            and not tree.sources)))
                 return {"window": grant["id"], "snapshot_id": tree.snapshot_id, **result}
         except (TimeoutError, OSError, RuntimeError):
             return {"elements_unavailable": "helper did not respond"}
@@ -220,23 +228,44 @@ class ElementsHub(ElementState):
         return element_id, False
 
     async def action_target(self, principal, grant, element_id):
-        """Recapture expired trees before translating stable ids to the helper's current ids."""
-        tree = self.fresh(grant["id"])
-        if tree is None:
-            previous = self.snapshots.get(grant["id"])
-            if (previous is not None and getattr(previous, "event_counter", None) is not None and
-                    await self.barrier(principal, grant, resolve_window(self.hub, principal, grant["id"])[1],
-                                       previous)):
-                return self._helper_id(previous, element_id)  # live counter proof supersedes the TTL
-            if grant["id"] not in self.spaces:
-                return element_id, True  # no server snapshot has established a stable id space yet
-            result = await self.read(principal, window=grant["id"], options={"refresh": True})
-            if result.get("elements_unavailable"):
+        """Prove the target unchanged before translating stable ids to the helper's current ids.
+
+        Events from elsewhere in the window do not stop an action: it proceeds when nothing at, above
+        or below the target changed since the tree was captured. Anything else is read again, and
+        `(None, False)` means the target is still changing.
+        """
+        gid = grant["id"]
+        tree = self.fresh(gid)
+        previous = tree or self.snapshots.get(gid)
+        counted = previous is not None and getattr(previous, "event_counter", None) is not None
+
+        def device():
+            return resolve_window(self.hub, principal, gid)[1]
+        if counted and previous.sources:
+            node = self.node_for(previous, element_id)
+            if node and await self.target_stable(principal, grant, device(), previous, node.id):
+                return node.helper, True  # events, if any, came only from other parts of the window
+        elif tree is not None:
+            return self._helper_id(tree, element_id)
+        elif counted and await self.barrier(principal, grant, device(), previous):
+            return self._helper_id(previous, element_id)  # live counter proof supersedes the TTL
+        if gid not in self.spaces:
+            return element_id, True  # no server snapshot has established a stable id space yet
+        result = await self.read(principal, window=gid, options={"refresh": True})
+        tree = self.snapshots.get(gid)
+        if result.get("elements_unavailable") or tree is None:
+            return None, False
+        node = self.node_for(tree, element_id)
+        if tree.sources and getattr(tree, "event_counter", None) is not None:
+            if node and not await self.target_stable(principal, grant, device(), tree, node.id):
                 return None, False
-            tree = self.snapshots.get(grant["id"])
-            if tree is None or tree.event_version != self.change_versions.get(grant["id"], 0):
-                return None, False
+        elif tree.event_version != self.change_versions.get(gid, 0):
+            return None, False
         return self._helper_id(tree, element_id)
+
+    @staticmethod
+    def node_for(tree, element_id):
+        return tree.nodes.get(element_id) or tree.nodes.get(tree.by_helper.get(element_id))
 
     def purge(self, preserve=None):
         """Forget every window's tree that has outlived its time."""

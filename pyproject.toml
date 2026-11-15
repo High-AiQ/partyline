@@ -28,6 +28,7 @@ helper = ["pynput>=1.8,<1.9", "websockets>=14", "pillow>=10.8", "pystray>=0.19",
 [project.scripts]
 partyline = "partyline.launch:main"
 partyline-helper = "partyline_helper.cli:main"
+partyline-chrome-host = "partyline_helper.native_host:main"
 
 [dependency-groups]
 dev = [
@@ -74,3 +75,10 @@ path = "partyline/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["partyline", "partyline_helper"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"partyline_chrome/manifest.json" = "partyline_helper/chrome_extension/manifest.json"
+"partyline_chrome/worker.js" = "partyline_helper/chrome_extension/worker.js"
+"partyline_chrome/relay.js" = "partyline_helper/chrome_extension/relay.js"
+"partyline_chrome/attachments.js" = "partyline_helper/chrome_extension/attachments.js"
+"partyline_chrome/wire.js" = "partyline_helper/chrome_extension/wire.js"

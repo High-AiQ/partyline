@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - "partyline_helper/**"
+      - "partyline_chrome/**"
       - "packaging/windows/**"
       - ".github/workflows/windows-installer.yml"
       - "partyline/file_events.py"
@@ -17,6 +18,7 @@ on:
       - "partyline/file_watch_paths.py"
       - "partyline/process_events.py"
       - "partyline/point_geometry.py"
+      - "partyline/process_events.py"
   workflow_dispatch:
     inputs:
       tag:
@@ -128,10 +130,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "partyline:// handler not registered" }
           reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v PartylineHelper
           if ($LASTEXITCODE -ne 0) { throw "start at login not registered" }
+          if (-not (Test-Path "$app\PartylineChromeHost.exe")) { throw "native host executable missing" }
+          reg query "HKCU\Software\Google\Chrome\NativeMessagingHosts\io.partyline.chrome"
+          if ($LASTEXITCODE -ne 0) { throw "Chrome native host not registered" }
+          $native = Get-Content "$env:LOCALAPPDATA\Partyline\chrome-native-host.json" | ConvertFrom-Json
+          if ($native.allowed_origins.Count -ne 1) { throw "native origin scope is too broad" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\Partyline\chrome-extension\manifest.json")) { throw "extension missing" }
           $un = Start-Process "$app\unins000.exe" -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES"
           if ($un.ExitCode -ne 0) { throw "uninstall exited $($un.ExitCode)" }
           reg query "HKCU\Software\Classes\partyline" 2>$null
           if ($LASTEXITCODE -eq 0) { throw "uninstall left the partyline:// handler behind" }
+          reg query "HKCU\Software\Google\Chrome\NativeMessagingHosts\io.partyline.chrome" 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "uninstall left the native host behind" }
           $global:LASTEXITCODE = 0  # the failed query above is the expected outcome, not the step's exit code
 
       - uses: actions/upload-artifact@v4

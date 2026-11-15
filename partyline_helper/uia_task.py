@@ -20,7 +20,12 @@ def read_options(message):
         return {"query_scope": {key: value[:200] for key, value in scope.items()
                                 if key in ("query", "control_type") and isinstance(value, str)}}
     cursor = message.get("cursor")
-    return {"cursor": cursor[:64]} if isinstance(cursor, str) and cursor else {}
+    if not (isinstance(cursor, str) and cursor):
+        return {}
+    options = {"cursor": cursor[:64]}
+    if message.get("tolerate_events") is True:
+        options["tolerate_events"] = True
+    return options
 
 
 class WindowTask:

@@ -5,14 +5,15 @@ POPUP_REFRESH = 0x804D  # private thread message; emitted by the scoped WinEvent
 
 
 class WindowHandlers:
-    def __init__(self, automation, uia, hwnd, scope, changed, com_object):
+    def __init__(self, automation, uia, hwnd, scope, changed, com_object, cache=None):
         self.automation, self.uia, self.hwnd = automation, uia, hwnd
-        self.scope, self.changed, self.com_object = scope, changed, com_object
+        self.scope, self.changed, self.com_object, self.cache = scope, changed, com_object, cache
         self.roots = {}
 
     def add(self, hwnd):
         root = self.automation.ElementFromHandle(hwnd)
-        self.roots[hwnd] = register_handlers(self.automation, self.uia, root, self.changed, self.com_object)
+        self.roots[hwnd] = register_handlers(self.automation, self.uia, root, self.changed, self.com_object,
+                                                 cache=self.cache)
 
     def start(self):
         self.add(self.hwnd)

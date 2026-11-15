@@ -77,6 +77,8 @@ begin
   Result := True;
   if FileExists(Exe) then
     Result := Exec(Exe, 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
+  if Result and FileExists(ExpandConstant('{app}\PartylineChromeHost.exe')) then
+    Result := Exec(Exe, 'suspend-chrome', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
 end;
 
 // An upgrade replaces files that a running helper holds open: stop it first, or do not install.
@@ -85,7 +87,7 @@ begin
   Result := '';
   if not HelperStopped then
     Result := 'Partyline Helper is still running and could not be stopped. Quit it from its tray icon (or end ' +
-              'PartylineHelper.exe in Task Manager), then run this installer again.';
+              'PartylineHelper.exe in Task Manager), disable Partyline Chrome at chrome://extensions, then run this installer again.';
 end;
 
 function InitializeUninstall: Boolean;
@@ -93,7 +95,7 @@ begin
   Result := HelperStopped;
   if not Result then
     MsgBox('Partyline Helper is still running and could not be stopped. Quit it from its tray icon (or end ' +
-           'PartylineHelper.exe in Task Manager), then uninstall again.', mbError, MB_OK);
+           'PartylineHelper.exe in Task Manager), disable Partyline Chrome at chrome://extensions, then uninstall again.', mbError, MB_OK);
 end;
 
 // A silent install (CI, scripted upgrade) does not open dialogs unless asked with /START=1.

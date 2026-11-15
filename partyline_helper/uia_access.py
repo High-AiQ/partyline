@@ -52,6 +52,8 @@ class WindowAccess:
         self.gate = DispatchGate()
         self.elements = {}
         self.paths = {}
+        self.runtimes = {}  # runtime id -> the element id an event from it belongs to
+        self.listed = {}  # element id -> the event counter when the read that listed it began
         self.epoch = None  # snapshot ID of the walk whose IDs are valid; parts of one walk share it
         self.walks = {}  # cursor -> the unread rest of that walk
         self.event_status = None
@@ -69,6 +71,7 @@ class WindowAccess:
 
     def forget(self):
         self.elements, self.paths, self.walks, self.epoch = {}, {}, {}, None
+        self.runtimes, self.listed = {}, {}
 
     def abandon_read(self):
         """Discard the read in flight; earlier parts' ids stay valid, since a late result is dropped."""
@@ -139,7 +142,7 @@ class WindowAccess:
         counter = status.get("event_counter")
         cursor = (options or {}).get("cursor")
         state = self.walks.get(cursor) if cursor else None
-        if cursor and self.event_counter != counter:
+        if cursor and self.event_counter != counter and not (options or {}).get("tolerate_events"):
             return {"elements_unavailable": "tree inconsistent: event during continuation; refresh"}
         if cursor and state is None:
             return {"elements_unavailable": "cursor expired; start a new snapshot"}
@@ -194,13 +197,13 @@ class WindowAccess:
                     or frame != self.session.last_uia_frame):
                 for element in result["elements"]:
                     element.pop("frame_bounds", None)
-            self.keep(result, cursor, scoped=scoped)
+            self.keep(result, cursor, scoped=scoped, counter=counter)
             result.update(window_title=grant["title"], process_name=grant["process"])
         elif result.get("elements_unavailable") == "timeout" and state is None:
             self.deep = False  # the one-call prefetch outran the budget: read per parent from now on
         return result
 
-    def keep(self, result, cursor, scoped=False):
+    def keep(self, result, cursor, scoped=False, counter=None):
         """Remember every part's IDs and paths until a new snapshot starts; hand back the next cursor."""
         if not scoped:
             if not cursor:
@@ -208,19 +211,61 @@ class WindowAccess:
             result["snapshot_id"] = self.epoch
         for item in result["elements"]:
             if "id" in item:
+                self.listed[item["id"]] = counter
                 self.elements[item["id"]] = {"id": item["id"], "control_type": item.get("control_type"),
                                              "name": item.get("name")}
         self.paths.update(result.pop("paths", {}))
+        self.runtimes.update((tuple(runtime), ident) for runtime, ident in result.pop("runtimes", ()))
+        while len(self.runtimes) > 2 * MAX_RETAINED_IDS:
+            del self.runtimes[next(iter(self.runtimes))]
         while len(self.elements) > MAX_RETAINED_IDS:
             oldest = next(iter(self.elements))
             self.elements.pop(oldest)
             self.paths.pop(oldest, None)
+            self.listed.pop(oldest, None)
         if rest := result.pop("state", None):
             token = uuid.uuid4().hex[:12]
             self.walks[token] = rest
             while len(self.walks) > MAX_WALKS:
                 del self.walks[next(iter(self.walks))]
             result["next_cursor"] = token
+
+    def event_sources(self, since):
+        """The listed elements events after counter `since` came from, each with its listed ancestors.
+
+        A chain is `[id, parent, ...]`, nearest first, from the child-index paths of the reads kept.
+        `unsure` names sources whose chain may be stale: an ancestor, or an event with no known or
+        listed sender, came after the source was listed, so children may have moved. `unplaced`
+        counts events whose sender was never listed.
+        """
+        state = getattr(self, "event_state", None)
+        if state is None:
+            return None
+        raw = state.sources_since(since)
+        ids, unplaced = set(), int(raw["unplaced"])
+        for runtime in raw["sources"]:
+            if ident := self.runtimes.get(runtime):
+                ids.add(ident)
+            else:
+                unplaced += 1
+        by_path = {tuple(path): ident for ident, path in self.paths.items()}
+        latest, blind = state.latest()
+        last = {}
+        for runtime, count in latest.items():
+            if ident := self.runtimes.get(runtime):
+                last[ident] = max(last.get(ident, 0), count)
+            else:
+                blind = max(blind, count)  # a sender no read listed could have moved anything
+        chains, unsure = [], []
+        for ident in sorted(ids):
+            path = self.paths.get(ident) or []
+            chain = [ident, *(by_path[tuple(path[:end])] for end in range(len(path) - 1, -1, -1)
+                              if tuple(path[:end]) in by_path)]
+            chains.append(chain)
+            listed = self.listed.get(ident)
+            if listed is None or blind > listed or any(last.get(above, 0) > listed for above in chain[1:]):
+                unsure.append(ident)
+        return {"ids": chains, "unsure": unsure, "unplaced": unplaced, "overflow": raw["overflow"]}
 
     async def watch(self):
         async with WindowEvents(self._changes) as events:

@@ -1,6 +1,7 @@
 """Snapshot event barriers, bounded capture and live diagnostics."""
 import asyncio
 
+from .screen_event_scope import UNPLACED, EventScope, related
 from .screen_timing import phase
 from .screen_tree import MAX_NODES, MAX_TREE, STATE_FIELDS, Snapshot
 
@@ -33,7 +34,7 @@ def verdict(live, cached, ancestors):
     return "live and snapshot agree: enabled" if live.get("enabled") is True else "live state unavailable"
 
 
-class ElementState:
+class ElementState(EventScope):
     async def barrier(self, principal, grant, device, tree):
         if getattr(tree, "event_counter", None) is None:
             return True  # older helpers retain their TTL and pushed-event behavior
@@ -42,9 +43,13 @@ class ElementState:
         return (status.get("events_supported") is True and status.get("subscription_live") is True
                 and status.get("event_counter") == tree.event_counter)
 
-    async def capture_status(self, principal, grant, device, tree):
+    async def capture_status(self, principal, grant, device, tree, top=None):
+        """Whether events since the capture began touch what is answered (`top`, else the whole tree)."""
         if getattr(tree, "event_counter", None) is None:
             return False
+        if getattr(tree, "sources", False):
+            moved, roots = await self.judge(principal, grant, device, tree)
+            return moved and (roots is None or any(top is None or related(tree, root, top) for root in roots))
         with phase("barrier_ms"):
             status = await self.exchange(principal, grant, device, "read_window_elements", event_status=True)
         return status.get("event_counter") != tree.event_counter
@@ -75,21 +80,37 @@ class ElementState:
         return result
 
     async def capture(self, principal, grant, device, tree):
-        """Recapture only in response to an observed event; deadlines bound churn, not truth."""
+        """Recapture only in response to an observed event; deadlines bound churn, not truth.
+
+        Events from placed elements leave the rest of the tree consistent: a second capture that still
+        sees them ends the read, naming the busy subtrees instead of failing the whole window.
+        """
         deadline = self.clock() + CAPTURE_SECONDS
-        raced = False
+        raced = confined = False
         for attempt in range(8):  # also bounds providers whose clock or event stream misbehaves
             result = await self.capture_parts(principal, grant, device, tree, deadline)
             if isinstance(result, dict):
                 return result
             if getattr(tree, "event_counter", None) is None:
                 return tree  # old helpers retain their explicit changed/partial response
-            if not tree.changed and not await self.capture_status(principal, grant, device, tree):
+            roots = None
+            if tree.sources and not tree.changed:
+                moved, roots = await self.judge(principal, grant, device, tree)
+                tree.moved = tree.moved or moved
+                if not moved or (roots is not None and not roots):
+                    tree.capture_raced = raced
+                    return tree
+            elif not tree.changed and not await self.capture_status(principal, grant, device, tree):
                 tree.capture_raced = raced
                 return tree
             raced = True
+            if roots and (confined or self.clock() >= deadline or attempt == 7):
+                tree.busy, tree.capture_raced = frozenset(roots), True
+                return tree
+            confined = confined or bool(roots)
             if self.clock() >= deadline or attempt == 7:
-                tree.note = "tree inconsistent: events during capture; refresh"
+                tree.note = UNPLACED if tree.sources and roots is None else \
+                    "tree inconsistent: events during capture; refresh"
                 return tree
             tree.space.renew()
             scope, prior_helpers, action_ids = tree.scope, tree.prior_helpers, tree.action_ids
@@ -105,6 +126,8 @@ class ElementState:
             fields = {"cursor": tree.cursor} if tree.cursor else {}
             if tree.scope:
                 fields["query_scope"] = tree.scope
+            if tree.cursor and tree.sources:
+                fields["tolerate_events"] = True  # events are judged by where they came from, at the end
             try:
                 response = await self.exchange(principal, grant, device, "read_window_elements", **fields)
             except TimeoutError:
@@ -118,15 +141,18 @@ class ElementState:
                 tree.note = "capture stopped: " + str(response["elements_unavailable"])[:100]
                 return tree
             tree.source = response.get("source", "uia")
+            tree.transport = response.get("transport")
             tree.source_reason = response.get("source_reason")
             tree.page_state = response.get("page_state")
             tree.recovery_hint = response.get("recovery_hint")
             counter = response.get("captured_event_counter")
             if not started:
                 tree.event_counter = counter
+            tree.sources = response.get("event_sources_supported") is True
             if counter is not None and (counter != getattr(tree, "event_counter", None) or
                                         response.get("event_counter") != counter):
-                tree.changed = True
+                tree.moved = True
+                tree.changed = tree.changed or not tree.sources
             tree.snapshot_id = tree.snapshot_id or response.get("snapshot_id")
             started = True
             tree.scoped = response.get("scoped", False)

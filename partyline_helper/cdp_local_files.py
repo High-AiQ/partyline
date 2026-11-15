@@ -32,7 +32,10 @@ def prepare(paths, media, limits):
                 stream.read(1)
         except CDPError:
             raise
-        except (OSError, ValueError, RuntimeError) as exc:
+        except OSError as exc:  # name the OS reason (such as an unreachable network path), never the path
+            reason = exc.strerror or type(exc).__name__
+            raise CDPError(f'local file is missing, unreadable, or not a regular file: {reason}') from exc
+        except (ValueError, RuntimeError) as exc:
             raise CDPError('local file is missing, unreadable, or not a regular file') from exc
         size = info.st_size
         if size > limits['file']:

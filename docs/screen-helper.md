@@ -1081,6 +1081,28 @@ returned reply; the next read's barrier detects it even if its debounced push is
 A `more` across a counter change restarts from the root, or explicitly reports an inconsistent tree;
 it never silently combines epochs. A restarted continuation returns `continuation_restarted`.
 
+**Busy subtrees (helper 1.4.4).** A window whose one subtree raises events without end (a view that keeps
+enumerating) must still read and act. UIA handlers register with a cache request for the sender's runtime id
+(the element scope; UIA forbids a parent scope), so each event names its sender without a COM call; `EventState` keeps the distinct sources (a source
+that fires continuously is one entry, bounded at 512) and the helper maps runtime ids to element ids, with a
+wrapper standing for its nearest listed ancestor. `event_status` with `events_since=<counter>` adds
+`event_sources` (`ids`: each source with its listed ancestors from the read's child-index paths, nearest first;
+`unsure`: sources whose ancestry may be stale because an ancestor raised an event after they were listed;
+`unplaced`; `overflow`); status carries `event_sources_supported`. The server judges
+a capture by where events came from, not by whether any came:
+
+| Situation | Outcome |
+| --- | --- |
+| Events only from elements outside what the read answers (a `root`, an `id`, a query's matches) | The read is clean; `change_event_since_snapshot` is false |
+| Events from placed elements the read covers | One recapture, then the tree is returned with `busy`, naming the outermost busy subtrees and `root=<id>` of stable parts to read instead |
+| Events the helper cannot place (never listed, overflow, none named) | The old rule: up to eight attempts, then `partial` says to read the whole window once, then scope by `root` or `query` |
+| An action whose target, ancestors and descendants had no events | The action proceeds without a recapture, even while another subtree is busy; descendants count even when a query's tree kept no node for them |
+| An event at the target, above it or below it, or a source with stale ancestry (an ancestor event, or an event with no sender or an unlisted one, after it was listed) that the tree does not hold | The tree is read again; every action target is proved against the live event counter, fresh tree or not, retained ids included; the action is refused if the target is still changing |
+
+Continuation parts send `tolerate_events`, so the helper no longer refuses them for an unrelated event;
+the final judgement covers the whole capture. No polling or sleeps are added: each judgement is one
+status exchange after a capture.
+
 `uia_events.PROPERTIES` includes IsEnabled (30010), Value (30045), Toggle (30086), SelectionItem
 (30079), ExpandCollapse (30070), Name (30005), AriaRole (30101), AriaProperties (30102) and
 LegacyIAccessible State (30096). Persistent property and structure registration uses
@@ -1148,14 +1170,89 @@ provider tests establish invariants but cannot decide which side of Greg's real 
 Tool result sizes and image estimates can be compared in the line's Usage section;
 see [tool telemetry](telemetry.md) for estimators, privacy and retention.
 
-#### Chrome page state without an extension
+#### Chrome page state with Partyline Chrome (recommended)
+
+The Windows installer ships **Partyline Chrome** and registers its native-messaging host
+for the current user only. After installing/updating the helper, load it once:
+
+1. Open `chrome://extensions` and turn on **Developer mode**.
+2. Choose **Load unpacked** and select `%LOCALAPPDATA%\Partyline\chrome-extension`.
+3. Leave the extension enabled. It stays installed across Chrome restarts. Its toolbar
+   button reconnects the native host after an update. The installer pauses that host before
+   replacing its executable; ordinary helper restarts keep the native port alive.
+
+For a source or `uv tool` install, run `partyline-helper install`; its output names the
+extension folder and native host. The host launcher must be installed alongside that
+helper. The Windows installer includes a dedicated console-subsystem native executable;
+its stdout carries binary protocol frames, never log messages. The host allows only
+`chrome-extension://plbehhebbdldlggkkpafpepcobmkojeb/`, fixed by the extension's public
+manifest key. There are no content scripts or host permissions: the only permissions are
+`debugger`, `tabs`, and `nativeMessaging`. A Web Store listing is a possible later step;
+loading the installed folder works without one.
+
+The extension is preferred when connected. The tray has a dedicated **Chrome: extension
+connected / extension disconnected / not installed / remote debugging** status row, and provider state includes
+`transport: extension|remote_debugging`. Read results also name their transport. When no
+extension is connected the helper explicitly falls back to the approved remote-debugging
+flow below. A failed page command is never automatically replayed through the fallback.
+
+Only tabs named by a live HWND grant may be attached. Mapping checks the Chrome process
+that launched the native host, the granted process/HWND identity, window bounds and active
+tab title. The native HWND list must also have exactly one compatible window for that
+process, caption and bounds; ambiguity fails closed to UIA even when Chrome hides another
+profile or incognito window from the extension. A selected-tab grant names only that tab. Chrome
+internal, extension, DevTools and local `file:` pages are refused, including pending
+navigation to them and child iframe targets. Only HTTP(S) pages are eligible.
+The first loaded Chrome profile owns the per-user native bridge; other profiles cannot
+replace it. Profiles and incognito windows can share a browser process, so process identity
+alone is insufficient: colliding native windows use UIA. Share from the extension profile
+or use the fallback when the extension is absent.
+
+Attachment lasts for the whole read/action plus **300 ms** of idle linger. A burst reuses
+one attachment. Chrome's normal debugging notification appears while attached; it is never
+hidden. Revoking a grant immediately gates further commands, writes the revoke signal to
+the native port, and initiates Chrome detach; the extension acknowledges after detach
+finishes. Clicking **Cancel** on Chrome's debugging bar also cancels that window grant's
+CDP access: subsequent calls stay on UIA until the person shares the window again. A helper
+restart or transport change does not undo that cancellation. A late attach completion is also detached. The OS/Chrome API completion is
+asynchronous; an input already delivered before revoke cannot be recalled. On idle resume,
+the helper reinitializes CDP domains and checks the document loader before reusing element
+IDs. A changed document requires a fresh read. UIA supplies background change events while
+CDP is idle; CDP does not claim a live subscription during that time.
+
+Native frames use a 32-bit native-endian length prefix and a 1 MiB cap in both directions.
+Large AX results are split into sequential chunks and reassembled with a 16 MiB total cap.
+The Chrome-started native port survives helper reconnects, avoiding a remote-debugging
+approval prompt on helper restarts. A random per-user secret authenticates the local IPC
+connection; it is stored beside the helper's private pairing configuration. Discovery requires
+the endpoint and PID files to name the same live native-host process. It never takes the
+host's startup lock, so discovery cannot reject a concurrently starting Chrome host, and a
+crashed host's stale file cannot reopen remote-debugging approval on every operation. Authentication accepts one unchunked
+frame of at most 1 KiB. Automatic native-port reconnect is limited to one attempt per startup
+or toolbar gesture; a failed decode and an installer suspension clean up locally, and the
+toolbar can connect again without restarting Chrome.
+
+File-input commands (`DOM.setFileInputFiles`) are relayed to Chrome without broader
+permissions, but that path has not been verified against real Chrome's debugger-extension
+file-access restrictions. If Chrome refuses it, use the Open dialog path. Loading local
+`file:` pages is deliberately refused; no file-URL permission toggle is required.
+
+`Partyline.metrics` reports attach/detach samples in milliseconds from the extension's
+monotonic clock. The fake clock models **7 ms attach / 3 ms detach** and asserts both values;
+those are injected timings, not real Chrome measurements. A separate Node test reports
+measured relay overhead for 100 fake attach/detach cycles. Expect roughly **10–100 ms attach
+and 1–30 ms detach** on a warm desktop Chrome as an engineering estimate, not a measured
+promise; busy renderers and security software can take longer. Run against real Windows
+Chrome before making a latency claim.
+
+#### Chrome remote debugging (fallback)
 
 In an already running **Chrome 144 or newer**, open `chrome://inspect/#remote-debugging`
 and enable remote debugging once. Share the Chrome window from the helper tray. Chrome asks whether to allow the debugging connection as soon as the window is shared;
 choose **Allow**. Reads use UIA with an awaiting-approval reason while that prompt is open,
 so slow approval does not block a read or require sharing again.
 The helper keeps one browser connection until it disconnects or exits. It never starts
-Chrome, changes its command line, copies a profile, or installs an extension. Denying or
+Chrome, changes its command line, or copies a profile. Denying or
 closing the prompt leaves UIA available. Share again to retry a refused connection.
 
 The tray and server device snapshot report `not_enabled` (with the setting instruction),
@@ -1389,10 +1486,48 @@ The person authorizes use through window access; the captain or agent decides
 what to upload. Local paths must resolve to readable regular files. Symlinks are
 followed, and files inside the helper's own data and config directory are refused,
 including paths that reach it through a symlink; this protects pairing credentials
-and audit files. This is the only path restriction. Local files are passed directly
+and audit files. This is the only path restriction. The helper opens paths as the
+signed-in user, so network share paths work wherever that user can open them. When a
+path cannot be opened, the error gives the operating system's reason, such as a
+network path that was not found, but never the path itself. Local files are passed directly
 to Chrome without copying. Media IDs must be readable through `get_media` and are
 downloaded into a fresh helper data directory with sanitized names. Staged media
 files are deleted after ten minutes, or on a later call if the helper was restarted.
 The existing general media per-file cap applies to every file, with a 200 MiB total
 per call. The helper and server audit media IDs, resolved local paths and their sizes,
 the grant, caller, file count and total size, without recording file contents.
+
+### Window interaction benchmark
+
+The `/lab/window-bench/` fixtures measure live Chrome window behavior using Partyline's MCP tools. The pages cover
+open, nested, slotted and closed shadow roots; a covering overlay; same-origin and cross-origin frames; native and
+custom selection; text entry; file controls; scrolling; settling; dialogs, toast and navigation; and a canvas that
+requires visual point grounding. Each fixture exposes an AX-readable event log with `isTrusted`, event type and
+target. The cross-origin page accepts a second-origin URL with `--cross-origin-url`; serve the built `partyline/static`
+directory from a second port or hostname reachable by the paired computer.
+
+After a person grants a Chrome window, run the bench from the attached Partyline process environment with its MCP
+connection available. The command prompts you to open each fixture in the granted window. It never chooses a window
+or grants access itself. Reads and actions use the same `screen_elements` and `screen_element_action` MCP tools as an
+agent, so the UIA transport does not require Chrome debugging. `--transport` records which sibling path is being
+measured; `--helper-version` records the helper build when it is not returned by discovery.
+
+```bash
+PARTYLINE_MCP_CONNECTION=/path/to/connection.json uv run --locked python scripts/window_bench.py \
+  --i-have-a-granted-window --base-url https://<partyline-host> --window '<granted-window-id>' \
+  --transport uia --helper-version '<helper-version>' \
+  --cross-origin-url https://<second-origin> --output window-bench-results.json
+```
+
+The run writes JSON plus a Markdown summary next to the chosen output. A step is verified only from the fixture's
+trusted event log and observed page state; an action response saying `completed` is not proof. Refusal cases count
+as successful when the page confirms the cover or closed root and records no trusted target event. File chooser,
+file selection and canvas point-click rows prompt for the person to perform that local action; their trusted event
+logs are still verified. Those manual steps do not contribute to action latency. Compare verified and failed counts first, then p50/p95 action time,
+response bytes, and estimated tokens. Text cost is response bytes divided by four; a screenshot row uses the
+recorded `thumb`, `slim` or `original` tier estimate. Compare runs with the same fixtures and helper/transport labels.
+Each scenario carries a tool and argument map, so point, scroll, type and drag MCP tools can be added as rows without
+changing the runner; the row keeps the selected transport alongside each result.
+
+Historical UIA medians remain: press **8.1 s**, select **4.9 s**, invoke **3.4 s** p50. They predate this bench and
+are context, not a matched run.

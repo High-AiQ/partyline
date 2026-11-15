@@ -1,3 +1,3 @@
 """Native desktop sender; independent of the Partyline server package."""
 
-__version__ = "1.4.4"
+__version__ = "1.5.0"

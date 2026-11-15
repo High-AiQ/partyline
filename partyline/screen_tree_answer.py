@@ -27,6 +27,9 @@ def elements_options(refresh: bool = False, more: bool = False,
 
 def state(tree):
     result = {"source": getattr(tree, "source", "uia")}
+    transport = getattr(tree, "transport", None)
+    if transport in ("extension", "remote_debugging"):
+        result["transport"] = transport
     if reason := getattr(tree, "source_reason", None):
         result["source_reason"] = reason
     for key in ("page_state", "recovery_hint"):

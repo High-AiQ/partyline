@@ -24,7 +24,8 @@ hidden = (collect_submodules("partyline_helper") + collect_submodules("pynput")
 a = Analysis(
     [os.path.join(ROOT, "packaging", "windows", "entry.py")],
     pathex=[ROOT],
-    datas=[],
+    datas=[(os.path.join(ROOT, "partyline_chrome", name), "partyline_helper/chrome_extension")
+           for name in ("manifest.json", "worker.js", "relay.js", "attachments.js", "wire.js")],
     hiddenimports=hidden,
     excludes=["pytest"],
 )
@@ -39,4 +40,9 @@ exe = EXE(
     version=VERSION_FILE,
     uac_admin=False,
 )
-coll = COLLECT(exe, a.binaries, a.datas, name="PartylineHelper")
+# Native messaging needs real binary stdin/stdout, unlike the tray executable.
+host = Analysis([os.path.join(ROOT, "packaging", "windows", "native_entry.py")], pathex=[ROOT])
+host_pyz = PYZ(host.pure)
+host_exe = EXE(host_pyz, host.scripts, exclude_binaries=True, name="PartylineChromeHost",
+               console=True, version=VERSION_FILE, uac_admin=False)
+coll = COLLECT(exe, host_exe, a.binaries, a.datas, host.binaries, host.datas, name="PartylineHelper")

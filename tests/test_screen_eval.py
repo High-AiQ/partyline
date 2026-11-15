@@ -81,6 +81,10 @@ class EvalServerTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         await receive(self.hub, self.device, dict(state="awaiting_approval", detail="Approve in Chrome"))
         self.assertEqual(self.device["chrome"]["state"], "awaiting_approval")
         self.hub._device_event.assert_awaited_once_with(self.device, True)
+        await receive(self.hub, self.device, dict(state="connected", transport="extension"))
+        self.assertEqual(self.device["chrome"]["transport"], "extension")
+        with self.assertRaises(ValueError):
+            await receive(self.hub, self.device, dict(state="connected", transport="invented"))
         with self.assertRaises(ValueError):
             await receive(self.hub, self.device, dict(state="invented"))
 

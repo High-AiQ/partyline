@@ -256,7 +256,7 @@ class ProbeTests(unittest.TestCase):
         state.supported = True
         state.changed()
         self.assertEqual({"event_counter": 1, "last_event_time": 7, "events_supported": True,
-                          "subscription_live": True}, state.status())
+                          "event_sources_supported": True, "subscription_live": True}, state.status())
         state.subscription.live = False
         self.assertFalse(state.status()["subscription_live"])
 

@@ -16,14 +16,14 @@ MAX_VISITS = 10000  # nodes read per part, including skipped wrappers, so empty 
 REASONS = {"limit": "element limit", "visits": "visit limit", "time": "time budget"}
 
 
-def describe(provider, node, path, props, frame, parent):
+def describe(provider, node, path, props, frame, parent, runtime=None):
     rect = provider.bounds(node)
     if provider.password(node):
         props.pop("value", None)
     for key, limit in (("name", MAX_NAME), ("automation_id", MAX_TEXT), ("value", MAX_VALUE)):
         if key in props:
             props[key] = str(props[key] or "")[:limit]
-    props["id"] = element_id(provider, node, path)
+    props["id"] = element_id(provider, node, path, runtime)
     if actions := supported(props, not path):
         props["actions"] = actions
     props["bounds"] = list(rect)
@@ -63,6 +63,7 @@ def snapshot(provider, frame=None, clock=time.monotonic, limit=MAX_ELEMENTS, bud
         changed, stack = len(kept) < len(stack), kept
     stack.reverse()  # the end of the list is the next node to read
     found, visited, reason = [], 0, ""
+    runtimes = []  # [runtime id, id of the element it sits in]: where an event came from
     while stack:
         if len(found) >= limit:
             reason = REASONS["limit"]
@@ -78,13 +79,16 @@ def snapshot(provider, frame=None, clock=time.monotonic, limit=MAX_ELEMENTS, bud
             continue  # the tree changed since the previous part
         visited += 1
         props = provider.properties(node)
+        runtime = list(provider.runtime_id(node))
         if not (path and is_wrapper(props)):
-            props = describe(provider, node, list(path), props, frame, parent)
+            props = describe(provider, node, list(path), props, frame, parent, runtime)
             parent = props["id"]
             found.append((path, props))
+        runtimes.append([runtime, parent])  # a wrapper stands for its nearest listed ancestor
         kids = provider.children(node)
         resolver.kids[path] = kids
-        own = parent if "id" in props else element_id(provider, node, list(path))  # a wrapper has no id yet
+        # a wrapper has no id yet
+        own = parent if "id" in props else element_id(provider, node, list(path), runtime)
         parents[path] = (own, len(kids))
         for index in range(len(kids) - 1, -1, -1):
             stack.append(((*path, index), parent))
@@ -92,7 +96,8 @@ def snapshot(provider, frame=None, clock=time.monotonic, limit=MAX_ELEMENTS, bud
     if not provider.current():
         return {"elements_unavailable": "window closed"}
     result = {"elements": [props for _, props in found], "truncated": bool(stack),
-              "paths": {props["id"]: list(path) for path, props in found}, "snapshot_id": str(uuid.uuid4())}
+              "paths": {props["id"]: list(path) for path, props in found}, "snapshot_id": str(uuid.uuid4()),
+              "runtimes": runtimes}
     if stack:
         result["truncation"] = f"{reason}; {len(stack)} subtrees remain; continue with next_cursor"
         result["state"] = {"stack": [[list(path), parent] for path, parent in reversed(stack)],

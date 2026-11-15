@@ -12,7 +12,8 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
 
 RETRY_SECONDS = 60  # One Allow prompt attempt per helper per interval; driven only by requests.
-INSTRUCTION = "Enable remote debugging in Chrome at chrome://inspect/#remote-debugging"
+INSTRUCTION = ("Extension not installed/connected; remote debugging fallback. "
+               "Enable remote debugging in Chrome at chrome://inspect/#remote-debugging")
 
 
 class CDPError(ValueError):
@@ -52,6 +53,8 @@ def discover(root=None):
 
 
 class BrowserConnection:
+    transport = "remote_debugging"
+
     def __init__(self, changed=lambda state, detail: None, discovery=discover, connector=connect,
                  timeout=asyncio.timeout, clock=time.monotonic):
         self.changed, self.discovery, self.connector = changed, discovery, connector

@@ -233,7 +233,7 @@ class InstallTests(TempHome):
         pairing.write_text("{}")
         installer.install(LAUNCH)
         out = installer.uninstall()
-        self.assertTrue(all(line.startswith("removed") for line in out))
+        self.assertTrue(all(line.startswith("removed") for line in out[:2]))
         self.assertEqual([p for p in installer.linux_paths() if p.exists()], [])
         self.assertTrue(pairing.exists())
         again = installer.uninstall()
@@ -263,7 +263,7 @@ class InstallTests(TempHome):
         self.assertEqual(snapshot, registry.values)
         out = installer.uninstall()
         self.assertEqual(registry.values, {})
-        self.assertEqual(len(out), 2)
+        self.assertEqual(len(out), 4)
         installer.uninstall()
 
     def test_macos_install_writes_a_launch_agent_and_says_no_url_handler(self):

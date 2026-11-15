@@ -6,35 +6,72 @@ import threading
 PROPERTIES = (30010, 30045, 30086, 30079, 30070, 30005, 30101, 30102, 30096)
 
 
+RUNTIME_ID = 30000
+
+
+def event_cache(automation):
+    """Cache the sender's runtime id, so a handler names its source without a COM call."""
+    try:
+        request = automation.CreateCacheRequest()
+        request.AddProperty(RUNTIME_ID)
+        return request  # the default scope is the element itself; UIA forbids a parent scope here
+    except Exception:
+        return None  # events stay valid; their sources are then unplaced
+
+
+def source_of(sender):
+    """The sender's runtime id from the event's cache; None when it holds none."""
+    try:
+        return tuple(sender.GetCachedPropertyValue(RUNTIME_ID))
+    except Exception:
+        return None
+
+
 def register_handlers(automation, uia, root, changed, com_object, accepts=lambda sender: True,
-                      structure_only=False):
+                      structure_only=False, cache=None):
     """Bind the exact UIA sink methods while keeping handler objects strongly referenced."""
+    def notify(sender):
+        source = source_of(sender) if cache is not None else None
+        if source is None:
+            changed()
+        else:
+            changed(source)
+
     class PropertyHandler(com_object):
         _com_interfaces_ = [uia.IUIAutomationPropertyChangedEventHandler]
 
         def HandlePropertyChangedEvent(self, sender, property_id, new_value):
             if accepts(sender):
-                changed()
+                notify(sender)
 
     class StructureHandler(com_object):
         _com_interfaces_ = [uia.IUIAutomationStructureChangedEventHandler]
 
         def HandleStructureChangedEvent(self, sender, change_type, runtime_id):
             if accepts(sender):
-                changed()
+                notify(sender)
 
-    handlers = []
-    properties, structure = PropertyHandler(), StructureHandler()
+    def add(request):
+        handlers = []
+        properties, structure = PropertyHandler(), StructureHandler()
+        try:
+            if not structure_only:
+                automation.AddPropertyChangedEventHandler(root, 7, request, properties, list(PROPERTIES))
+                handlers.append(("property", root, properties))
+            automation.AddStructureChangedEventHandler(root, 7, request, structure)
+            handlers.append(("structure", root, structure))
+        except Exception:
+            remove_handlers(automation, handlers)
+            raise
+        return handlers
+
     try:
-        if not structure_only:
-            automation.AddPropertyChangedEventHandler(root, 7, None, properties, list(PROPERTIES))
-            handlers.append(("property", root, properties))
-        automation.AddStructureChangedEventHandler(root, 7, None, structure)
-        handlers.append(("structure", root, structure))
+        return add(cache)
     except Exception:
-        remove_handlers(automation, handlers)
-        raise
-    return handlers
+        if cache is None:
+            raise
+        cache = None  # a provider that refuses cached events still reports them, unplaced
+        return add(None)
 
 
 def remove_handlers(automation, handlers):
@@ -118,7 +155,8 @@ class UIAEventSubscription:
                 handlers = register_handlers(automation, uia, root, self.changed, COMObject,
                                              lambda sender: sender_in_scope(provider, sender), True)
             else:
-                roots = WindowHandlers(automation, uia, self.hwnd, provider.scope, self.changed, COMObject)
+                roots = WindowHandlers(automation, uia, self.hwnd, provider.scope, self.changed, COMObject,
+                                       event_cache(automation))
                 roots.start()  # no COM calls or sender walks inside persistent UIA handlers
             if not self._mark_started(thread_id, automation, handlers):
                 return

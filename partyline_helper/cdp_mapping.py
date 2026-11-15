@@ -33,6 +33,8 @@ async def map_window(connection, access, guard, bounds=frame, recovery_target=No
     grant = access.grant
     if not grant or grant.get("process", "").lower() != "chrome.exe":
         raise CDPError("not a Chrome window")
+    if hasattr(connection, "map_window"):
+        return await connection.map_window(access, guard, bounds)
     windows = await asyncio.to_thread(access.list_windows)
     guard()
     window = next((w for w in windows or [] if w["hwnd"] == grant["hwnd"] and w["pid"] == grant["pid"]), None)
