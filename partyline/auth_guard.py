@@ -33,7 +33,7 @@ WS_POLICY_VIOLATION = 4401
 # Authenticated, but this credential kind has no business on this socket.
 WS_FORBIDDEN = 4403
 
-_EXEMPT_PREFIXES = ("/api/auth/", "/api/hooks/", "/assets/")
+_EXEMPT_PREFIXES = ("/api/auth/", "/api/hooks/", "/assets/", "/api/screen/file-input/")
 # /api/restart-plan/failure carries its own capability (the plan's
 # report_token) plus a loopback check, exactly like the hooks routes.
 # Operator approval has a one-use capability issued through local DB write access.

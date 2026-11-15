@@ -31,6 +31,8 @@ STATE = r"""function() {
    tag:e.tagName, type:e.type, focused: (()=>{let a=e.ownerDocument.activeElement;
      while(a&&a.shadowRoot&&a.shadowRoot.activeElement) a=a.shadowRoot.activeElement;
      return a===e;})(),
+   files:e.tagName==='INPUT' && e.type==='file'?Array.from(e.files, f=>f.name):null,
+   file_count:e.tagName==='INPUT' && e.type==='file'?e.files.length:null,
    bounds:[r.left,r.top,r.right,r.bottom],
    hit:pointHit.hit, hit_reason:pointHit.reason};
 }"""
@@ -101,6 +103,8 @@ def normalize(node, ident, parent, dom=None):
         actions = ["scroll_into_view", "press"]
         if role in ("Hyperlink", "Button", "MenuItem", "TabItem", "RadioButton", "ListItem"):
             actions.append("invoke")
+        if dom.get("tag") == "INPUT" and dom.get("type") == "file":
+            actions.append("set_files")
         if (role in ("Edit", "ComboBox") and not dom.get("readonly") and not dom.get("password")
                 and dom.get("tag") != "SELECT"):
             actions.append("set_value")

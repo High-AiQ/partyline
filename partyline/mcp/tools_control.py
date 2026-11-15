@@ -13,7 +13,8 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 ELEMENT_ACTION_NOTE = (
     "Act on a screen_elements id using its provider (CDP or UIA). select value=option name; "
-    "set_value edits text; press key=enter/tab/escape commits. force overrides reported disabled. "
+    "set_value edits text; set_files uploads readable Partyline media to CDP file inputs; "
+    "press key=enter/tab/escape commits. force overrides reported disabled. "
     "then re-reads after an event quiet deadline for CDP, reporting quiet/changing/deadline. "
     "UIA window_* actions target the shared window. Drag: screen_drag.")
 ELEMENT_ACTION_TIMEOUT = 100  # a 20s capture deadline may be followed by a 35s exchange, then action
@@ -24,10 +25,13 @@ ELEMENT_ACTION_PROPERTIES = {
     "force": {"type": "boolean", "description": "Try a reported-disabled control the person confirms works."},
     "element_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "action": {"type": "string", "enum": [
-        "invoke", "toggle", "set_value", "press", "select", "add_to_selection",
+        "invoke", "toggle", "set_value", "set_files", "press", "select", "add_to_selection",
         "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent", "scroll_into_view",
         "set_range_value", "window_close",
         "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize"]},
+    "files": {"type": "array", "minItems": 1, "maxItems": 10,
+              "items": {"type": "string", "minLength": 1, "maxLength": 128},
+              "description": "For set_files: readable Partyline media IDs, never local paths."},
     "value": {"type": "string", "maxLength": 500,
               "description": "Text for set_value; option name for ComboBox select."},
     "key": {"type": "string", "enum": ["enter", "tab", "escape"], "description": "For press; no modifiers."},
@@ -140,6 +144,7 @@ def call(client, name, args, state):
     if name == "screen_control_request":
         return client.request("POST", base + "/request")
     if name == "screen_element_action":
-        wait = ELEMENT_ACTION_THEN_TIMEOUT if args.get("then") is not None else ELEMENT_ACTION_TIMEOUT
+        wait = (700 if args.get("action") == "set_files" else
+                ELEMENT_ACTION_THEN_TIMEOUT if args.get("then") is not None else ELEMENT_ACTION_TIMEOUT)
         return client.request("POST", base + "/element-action", args, timeout=wait)
     return client.request("POST", base + "/action", {"kind": name.removeprefix("screen_"), **args})

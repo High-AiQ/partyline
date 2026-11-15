@@ -1,5 +1,12 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — Audit redaction tests must distinguish identifiers from content
+
+The false assumption was that a short file-content substring could never appear in a random media
+UUID. A legitimate ID contained that substring and made the audit test fail. The regression in
+`tests/test_cdp_file_input.py` uses a deterministic overlapping ID and checks the parsed audit's
+exact permitted fields, rather than searching the serialized record for incidental characters.
+
 ## 2026-11-15 — Capability flags must survive response serialization
 
 The false assumption was that adding a flag to attachment capability state made it visible to MCP.

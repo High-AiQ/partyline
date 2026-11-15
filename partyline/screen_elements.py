@@ -41,7 +41,7 @@ class ElementsHub(ElementState):
         future = asyncio.get_running_loop().create_future()
         self.waiters[ident] = (device["id"], future)
         try:
-            async with asyncio.timeout(35):
+            async with asyncio.timeout(600 if fields.get("action") == "set_files" else 35):
                 line_id = getattr(principal, "conv_id", None) or grant.get("conv_id", "")
                 line = self.hub.runtime.db.get_conversation(line_id) if line_id else None
                 with phase("send_ms"):

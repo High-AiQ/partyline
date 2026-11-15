@@ -31,9 +31,10 @@ async def dispatch(shares, message):
         else:
             kind = ("window_elements" if message["type"] == "read_window_elements"
                     else "window_element_result")
+            error = ("consent revoked; use the Open dialog path instead"
+                     if message.get("action") == "set_files" else "consent revoked")
             await shares.session.send(kind, request_id=message["request_id"],
-                                      elements_unavailable="consent revoked",
-                                      status="failed", error="consent revoked")
+                                      elements_unavailable=error, status="failed", error=error)
     elif message.get("event_status"):
         await _event_status(shares, entry, message)
     elif message["type"] == "read_window_elements":

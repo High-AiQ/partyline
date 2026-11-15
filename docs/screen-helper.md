@@ -1206,3 +1206,22 @@ Also read `tests/test_windows_capture_events.py` including its native Tk capture
 `tests/test_windows_platform.py`. Their capture, packaging and startup contracts remain
 applicable. This is a source audit; native Windows execution is still required by CI, and
 these UIA fixtures do not establish Chrome popup/event-trust behavior for the checklist above.
+
+### Upload Partyline media to a Chrome file input
+
+For a shared Chrome window whose `screen_elements` result has `source: cdp`, call
+`screen_element_action` with `action: "set_files"`, the `window`, `element_id`, and
+`files` containing 1–10 Partyline media IDs. The input must be a file input and
+must allow multiple files when more than one ID is supplied. Request `then` for
+an observation that includes the names and count read back from Chrome, together
+with the usual settle state. If CDP is unavailable, use the Open dialog path.
+
+Only media the caller can read through `get_media` is accepted. Local paths are
+never accepted: allowing them would let an agent upload arbitrary files from the
+person's computer. The existing general per-file media cap applies, with a
+200 MiB total per call; the same file types as normal uploads are accepted. The
+helper downloads the authorized files into a fresh directory under its data
+folder, preserving sanitized file names. Staged files are deleted after ten
+minutes, or on a later call if the helper was restarted before the deadline.
+The helper and server record the grant, caller, media IDs, count and total size,
+not file contents.

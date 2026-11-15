@@ -66,6 +66,8 @@ class WindowTask:
         try:
             chrome = getattr(self.session, "chrome", None)
             result = await chrome.action(self.session.window, message) if chrome else None
+            if result is None and message.get("action") == "set_files":
+                result = {"status": "failed", "error": "CDP unavailable; use the Open dialog path instead"}
             if result is None:
                 result = await self.actions.perform(message)
                 result.setdefault("source", "uia")
