@@ -43,6 +43,10 @@
       <WindowAccessLine {device} />
       <WindowAccessAudit {device} />
     {/each}
+    {#if devices.length}<small
+        >Selected lines and their sublines can see and use windows while the computer's window access toggle
+        is on.</small
+      >{/if}
     {#if error}<p role="alert">{error}</p>{/if}
     <PairingSteps origin={window.location.origin} code={code || "YOUR-CODE"} />
   </SettingRow>

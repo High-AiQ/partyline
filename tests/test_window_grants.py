@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, Mock, patch
 from fastapi import WebSocketDisconnect
 
 from partyline.auth_guard import Principal
-from partyline.screen_grants import device_grants, resolve_window, window_share_indicators
+from partyline.screen_grants import device_grants, resolve_window
 from partyline.screen_frames import ShareBuffer
 from partyline.screen_account_wire import serve_wire
-from partyline.screen_snapshot import owner_state
+from partyline.screen_snapshot import owner_state, owner_indicators
 from partyline.screen_window_grants import share_targets
 from tests.window_grant_fixtures import WindowGrantFixture
 
@@ -41,7 +41,7 @@ class WindowGrantTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(), self.runtime.sockets["~account"])
         self.runtime.sockets["~account"].add(socket)
         await self.hub.window_grants.revoke("g1")
-        self.assertEqual([], socket.send_json.await_args.args[0]["indicators"])
+        self.assertEqual(["standing"], [i["kind"] for i in socket.send_json.await_args.args[0]["indicators"]])
 
     async def test_a_greeting_to_a_socket_closed_underneath_it_is_a_disconnect(self):
         """Every restart logged an ASGI traceback: the hello raced the shutdown's close."""
@@ -93,7 +93,7 @@ class WindowGrantTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         def snapshots():
             return [call.args[0] for call in own.send_json.await_args_list
                     if call.args[0]["type"] == "screen_snapshot"]
-        self.assertEqual([], snapshots()[-1]["indicators"])
+        self.assertEqual(["standing"], [i["kind"] for i in snapshots()[-1]["indicators"]])
         share.status = "active"
         await self.hub._line_event("alpha", self.hub._share_view(share, self.device))
         self.assertEqual("screen", snapshots()[-1]["indicators"][0]["kind"])
@@ -105,7 +105,7 @@ class WindowGrantTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(len(snapshots()), 4)
         with patch("partyline.screen_share_stop.share_stopped", new_callable=AsyncMock):
             await self.hub.stop_share(share.share_id)
-        self.assertEqual([], snapshots()[-1]["indicators"])
+        self.assertEqual(["standing"], [i["kind"] for i in snapshots()[-1]["indicators"]])
 
     async def test_pair_and_offline_removal_push_device_list(self):
         own = SimpleNamespace(screen_owner_id=self.owner["id"], send_json=AsyncMock())
@@ -134,7 +134,7 @@ class WindowGrantTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         snapshots = [call.args[0] for call in own.send_json.await_args_list
                      if call.args[0]["type"] == "screen_snapshot"]
         self.assertTrue(snapshots)
-        self.assertEqual([], snapshots[-1]["indicators"])
+        self.assertEqual(["standing"], [i["kind"] for i in snapshots[-1]["indicators"]])
 
     async def test_grant_lifecycle_notifies_only_owner(self):
         own = SimpleNamespace(screen_owner_id=self.owner["id"], send_json=AsyncMock())
@@ -290,10 +290,11 @@ class WindowGrantTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(403, (await self.read("a")).status_code)
         self.assertEqual(200, (await self.read("b")).status_code)
         self.assertNotIn("g1", self.hub.window_grants.known)
-        indicators = window_share_indicators(self.db, self.owner["id"])
+        indicators = [item for item in owner_indicators(self.hub, self.owner["id"])
+                      if item["kind"] == "window"]
         self.assertEqual([{"conv_id": "beta", "device_name": "Computer", "kind": "window",
                            "label": "window → «Beta» (and its sublines): Editor"}], indicators)
-        self.assertEqual([], window_share_indicators(self.db, self.other_user["id"]))
+        self.assertEqual([], owner_indicators(self.hub, self.other_user["id"]))
         principal = Principal(kind="user", name="other", user_id=self.other_user["id"])
         from fastapi import HTTPException
         with self.assertRaises(HTTPException):

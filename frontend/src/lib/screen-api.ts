@@ -94,11 +94,15 @@ export const screenApi = {
       schema: z.object({ ok: z.literal(true) }),
       method: "DELETE",
     }),
-  authorizeWindowLine: (deviceId: string, convId: string | null) =>
-    request("/api/screen/devices/" + encodeURIComponent(deviceId) + "/window-access-line", {
+  windowLineOptions: (deviceId: string) =>
+    request(`/api/screen/devices/${encodeURIComponent(deviceId)}/window-access-lines`, {
+      schema: z.object({ lines: z.array(z.object({ id: z.string(), name: z.string() })) }),
+    }),
+  authorizeWindowLines: (deviceId: string, convIds: string[]) =>
+    request(`/api/screen/devices/${encodeURIComponent(deviceId)}/window-access-lines`, {
       schema: z.object({ ok: z.literal(true) }),
       method: "PUT",
-      body: { conv_id: convId },
+      body: { conv_ids: convIds },
     }),
   windowAccessAudit: (convId: string) =>
     request("/api/conversations/" + encodeURIComponent(convId) + "/window-access-audit?limit=50", {

@@ -27,15 +27,31 @@ screen tools remain listed for the session and return a clear denial when no scr
 
 After pairing, the tray item **Let agents on my lines see and use my windows** is off by default and
 persists across restarts. In **Settings → Computers**, the paired person selects a **Window access**
-line for each computer. That line and its sublines are authorized; **No lines** removes the binding and
-revokes standing grants. Pairing from a line initially selects that line. Settings pairing and existing
-account-wide helpers start with no authorized lines until their owner selects one. An unknown owner
+set of lines for each computer. The filterable picker offers top-level lines with a live attached process;
+selected lines stay listed when idle so they can be removed. Readability follows the rail's rules:
+people can currently read every line. Each selected line and its sublines inherit
+access. Use checkboxes or arrows and Enter to toggle; Space toggles when the filter is empty, so
+multiword filters remain plain text. Use Backspace to remove the last chip, and
+Escape to close. Removing a line immediately revokes its subtree's standing window grants on the server
+and helper; disjoint selected subtrees and explicit shares keep their grants. If both an ancestor and a
+subline are selected (for example through pairing), removing the ancestor also revokes outstanding
+standing grants in the subline. The still-selected subline retains authorization and may attach again.
+Adding a line revokes nothing.
+Pairing from a line initially adds that line. Settings pairing and existing account-wide helpers start
+with no authorized lines until their owner selects them. An unknown owner
 never receives standing access. Turn the tray toggle on to let agents on an authorized line call
 `screen_windows` and `screen_attach_window(window, reason)`. Discovery returns the HWND, process, title
 and state Windows UIA provides. If Chrome approval is active, the list can also include inactive tabs
 with their titles and URLs; otherwise it returns what UIA exposes. For example, a worker can select the
 **Catalog Dashboard** window, choose `shop.us` or `shop.uk`, follow **Manage listing content** to the
 **Listing Content Manager** page, then attach with a short reason.
+
+The rail shows an outlined computer on authorized lines and their sublines while the computer is online
+and its toggle is on. A live window grant, screen share or control shows a filled green computer. These
+states update from server events. The person-only, computer-owner-only
+`PUT /api/screen/devices/{id}/window-access-lines` replaces the full set with `{"conv_ids":[...]}`;
+`GET` on the same path returns readable picker options. The older singular route replaces the set with
+zero or one line for compatibility. Existing saved bindings migrate exactly once, without adding scope.
 
 Attach creates the same line window grant as an explicit share. Existing per-call checks still apply, and
 sublines inherit through the existing grant tree. The first attach in each helper session shows a toast

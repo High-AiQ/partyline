@@ -9,13 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .auth_guard import Principal
 from .auth_store import user_by_id
-from .hierarchy import descendants
 from .machine_scope import visible_conversation_ids
 from .screen_window_notices import announce, live_processes
 from .preset_traits import match_preset
 from .screen_grants import GRANTS
 from .screen_grant_store import replace_grant
-from .screen_device_access import standing_root
+from .screen_device_access import standing_lines
 from .op_timing import pushed
 
 MESSAGES = ("list_share_targets", "window_grant", "window_revoked", "window_changed")
@@ -118,14 +117,11 @@ class WindowGrants:
             except ValidationError:
                 return
             offered = {}  # attachment id -> (line id, name), for helpers that still pick a process
-            root = standing_root(self.hub.runtime.db, device)
-            root_line = self.hub.runtime.db.get_conversation(root) if root else None
-            standing_lines = ({root, *descendants(self.hub.runtime.db, root, include_archived=False)}
-                              if root_line and not root_line.get("archived_at") else set())
+            authorized = standing_lines(self.hub.runtime.db, device)
             lines = share_targets(self.hub.runtime.db, device["owner_id"], offered=offered,
-                                  window_lines=bool(device.get("windows")), standing_lines=standing_lines)
+                                  window_lines=bool(device.get("windows")), standing_lines=authorized)
             self.offers[device["id"]] = (device["socket"], ident, offered,
-                                          {g["line_id"] for g in lines}, standing_lines)
+                                          {g["line_id"] for g in lines}, authorized)
             await pushed("screen", device["socket"].send_json(
                 {"type": "share_targets", "request_id": ident, "lines": lines}))
             return
@@ -157,10 +153,7 @@ class WindowGrants:
                 raise ValueError("choose a line from the current picker")
             line_id, name = self.target_line(device, body, offer)
             line = self.hub.runtime.db.get_conversation(line_id)
-            root = standing_root(self.hub.runtime.db, device)
-            root_line = self.hub.runtime.db.get_conversation(root) if root else None
-            current_standing = ({root, *descendants(self.hub.runtime.db, root, include_archived=False)}
-                                if root_line and not root_line.get("archived_at") else set())
+            current_standing = standing_lines(self.hub.runtime.db, device)
             if body.standing_access and line_id not in current_standing:
                 raise ValueError("the selected line is not owned by the paired person")
             if (line is None or line.get("archived_at") or line_id not in offer[3]
@@ -216,13 +209,14 @@ class WindowGrants:
         if device_id:
             await self.changed(device_id)
 
-    async def revoke_standing(self, device_id, *, tell_helper=False):
+    async def revoke_standing(self, device_id, *, tell_helper=False, lines=None):
         rows = self.hub.runtime.db._exec(
-            "SELECT id FROM screen_line_window_grants WHERE device_id=? AND standing_access=1",
-            (device_id,),
-        ).fetchall()
-        self.hub.runtime.db._exec(
-            "DELETE FROM screen_line_window_grants WHERE device_id=? AND standing_access=1", (device_id,))
+            "SELECT id,conv_id FROM screen_line_window_grants WHERE device_id=? AND standing_access=1",
+            (device_id,)).fetchall()
+        rows = [row for row in rows if lines is None or row["conv_id"] in lines]
+        # Delete the complete affected set before any notification can yield.
+        for row in rows:
+            self.hub.runtime.db._exec("DELETE FROM screen_line_window_grants WHERE id=?", (row["id"],))
         for row in rows:
             await self.revoke(row["id"], tell_helper=tell_helper)
 

@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .auth_guard import request_principal
 from .machine_scope import is_human
-from .screen_audit import record_window_access, reset_window_access_notices
+from .screen_audit import record_window_access
 from .screen_device_access import standing_devices
 
 
@@ -14,39 +14,10 @@ class AttachWindow(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
 
-class WindowAccessLine(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    conv_id: str | None = Field(default=None, min_length=1, max_length=128)
-
-
 def router_for(runtime, hub):
+    from .screen_window_line_routes import router_for as line_router
     router = APIRouter()
-
-    @router.put("/api/screen/devices/{device_id}/window-access-line")
-    async def authorize_line(device_id: str, body: WindowAccessLine, request: Request):
-        principal = request_principal(request)
-        if not is_human(principal):
-            raise HTTPException(403, "only the paired person can authorize window access lines")
-        row = runtime.db._exec("SELECT id FROM screen_devices WHERE id=? AND owner_id=? "
-                               "AND revoked_at IS NULL", (device_id, principal.user_id)).fetchone()
-        if not row:
-            raise HTTPException(404, "computer not found")
-        if body.conv_id:
-            line = runtime.db.get_conversation(body.conv_id)
-            if not line:
-                raise HTTPException(404, "line not found")
-            if line.get("archived_at"):
-                raise HTTPException(409, "cannot authorize an archived line")
-        runtime.db._exec("INSERT INTO screen_device_window_access(device_id,enabled,owner_conv_id) "
-                        "VALUES(?,0,?) ON CONFLICT(device_id) DO UPDATE "
-                        "SET owner_conv_id=excluded.owner_conv_id", (device_id, body.conv_id))
-        # Remove outstanding grants before announcing the changed scope.
-        reset_window_access_notices(runtime, device_id)
-        await hub.window_grants.revoke_standing(device_id, tell_helper=True)
-        from .capability_versions import bump_runtime
-        bump_runtime(runtime)
-        await hub._device_event({"id": device_id, "owner_id": principal.user_id}, device_id in hub.devices)
-        return {"ok": True}
+    router.include_router(line_router(runtime, hub))
 
     def caller(request, conv_id):
         principal = request_principal(request)
@@ -57,6 +28,11 @@ def router_for(runtime, hub):
         if len(devices) != 1:
             raise HTTPException(403, "no paired person has enabled window access for this line")
         return principal, devices[0]
+
+    def still_authorized(device, conv_id):
+        if (hub.devices.get(device["id"]) is not device or
+                device not in standing_devices(hub, conv_id)):
+            raise HTTPException(403, "window access is no longer enabled for this line")
 
     async def audit(conv_id, principal, call, app="", title="", result="failed", device=None):
         await record_window_access(runtime, conv_id, principal.name, call, app, title, result, device)
@@ -72,9 +48,11 @@ def router_for(runtime, hub):
             raise
         await audit(conv_id, principal, "list", "windows", "window list", "started", device)
         try:
+            still_authorized(device, conv_id)
             result = await hub.standing_windows.request(device, "screen_windows", line=conv_id,
                 line_id=conv_id, line_name=runtime.db.get_conversation(conv_id)["name"],
                 agent=principal.name)
+            still_authorized(device, conv_id)
         except HTTPException:
             await audit(conv_id, principal, "list", "windows", "window list", "failed", device)
             raise
@@ -98,9 +76,11 @@ def router_for(runtime, hub):
             raise
         await audit(conv_id, principal, "attach", "", body.window, "started", device)
         try:
+            still_authorized(device, conv_id)
             result = await hub.standing_windows.request(device, "attach_window", window=body.window,
                 reason=body.reason, line=conv_id, line_id=conv_id,
                 line_name=hub.runtime.db.get_conversation(conv_id)["name"], agent=principal.name)
+            still_authorized(device, conv_id)
         except HTTPException:
             await audit(conv_id, principal, "attach", "", body.window, "failed", device)
             raise
