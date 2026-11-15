@@ -252,6 +252,7 @@ class CapabilityState(BaseModel):
     screen_read: bool = False
     screen_control: bool = False
     screen_windows: bool = False
+    window_access: bool = False
     dynamic_screen_tools: bool = False
     bridge_open: bool = False
     capability_version: str | None = None

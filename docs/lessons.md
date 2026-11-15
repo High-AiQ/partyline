@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — Capability flags must survive response serialization
+
+The false assumption was that adding a flag to attachment capability state made it visible to MCP.
+FastAPI silently dropped `window_access` because the response model did not declare it, hiding standing
+window tools despite an authorized connected helper. The real-route regression in
+`tests/test_capability_window_route.py` exercises inherited access through MCP and guards the response
+model against missing capability assignments.
+
 ## 2026-11-15 — Standing access needs local revocation and an explicit line binding
 
 The false assumptions were that stopping capture finishes promptly, that every paired helper has a
