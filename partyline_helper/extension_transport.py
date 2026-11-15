@@ -4,9 +4,11 @@ import contextlib
 from contextlib import asynccontextmanager
 
 from .cdp_mapping import same_bounds, title_matches
-from .cdp_transport import BrowserConnection, CDPError
+from .cdp_transport import BrowserConnection, CDPError, ExtensionRefused
 from .native_host import discover
 from .native_socket import NativeSocket
+
+STALE_HOLDS = frozenset({"tab_owned_by_other_grant", "previous_detach_incomplete"})
 
 
 class ExtensionTransport(BrowserConnection):
@@ -71,8 +73,21 @@ class ExtensionTransport(BrowserConnection):
             grant = self.targets.get(target)
             if not grant or not self.grants.get(grant) or grant in self.cancelled:
                 raise CDPError("Tab outside live grant")
-            return await self.control(method, params, grant, guard, on_result)
+            try:
+                return await self.control(method, params, grant, guard, on_result)
+            except ExtensionRefused as exc:
+                if exc.code not in STALE_HOLDS or not target.isdigit():
+                    raise
+                # A hold left by a grant that no longer exists (an update, a lock, a reconnect): release
+                # it for this tab only, then try once more. A second refusal is reported with its code.
+                await self.release_stale(int(target), guard)
+                return await self.control(method, params, grant, guard, on_result)
         return await super().call(method, params, session, guard, on_result)
+
+    async def release_stale(self, tab, guard=lambda: None):
+        """Ask the extension to drop this tab's entries under grants this helper no longer has."""
+        return await super().call("Partyline.dispatch", {"method": "Partyline.release", "grant": None,
+                                  "params": {"tabs": [tab], "live": sorted(self.grants)}}, guard=guard)
 
     async def control(self, method, params=None, grant=None, guard=lambda: None, on_result=None):
         # Standard CDP params carry the grant only at the native boundary.

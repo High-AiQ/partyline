@@ -16,7 +16,7 @@ from .status import Status
 from .updates import Updates, MESSAGES as UPDATE_MESSAGES
 from .update_recovery import path as recovery_path
 from .tools import MESSAGES as TOOL_MESSAGES, TOOLS_VERSION, Tools
-from .chrome_operations import chrome_label, watch_windows
+from .chrome_operations import current, show_current, watch_windows
 from .window_shares import MESSAGES as WINDOW_MESSAGES, WINDOWS_VERSION, WindowShares
 from .transport import CertificateError, certificate_failure
 from .version import helper_version
@@ -188,14 +188,12 @@ class Session(SessionTransport):
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
                         helper_version=helper_version(), monitors=self.desktop.monitors(),
                         control=CONTROL_VERSION, tools=TOOLS_VERSION, windows=WINDOWS_VERSION,
-                        press=PRESS_VERSION, chrome_dom=4, chrome={"state": "not_enabled",
-                        "detail": self.windows.chrome.browser.detail,
-                        "transport": self.windows.chrome.browser.transport},
+                        press=PRESS_VERSION, chrome_dom=4, chrome=current(self.windows.chrome),
                         window_access=self.window_access_enabled, update_check=True,
                         auto_update=self.updates.enabled, update_recovery=recovery_path().exists())
-        self.status.chrome = ("Chrome: " + chrome_label(self.windows.chrome.browser, "not_enabled")
-                              + " — " + self.windows.chrome.browser.detail)
+        show_current(self.windows.chrome)  # a reconnect to the server keeps the live extension state
         self.status.set("paired")
+        self.status.ready()  # the tray has been up for a while by now
         loop = asyncio.get_running_loop()
         # The tray's Stop sharing runs on another thread: hand the stop to this loop.
         self.status.stop_share = lambda: asyncio.run_coroutine_threadsafe(self.stop("local"), loop)

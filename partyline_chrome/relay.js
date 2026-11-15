@@ -1,4 +1,5 @@
 import { Attachments, safeURL } from './attachments.js';
+import { chromeFailure, codeOf, refuse } from './refusal.js';
 
 export class Relay {
   constructor(api, emit, clock) {
@@ -28,8 +29,9 @@ export class Relay {
     try {
       const result = await this.command(message);
       this.emit({ id: message.id, result: result || {} });
-    } catch {
-      this.emit({ id: message.id, error: { message: 'Extension command refused or interrupted' } });
+    } catch (error) {
+      this.emit({ id: message.id, error: { message: 'Extension command refused or interrupted',
+        code: codeOf(error) } });
     }
   }
   async command({ method, params = {}, sessionId, grant }) {
@@ -49,6 +51,7 @@ export class Relay {
     if (method === 'Partyline.end') { a.release(grant); return {}; }
     if (method === 'Partyline.revoke') return await a.revoke(grant), {};
     if (method === 'Partyline.reset') return await a.reset(), {};
+    if (method === 'Partyline.release') return await a.drop(params.tabs, params.live);
     if (method === 'Partyline.metrics') return a.metrics;
     if (method === 'Target.attachToTarget' && !sessionId) {
       const entry = await a.attach(grant, Number(params.targetId));
@@ -62,15 +65,15 @@ export class Relay {
       return await this.api.debugger.sendCommand({ tabId: entry.tabId }, method, params);
     }
     const entry = a.entry(sessionId);
-    if (method === 'Page.navigate' && !safeURL(params.url)) throw Error('Restricted navigation');
+    if (method === 'Page.navigate' && !safeURL(params.url)) throw refuse('restricted_navigation');
     // Browser/Target commands cannot escape the tab capability via a granted root session.
     if (!/^(Page|DOM|Accessibility|Runtime|Input|Inspector)\./.test(method) &&
-        !['Target.setAutoAttach', 'Target.detachFromTarget'].includes(method)) throw Error('Domain refused');
+        !['Target.setAutoAttach', 'Target.detachFromTarget'].includes(method)) throw refuse('domain_refused');
     if (method === 'Target.setAutoAttach') {
       params = { ...params, flatten: true, filter: [{ type: 'iframe', exclude: false }, { exclude: true }] };
     }
     if (method === 'Target.detachFromTarget' && !entry.children.has(params.sessionId)) {
-      throw Error('Child outside grant');
+      throw refuse('child_outside_grant');
     }
     entry.busy = (entry.busy || 0) + 1;
     try {
@@ -78,11 +81,12 @@ export class Relay {
       await a.check(entry);
       const debuggee = { tabId: entry.tabId };
       if (sessionId !== entry.session) {
-        if (!entry.children.has(sessionId)) throw Error('Child detached');
+        if (!entry.children.has(sessionId)) throw refuse('child_detached');
         debuggee.sessionId = sessionId;
       }
-      if (!a.valid(entry)) throw Error('Revoked');
-      return await this.api.debugger.sendCommand(debuggee, method, params);
+      if (!a.valid(entry)) throw refuse('revoked');
+      return await this.api.debugger.sendCommand(debuggee, method, params)
+        .catch(error => { throw chromeFailure(error, 'debugger_command_failed'); });
     } finally {
       entry.busy--;
       a.idle(entry);

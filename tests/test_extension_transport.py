@@ -37,6 +37,24 @@ class ExtensionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next(m for m in reversed(self.peer.calls)
                               if m['method'] == 'Partyline.scope')['params']['tabs'], [1])
 
+    async def test_a_server_reconnect_reports_the_live_extension_state_to_server_and_tray(self):
+        self.assertEqual(chrome_operations.current(self.f.chrome)['state'], 'not_enabled')
+        await self.f.browser.ensure()
+        self.assertEqual(chrome_operations.current(self.f.chrome),
+                         {'state': 'connected', 'detail': '', 'transport': 'extension'})
+        self.f.session.status.chrome = 'Chrome: not installed'
+        chrome_operations.show_current(self.f.chrome)
+        self.assertEqual(self.f.session.status.chrome, 'Chrome: extension connected')
+        self.peer.close()  # the extension goes away: the tray row and the device state follow at once
+        await self.f.browser.reader
+        self.assertEqual(self.f.session.status.chrome.split(' — ')[0], 'Chrome: extension disconnected')
+        self.assertEqual(chrome_operations.current(self.f.chrome)['state'], 'disconnected')
+        await asyncio.gather(*self.f.shares.tasks)
+        sent = self.f.session.send.call_args_list[-1]
+        self.assertEqual((sent.args, sent.kwargs['state'], sent.kwargs['transport']),
+                         (('chrome_state',), 'disconnected', 'extension'))
+        self.assertEqual(chrome_operations.current(self.f.chrome)['transport'], 'extension')
+
     async def test_flat_sessions_large_ax_trees_and_crash_event_relay(self):
         await self.f.read()
         events = []

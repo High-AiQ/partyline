@@ -22,6 +22,7 @@ class Status:
         self.auto_update = enabled()
         self.auto_update_toggle = None
         self.notified_updates = set()
+        self.when_ready = None  # run once, when the helper first reaches the server
         self.listeners, self.attention_listeners = [], []
         self.stop_share = self.quit = self.stop_tools = None
         self.tools_active = False
@@ -51,6 +52,12 @@ class Status:
         label = LABELS[self.state]
         label += "; " + self.chrome if self.chrome else ""
         return label + f"; reading {self.window_title}" if self.window_title else label
+
+    def ready(self):
+        ready, self.when_ready = self.when_ready, None
+        if ready:
+            with contextlib.suppress(Exception):  # a notice must never stop the helper
+                ready()
 
     def set(self, state):
         if state != self.state:

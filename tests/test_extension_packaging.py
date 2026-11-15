@@ -23,7 +23,8 @@ class ExtensionPackagingTests(unittest.TestCase):
                                                    'PYZ': Mock(), 'EXE': exe, 'COLLECT': collect})
         self.assertEqual(analysis.call_count, 2)
         names = {Path(source).name for source, dest in analysis.call_args_list[0].kwargs['datas']}
-        self.assertEqual(names, {'manifest.json', 'worker.js', 'relay.js', 'attachments.js', 'wire.js'})
+        self.assertEqual(names, {'manifest.json', 'worker.js', 'relay.js', 'attachments.js', 'wire.js',
+                                 'status.js', 'refusal.js'})
         self.assertTrue(all((root / 'partyline_chrome' / name).exists() for name in names))
         self.assertFalse(exe.call_args_list[0].kwargs['console'])
         self.assertTrue(exe.call_args_list[1].kwargs['console'])

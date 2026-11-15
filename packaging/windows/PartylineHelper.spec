@@ -25,7 +25,8 @@ a = Analysis(
     [os.path.join(ROOT, "packaging", "windows", "entry.py")],
     pathex=[ROOT],
     datas=[(os.path.join(ROOT, "partyline_chrome", name), "partyline_helper/chrome_extension")
-           for name in ("manifest.json", "worker.js", "relay.js", "attachments.js", "wire.js")],
+           for name in ("manifest.json", "worker.js", "relay.js", "attachments.js", "wire.js", "status.js",
+                        "refusal.js")],
     hiddenimports=hidden,
     excludes=["pytest"],
 )

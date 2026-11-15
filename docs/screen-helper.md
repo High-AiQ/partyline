@@ -1058,6 +1058,13 @@ configuration. Computers can queue a change while offline; the paired person's
 pending choice is sent on reconnect. Processes cannot change it. Changes are recorded
 in the server's helper update audit and the helper's local `screen-access-audit.jsonl`.
 
+After the new version is running, the tray shows a one-off **Partyline Helper updated to <version>**
+notice, for automatic updates and for manual installs that replaced an older version. The helper
+records the last announced version in `announced-version.json` beside its pairing configuration, so
+it fires once per version, even across restarts. It never shows on a first install or on a restart at
+the same version. A helper that predates this notice has no record, so its first run only records the
+version: the first announcement comes with the next update.
+
 With the setting enabled, a connection's update announcement makes one attempt.
 If the installer or checksum is missing (404), nothing happens: the release has not
 been published yet. Other transient download failures can be tried on the next connection or
@@ -1412,6 +1419,50 @@ for the current user only. After installing/updating the helper, load it once:
    never trigger reload; the opt-in must be true.
    Manual installations and uninstalls can suspend the host before replacing its registration.
 
+**Toolbar badge.** The extension's toolbar button shows whether the helper is reachable; hover it
+for the reason in plain words. It uses `chrome.action` only, which needs no extra permission.
+
+| Badge | Colour | Meaning |
+| --- | --- | --- |
+| `…` | grey | Connecting to the native host, or the host is up and **waiting for Partyline Helper to attach**. Start the helper if it stays grey. |
+| `✓` | green | Connected: the helper greeted the extension (`Partyline: connected to helper <version>`). The tray's **Chrome** row reads *extension connected*. |
+| `!` | red | Not connected; the title says why. *Native host not found*: Chrome has no registration for the helper's host, so reinstall or restart the helper. *Access forbidden*: the extension id does not match; load the extension from the helper's own folder. *Native host has exited*: the helper bridge stopped, so make sure the helper is running. *Paused for a helper update*: click the button to reconnect. |
+
+Click the button to retry; the badge turns grey straight away and then green or red. A click on a
+port that never greeted replaces it instead of doing nothing. The service worker console
+(`chrome://extensions` → **Inspect views: service worker**) shows concise `[Partyline]` lines for each
+connect attempt, hello, disconnect with Chrome's error text, and reload decision. Page content and
+CDP payloads are never logged.
+
+The helper accepts the native host whenever it connects: after install, after the extension is
+loaded or reloaded, after Chrome restarts, and after an installer pause (`suspend-chrome`) ends. A
+running helper watches the host's endpoint file with an operating-system file event (no timer), and
+the host lets the newest authenticated helper replace a stale one. The host also exits once
+Chrome closes its port, even while a helper is still attached, so the next host can start.
+
+**Extension refusal codes.** A refused extension command returns one fixed code, never Chrome's own
+text (it can name a URL). The helper reports it as `Chrome extension refused <CDP method>:
+<code>`, for example in a read's `source_reason`.
+
+| Code | Meaning and fix |
+| --- | --- |
+| `tab_outside_grant` | The tab or window is not in the live grant (closed, moved, or not shared). Share the window again. |
+| `tab_owned_by_other_grant` | An entry from an older grant still holds the tab. The helper releases that tab's stale entries and retries once on its own; if it still appears, reload the extension at `chrome://extensions`. |
+| `previous_detach_incomplete` | Chrome did not finish detaching the debugger from an earlier grant. Handled like the code above; otherwise close the debugger bar or reload the extension. |
+| `domain_refused` | The command is outside the allowed page domains. Not a fault; use a supported action. |
+| `child_outside_grant` | A frame session outside the shared tab was named. Read again. |
+| `child_detached` | The frame went away. Read again. |
+| `revoked` | The grant ended or the user cancelled debugging in Chrome. Share the window again. |
+| `restricted_navigation` | The page is not an HTTP(S) page (internal, extension, DevTools or `file:`). Navigate to a web page. |
+| `debugger_attach_failed` | Chrome refused to attach (another debugger, or a protected page). Close other DevTools on the tab and read again. |
+| `debugger_command_failed` | Chrome rejected a command on the attached tab. Read again; if it repeats, reload the page. |
+| `debugger_detached` | Chrome detached the debugger (the tab closed or navigated away). Reload the page and read again. |
+
+A new `Partyline.hello` (after an update, a lock, or any reconnect) drops every attachment and
+orphan the extension held from before it, and a failed detach is retried by the next attach, so a
+new grant on the same tab does not collide with an old one. The helper's `Partyline.release`
+frees only a tab no live grant of the helper owns. `reload` takes the same recovery path as a read.
+
 For a source or `uv tool` install, run `partyline-helper install`; its output names the
 extension folder and native host. The host launcher must be installed alongside that
 helper. The Windows installer includes a dedicated console-subsystem native executable;
@@ -1608,6 +1659,16 @@ This implementation is tested against a fake CDP websocket and fake HWND lists o
 Record Chrome/helper versions, each card's CDP line and UIA line, DOM state, page event log,
 and any difference. Upload sanitized evidence to the line; keep host/account details out.
 
+0. **Extension badge and late connect:** start the helper first, with the extension not yet
+   loaded. Load it unpacked: the badge goes grey, then green (`Partyline: connected to helper
+   <version>`) and the tray row reads *extension connected* without restarting the helper. Quit
+   the helper: the badge turns red `!` (*helper bridge stopped*) and the tray row follows. Start it
+   again and click the button: green again. Reload the extension and restart Chrome: both
+   reconnect. Run the installer over a running helper (it pauses the host): the badge shows
+   *paused for a helper update* and the button reconnects. Open the service worker console and
+   confirm `[Partyline]` lines for each step and no page content. Rename the native host
+   registration to see *native host not found*, and load the extension from another folder to see
+   *access forbidden*.
 1. Open `/lab/a11y` in the existing signed-in Chrome window. Disable remote debugging and
    share it. Run `screen_elements(refresh=true)`; expect `source: uia` and the Chrome setting
    instruction. Enable the setting, read again, approve Chrome's prompt, and expect `source: cdp`.

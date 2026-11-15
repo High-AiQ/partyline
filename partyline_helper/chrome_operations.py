@@ -41,8 +41,9 @@ async def watch_extension(chrome, events=file_events):
                                 browser.state = "not_enabled"
                             await browser.ensure()
                 await watcher.wait()
-    except OSError:
-        pass  # Per-operation discovery still works if OS file notifications are unavailable.
+    except OSError as exc:
+        # Per-operation discovery still works; the tray just no longer learns of a late extension itself.
+        print(f"Chrome extension watch stopped ({type(exc).__name__}); reads still look for it", flush=True)
 
 
 async def watch_windows(shares):
@@ -106,3 +107,16 @@ def chrome_label(browser, state):
     suffix = (" " + state.replace("_", " ")
               if state in ("awaiting_approval", "refused", "disconnected") else "")
     return "not installed" if state == "not_enabled" else "remote debugging" + suffix
+
+
+def current(chrome):
+    """What the server and the tray show right now, not what a freshly started helper would assume."""
+    browser = chrome.browser
+    return {"state": browser.state, "detail": "" if browser.state == "connected" else browser.detail,
+            "transport": browser.transport}
+
+
+def show_current(chrome):
+    now = current(chrome)
+    label = chrome_label(chrome.browser, now["state"])
+    chrome.session.status.chrome = "Chrome: " + label + (f" — {now['detail']}" if now["detail"] else "")

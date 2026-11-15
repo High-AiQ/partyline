@@ -128,6 +128,8 @@ def main(argv=None):
                 if tray_wanted(args.no_tray):
                     from .tray import start_tray
                     tray = start_tray(status)
+                    from .update_notice import announce_update
+                    status.when_ready = lambda: announce_update(status)
                 background = bool(args.log) or frozen()  # no one can read a prompt in a log
                 terminal = Terminal(dialog=consent_dialog.auto_dialog(background), status=status)
                 asyncio.run(guarded(serve(load_config(), desktop, terminal, args.yes, border=border,
