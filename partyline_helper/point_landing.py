@@ -1,4 +1,6 @@
 """Text-free evidence for point input, including refusals before dispatch."""
+from contextlib import contextmanager
+
 from partyline.point_geometry import GeometryError, locate
 
 
@@ -38,3 +40,22 @@ def before(api, grant, landing):
 
 def after(api, landing):
     landing["foreground_after"] = api.owns(api.foreground())
+
+
+@contextmanager
+def landing_session(api, grant, landing, page):
+    """Evidence around one page click: before it goes out, and on every path out of it.
+
+    Whatever the click did, `input_sent` is recorded and the foreground is read again; if that read fails the
+    failure is noted in the evidence and never replaces the click's own error."""
+    with api.session():
+        before(api, grant, landing)
+    try:
+        yield
+    finally:
+        landing["input_sent"] = page.dispatched
+        try:
+            with api.session():
+                after(api, landing)
+        except Exception:  # noqa: BLE001 - the foreground is evidence only
+            landing["after_error"] = "foreground not read"

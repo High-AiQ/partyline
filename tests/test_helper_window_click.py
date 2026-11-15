@@ -272,6 +272,21 @@ class CdpRouteTests(ClickFixture):
             return {}
         self.page.call = call
 
+    async def test_an_unreadable_foreground_afterwards_is_noted_and_never_replaces_the_click_result(self):
+        self.press_fails()
+        reads = []
+
+        def foreground():
+            reads.append(1)
+            if len(reads) > 1:
+                raise OSError("no foreground")
+            return 10
+        self.pointer.foreground = foreground
+        reply = await self.click()
+        self.assertEqual(("unconfirmed", "cdp"), (reply["status"], reply["route"]))
+        self.assertEqual((True, None, "foreground not read"), (reply["landing"]["input_sent"],
+                         reply["landing"]["foreground_after"], reply["landing"]["after_error"]))
+
     def kinds(self):
         return [p["type"] for m, p in self.page.calls if m == "Input.dispatchMouseEvent"]
 

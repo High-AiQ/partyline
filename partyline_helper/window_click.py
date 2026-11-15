@@ -19,7 +19,7 @@ from .point_cdp import CHROME
 from .point_cursor import CHANGED, COVERED, MOVED, PointRefused, run as cursor_run
 from .point_ops import KEYBOARD, NEEDS_CLICK, POINTED, arguments, by_cdp, for_cursor, which
 from .point_win32 import Win32Pointer
-from .point_landing import after, before, evidence
+from .point_landing import evidence, landing_session
 from .uia_window_list import HARD_FLOOR
 from .uia_window_identity import live
 
@@ -75,14 +75,11 @@ class PointClicks:
         operation = which(message)
         message["landing"] = evidence(entry, message)
         try:
-            from .window_look import check, operation_lock
+            from .window_look import StaleMark, check, operation_lock
             async with operation_lock(entry):
-                try:
-                    check(access, message)
-                except ValueError as exc:
-                    raise Refused(str(exc)) from exc
+                check(access, message)
                 route, result = await self.run(entry, message, active)
-        except (Refused, PointRefused, CDPError) as exc:
+        except (Refused, PointRefused, CDPError, StaleMark) as exc:
             result = {"status": "failed", "error": str(exc),
                       **({"reason": code} if (code := reason_code(str(exc))) else {})}
         except Exception as exc:  # noqa: BLE001 - whatever fails, the caller gets an answer, not a timeout
@@ -237,25 +234,20 @@ class PointClicks:
             if self.clock() >= limit:
                 raise CDPError(PARTLY if page.dispatched else LATE)
         api, landing = self.pointer(grant["hwnd"]), message["landing"]
-        with api.session():
-            before(api, grant, landing)
-        try:
-            info = await by_cdp(operation, page, frame, points, args, guard)
-            counter = page.access.event_status()["event_counter"]
-            settle = await page.quiet.wait()
-            if page.access.event_status()["event_counter"] != counter and settle == "quiet":
-                settle = "changing"
-            return {"status": "completed", "source": "cdp", "settle": settle,
-                    "settled_event_counter": counter, **info}
-        except CDPError as exc:
-            if not page.dispatched:
-                raise Refused(str(exc)) from exc
-            return {"status": "unconfirmed", "source": "cdp", "error": str(exc),
-                    "revoked_during": not page.live}
-        finally:
-            landing["input_sent"] = page.dispatched
-            with api.session():
-                after(api, landing)
+        with landing_session(api, grant, landing, page):
+            try:
+                info = await by_cdp(operation, page, frame, points, args, guard)
+                counter = page.access.event_status()["event_counter"]
+                settle = await page.quiet.wait()
+                if page.access.event_status()["event_counter"] != counter and settle == "quiet":
+                    settle = "changing"
+                return {"status": "completed", "source": "cdp", "settle": settle,
+                        "settled_event_counter": counter, **info}
+            except CDPError as exc:
+                if not page.dispatched:
+                    raise Refused(str(exc)) from exc
+                return {"status": "unconfirmed", "source": "cdp", "error": str(exc),
+                        "revoked_during": not page.live}
 
     async def via_cursor(self, entry, message, access, grant, generation, points, epoch, args):
         operation = which(message)

@@ -51,10 +51,14 @@ async def read(entry, message):
                 found, start)
 
 
+class StaleMark(ValueError):
+    """The request names marks from a look that is no longer the latest."""
+
+
 def check(access, message):
     generation = message.get("look_generation")
     if generation and generation != getattr(access, "look_generation", None):
-        raise ValueError("stale mark; take a fresh screen_window_look")
+        raise StaleMark("stale mark; take a fresh screen_window_look")
 
 
 def limit_boxes(look, found):

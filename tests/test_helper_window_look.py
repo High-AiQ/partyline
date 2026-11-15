@@ -239,8 +239,12 @@ class MarkCdpGuardTests(point_cases.ClickFixture):
         super().setUp()
         self.access.grant["process"] = "chrome.exe"
         self.shares.chrome.page = AsyncMock(return_value=self.page)
-        self.shares.clicks.pointer = Mock(side_effect=AssertionError("cursor must not run"))
+        self.shares.clicks.pointer = Mock(return_value=self.pointer)  # landing evidence reads, never input
         self.snapshot = self.take()
 
-    test_cdp = (point_cases.CdpRouteTests.
-                test_a_chrome_page_is_clicked_through_cdp_at_page_pixels_and_never_the_cursor)
+    async def test_cdp(self):
+        await (point_cases.CdpRouteTests.
+               test_a_chrome_page_is_clicked_through_cdp_at_page_pixels_and_never_the_cursor)(self)
+        reads = {"foreground", "window_at"}  # the only pointer calls the landing evidence may make
+        self.assertEqual([], [call for call in self.pointer.calls
+                              if (call if isinstance(call, str) else call[0]) not in reads])
