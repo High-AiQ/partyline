@@ -58,6 +58,7 @@ def uninstall(system, home, registry=None):
         registry.delete_tree(REGISTRY_KEY)
     manifest_existed, folder_existed = manifest.exists(), folder.exists()
     manifest.unlink(missing_ok=True)
+    folder.parent.joinpath("chrome-native.lock").unlink(missing_ok=True)  # the extension is no longer known
     if folder.exists():
         shutil.rmtree(folder)
     return [f"{'removed' if manifest_existed else 'not present'} Chrome native host: {manifest}",

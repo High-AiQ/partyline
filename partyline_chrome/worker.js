@@ -1,18 +1,19 @@
 import { Relay } from './relay.js';
-import { Status, explain } from './status.js';
+import { Backoff, ALARM } from './backoff.js';
+import { Status, explain, brief, recoverable } from './status.js';
 import { Decoder, packets } from './wire.js';
 
 // Only states, versions and Chrome's own error text are logged: never page content or CDP payloads.
 const log = { info: (...a) => console.info('[Partyline]', ...a), warn: (...a) => console.warn('[Partyline]', ...a) };
 const status = new Status(chrome.action, log);
 let current = null; // the live native port: { connection, greeted, disconnect }
-let reconnects = 0;
+const backoff = new Backoff(chrome);
 let closing = Promise.resolve();
 const relay = new Relay(chrome, message => {
   if (current) for (const packet of packets(message)) current.connection.postMessage(packet);
 });
 async function connect(resetBudget = false, why = 'startup', force = false) {
-  if (resetBudget) reconnects = 0;
+  if (resetBudget) await backoff.reset();
   await closing;
   if (current && force && (!current.greeted || status.state?.name !== 'connected')) {
     // A click while no helper is attached (or a port that never greeted) starts over with a new host.
@@ -27,11 +28,12 @@ async function connect(resetBudget = false, why = 'startup', force = false) {
   }
   log.info(`${why}: connecting to the native host`);
   status.set('connecting');
+  await backoff.began();
   const connection = chrome.runtime.connectNative('io.partyline.chrome');
   const self = { connection, greeted: false, disconnect };
   current = self;
   const decoder = new Decoder();
-  let received = false, ended = false;
+  let ended = false;
   let hellos = Promise.resolve();
   function closed(remote = false, error = '') {
     if (ended) return;
@@ -39,13 +41,8 @@ async function connect(resetBudget = false, why = 'startup', force = false) {
     if (current === self) current = null;
     closing = relay.attachments.reset().catch(() => {});
     if (!remote) return;
-    const retry = received && reconnects < 1;
-    log.warn(`native host disconnected${error ? `: ${error}` : ''}${retry ? '; retrying once' : ''}`);
-    if (retry) {
-      reconnects++;
-      // no-poll (e): at most one automatic reconnect per startup or user gesture.
-      void connect(false, 'automatic retry');
-    } else status.set('error', explain(error || 'Native host has exited.'));
+    log.warn(`native host disconnected${error ? `: ${error}` : ''}`);
+    void lost(error || 'Native host has exited.');
   }
   function disconnect() {
     closed(); // Chrome does not emit onDisconnect on the port calling disconnect().
@@ -65,6 +62,7 @@ async function connect(resetBudget = false, why = 'startup', force = false) {
       log.info(`helper ${message.helper_version || '(unknown version)'} attached`);
       status.set('connected', message.helper_version);
     }
+    void backoff.reset(); // a greeting ends the retries: the next loss starts the schedule again
     await dropped;
     const running = chrome.runtime.getManifest?.().version;
     if (!ended && await claimReload(chrome.storage.local, running, message) && !ended) {
@@ -80,7 +78,6 @@ async function connect(resetBudget = false, why = 'startup', force = false) {
     try {
       const message = decoder.accept(packet);
       if (message?.method === 'Partyline.hello') {
-        received = true;
         hellos = hellos.then(() => hello(message)).catch(disconnect);
       } else if (message?.method === 'Partyline.suspend') {
         // The helper is away. The port stays up, so the next helper that attaches is greeted with no click;
@@ -95,7 +92,6 @@ async function connect(resetBudget = false, why = 'startup', force = false) {
           status.set('waiting');
         }
       } else if (message) {
-        received = true;
         if (message.method === 'Partyline.reset') {
           log.info('the helper is away; keeping the native port for its return');
           status.set('waiting');
@@ -110,6 +106,20 @@ async function connect(resetBudget = false, why = 'startup', force = false) {
   });
   connection.onDisconnect.addListener(() => closed(true, chrome.runtime.lastError?.message || ''));
 }
+// A port that closed on its own: reconnect by itself on the bounded schedule (backoff.js). The badge stays
+// neutral while attempts remain, and goes red when they are spent. Only a registration or id mismatch is
+// red at once, though the schedule still runs: a registration is briefly absent while an installer replaces it.
+async function lost(error) {
+  const fatal = !recoverable(error);
+  status.set(...(fatal ? ['error', explain(error)] : ['reconnecting', brief(error)]));
+  const delay = await backoff.failed(fatal);
+  if (current) return; // a newer port (a click, an alarm) owns the badge now
+  if (delay === null) {
+    log.warn('giving up automatic reconnects; click the button, start Chrome again or switch tabs to retry');
+    status.set('error', explain(error));
+  } else if (delay === 0) void connect(false, 'automatic retry');
+  else log.info(`retrying the native host in ${delay} s`);
+}
 const start = why => () => { void connect(true, why); };
 chrome.runtime.onStartup.addListener(start('browser startup'));
 chrome.runtime.onInstalled.addListener(start('installed or updated'));
@@ -117,7 +127,12 @@ chrome.action.onClicked.addListener(() => {
   if (!current) status.set('connecting'); // the click is visible before the connect resolves
   void connect(true, 'toolbar click', true);
 });
-start('service worker start')();
+chrome.alarms?.onAlarm.addListener(alarm => { if (alarm.name === ALARM) void connect(false, 'retry alarm'); });
+chrome.tabs?.onActivated?.addListener(async () => {
+  if (!current && await backoff.mayRetry()) void connect(false, 'tab activation');
+});
+// A worker woken by an alarm, or started while the helper is still restarting, continues the schedule.
+void connect(false, 'service worker start');
 
 // Reload restarts this service worker, whose startup path reconnects the native host itself.
 export function shouldReload(running, hello) {

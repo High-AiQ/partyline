@@ -45,6 +45,14 @@ def running_pid():
     return None
 
 
+def seen():
+    """A native host has run for this user before (Chrome started one for the loaded extension).
+
+    The host's own lock file stays after it exits, so a helper that starts while the extension is between
+    hosts (an update, a restart, a reload) still knows the extension is there and waits for it."""
+    return endpoint_path().with_name("chrome-native.lock").exists()
+
+
 def discover():
     try:
         value = json.loads(endpoint_path().read_text())

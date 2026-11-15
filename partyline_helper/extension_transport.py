@@ -9,6 +9,7 @@ from .native_host import discover
 from .native_socket import NativeSocket
 
 STALE_HOLDS = frozenset({"tab_owned_by_other_grant", "previous_detach_incomplete"})
+RECONNECTING = "Partyline Chrome is reconnecting; it reconnects by itself, or click its toolbar button"
 
 
 class ExtensionTransport(BrowserConnection):
@@ -22,7 +23,8 @@ class ExtensionTransport(BrowserConnection):
         self.tabinfo = {}  # tab id -> (url, title) as last mapped, to find the same tab on another transport
         self.cancelled = set()
         self.listeners.add(self.event)
-        self.detail = "Load Partyline Chrome once at chrome://extensions"
+        self.detail = RECONNECTING
+        self.waited = False  # one bounded wait per outage for the extension to return (chrome_operations)
 
     def can_attempt(self):
         return not self.closed and not self.socket and (self.state != "refused" or self.retry_requested)
@@ -33,8 +35,10 @@ class ExtensionTransport(BrowserConnection):
     def report(self, state, detail=""):
         if state == "awaiting_approval":
             detail = "Connecting to Partyline Chrome"
-        elif state in ("refused", "disconnected"):
-            detail = "Chrome extension disconnected; click its toolbar button to reconnect"
+        elif state in ("refused", "disconnected", "not_enabled"):
+            detail = RECONNECTING  # never remote debugging's wording: this transport only waits for its host
+        elif state == "connected":
+            self.waited = False
         super().report(state, detail)
 
     def denial(self, access):

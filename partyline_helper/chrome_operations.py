@@ -7,11 +7,40 @@ from contextvars import ContextVar
 from partyline.file_events import file_events
 from .cdp_transport import BrowserConnection
 from .extension_transport import ExtensionTransport
-from .native_host import discover, endpoint_path
+from .native_host import discover, endpoint_path, seen
+
+PATIENCE = 3  # seconds one read waits for a returning extension, once per outage
+
+
+def known():
+    """The extension is running now or has run before. Only an extension never seen leaves remote debugging
+    as the default; a known one that is between hosts is waited for, never replaced."""
+    return bool(discover() or seen())
 
 
 def preferred(changed):
-    return ExtensionTransport(changed) if discover() else BrowserConnection(changed)
+    return ExtensionTransport(changed) if known() else BrowserConnection(changed)
+
+
+async def await_extension(browser, events=file_events, deadline=asyncio.timeout, patience=PATIENCE):
+    """Give a returning extension one brief chance to connect, woken by its host's endpoint file.
+
+    no-poll (b): one deadline per outage; the wake is a file event, never a timer tick. A later read in
+    the same outage goes straight to UIA with the reconnecting reason."""
+    if browser.waited:
+        return False
+    browser.waited = True
+    try:
+        async with deadline(patience), events(endpoint_path()) as watcher:
+            while True:
+                if browser.state == "refused":
+                    browser.state = "not_enabled"  # a new host is a new chance, as in watch_extension
+                if await browser.ensure():
+                    break
+                await watcher.wait()
+    except TimeoutError:
+        return False
+    return True
 
 
 async def select_extension(chrome):
@@ -67,6 +96,8 @@ def operation(function):
                 result = await leased(self, access, *args, **kwargs)
                 if isinstance(result, dict) and result.get("source") == "cdp":
                     result["transport"] = self.browser_of(access).transport
+                    if why := self.fallback.why(access, self.browser):
+                        result["fallback_reason"] = why
                 return result
             finally:
                 _ACTIVE.reset(token)
@@ -75,16 +106,23 @@ def operation(function):
         if access.grant and access.grant.get("chrome_cancelled"):
             return await function(self, access, *args, **kwargs)
         browser = await select_extension(self)
-        if isinstance(browser, ExtensionTransport) and not browser.socket:
-            if not await browser.ensure() and self.auto_transport:
-                await browser.close()
+        if isinstance(browser, ExtensionTransport) and not browser.socket and not await browser.ensure():
+            if self.auto_transport and not known():
+                await browser.close()  # the extension was never installed: the pre-extension default
                 self.browser = browser = BrowserConnection(self.report)
                 browser.report("not_enabled", "Extension absent; remote debugging fallback. "
                                + browser.detail)
-        if isinstance(browser, ExtensionTransport) and access.grant and access not in self.fallback.grants:
-            async with browser.operation(access):
-                return await function(self, access, *args, **kwargs)
-        return await function(self, access, *args, **kwargs)
+            else:
+                await await_extension(browser)  # a disconnect or an update is never a reason for Allow
+        await self.fallback.retry(access, browser)
+        try:
+            if (isinstance(browser, ExtensionTransport) and browser.socket and access.grant
+                    and access not in self.fallback.grants):
+                async with browser.operation(access):
+                    return await function(self, access, *args, **kwargs)
+            return await function(self, access, *args, **kwargs)
+        finally:
+            await self.fallback.settle(access)
     return run
 
 

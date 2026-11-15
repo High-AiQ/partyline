@@ -17,7 +17,8 @@ class NativeInstallTests(unittest.TestCase):
         manifest = json.loads(Path('partyline_chrome/manifest.json').read_text())
         digest = hashlib.sha256(base64.b64decode(manifest['key'])).hexdigest()[:32]
         self.assertEqual(''.join(chr(ord('a') + int(c, 16)) for c in digest), EXTENSION_ID)
-        self.assertEqual(manifest['permissions'], ['debugger', 'tabs', 'nativeMessaging', 'storage'])
+        self.assertEqual(manifest['permissions'],
+                         ['debugger', 'tabs', 'nativeMessaging', 'alarms', 'storage'])
         self.assertNotIn('host_permissions', manifest)
         self.assertNotIn('content_scripts', manifest)
 
