@@ -2,7 +2,7 @@
 from typing import Annotated, Literal
 
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .auth_guard import request_principal
 from .capability_versions import WINDOW_PRESS_VERSION
@@ -13,7 +13,7 @@ from .screen_tree_answer import size
 from .screen_timing import timed, phase
 
 
-ACTIONS = Literal["invoke", "toggle", "set_value", "press", "select", "add_to_selection",
+ACTIONS = Literal["click", "invoke", "toggle", "set_value", "press", "select", "add_to_selection",
                   "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent",
                   "scroll_into_view", "set_range_value", "window_close", "window_minimize", "window_maximize",
                   "window_restore", "window_move", "window_resize", "set_files", "reload"]
@@ -48,7 +48,8 @@ class Then(BaseModel):
 
 class ElementAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    element_id: str = Field(min_length=1, max_length=128)
+    element_id: str | None = Field(default=None, min_length=1, max_length=128)
+    mark: int | None = Field(default=None, ge=1, strict=True)
     action: ACTIONS
     force: bool = False
     window: str | None = Field(default=None, min_length=1, max_length=500)
@@ -68,6 +69,14 @@ class ElementAction(BaseModel):
     width: int | None = Field(default=None, ge=1, le=16384)
     height: int | None = Field(default=None, ge=1, le=16384)
     then: Then | None = None
+
+    @model_validator(mode="after")
+    def target(self):
+        if (self.element_id is None) == (self.mark is None):
+            raise ValueError("give exactly one of element_id or mark")
+        if self.action == "click" and self.mark is None:
+            raise ValueError("click requires a look mark")
+        return self
 
     def parameters(self):
         """Reject missing or foreign parameters, so the helper only sees what the action takes."""
@@ -91,7 +100,7 @@ class ElementAction(BaseModel):
             raise ValueError(f"{self.action} requires {', '.join(missing)}")
         if extra := sorted(given - wanted):
             raise ValueError(f"{self.action} does not take {', '.join(extra)}")
-        excluded = {"window", "then"} | ({"force"} if not self.force else set())
+        excluded = {"window", "then", "mark"} | ({"force"} if not self.force else set())
         return self.model_dump(exclude_none=True, exclude=excluded)
 
 
@@ -134,6 +143,9 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
     try:
         grant, device = resolve_window(hub, principal, body.window)
         message = body.parameters()
+        if body.mark is not None:
+            look, _, _ = hub.snapshots.looks.target(principal, grant, body.mark)
+            message["look_generation"] = look["generation"]
         if body.action == "press" and device.get("press", 0) < WINDOW_PRESS_VERSION:
             raise ValueError("update the Partyline helper to use press")
         if body.action == "reload" and device.get("chrome_dom", 0) < 4:
@@ -154,6 +166,10 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
         if target is None:
             return {"status": "failed", "error": REFRESH_FAILED}
         async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window
+            if body.mark is not None:
+                look, _, _ = hub.snapshots.looks.target(principal, grant, body.mark)
+                if look["generation"] != message["look_generation"]:
+                    raise HTTPException(409, "stale mark; take a fresh screen_window_look")
             known = True
             if body.action != "reload":
                 message["element_id"], known = hub.elements.locked_target(grant["id"], body.element_id)

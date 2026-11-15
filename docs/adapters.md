@@ -225,7 +225,7 @@ capabilities = { compaction_hooks = true }
 ```
 
 - `PreCompact` (matchers `auto` and `manual`) POSTs to the attachment's hook URL, which
-  bumps the attachment's persisted compactions counter — shown as `×N compactions` in the
+  bumps the context epoch's persisted compactions counter — shown as `×N compactions` in the
   staffing line — and rings on thrash. That is the remedy signal: a fresh instance, not a
   re-prompt.
 - `SessionStart` with matcher `compact` GETs

@@ -372,7 +372,7 @@ replaced by a compaction rotation does not end it. Ending one grant leaves other
 Consent is never restored after a restart. Grants and revocations are recorded in the helper's local
 audit.
 
-Window grants cover `screen_elements`, `screen_element_action`, `screen_window_snapshot` and the point tools
+Window grants cover `screen_elements`, `screen_window_look`, `screen_element_action`, `screen_window_snapshot` and the point tools
 (`screen_window_click`, `_scroll`, `_drag`, `_type`, `_key`). With one window the target is
 unambiguous. With several, pass `window` as the grant ID or title; an ambiguous call lists every
 choice with its owning line, and each snapshot returns its grant ID as `window`. Inherited reads
@@ -478,6 +478,42 @@ Errors, denied consent, closed windows and unsupported platforms return an unava
 macOS AX and Linux AT-SPI are planned. The Windows-only helper dependency `comtypes`
 supplies the typed UI Automation COM interfaces; it is not installed on other platforms.
 
+### Look at a window
+
+Use `screen_window_look(window=W, detail="thumb", query?)` when the text read does not explain
+what is on screen; otherwise prefer `screen_elements` and text deltas after actions. It is listed
+wherever window grants are available, and callable through `extras` for clients that do not re-list.
+Helper 1.7.0 (`windows: 5`) takes a fresh element read and the window image back to back under
+one window operation lock, for both CDP transports and UIA. They carry one shared `generation`.
+Events during capture add a `changing` note: element state may lag the image. A busy page
+still returns a bounded look, and boxes and list always use the same captured nodes.
+
+The MCP answer contains one image with a light coordinate grid and numbered boxes, plus one
+compact state line per box, for example `[7] Button "Save" invoke,press focused`. Lines also show
+checked, selected, disabled and value state when available. Visible elements with bounds get
+boxes even without actions (`no actions`). Actionable elements come first, then smaller areas;
+at most 80 boxes are drawn, with a truncation note. `query` uses the same name matching as
+`screen_elements`, before the cap; every drawn box has exactly one matching list entry. Elements
+clipped outside the image or too small to draw have no box and no list entry. Partial tree reads
+also report truncation. The answer includes `snapshot`, `generation`, a coordinates note and
+`image_tokens`. Box geometry uses the same screen/CSS-to-image mapping as snapshot marks.
+
+`thumb` fits within 1000 pixels on the longest edge and 700,000 total pixels (about 930 image
+tokens). `slim` fits within 1600 pixels; `full` preserves the window's own size. The helper resizes
+before drawing so labels stay readable and point coordinates name the delivered image's pixels.
+
+Act with `screen_element_action(window=W, mark=7, action="invoke")`, giving exactly one of
+`mark` or `element_id`. A supported named action uses the normal CDP/UIA element route and its
+guards. Otherwise `invoke` or `click` uses the box centre through `screen_window_click`'s existing
+route: snapshot freshness, geometry, hard floor, consent, deadlines, hit and cover checks all
+apply. It uses CDP page input or the consented real cursor, never script clicks. `force` cannot
+bypass point guards. Other unsupported actions are refused. Marks have increasing numbers and
+belong to the latest look by that caller; another look invalidates the older generation.
+Unrelated events and ordinary reads or actions do not discard marks. Named actions still perform
+the existing source-scoped freshness checks, and point actions retain snapshot and geometry guards.
+A stale mark says `take a fresh screen_window_look`. Successful actions keep text deltas; use `then={}`
+to read them.
+
 ### Screenshot of the chosen window
 
 `screen_window_snapshot` (listed with `screen_elements`; on clients that never re-list, `extras(op="screen_window_snapshot")`)
@@ -545,8 +581,8 @@ not found, is stale, or the page never settled) carries a `screenshot` with it: 
 granted window alone, a `snapshot` id and the numbered `marks`, taken right then from a fresh tree read (bounded
 to 20 s, and only for a caller who may read the window). Take the point from that picture and call a point tool
 (see *Point input in the chosen window*) without another look. A revoked grant, a refused consent, a floor
-program or a vanished window carry no picture. A success carries no image; pass `then: {"snapshot": true}` to
-get one after the action. The default `then` answers with what changed only (`diff` with added, removed and
+program or a vanished window carry no picture. An element-action success carries no image; pass
+`then: {"snapshot": true}` to get one after the action. The default `then` answers with what changed only (`diff` with added, removed and
 updated ids, and its notes), not a full re-read; any other `then` option reads as before.
 
 With a window granted to its line, any process on that line can call
@@ -700,6 +736,27 @@ leave the granted window.
   refuses a point outside the image or outside the window's client area (frame, title bar and shadows are not
   clickable; controls there go through `window_*` element actions). The helper converts again with its own
   record, never with the server's numbers, and the two must agree.
+- **Landing evidence.** Every point-operation reply has `landing`, with `snapshot` and `points` (both
+  endpoints for a drag; empty for typing and keys). Each point reports `snapshot_point`, `screen_point`
+  (physical screen pixels), the raw `hwnd` and `class` returned by `WindowFromPoint`, `granted_window`
+  (the handle is the grant itself), and `page_area_child` (its renderer child belongs to the grant).
+  `dpi` and `dpi_scale` (DPI / 96) describe the named snapshot; `image_scale` is image pixels per physical
+  screen pixel on each axis. DPI is never multiplied into the physical mapping a second time.
+  `foreground_before` and `foreground_after` say whether the grant or its owned dialog was foreground,
+  before activation and immediately after input, before restoring the person's foreground. `input_sent`
+  distinguishes observed input from a refused attempt. Unknown observations are `null`, including old
+  helpers and transport timeouts; these fields contain no page text. On CDP, `screen_point` is the mapped
+  physical equivalent: input goes to the page in CSS pixels and the hit window is observational only.
+- **Reading a miss.** `settle: unchanged`, `status: no_effect`, or an unchanged requested `after` image
+  attaches `landing_thumb`: a crop of at most 240 × 240 pixels of the granted window around the last
+  landing point, with a red crosshair edged in white. It needs read permission, captures no desktop pixels,
+  and supplies no new coordinate snapshot. Compare the crosshair with the intended control. An unexpected
+  physical point suggests image scale or offset; an unexpected handle/class suggests a covering window or
+  layer. A false foreground-before followed by true foreground-after records activation: the helper
+  activates first, confirms foreground, and then sends a separate page click. A correct crosshair and
+  target with unchanged pixels suggests the component ignored input; it does not prove that no state changed.
+  Do not repeat input automatically. If the window moved away from the landing point, the crop reports that
+  failure instead. A missing renderer child alone does not prove a miss; some windows expose only a root.
 - **Stale pictures.** The click is refused, with "take a fresh `screen_window_snapshot`", when the snapshot
   is unknown or older than the last eight for that grant, or when the window moved, resized, closed, or was
   re-granted, or when the secure desktop is up. The check compares the live rectangle and client areas with the
@@ -1000,6 +1057,13 @@ or Settings → Computers. The helper persists the choice beside its existing pa
 configuration. Computers can queue a change while offline; the paired person's
 pending choice is sent on reconnect. Processes cannot change it. Changes are recorded
 in the server's helper update audit and the helper's local `screen-access-audit.jsonl`.
+
+After the new version is running, the tray shows a one-off **Partyline Helper updated to <version>**
+notice, for automatic updates and for manual installs that replaced an older version. The helper
+records the last announced version in `announced-version.json` beside its pairing configuration, so
+it fires once per version, even across restarts. It never shows on a first install or on a restart at
+the same version. A helper that predates this notice has no record, so its first run only records the
+version: the first announcement comes with the next update.
 
 With the setting enabled, a connection's update announcement makes one attempt.
 If the installer or checksum is missing (404), nothing happens: the release has not
@@ -1355,6 +1419,78 @@ for the current user only. After installing/updating the helper, load it once:
    never trigger reload; the opt-in must be true.
    Manual installations and uninstalls can suspend the host before replacing its registration.
 
+**Toolbar badge.** The extension's toolbar button shows whether the helper is reachable; hover it
+for the reason in plain words. It uses `chrome.action` only, which needs no extra permission.
+
+| Badge | Colour | Meaning |
+| --- | --- | --- |
+| `…` | grey | Connecting to the native host, or the extension is **ready and the helper is away** (not started yet, quit, restarting or updating). Nothing to do: the extension keeps its port to Chrome's native host, and the helper attaches by itself when it starts. Start the helper if it stays grey. |
+| `✓` | green | Connected: the helper greeted the extension (`Partyline: connected to helper <version>`). The tray's **Chrome** row reads *extension connected*. |
+| `!` | red | Not connected; the title says why. *Native host not found*: Chrome has no registration for the helper's host, so reinstall or restart the helper. *Access forbidden*: the extension id does not match; load the extension from the helper's own folder. *Native host has exited*: the native host process ended, so click the button (Chrome starts a new one) and make sure the helper is running. *Paused for a helper update*: a manual install or uninstall asked the host to release its files; click the button to reconnect. |
+
+Click the button to retry; the badge turns grey straight away and then green or red. A click while
+no helper is attached, or on a port that never greeted, replaces the native port instead of doing
+nothing; a click while connected just repaints the badge. The service worker console
+(`chrome://extensions` → **Inspect views: service worker**) shows concise `[Partyline]` lines for each
+connect attempt, hello, disconnect with Chrome's error text, and reload decision. Page content and
+CDP payloads are never logged.
+
+The helper accepts the native host whenever it connects: after install, after the extension is
+loaded or reloaded, after Chrome restarts, and after an installer pause (`suspend-chrome`) ends. A
+running helper watches the host's endpoint file with an operating-system file event (no timer), and
+the host lets the newest authenticated helper replace a stale one. The host also exits once
+Chrome closes its port, even while a helper is still attached, so the next host can start.
+
+**Helper restarts need no click.** Chrome starts the native host only when the extension connects, so the
+host outlives the helper. When the helper quits, restarts or auto-updates, the host keeps Chrome's port
+and tells the extension the helper is away (grey badge; the extension drops its debugger attachments).
+The next helper finds the host through its endpoint file, authenticates, and the host greets the
+extension again: the badge goes green with no click, no timer and no retry loop. Only an installer that
+has to replace the host's files (a manual install or uninstall; an automatic update does not) sends
+`Partyline.suspend` with `release`, which makes the extension close the port; that is the one case that
+shows red *paused* and needs a click (or Chrome restart) to reconnect.
+
+**Extension refusal codes.** A refused extension command returns one fixed code, never Chrome's own
+text (it can name a URL). The helper reports it as `Chrome extension refused <CDP method>:
+<code>`, for example in a read's `source_reason`.
+
+| Code | Meaning and fix |
+| --- | --- |
+| `tab_outside_grant` | The tab or window is not in the live grant (closed, moved, or not shared). Share the window again. |
+| `tab_owned_by_other_grant` | An entry from an older grant still holds the tab. The helper releases that tab's stale entries and retries once on its own; if it still appears, reload the extension at `chrome://extensions`. |
+| `previous_detach_incomplete` | Chrome did not finish detaching the debugger from an earlier grant. Handled like the code above; otherwise close the debugger bar or reload the extension. |
+| `domain_refused` | The command is outside the allowed page domains. Not a fault; use a supported action. |
+| `child_outside_grant` | A frame session outside the shared tab was named. Read again. |
+| `child_detached` | The frame went away. Read again. |
+| `revoked` | The grant ended or the user cancelled debugging in Chrome. Share the window again. |
+| `restricted_navigation` | The page is not an HTTP(S) page (internal, extension, DevTools or `file:`). Navigate to a web page. |
+| `other_extension_frame` | Chrome will not let an extension debug a page that hosts another extension's frame. The helper moves only this grant to Chrome's remote debugging (see below); if that is off, the read's `source_reason` says to enable it at `chrome://inspect/#remote-debugging` or disable the extension that injects the frame. |
+| `debugger_already_attached` | DevTools or another debugging extension holds the tab. Same fallback as above; or close that debugger. |
+| `restricted_page` | Chrome never lets extensions debug this page (a `chrome://` page, the extensions gallery, another extension's page). Use a normal web page. |
+| `tab_gone` | The tab closed between the mapping and the command. Read again. |
+| `debugger_attach_failed` | Chrome refused to attach for a reason the extension does not recognise. Read again. |
+| `debugger_command_failed` | Chrome rejected a command on the attached tab for an unrecognised reason. Read again; if it repeats, reload the page. |
+| `unknown` | A failure that was not a recognised refusal at all. Open the extension's service worker console. |
+| `debugger_detached` | Chrome detached the debugger (the tab closed or navigated away). Reload the page and read again. |
+
+**Remote-debugging fallback, per grant.** Only a grant whose tab Chrome refuses with `other_extension_frame`
+or `debugger_already_attached` changes transport; every other grant keeps the extension. The helper
+tells the extension to drop that grant, and, when Chrome's remote debugging is enabled
+(`DevToolsActivePort` exists), reads continue over remote debugging after Chrome's normal Allow prompt
+(UIA answers meanwhile; the read reports `transport: remote_debugging`). The tray's Chrome row keeps
+describing the extension. A grant for one picked tab is bound once, when it first maps over remote
+debugging, to the one remote target in its window with the same URL and title; from then on only that
+target is the grant's tab (navigating it keeps the grant). If no tab or several match, or the bound tab
+closes, the grant selects nothing and says *pick a tab again*; it never re-matches by content. When remote debugging is off the grant stays on UIA with the actionable
+`source_reason`. Ending the grant closes the remote connection. The extension's own service worker
+console logs each refused command's method and Chrome's raw error text for the person at that machine;
+that text is never sent to the helper.
+
+A new `Partyline.hello` (after an update, a lock, or any reconnect) drops every attachment and
+orphan the extension held from before it, and a failed detach is retried by the next attach, so a
+new grant on the same tab does not collide with an old one. The helper's `Partyline.release`
+frees only a tab no live grant of the helper owns. `reload` takes the same recovery path as a read.
+
 For a source or `uv tool` install, run `partyline-helper install`; its output names the
 extension folder and native host. The host launcher must be installed alongside that
 helper. The Windows installer includes a dedicated console-subsystem native executable;
@@ -1551,6 +1687,18 @@ This implementation is tested against a fake CDP websocket and fake HWND lists o
 Record Chrome/helper versions, each card's CDP line and UIA line, DOM state, page event log,
 and any difference. Upload sanitized evidence to the line; keep host/account details out.
 
+0. **Extension badge and late connect:** start the helper first, with the extension not yet
+   loaded. Load it unpacked: the badge goes grey, then green (`Partyline: connected to helper
+   <version>`) and the tray row reads *extension connected* without restarting the helper. Quit
+   the helper: the badge stays grey (*helper away*). Start it again with no
+   click: green again. Restart the helper, and let it auto-update: green again each time with no
+   click. Reload the extension and restart Chrome: both reconnect. Run the manual installer over a
+   running helper (it asks the host to release its files): the badge shows *paused for a helper
+   update* and the button reconnects. On a page that hosts another extension's frame, expect
+   `other_extension_frame` and, with remote debugging on, a read over `remote_debugging`. Open the service worker console and
+   confirm `[Partyline]` lines for each step and no page content. Rename the native host
+   registration to see *native host not found*, and load the extension from another folder to see
+   *access forbidden*.
 1. Open `/lab/a11y` in the existing signed-in Chrome window. Disable remote debugging and
    share it. Run `screen_elements(refresh=true)`; expect `source: uia` and the Chrome setting
    instruction. Enable the setting, read again, approve Chrome's prompt, and expect `source: cdp`.

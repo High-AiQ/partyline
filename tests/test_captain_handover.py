@@ -53,6 +53,8 @@ class HandoverTest(unittest.TestCase):
         self.assertTrue(self.db.get_attachment('new')['is_lead'])
 
     def test_success_and_restart_persistence(self):
+        self.db._exec("INSERT INTO attachment_context_epochs(attachment_id,epoch) VALUES('old',3)")
+        self.db._exec("INSERT INTO attachment_context_epochs(attachment_id,epoch) VALUES('new',4)")
         self.db._exec('INSERT INTO line_bridges VALUES(?,?,?,?,?,?,?,?,?,?)',
                       ('b', 'line', 'old', 'other', 'foreign', 1, 'human', None, None, None))
         self.db._exec("INSERT INTO conversation_write_grant_requests"
@@ -69,6 +71,11 @@ class HandoverTest(unittest.TestCase):
         self.assertIn('handed captainship', message['body'])
         self.assertFalse(self.db.get_attachment('old')['is_lead'])
         self.assertTrue(self.db.get_attachment('new')['is_lead'])
+        epochs = self.db._exec(
+            "SELECT attachment_id,epoch FROM attachment_context_epochs WHERE attachment_id IN ('old','new') "
+            "ORDER BY attachment_id").fetchall()
+        self.assertEqual([(row['attachment_id'], row['epoch']) for row in epochs],
+                         [('new', 4), ('old', 3)])
         self.assertEqual(self.db._exec('SELECT a_attachment_id FROM line_bridges').fetchone()[0], 'new')
         self.assertEqual(self.db._exec('SELECT requester_attachment_id FROM '
                                        'conversation_write_grant_requests').fetchone()[0], 'new')

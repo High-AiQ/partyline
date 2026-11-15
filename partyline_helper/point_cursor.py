@@ -7,6 +7,7 @@ not a hard-floor program, and the foreground is still the same just before the b
 import threading
 
 from .uia_window_list import HARD_FLOOR
+from .point_landing import after, before
 
 MINIMIZED = "the window is minimised; Partyline never restores it. Ask the person to bring it back"
 NOT_FRONT = "the window could not be brought to the front; no click was sent"
@@ -30,7 +31,7 @@ def click(api, grant, point, button, clicks, alive, events=None, ready=lambda: N
 
 
 def run(api, grant, points, send, alive, events=None, ready=lambda: None, last=lambda: None, check=None,
-        partial=lambda api: None, what="input"):
+        partial=lambda api: None, what="input", landing=None):
     """Every real-input operation shares this: the window in front, every point inside it and not a floor
     program, the foreground unchanged, the guard last. `points` are the screen pixels the input touches
     (the first is where the cursor goes); none for the keyboard, which goes to the window in front.
@@ -41,6 +42,8 @@ def run(api, grant, points, send, alive, events=None, ready=lambda: None, last=l
     hwnd, report = grant["hwnd"], {}
     with ONE_AT_A_TIME, api.session():
         alive()
+        if landing is not None:
+            before(api, grant, landing)
         if api.iconic(hwnd):
             raise PointRefused(MINIMIZED)
         prior, prior_cursor = api.foreground(), api.cursor()
@@ -48,6 +51,8 @@ def run(api, grant, points, send, alive, events=None, ready=lambda: None, last=l
         if not api.owns(prior):
             report["target_came_forward"] = bool(api.bring_forward(hwnd, prior))
         focus = api.foreground()
+        if landing is not None:
+            landing["foreground_after"] = api.owns(focus)
         if not api.owns(focus):
             raise PointRefused(NOT_FRONT)
         alive()
@@ -60,7 +65,12 @@ def run(api, grant, points, send, alive, events=None, ready=lambda: None, last=l
                     raise PointRefused(f"the cursor could not be moved; no {what} was sent")
             ready()  # after the window was brought forward: it may have moved
             for point in points or [None]:
-                under = api.window_at(*point) if point else focus
+                hit = api.window_at(*point) if point else focus
+                if landing is not None:
+                    for item in landing["points"]:
+                        if item["screen_point"] == list(point or ()):
+                            item.update(api.describe(hit, hwnd))
+                under = api.root(hit)
                 if not under or not api.owns(under):
                     raise PointRefused(COVERED)
                 if api.image_name(under) in HARD_FLOOR or api.is_helper(under):
@@ -79,11 +89,17 @@ def run(api, grant, points, send, alive, events=None, ready=lambda: None, last=l
                 last()
                 if api.foreground() != focus or not api.owns(api.foreground()):
                     raise PointRefused(CHANGED)
+            if landing is not None:
+                landing["input_sent"] = None  # an interrupted native send cannot prove delivery
             sent, wanted = send(api, again)
+            if landing is not None:
+                landing["input_sent"] = bool(sent)
             if sent != wanted:
                 partial(api)
                 return {"status": "unconfirmed", "error": f"the {what} was only partly delivered", **report}
         finally:
+            if landing is not None:
+                after(api, landing)  # before restoring the person's foreground
             if moved:
                 report["cursor_restored"] = (api.cursor() == tuple(points[-1])
                                              and bool(api.move(*prior_cursor)))

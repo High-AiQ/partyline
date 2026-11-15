@@ -64,6 +64,9 @@ class RotationFixture(TaskFixture):
             self.db._exec(
                 "INSERT INTO compaction_events(attachment_id,runtime_owner,trigger,turn,created_at)"
                 " VALUES('worker',?,'manual',1,?)", (owner, now))
+        # Those rows belong to prior fresh contexts, not the live worker's epoch.
+        self.db._exec(
+            "INSERT INTO attachment_context_epochs(attachment_id,epoch) VALUES('worker',2)")
 
     def go_live(self, ident):
         att = self.db.get_attachment(ident)
@@ -76,6 +79,9 @@ class RotationFixture(TaskFixture):
             att=att, stop=stop, proc=None, deliver=AsyncMock(return_value=True))
 
     async def start(self, att, **kwargs):
+        if kwargs.get("fresh"):
+            from partyline.context_epoch import start_fresh_context
+            start_fresh_context(self.db, att)
         self.starts.append((dict(att), kwargs))
         self.db.set_attachment_status(att["id"], "running", att["runtime_owner"])
         self.go_live(att["id"])
@@ -372,6 +378,21 @@ class GuardsTest(RotationFixture):
         await self.turn("worker")
         self.assertEqual(len(self.starts), 1)
 
+    async def test_a_preserved_restart_plan_blocks_only_its_attachments(self):
+        await self.reach_the_ask()
+        self.db.add_attachment("other", "root", "other", "fake", ["fake"], self.repo, "o1")
+        self.db._exec("UPDATE attachments SET preset='builder' WHERE id='other'")
+        self.go_live("other")
+        self.db.save_restart_plan("root", ["worker"], "resume")
+        await self.turn("worker")
+        self.assertEqual(self.starts, [])
+        await self.reach_the_ask("other")
+        await self.turn("other")
+        self.assertEqual([start[0]["id"] for start in self.starts], ["other"])
+        self.db._exec("DELETE FROM restart_plan")
+        await self.turn("worker")
+        self.assertEqual([start[0]["id"] for start in self.starts], ["other", "worker"])
+
     async def test_a_pending_handover_defers_the_rotation_for_either_party(self):
         await self.reach_the_ask("captain")
         self.db._exec(
@@ -552,6 +573,9 @@ class RealStartTest(RotationFixture):
     async def test_the_fresh_instance_is_told_to_continue_and_the_line_hears_one_notice(self):
         await self.rotate_worker(HANDOFF)
         fresh = self.adapters[-1]
+        epoch = self.db._exec(
+            "SELECT epoch FROM attachment_context_epochs WHERE attachment_id='worker'").fetchone()
+        self.assertEqual(epoch["epoch"], 3)
         self.assertEqual(fresh.att["id"], "worker")
         self.assertTrue(fresh.att["fresh_resume_now"])
         briefing = fresh.briefing()

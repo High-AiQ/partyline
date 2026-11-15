@@ -312,8 +312,8 @@ class WindowSnapshotToolTests(unittest.TestCase):
 
         text = usage("g1", "Editor", "PC", "me")
         self.assertIn("Read elements first, and the deltas after each action", text)
-        self.assertIn('extras(op="screen_window_snapshot", args={"window": "g1"})', text)
-        self.assertIn("screen_window_snapshot", line_window_text(
+        self.assertIn('screen_window_look(window="g1")', text)
+        self.assertIn("screen_window_look", line_window_text(
             SimpleNamespace(get_conversation=lambda ident: {"id": ident, "parent_id": None},
                             _exec=lambda *a: SimpleNamespace(fetchall=lambda: [
                 {"title": "T", "id": "g1", "device_name": "PC", "conv_id": "c"}])), "c"))

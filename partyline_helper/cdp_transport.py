@@ -16,8 +16,26 @@ INSTRUCTION = ("Extension not installed/connected; remote debugging fallback. "
                "Enable remote debugging in Chrome at chrome://inspect/#remote-debugging")
 
 
+REFUSAL_CODES = frozenset({
+    "tab_outside_grant", "tab_owned_by_other_grant", "previous_detach_incomplete", "domain_refused",
+    "child_outside_grant", "child_detached", "revoked", "restricted_navigation", "debugger_attach_failed",
+    "debugger_command_failed", "debugger_detached", "other_extension_frame", "restricted_page",
+    "debugger_already_attached", "tab_gone", "unknown"})
+DETACHED_CODES = frozenset({"debugger_detached", "child_detached"})
+METHOD = re.compile(r"[A-Za-z]{1,40}\.[A-Za-z]{1,60}")
+
+
+
 class CDPError(ValueError):
     """A bounded, non-page-derived CDP failure."""
+
+
+class ExtensionRefused(CDPError):
+    """The extension refused a command with one of its fixed codes."""
+    def __init__(self, method, code):
+        self.method, self.code = method, code
+        named = f" {method}" if isinstance(method, str) and METHOD.fullmatch(method) else ""
+        super().__init__(f"Chrome extension refused{named}: {code}")
 
 
 class DocumentChanged(CDPError):
@@ -31,7 +49,13 @@ class PageUnavailable(CDPError):
         super().__init__(f"Chrome page {state}; reload the page before acting")
 
 
-def command_error(error):
+def command_error(error, method=None):
+    """A fixed, page-free description: the CDP method this helper sent and the extension's refusal code."""
+    code = error.get("code")
+    if isinstance(code, str) and code in REFUSAL_CODES:
+        if code in DETACHED_CODES:
+            return PageUnavailable("detached")
+        return ExtensionRefused(method, code)
     message = str(error.get("message", "")).lower()
     if any(term in message for term in ("session with given id", "session closed", "target closed")):
         return PageUnavailable("detached")
@@ -63,6 +87,7 @@ class BrowserConnection:
         self.state, self.detail = "not_enabled", INSTRUCTION
         self.socket = self.reader = None
         self.pending, self.listeners, self.result_hooks = {}, set(), {}
+        self.labels = {}
         self.serial = 0
         self.lock = asyncio.Lock()
         self.closed = False
@@ -137,6 +162,7 @@ class BrowserConnection:
         ident = self.serial
         future = asyncio.get_running_loop().create_future()
         self.pending[ident] = future
+        self.labels[ident] = (params or {}).get("method") if method == "Partyline.dispatch" else method
         if on_result:
             self.result_hooks[ident] = on_result
         message = {"id": ident, "method": method, "params": params or {}}
@@ -153,6 +179,7 @@ class BrowserConnection:
             raise CDPError("Chrome command interrupted; do not retry actions automatically") from exc
         finally:
             self.pending.pop(ident, None)
+            self.labels.pop(ident, None)
 
     async def receive(self):
         try:
@@ -163,7 +190,8 @@ class BrowserConnection:
                     hook(message.get("result", {}), future is None or future.done())
                 if future and not future.done():
                     if "error" in message:
-                        future.set_exception(command_error(message["error"]))
+                        label = self.labels.get(message.get("id"))
+                        future.set_exception(command_error(message["error"], label))
                     else:
                         future.set_result(message.get("result", {}))
                 elif "method" in message:

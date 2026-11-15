@@ -41,8 +41,9 @@ async def watch_extension(chrome, events=file_events):
                                 browser.state = "not_enabled"
                             await browser.ensure()
                 await watcher.wait()
-    except OSError:
-        pass  # Per-operation discovery still works if OS file notifications are unavailable.
+    except OSError as exc:
+        # Per-operation discovery still works; the tray just no longer learns of a late extension itself.
+        print(f"Chrome extension watch stopped ({type(exc).__name__}); reads still look for it", flush=True)
 
 
 async def watch_windows(shares):
@@ -65,7 +66,7 @@ def operation(function):
             try:
                 result = await leased(self, access, *args, **kwargs)
                 if isinstance(result, dict) and result.get("source") == "cdp":
-                    result["transport"] = self.browser.transport
+                    result["transport"] = self.browser_of(access).transport
                 return result
             finally:
                 _ACTIVE.reset(token)
@@ -80,7 +81,7 @@ def operation(function):
                 self.browser = browser = BrowserConnection(self.report)
                 browser.report("not_enabled", "Extension absent; remote debugging fallback. "
                                + browser.detail)
-        if isinstance(browser, ExtensionTransport) and access.grant:
+        if isinstance(browser, ExtensionTransport) and access.grant and access not in self.fallback.grants:
             async with browser.operation(access):
                 return await function(self, access, *args, **kwargs)
         return await function(self, access, *args, **kwargs)
@@ -106,3 +107,30 @@ def chrome_label(browser, state):
     suffix = (" " + state.replace("_", " ")
               if state in ("awaiting_approval", "refused", "disconnected") else "")
     return "not installed" if state == "not_enabled" else "remote debugging" + suffix
+
+
+def current(chrome):
+    """What the server and the tray show right now, not what a freshly started helper would assume."""
+    browser = chrome.browser
+    return {"state": browser.state, "detail": "" if browser.state == "connected" else browser.detail,
+            "transport": browser.transport}
+
+
+def show_current(chrome):
+    now = current(chrome)
+    label = chrome_label(chrome.browser, now["state"])
+    chrome.session.status.chrome = "Chrome: " + label + (f" — {now['detail']}" if now["detail"] else "")
+
+
+def status(chrome, access):
+    """The grant's event status; a live attached page proves page events work."""
+    entry = chrome.shares.grants.get(access.session.window_grant_id, {})
+    state = entry.get("event_state")
+    result = state.status() if state else {"event_counter": 0, "events_supported": False,
+                                           "subscription_live": False}
+    browser = chrome.browser_of(access)
+    if any(p.live and p.page_state == "alive" and (not hasattr(browser, "is_attached")
+                                                   or browser.is_attached(p.session))
+           for p in chrome.pages.get(access, {}).values()):
+        result.update(events_supported=True, subscription_live=True)
+    return result

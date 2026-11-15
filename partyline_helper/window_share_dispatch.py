@@ -3,7 +3,7 @@
 
 def label(message):
     """The audit name of a window call."""
-    return {"snapshot_window": "screenshot", "read_window_elements": "uia_read",
+    return {"snapshot_window": "screenshot", "look_window": "screenshot", "read_window_elements": "uia_read",
             "window_click": "point_click", "window_point": "point_input"}.get(message["type"], "uia_action")
 
 
@@ -13,7 +13,7 @@ async def dispatch(shares, message):
         call = label(message)
         shares.session.window_access_audit.append(message.get("line", ""), message.get("agent", ""),
             call, entry.get("process", ""), entry.get("title", ""), "denied: toggle off")
-        if message["type"] == "snapshot_window":
+        if message["type"] in ("snapshot_window", "look_window"):
             await shares.session.send("window_snapshot", request_id=message["request_id"], ok=False,
                                       error="window access is off in the helper")
         elif message["type"] == "read_window_elements":
@@ -23,12 +23,12 @@ async def dispatch(shares, message):
             await shares.session.send("window_element_result", request_id=message["request_id"],
                                       error="window access is off", status="failed")
         return
-    if message["type"] == "snapshot_window":
+    if message["type"] in ("snapshot_window", "look_window"):
         shares.spawn(shares.snapshots.handle(entry, message))
     elif not entry:
         shares.session.window_access_audit.append(message.get("line", ""), message.get("agent", ""),
             label(message), message.get("process", ""), message.get("title", ""), "denied: grant unavailable")
-        if message["type"] == "snapshot_window":
+        if message["type"] in ("snapshot_window", "look_window"):
             await shares.session.send("window_snapshot", request_id=message["request_id"],
                                       ok=False, error="consent revoked")
         else:

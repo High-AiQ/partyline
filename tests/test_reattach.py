@@ -160,6 +160,61 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ready, ("sol", "terra"))
         self.assertIn("Continuation debrief", adapters["one"].deliveries[0][0]["body"])
 
+    async def test_rotation_waits_for_the_whole_manual_reattach_plan(self):
+        from partyline.compaction_events import compaction_count
+        from partyline.compaction_rotation import arm, turn_ended
+
+        self.db.set_setting("max_compactions_per_process", "2")
+        self.db._exec(
+            "INSERT INTO attachment_context_epochs(attachment_id,epoch) VALUES('one',7)")
+        for index in range(2):
+            self.db._exec(
+                "INSERT INTO compaction_events(attachment_id,runtime_owner,trigger,turn,created_at) "
+                "VALUES('one',?,'auto',?,0)", (f"before-{index}", index + 1))
+            event_id = self.db._exec(
+                "SELECT id FROM compaction_events WHERE attachment_id='one' AND runtime_owner=?",
+                (f"before-{index}",)).fetchone()["id"]
+            self.db._exec(
+                "INSERT INTO compaction_context_events(event_id,attachment_id,epoch) "
+                "VALUES(?,'one',7)", (event_id,))
+        self.plan = self.db.save_restart_plan("line", ["one", "two"], "", mode="offer")
+        during_plan = []
+        resumed = []
+
+        async def resume(attachment_id, _pending):
+            resumed.append(attachment_id)
+            owner = f"resumed-{attachment_id}"
+            self.db._exec(
+                "UPDATE attachments SET status='running',runtime_owner=? WHERE id=?",
+                (owner, attachment_id))
+            att = self.db.get_attachment(attachment_id)
+            adapter = ReadyAdapter(self.order, att["name"])
+            adapter.att["runtime_owner"] = owner
+            self.runtime.live[attachment_id] = adapter
+            if attachment_id == "one":
+                count = compaction_count(self.db, attachment_id)
+                arm(self.runtime, att, f"{count} compactions, limit 2", count, 2)
+            if attachment_id == "two":
+                during_plan.append(await turn_ended(
+                    self.runtime, None, "one", "resumed-one"))
+                self.assertIsNone(self.runtime.rotations["one"].asked_id)
+            return ResumedAttachment(adapter, False)
+
+        coordinator = ReattachCoordinator(self.runtime, resume)
+        await coordinator.choose(
+            "line", {"type": "reattach", "token": self.plan["token"], "action": "accept"}, "greg"
+        )
+
+        self.assertEqual(resumed, ["one", "two"])
+        self.assertEqual(during_plan, [False])
+        self.assertEqual(self.runtime.restart_plan_order, [])
+        self.assertNotIn("one", self.runtime.reattaching)
+        self.assertFalse(await turn_ended(self.runtime, None, "one", "resumed-one"))
+        asks = [message for message in self.db.list_messages("line")
+                if message.get("audience_attachment_id") == "one"
+                and "hand-off note" in message["body"]]
+        self.assertEqual(len(asks), 1)
+
     async def test_restart_plan_grandfathers_over_budget_fleet_and_refuses_new_starts(self):
         max_live = 8
         self.db.set_setting("max_live_processes", str(max_live))

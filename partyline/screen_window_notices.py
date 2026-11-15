@@ -23,9 +23,10 @@ def usage(grant_id, title, computer, shared_by, line_name=None):
             "Every process on this line and its sublines can use this window; actions run one at a time. "
             "UIA changes "
             "invalidate snapshots; pass refresh=true for a fresh read.\n"
-            "Read elements first, and the deltas after each action. Take a screenshot "
-            f"(extras(op=\"screen_window_snapshot\", args={{\"window\": {window}}})) when layout or "
-            "visuals matter, or elements do not explain what is on screen; slim is the usual size.")
+            "Read elements first, and the deltas after each action. When text does not explain the screen, "
+            f"use screen_window_look(window={window}) for one fresh image with numbered state; thumb "
+            "is the default (~930 image tokens). Act with screen_element_action(mark=n, action=...); "
+            "old marks require a fresh look.")
 
 
 def live_processes(db, conv_id):
@@ -46,8 +47,9 @@ def line_window_text(db, conv_id):
              for row in rows]
     return ("Windows shared with this line or inherited (any process here may use them): " +
             "; ".join(parts) +
-            ". Read with screen_elements(window=...), act with screen_element_action; a screenshot "
-            "(screen_window_snapshot) is for layout or visuals only.")
+            ". Read text with screen_elements(window=...), act with screen_element_action. Use "
+            "screen_window_look when text does not explain the screen; its default thumb combines "
+            "one fresh image and numbered state. Act by mark; take a fresh look for stale marks.")
 
 
 async def announce(runtime, entry, grant_id, reason=None):

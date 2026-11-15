@@ -50,6 +50,9 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
             raise
     ident, conv_id, owner = att["id"], att["conv_id"], att["runtime_owner"]
     try:
+        # This path always launches a new CLI session; resumed sessions use attachment_resume.
+        from .context_epoch import start_fresh_context
+        start_fresh_context(runtime.db, att)
         await asyncio.to_thread(prepare_attachment, att, runtime, hook_url, checkpoint)
         adapter = make_adapter(
             att["adapter"], att,

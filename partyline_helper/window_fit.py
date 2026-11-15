@@ -27,7 +27,7 @@ def fitted(image, limits):
     scale = min(1.0, edge / max(image.size), (pixels / (image.width * image.height)) ** 0.5)
     if scale >= 1.0:
         return image
-    small = image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))),
+    small = image.resize((max(1, int(image.width * scale)), max(1, int(image.height * scale))),
                          Image.LANCZOS)
     small.info.update(image.info)
     return small

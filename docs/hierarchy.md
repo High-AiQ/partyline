@@ -649,24 +649,31 @@ a line event on every adapter that declares a compaction capability (finding
 - **`compaction_detect = "transcript"`** (Codex, opencode-v2): the adapter
   tails its own transcript or storage for the compaction record — Codex's
   `{"type": "compacted"}` rollout record, opencode-v2's `type='compaction'`
-  row with `status='completed'` — and counts it once per activation, so a
+  row with `status='completed'` — and counts it once per record, so a
   re-read transcript never double-counts. The re-briefing is delivered as a
   private wake message instead of hook stdout.
 
 Both routes share the counter (shown as `×N compactions` in the staffing
-line) and the thrash rule: the third `auto` compaction within five hook
-turns rings the line's live captain once. Adapters without a capability
-report nothing.
+line) for the current context epoch and the thrash rule: the third `auto`
+compaction within five hook turns in one activation rings the line's live
+captain once. Adapters without a capability report nothing.
 
 ## The compaction limit: rotating a process to a fresh instance
 
 Every compaction is a lossy summary of the last, so a process is allowed only a few. The
 **maximum compactions per process** setting (Settings → Processes; `GET`/`PUT
 /api/settings/max_compactions`, people only; default 2, `0` turns it off) bounds how many
-compactions one activation may have. A preset may carry its own `max_compactions`: blank
-inherits the instance setting, `0` turns the limit off for that preset only.
+compactions a context may have before a fresh session is started. A preset may carry its own
+`max_compactions`: blank inherits the instance setting, `0` turns the limit off for that preset only.
 
-When a compaction brings the activation to the limit, or the thrash rule fires, the process is
+Fresh means a new CLI session with no resume, including a rotation started from its hand-off
+note. An ordinary restart, sequential reattachment, crash reattach, or task restart that resumes
+the existing CLI session keeps the same context epoch and its compaction count. Captain handover
+also preserves the context when the same session continues. A restart-resumed process already at
+the limit is armed but stays blocked while any restart plan is active. After the plan finishes its
+ordered work, the process rotates at a later safe turn end.
+
+When a compaction brings the context epoch to the limit, or the thrash rule fires, the process is
 *armed*. Nothing happens mid-turn. At the end of that turn, the harness receipt sends one private
 notice asking for a hand-off note (notes tool, attachment scope: state, decisions, next step, paths
 and SHAs, at most 4,000 characters). At the end of the turn that read the notice, or of any later

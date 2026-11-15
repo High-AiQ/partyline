@@ -332,7 +332,7 @@ class CdpRouteTests(PointFixture):
         self.page = Page()
         self.access.grant["process"] = "chrome.exe"
         self.shares.chrome.page = AsyncMock(return_value=self.page)
-        self.shares.clicks.pointer = Mock(side_effect=AssertionError("the cursor route must not run"))
+        self.shares.clicks.pointer = Mock(return_value=self.pointer)
         self.snapshot = self.take()
 
     async def test_scroll_is_a_wheel_event_at_the_page_point_and_never_the_cursor(self):

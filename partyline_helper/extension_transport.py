@@ -4,9 +4,11 @@ import contextlib
 from contextlib import asynccontextmanager
 
 from .cdp_mapping import same_bounds, title_matches
-from .cdp_transport import BrowserConnection, CDPError
+from .cdp_transport import BrowserConnection, CDPError, ExtensionRefused
 from .native_host import discover
 from .native_socket import NativeSocket
+
+STALE_HOLDS = frozenset({"tab_owned_by_other_grant", "previous_detach_incomplete"})
 
 
 class ExtensionTransport(BrowserConnection):
@@ -17,6 +19,7 @@ class ExtensionTransport(BrowserConnection):
         super().__init__(changed, discovery, self.connect)
         self.opener = opener
         self.targets, self.grants, self.attached = {}, {}, set()
+        self.tabinfo = {}  # tab id -> (url, title) as last mapped, to find the same tab on another transport
         self.cancelled = set()
         self.listeners.add(self.event)
         self.detail = "Load Partyline Chrome once at chrome://extensions"
@@ -71,8 +74,21 @@ class ExtensionTransport(BrowserConnection):
             grant = self.targets.get(target)
             if not grant or not self.grants.get(grant) or grant in self.cancelled:
                 raise CDPError("Tab outside live grant")
-            return await self.control(method, params, grant, guard, on_result)
+            try:
+                return await self.control(method, params, grant, guard, on_result)
+            except ExtensionRefused as exc:
+                if exc.code not in STALE_HOLDS or not target.isdigit():
+                    raise
+                # A hold left by a grant that no longer exists (an update, a lock, a reconnect): release
+                # it for this tab only, then try once more. A second refusal is reported with its code.
+                await self.release_stale(int(target), guard)
+                return await self.control(method, params, grant, guard, on_result)
         return await super().call(method, params, session, guard, on_result)
+
+    async def release_stale(self, tab, guard=lambda: None):
+        """Ask the extension to drop this tab's entries under grants this helper no longer has."""
+        return await super().call("Partyline.dispatch", {"method": "Partyline.release", "grant": None,
+                                  "params": {"tabs": [tab], "live": sorted(self.grants)}}, guard=guard)
 
     async def control(self, method, params=None, grant=None, guard=lambda: None, on_result=None):
         # Standard CDP params carry the grant only at the native boundary.
@@ -145,6 +161,7 @@ class ExtensionTransport(BrowserConnection):
         await self.control("Partyline.scope", {"tabs": [t["id"] for t in tabs],
                                                "windowId": window["id"]}, ident, guard)
         self.targets.update({str(t["id"]): ident for t in tabs})
+        self.tabinfo.update({str(t["id"]): (t.get("url"), t.get("title")) for t in tabs})
         return ((window["id"], [{"targetId": str(t["id"]), "type": "page", **t} for t in tabs]), native)
 
     async def resume(self, page):

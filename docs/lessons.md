@@ -1,5 +1,25 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — A checked cursor point is not proof of the dispatched pixel
+
+The false assumption was that normalising physical coordinates with `65535 / (size - 1)` preserves the
+pixel that WindowFromPoint checked. Windows expands absolute input over half-open virtual desktop pixels;
+truncation could land one pixel before the intended point. Aim at each physical pixel's centre using
+65536 and the desktop size, retaining negative monitor origins. `tests/test_point_landing.py` pins the
+snapshot-to-screen-to-input round trip at 100%, 125%, 150% and 200% DPI. Replies retain the raw hit handle,
+foreground observations and a marked crop on unchanged outcomes, so completion alone is not evidence of
+an effective page click.
+
+## 2026-11-15 — A restart that resumes a session is not a fresh context
+
+The false assumption was that a new runtime owner meant the process had a new context. A Partyline
+restart changes activation ownership but resumes the same CLI session, whose earlier compactions
+still contribute context rot. Track compactions in a durable context epoch that advances only on a
+fresh CLI session; keep the thrash window activation-scoped, and let an already-due resumed process
+rotate at a safe turn end after sequential reattachment. Regressions in
+`tests/test_compaction_events.py`, `tests/test_attachment_resume.py` and
+`tests/test_compaction_rotation.py` cover this boundary.
+
 ## 2026-11-15 — An installer step runs the previous helper, not the new one
 
 The false assumption was that every helper the installer finds knows the newest commands. The upgrade's
@@ -3208,3 +3228,24 @@ held the entire window queue and survived revocation. Reload now starts approval
 returns a failed, explicit retry instruction immediately. The blocking-connector test
 in `tests/test_cdp_reconnect.py` proves reads and UIA actions continue while the prompt
 is unanswered, approval cannot silently reload, and revocation cancels the pending attempt.
+
+### Pixel budgets must survive integer sizing
+
+A proportional resize rounded to nearest whole pixels can exceed its total pixel budget:
+4000×3000 fitted to 700,000 pixels became 966×725 (700,350). Assuming the floating-point
+scale alone enforced the cap was false. Floor each positive output dimension before resizing;
+`tests/test_helper_window_look.py` checks both the longest edge and total pixels after capture.
+
+### Surface protocol handler failures to their test waiter
+
+An integration test waited forever after a WebSocket handler's helper-version assertion failed:
+assuming a handler exception would fail its parent test was false. The server logged the exception,
+but the completion event remained unset. The fake protocol handler now sets completion in `finally`
+and propagates its saved exception in the test, so capability-version failures report an assertion.
+
+### A look generation is independent of the window event clock
+
+Assuming every window event invalidated a look made a clock or spinner starve captures and marks.
+Look generations now change only with a new look. Capture-time events produce a `changing` note,
+while named actions retain source-scoped target checks and point actions retain their geometry and
+input guards. Tests cover unrelated changes, repeated mark actions and a busy continuation.

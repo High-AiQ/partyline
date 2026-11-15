@@ -207,8 +207,8 @@ class CompactionEventsTest(unittest.TestCase):
         self.compact("auto")  # third in window under owner1: the one ring
         self.assertEqual(len([m for m in self.captain_recorder.delivered
                               if "thrashing" in m["body"]]), 1)
-        # restart as owner B: the turn count and the ordinal start over, and
-        # owner A's old high-turn events must not read as thrash
+        # restart as owner B: the context ordinal carries on, but owner A's
+        # old high-turn events must not read as thrash in the new activation.
         self.db._exec("UPDATE attachments SET runtime_owner='owner2' WHERE id='haiku'")
         self.turn_post = self.client.post("/api/hooks/haiku/owner2",
                                           json={"hookEventName": "UserPromptSubmit"})
@@ -217,13 +217,24 @@ class CompactionEventsTest(unittest.TestCase):
                                 json={"hook_event_name": "PreCompact", "trigger": "auto"})
         self.assertEqual(made.status_code, 200)
         notices = [m["body"] for m in self.db.list_messages("line") if "compacted" in m["body"]]
-        self.assertIn("⚠ @haiku compacted (auto, 1st time)", notices)  # this activation's 1st
+        self.assertIn("⚠ @haiku compacted (auto, 4th time)", notices)
         self.assertEqual(len([m for m in self.captain_recorder.delivered
                               if "thrashing" in m["body"]]), 1)  # still just the one ring
-        # the staffing badge keeps the lifetime count across owners
+        # The staffing badge and ordinal count this still-resumed context.
         from partyline.compaction_events import compaction_counts
 
         self.assertEqual(compaction_counts(self.db).get("haiku"), 4)
+
+    def test_a_fresh_context_resets_the_ordinal_but_keeps_prior_history(self):
+        self.compact("manual")
+        from partyline.context_epoch import start_fresh_context
+        start_fresh_context(self.db, self.db.get_attachment("haiku"))
+        self.db._exec("UPDATE attachments SET runtime_owner='owner2' WHERE id='haiku'")
+        self.hooks = "/api/hooks/haiku/owner2"
+        self.assertEqual(self.compact("manual").status_code, 200)
+        notices = [m["body"] for m in self.db.list_messages("line") if "compacted" in m["body"]]
+        self.assertEqual(notices[-1], "⚠ @haiku compacted (manual, 1st time)")
+        self.assertEqual(compaction_count(self.db, "haiku"), 1)
 
     def test_a_captains_rebrief_points_at_the_captain_pack(self):
         from partyline.goal import set_goal

@@ -188,6 +188,11 @@ class MCPServer:
                     self.send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
             value = catalog.dispatch(self.client, name, args, state)
             self._telemetry_value = value
+            if name == "screen_window_look" or (name == "extras" and args.get("op") == "screen_window_look"):
+                from .look_content import content
+                result = content(self.client, value)
+                self._telemetry_value = {**value, "inline": True}
+                return {"content": result}
             text = render(value, self.client.connection["api"].rstrip("/"))
             return {"content": [{"type": "text", "text": text}]}
         except (ApiError, ValueError, KeyError, TypeError, OSError) as exc:

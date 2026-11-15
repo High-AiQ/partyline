@@ -16,13 +16,18 @@ from .native_codec import Decoder, frame, length, packets, read_frame
 from .native_socket import NativeSocket
 
 
-def hello():
+def hello(helper=False):
+    """The extension's greeting. Only a hello sent when a helper attaches carries `helper_connected`."""
     try:
         version = json.loads((config_path().parent / "chrome-extension" / "manifest.json").read_text())[
             "version"]
     except (OSError, ValueError, KeyError):
         version = None
-    return {"method": "Partyline.hello", "extension_version": version, "auto_update": enabled()}
+    message = {"method": "Partyline.hello", "extension_version": version, "auto_update": enabled(),
+               "helper_connected": helper}
+    if helper:
+        message["helper_version"] = __version__
+    return message
 
 
 def endpoint_path():
@@ -75,11 +80,15 @@ class Bridge:
                 if size > 1024:
                     return  # authenticate one small frame before accepting chunked CDP messages
                 auth = json.loads(await reader.readexactly(size))
-            if auth != {"token": self.token} or self.client:
+            if auth != {"token": self.token}:
                 return
+            if self.client:
+                # The newest authenticated helper wins: a helper that was killed or lost its network
+                # may leave a half-open socket here, and Chrome must not stay unreachable behind it.
+                await self.drop_client()
             owned = True
             self.client = socket
-            self.native(hello())
+            self.native(hello(helper=True))
             async for raw in socket:
                 message = json.loads(raw)
                 if "id" in message:
@@ -94,11 +103,18 @@ class Bridge:
             pass
         finally:
             if owned:
-                self.client = None
                 self.pending = {i: pair for i, pair in self.pending.items() if pair[0] is not socket}
-                self.native({"method": "Partyline.reset"})
+                if self.client is socket:  # a newer helper replaced this one: it owns the extension now
+                    self.client = None
+                    self.native({"method": "Partyline.reset"})
             with contextlib.suppress(OSError):
                 await socket.close()
+
+    async def drop_client(self):
+        client, self.client = self.client, None
+        self.pending = {}
+        with contextlib.suppress(OSError):
+            await client.close()
 
     async def receive(self, stream):
         decoder = Decoder()
@@ -141,11 +157,16 @@ async def run(stream, output, wait=wait_pid):
         bridge.native(hello())
         await bridge.receive(stream)
     finally:
+        # Close the helper first: wait_closed() (Python 3.12+) waits for every open connection, so a
+        # host whose Chrome side ended would otherwise keep the lock and refuse each later host.
         if server:
             server.close()
-            await server.wait_closed()
         if bridge.client:
-            await bridge.client.close()
+            await bridge.drop_client()
+        if server:
+            if close_clients := getattr(server, "close_clients", None):
+                close_clients()
+            await server.wait_closed()
         endpoint_path().unlink(missing_ok=True)
         lock.release()
 

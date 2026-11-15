@@ -1,35 +1,79 @@
 import { Relay } from './relay.js';
+import { Status, explain } from './status.js';
 import { Decoder, packets } from './wire.js';
 
-let port;
+// Only states, versions and Chrome's own error text are logged: never page content or CDP payloads.
+const log = { info: (...a) => console.info('[Partyline]', ...a), warn: (...a) => console.warn('[Partyline]', ...a) };
+const status = new Status(chrome.action, log);
+let current = null; // the live native port: { connection, greeted, disconnect }
 let reconnects = 0;
 let closing = Promise.resolve();
 const relay = new Relay(chrome, message => {
-  if (port) for (const packet of packets(message)) port.postMessage(packet);
+  if (current) for (const packet of packets(message)) current.connection.postMessage(packet);
 });
-async function connect(resetBudget = false) {
+async function connect(resetBudget = false, why = 'startup', force = false) {
   if (resetBudget) reconnects = 0;
   await closing;
-  if (port) return;
+  if (current && force && (!current.greeted || status.state?.name !== 'connected')) {
+    // A click while no helper is attached (or a port that never greeted) starts over with a new host.
+    log.warn(`${why}: no helper is attached; reconnecting the native port`);
+    current.disconnect();
+    await closing;
+  }
+  if (current) {
+    log.info(`${why}: already connected to the native host`);
+    status.refresh();
+    return;
+  }
+  log.info(`${why}: connecting to the native host`);
+  status.set('connecting');
   const connection = chrome.runtime.connectNative('io.partyline.chrome');
-  port = connection;
+  const self = { connection, greeted: false, disconnect };
+  current = self;
   const decoder = new Decoder();
   let received = false, ended = false;
   let hellos = Promise.resolve();
-  function closed(retry = false) {
+  function closed(remote = false, error = '') {
     if (ended) return;
     ended = true;
-    if (port === connection) port = null;
+    if (current === self) current = null;
     closing = relay.attachments.reset().catch(() => {});
-    if (retry && received && reconnects < 1) {
+    if (!remote) return;
+    const retry = received && reconnects < 1;
+    log.warn(`native host disconnected${error ? `: ${error}` : ''}${retry ? '; retrying once' : ''}`);
+    if (retry) {
       reconnects++;
       // no-poll (e): at most one automatic reconnect per startup or user gesture.
-      void connect();
-    }
+      void connect(false, 'automatic retry');
+    } else status.set('error', explain(error || 'Native host has exited.'));
   }
   function disconnect() {
     closed(); // Chrome does not emit onDisconnect on the port calling disconnect().
     connection.disconnect();
+  }
+  async function hello(message) {
+    if (ended) return; // a hello queued behind a closed port must not repaint or reset the new one
+    self.greeted = true;
+    // A new hello starts a new helper session: nothing attached before it (an update, a lock, a
+    // reconnect) may collide with the grants that follow. The revoke gates run synchronously here.
+    const dropped = relay.attachments.reset().catch(() => {});
+    if (ended) return;
+    if (message.helper_connected === false) {
+      log.info('native host is up; waiting for the helper to attach');
+      status.set('waiting');
+    } else {
+      log.info(`helper ${message.helper_version || '(unknown version)'} attached`);
+      status.set('connected', message.helper_version);
+    }
+    await dropped;
+    const running = chrome.runtime.getManifest?.().version;
+    if (!ended && await claimReload(chrome.storage.local, running, message) && !ended) {
+      log.info(`reloading the extension: running ${running}, helper ships ${message.extension_version}`);
+      disconnect();
+      chrome.runtime.reload();
+    } else if (shouldReload(running, message)) {
+      log.info(`not reloading: a reload to ${message.extension_version} was already attempted`);
+    }
   }
   connection.onMessage.addListener(packet => {
     if (ended) return;
@@ -37,27 +81,43 @@ async function connect(resetBudget = false) {
       const message = decoder.accept(packet);
       if (message?.method === 'Partyline.hello') {
         received = true;
-        hellos = hellos.then(async () => {
-          if (!ended && await claimReload(chrome.storage.local, chrome.runtime.getManifest?.().version, message)
-              && !ended) {
-            disconnect();
-            chrome.runtime.reload();
-          }
-        }).catch(disconnect);
-      } else if (message?.method === 'Partyline.suspend') disconnect();
-      else if (message) { received = true; void relay.receive(message); }
-    } catch { disconnect(); }
+        hellos = hellos.then(() => hello(message)).catch(disconnect);
+      } else if (message?.method === 'Partyline.suspend') {
+        // The helper is away. The port stays up, so the next helper that attaches is greeted with no click;
+        // only an installer that must free the host's files asks for `release`.
+        if (message.release === true) {
+          log.info('the installer asked the native host to release its files; click the button to reconnect');
+          disconnect();
+          status.set('paused');
+        } else {
+          log.info('the helper is away (paused); keeping the native port for its return');
+          relay.attachments.reset().catch(() => {});
+          status.set('waiting');
+        }
+      } else if (message) {
+        received = true;
+        if (message.method === 'Partyline.reset') {
+          log.info('the helper is away; keeping the native port for its return');
+          status.set('waiting');
+        }
+        void relay.receive(message);
+      }
+    } catch {
+      log.warn('unreadable message from the native host; reconnecting needs a click');
+      disconnect();
+      status.set('error', 'received an unreadable message from the helper bridge. Click this button to reconnect');
+    }
   });
-  connection.onDisconnect.addListener(() => {
-    void chrome.runtime.lastError;
-    closed(true);
-  });
+  connection.onDisconnect.addListener(() => closed(true, chrome.runtime.lastError?.message || ''));
 }
-const start = () => { void connect(true); };
-chrome.runtime.onStartup.addListener(start);
-chrome.runtime.onInstalled.addListener(start);
-chrome.action.onClicked.addListener(start);
-start();
+const start = why => () => { void connect(true, why); };
+chrome.runtime.onStartup.addListener(start('browser startup'));
+chrome.runtime.onInstalled.addListener(start('installed or updated'));
+chrome.action.onClicked.addListener(() => {
+  if (!current) status.set('connecting'); // the click is visible before the connect resolves
+  void connect(true, 'toolbar click', true);
+});
+start('service worker start')();
 
 // Reload restarts this service worker, whose startup path reconnects the native host itself.
 export function shouldReload(running, hello) {

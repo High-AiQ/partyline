@@ -55,6 +55,8 @@ KEPT_WHEN_UNCHANGED = ("snapshot", "note", "budget", "source", "page_state", "re
 
 class WindowSnapshots:
     def __init__(self, hub, wall=time.time):
+        from .screen_window_look import WindowLooks
+        self.looks = WindowLooks(hub)
         self.hub, self.wall = hub, wall
         self.last = {}  # window grant id -> {"at": epoch seconds, "by": handle} of its latest capture
         self.shares = {}  # window grant id -> what frame_reference needs to say "unchanged"
@@ -63,6 +65,7 @@ class WindowSnapshots:
         self.marks = {}  # (window grant id, handle) -> the marks that process was last sent
 
     def end(self, grant_id):
+        self.looks.end(grant_id)
         for table in (self.last, self.shares, self.locks):
             table.pop(grant_id, None)
         for key in [key for key in self.marks if key[0] == grant_id]:
@@ -84,7 +87,8 @@ class WindowSnapshots:
         self.hub.elements.receive(device, {**message, "data": data})
 
     @timed
-    async def take(self, principal, store, window=None, device_name=None, marks=False, tier=None):
+    async def take(self, principal, store, window=None, device_name=None, marks=False, tier=None,
+                   landing=None):
         """One picture. `tier` "thumb" (the default with marks) shrinks the window to THUMB_EDGE x
         THUMB_PIXELS
         before the boxes are drawn and its geometry is recorded, so the picture costs at most ~930 image
@@ -96,6 +100,8 @@ class WindowSnapshots:
         async with locked(self.locks.setdefault(grant["id"], asyncio.Lock())):
             tree = self.hub.elements.snapshots.get(grant["id"]) if marks else None
             extra = {"overlay": True, "marks": mark_inputs(tree) if tree is not None else []} if marks else {}
+            if landing is not None:
+                extra["landing"] = list(landing)
             if tier == "thumb":
                 extra["fit"] = {"edge": THUMB_EDGE, "pixels": THUMB_PIXELS}
             try:
@@ -107,6 +113,8 @@ class WindowSnapshots:
             if answer.get("ok") is not True:
                 reason = answer.get("error") or "the computer could not take the screenshot"
                 raise HTTPException(409, str(reason)[:300])
+            if landing is not None and answer.get("landing_marked") is not True:
+                raise HTTPException(409, "update the Partyline helper to get a marked landing thumbnail")
             with phase("image_store_ms"):
                 result = await self.keep(store, principal, grant, answer, tier)
                 if marks:
@@ -129,9 +137,10 @@ class WindowSnapshots:
         require_window(self.hub, principal, grant["id"])  # nothing is stored for a grant that has ended
         share = self.shares.setdefault(grant["id"], SimpleNamespace(
             frame_lock=asyncio.Lock(), agent_frames={}, conv_id=grant["conv_id"]))
+        sender = (principal.name, "landing") if answer.get("landing_marked") else principal.name
         try:
             ref, unchanged = await frame_reference(
-                store, share, principal.name,
+                store, share, sender,
                 SimpleNamespace(region=None, out_width=answer.get("width"), out_height=answer.get("height")),
                 data, mime)
         except MediaError as exc:  # bytes the media store cannot read as an image
@@ -141,7 +150,7 @@ class WindowSnapshots:
             require_window(self.hub, principal, grant["id"])  # the one gate: nothing awaits before the return
         except HTTPException:  # the grant ended while it was stored or announced: nothing leaves or stays
             if not unchanged:
-                share.agent_frames.pop(principal.name, None)
+                share.agent_frames.pop(sender, None)
                 await asyncio.to_thread(store.delete_file, ref.id)
             record(self.hub.runtime.db, grant["id"], grant["conv_id"], principal.name,
                    f"window screenshot withheld: {grant['process']} — {grant['title']} "
@@ -161,7 +170,7 @@ class WindowSnapshots:
             result["note"] = BLANK
         if self.geometry.keep(grant["id"], answer.get("snapshot_id"), answer.get("geometry")):
             result.update(snapshot=answer["snapshot_id"], coordinates=USE)
-        if unchanged:  # the agent already has this picture: its reference, and the new snapshot id to use
+        if unchanged and not answer.get("landing_marked"):  # reuse the image with its new snapshot id
             result = {"unchanged": True, "file": {"id": ref.id}, "window": grant["id"],
                       "title": grant["title"],
                       "width": ref.width, "height": ref.height,
@@ -195,5 +204,15 @@ def snapshot_router(runtime, hub, store):
         principal = request_principal(request)
         deny_unless(runtime.db, principal, conv_id, "read")
         return await hub.snapshots.take(principal, store, window, device, marks, tier)
+
+    @router.post("/api/conversations/{conv_id}/screen-window-look")
+    @timed
+    async def window_look(conv_id: str, request: Request, window: str | None = None,
+                          detail: Literal["thumb", "slim", "full"] = "thumb", query: str | None = None):
+        principal = request_principal(request)
+        deny_unless(runtime.db, principal, conv_id, "read")
+        if query is not None and not 1 <= len(query) <= 200:
+            raise HTTPException(422, "query must have 1–200 characters")
+        return await hub.snapshots.looks.take(principal, store, window, detail, query)
 
     return router

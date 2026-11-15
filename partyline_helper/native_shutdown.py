@@ -11,7 +11,8 @@ async def suspend(endpoint, opener=asyncio.open_connection):
     socket = NativeSocket(reader, writer)
     try:
         socket.send_nowait({"token": endpoint["token"]})
-        await socket.send('{"method":"Partyline.suspend"}')
+        # `release`: the installer needs this host's files, so Chrome's port must close.
+        await socket.send('{"method":"Partyline.suspend","release":true}')
         # EOF confirms Chrome closed the native port; the PID wait confirms file handles are gone.
         async with asyncio.timeout(5):
             async for _ in socket:

@@ -59,7 +59,7 @@ class ElementsHub(ElementState):
             try:
                 require_window(self.hub, principal, grant["id"])
             except HTTPException:
-                if kind in ("read_window_elements", "snapshot_window"):
+                if kind in ("read_window_elements", "snapshot_window", "look_window"):
                     raise
                 status = response.get("status", "unknown")
                 note = ("The action was performed; the grant has since ended." if status == "completed" else

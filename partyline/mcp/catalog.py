@@ -41,7 +41,7 @@ SCREEN_CONTROL = frozenset({
     "screen_drag", "screen_scroll", "screen_type", "screen_key", "screen_window_click",
     "screen_window_scroll", "screen_window_drag", "screen_window_type", "screen_window_key",
 })
-SCREEN = SCREEN_CONTROL | {"screen_frame", "screen_elements", "screen_window_snapshot"}
+SCREEN = SCREEN_CONTROL | {"screen_frame", "screen_elements", "screen_window_snapshot", "screen_window_look"}
 WINDOW_ACCESS = frozenset({"screen_windows", "screen_attach_window"})
 SCREEN |= WINDOW_ACCESS
 # Captain and task operations that stay listed; every other one runs as captain(op, args).
@@ -65,7 +65,7 @@ def door(name: str, state: dict) -> str | None:
     if (name in WINDOW_ACCESS and state.get("dynamic_screen_tools")
             and not state.get("window_access")):
         return "-"
-    if name in EXTRAS_OPS or (name in SCREEN_CONTROL | {tools_bridge.NAME}
+    if name in EXTRAS_OPS or (name in SCREEN_CONTROL | {tools_bridge.NAME, "screen_window_look"}
                               and not state.get("dynamic_screen_tools")):
         return EXTRAS
     if name in (*tools_captain.OPERATIONS, *tools_tasks.OPERATIONS) and name not in EVERYDAY:

@@ -64,6 +64,13 @@ class FakePointer:
         self.calls.append(("window_at", x, y))
         return self.under
 
+    def root(self, hwnd):
+        return hwnd
+
+    def describe(self, hwnd, granted):
+        return {"hwnd": hwnd, "class": "TestWindow" if hwnd == granted else "TestChild",
+                "granted_window": hwnd == granted, "page_area_child": hwnd == 11}
+
     def image_name(self, hwnd):
         return self.image
 
@@ -186,7 +193,7 @@ class CdpRouteTests(ClickFixture):
         super().setUp()
         self.access.grant["process"] = "chrome.exe"
         self.shares.chrome.page = AsyncMock(return_value=self.page)
-        self.shares.clicks.pointer = Mock(side_effect=AssertionError("the cursor route must not run"))
+        self.shares.clicks.pointer = Mock(return_value=self.pointer)
         self.snapshot = self.take()
 
     async def test_a_chrome_page_is_clicked_through_cdp_at_page_pixels_and_never_the_cursor(self):
@@ -198,7 +205,8 @@ class CdpRouteTests(ClickFixture):
         self.assertEqual({(92.0, 70.0)}, {(event["x"], event["y"]) for event in events})
         self.assertEqual([1, 1, 2, 2], [event.get("clickCount") for event in events if "clickCount" in event])
         self.assertEqual({"right"}, {event["button"] for event in events[1:]})
-        self.shares.clicks.pointer.assert_not_called()
+        self.assertEqual([], self.sends())
+        self.assertNotIn(("move", 200, 150), self.pointer.calls)
         self.ask.assert_not_called()  # no consent prompt, as for CDP element actions
         self.assertEqual(["dispatching", "completed"], [row["result"] for row in self.rows()])
         self.assertEqual({"cdp"}, {row["route"] for row in self.rows()})
@@ -263,6 +271,21 @@ class CdpRouteTests(ClickFixture):
                 raise CDPError("Chrome command interrupted")
             return {}
         self.page.call = call
+
+    async def test_an_unreadable_foreground_afterwards_is_noted_and_never_replaces_the_click_result(self):
+        self.press_fails()
+        reads = []
+
+        def foreground():
+            reads.append(1)
+            if len(reads) > 1:
+                raise OSError("no foreground")
+            return 10
+        self.pointer.foreground = foreground
+        reply = await self.click()
+        self.assertEqual(("unconfirmed", "cdp"), (reply["status"], reply["route"]))
+        self.assertEqual((True, None, "foreground not read"), (reply["landing"]["input_sent"],
+                         reply["landing"]["foreground_after"], reply["landing"]["after_error"]))
 
     def kinds(self):
         return [p["type"] for m, p in self.page.calls if m == "Input.dispatchMouseEvent"]

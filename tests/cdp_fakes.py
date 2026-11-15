@@ -22,6 +22,7 @@ class Socket:
                       2: dict(left=900, top=20, width=800, height=600)}
         self.visible = {"a": True, "b": False, "other": True}
         self.titles = {"a": "Lab", "b": "Background", "other": "Other"}
+        self.urls = {}  # target -> url; empty unless a test needs pages to report one
         self.nodes = [dict(nodeId="1", backendDOMNodeId=1, role={"value": "RootWebArea"},
                            name={"value": "Lab"}),
                       dict(nodeId="2", parentId="1", backendDOMNodeId=2, role={"value": "link"},
@@ -62,7 +63,8 @@ class Socket:
         if method == "SystemInfo.getProcessInfo":
             return {"processInfo": [{"type": "browser", "id": 12}]}
         if method == "Target.getTargets":
-            return {"targetInfos": [{"targetId": ident, "type": "page", "title": self.titles[ident]}
+            return {"targetInfos": [{"targetId": ident, "type": "page", "title": self.titles[ident],
+                                     "url": self.urls.get(ident, "")}
                                     for ident in self.windows]}
         if method == "Browser.getWindowForTarget":
             ident = self.windows[p["targetId"]]

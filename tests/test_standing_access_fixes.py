@@ -222,7 +222,8 @@ class StandingOwnerBindingTests(WindowGrantFixture, unittest.IsolatedAsyncioTest
         parent = SimpleNamespace(window_access_audit=audit, status=Status(),
             windows=SimpleNamespace(grants={"g1": {"target": {"line_id": "alpha", "line_name": "Alpha"},
                                                   "process": "editor.exe", "title": "Editor"}}))
-        session = SimpleNamespace(parent=parent, window_grant_id="g1", window=object(), send=AsyncMock(),
+        session = SimpleNamespace(parent=parent, window_grant_id="g1", window=SimpleNamespace(),
+            send=AsyncMock(),
             chrome=SimpleNamespace(action=AsyncMock(return_value={"status": "completed"})))
         await WindowTask(session)._action(message)
         self.assertEqual("child", audit.recent()[0]["line"])

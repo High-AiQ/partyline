@@ -71,6 +71,9 @@ class TaskFixture(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.client.close)
 
     async def start(self, att, **kwargs):
+        if kwargs.get('fresh', True):
+            from partyline.context_epoch import start_fresh_context
+            start_fresh_context(self.db, att)
         self.db.set_attachment_status(att['id'], 'running', att['runtime_owner'])
         async def stop():
             self.db.set_attachment_status(att['id'], 'exited', att['runtime_owner'])
@@ -80,7 +83,7 @@ class TaskFixture(unittest.IsolatedAsyncioTestCase):
 
     async def resume(self, ident, pending=None):
         att = self.db.get_attachment(ident)
-        await self.start(att)
+        await self.start(att, fresh=False)
         adapter = self.runtime.live[ident]
         adapter.startup_messages = pending or []
         adapter.wait_ready = AsyncMock(return_value=True)

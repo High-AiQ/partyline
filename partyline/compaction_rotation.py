@@ -4,8 +4,8 @@ Each compaction is a lossy summary of the last, so after a few the cheapest
 good move is to start over from a short, deliberate hand-off. The flow is
 event-driven end to end — no timer decides anything:
 
-1. A compaction event (`compaction_events`) counts the activation's
-   compactions. At the limit, or when the thrash rule fires, the process is
+1. A compaction event (`compaction_events`) counts the current context epoch's
+   compactions. At the limit, or when the activation-scoped thrash rule fires, the process is
    *armed*. Nothing happens mid-turn.
 2. At the end of the turn that follows (`Presence.ended`, the harness receipt)
    an armed process is asked, once and privately, to write its hand-off note
@@ -17,9 +17,10 @@ event-driven end to end — no timer decides anything:
 
 The attachment row never changes, so the handle, preset, line, lead flag, task
 role, bridge, notes and delivery cursor carry over; only the CLI session and the
-runtime owner are new. A restart request or a captain handover in flight defers
-the rotation to a later turn end. The one deadline is a short grace after the
-receipt, because the transcript tail posts a turn's last words just after it.
+runtime owner are new. An active sequential restart plan, restart request, or
+captain handover defers rotation until a later turn end. The one deadline is a
+short grace after the receipt, because the transcript tail posts a turn's last
+words just after it.
 """
 
 from __future__ import annotations
@@ -82,6 +83,11 @@ def blocker(runtime, att: dict) -> str:
         return "a restart request is pending"
     if getattr(runtime, "stopping", False):
         return "the server is stopping"
+    if getattr(runtime, "restart_plan_order", None):
+        return "a sequential reattachment plan is active"
+    plan = runtime.db.get_restart_plan()
+    if plan is not None and att["id"] in plan["attachment_ids"]:
+        return "this attachment is pending in a restart plan"
     if att["id"] in runtime.reattaching:
         return "it is being restored"
     if state_text(runtime.db, att["id"]):

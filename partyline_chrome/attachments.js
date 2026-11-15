@@ -1,4 +1,6 @@
 // An attachment is a revocable capability, never a browser-wide connection.
+import { chromeFailure, refuse } from './refusal.js';
+
 export const IDLE_LINGER_MS = 300;
 export const safeURL = (url) => /^https?:/i.test(url || '');
 
@@ -19,9 +21,9 @@ export class Attachments {
   now() { return this.clock.performance.now(); }
   scope(grant, tabs, windowId) {
     if (typeof grant !== 'string' || !grant || !Array.isArray(tabs) || !tabs.every(Number.isInteger) || !Number.isInteger(windowId)) {
-      throw Error('Invalid grant');
+      throw refuse('tab_outside_grant');
     }
-    if (this.cancelled.has(grant)) throw Error('Cancelled by user; a new share is required');
+    if (this.cancelled.has(grant)) throw refuse('revoked'); // cancelled by the user; a new share is required
     const allowed = new Set(tabs);
     for (const entry of this.entries.values()) {
       if (entry.grant === grant && !allowed.has(entry.tabId)) this.forget(entry);
@@ -33,19 +35,21 @@ export class Attachments {
     return this.entries.get(entry.session) === entry && this.grants.get(entry.grant)?.has(entry.tabId);
   }
   async check(entry) {
-    if (!this.valid(entry)) throw Error('Consent revoked');
-    const tab = await this.api.tabs.get(entry.tabId);
-    if (!this.valid(entry) || tab.windowId !== this.windows.get(entry.grant) || !safeURL(tab.url) || (tab.pendingUrl && !safeURL(tab.pendingUrl))) {
-      throw Error('Tab unavailable or restricted');
-    }
+    if (!this.valid(entry)) throw refuse('revoked');
+    const tab = await this.api.tabs.get(entry.tabId).catch(() => { throw refuse('tab_outside_grant'); });
+    if (!this.valid(entry)) throw refuse('revoked');
+    if (tab.windowId !== this.windows.get(entry.grant)) throw refuse('tab_outside_grant');
+    if (!safeURL(tab.url) || (tab.pendingUrl && !safeURL(tab.pendingUrl))) throw refuse('restricted_navigation');
     return tab;
   }
   async attach(grant, tabId) {
-    if (!this.grants.get(grant)?.has(tabId)) throw Error('Tab outside grant');
-    if ([...this.orphans].some(e => e.tabId === tabId)) throw Error('Previous detach incomplete');
+    if (!this.grants.get(grant)?.has(tabId)) throw refuse('tab_outside_grant');
+    // A detach that failed earlier gets one more try now; only a tab Chrome still holds blocks the new grant.
+    for (const orphan of [...this.orphans].filter(e => e.tabId === tabId)) await this.detach(orphan).catch(() => {});
+    if ([...this.orphans].some(e => e.tabId === tabId)) throw refuse('previous_detach_incomplete');
     // One debugger per tab. Two independently revocable grants cannot share it.
     if ([...this.entries.values()].some(e => e.tabId === tabId && e.grant !== grant)) {
-      throw Error('Tab already owned by another grant');
+      throw refuse('tab_owned_by_other_grant');
     }
     const previous = [...this.entries.values()].find(e => e.tabId === tabId && e.grant === grant);
     if (previous) await this.forget(previous);
@@ -67,17 +71,20 @@ export class Attachments {
   }
   async open(entry) {
     const start = this.now();
-    await this.api.debugger.attach({ tabId: entry.tabId }, '1.3');
+    await this.api.debugger.attach({ tabId: entry.tabId }, '1.3').catch(error => {
+      throw chromeFailure(error, 'debugger_attach_failed');
+    });
     entry.attached = true;
     this.metrics.attach_ms.push(this.now() - start);
     this.metrics.attach_ms.splice(0, Math.max(0, this.metrics.attach_ms.length - 128));
     if (!this.valid(entry)) {
       await this.detach(entry);
-      throw Error('Consent revoked during attach');
+      throw refuse('revoked');
     }
     try {
       await this.check(entry);
-      const result = await this.api.debugger.sendCommand({ tabId: entry.tabId }, 'Page.getFrameTree');
+      const result = await this.api.debugger.sendCommand({ tabId: entry.tabId }, 'Page.getFrameTree')
+        .catch(error => { throw chromeFailure(error, 'debugger_command_failed'); });
       const loader = result.frameTree.frame.loaderId;
       const documentChanged = entry.loader !== undefined && entry.loader !== loader;
       entry.loader = loader;
@@ -110,6 +117,7 @@ export class Attachments {
     entry.closing = this.api.debugger.detach({ tabId: entry.tabId });
     try { await entry.closing; this.orphans.delete(entry); }
     catch (error) {
+      if (chromeFailure(error, '').code === 'debugger_detached') { this.orphans.delete(entry); return; }
       // Retain ownership after an API failure so revoke or the next release can still detach.
       entry.attached = true;
       this.emit({ method: 'Partyline.attachment', sessionId: entry.session,
@@ -133,13 +141,21 @@ export class Attachments {
     return Promise.all([...this.entries.values(), ...this.orphans]
       .filter(e => e.grant === grant).map(e => this.forget(e)));
   }
+  // Release a tab's entries under grants the helper no longer has; a live grant's tab is never touched.
+  async drop(tabs, live) {
+    if (!Array.isArray(tabs) || !tabs.every(Number.isInteger) || !Array.isArray(live)) throw refuse('tab_outside_grant');
+    const wanted = new Set(tabs), keep = new Set(live);
+    const stale = [...this.entries.values(), ...this.orphans].filter(e => wanted.has(e.tabId) && !keep.has(e.grant));
+    await Promise.all(stale.map(e => this.forget(e)));
+    return { released: stale.length };
+  }
   reset() {
     const grants = new Set([...this.grants.keys(), ...[...this.orphans].map(e => e.grant)]);
     return Promise.all([...grants].map(g => this.revoke(g)));
   }
   entry(session) {
     const entry = this.entries.get(session) || [...this.entries.values()].find(e => e.children.has(session));
-    if (!entry || !this.valid(entry)) throw Error('Unknown or revoked session');
+    if (!entry || !this.valid(entry)) throw refuse('revoked');
     return entry;
   }
   event(source, method, params) {

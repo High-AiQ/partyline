@@ -15,6 +15,7 @@ from partyline_helper import update_download as downloads, update_preferences as
 from partyline_helper import update_signature, update_supervisor as supervisor
 from partyline_helper.update_release import installer_info
 from partyline_helper.native_host import hello
+from partyline_helper.version import helper_version
 
 
 class ReleaseTests(unittest.TestCase):
@@ -155,7 +156,8 @@ class ReleaseTests(unittest.TestCase):
         with patch("partyline_helper.native_host.config_path", return_value=path), \
                 patch("partyline_helper.native_host.enabled", return_value=True):
             self.assertEqual(hello(), {"method": "Partyline.hello", "extension_version": "1.7.0",
-                                      "auto_update": True})
+                                      "auto_update": True, "helper_connected": False})
+            self.assertEqual(hello(helper=True)["helper_version"], helper_version())
             (extension / "manifest.json").unlink()
             self.assertIsNone(hello()["extension_version"])
 

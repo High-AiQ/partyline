@@ -6,6 +6,7 @@ from pathlib import PureWindowsPath
 
 from .foreground_swap import activate
 from .point_cursor import PointRefused
+from .page_windows import RENDERER
 from .uia_popups import WindowScope, configure, process_image
 from .window_dpi import per_monitor
 
@@ -68,8 +69,16 @@ class Win32Pointer:  # pragma: no cover - Windows only
     restore = bring_forward  # the same swap, the other way round
 
     def window_at(self, x, y):
-        hit = self.user.WindowFromPoint(wintypes.POINT(x, y))
-        return self.user.GetAncestor(hit, 2) if hit else 0  # GA_ROOT
+        return self.user.WindowFromPoint(wintypes.POINT(x, y)) or 0
+
+    def root(self, hwnd):
+        return self.user.GetAncestor(hwnd, 2) if hwnd else 0  # GA_ROOT, the original safety boundary
+
+    def describe(self, hwnd, granted):
+        name = self.scope.window_class(hwnd) if hwnd else ""
+        return {"hwnd": hwnd, "class": name, "granted_window": hwnd == granted,
+                "page_area_child": bool(hwnd and self.user.GetAncestor(hwnd, 2) == granted
+                                        and hwnd != granted and name == RENDERER)}
 
     def image_name(self, hwnd):
         path = process_image(self.scope.process(hwnd))
@@ -101,7 +110,9 @@ class Win32Pointer:  # pragma: no cover - Windows only
     def desktop(self, x, y):
         """The point as 0..65535 across the virtual desktop, which SendInput's absolute moves use."""
         left, top, wide, high = (self.user.GetSystemMetrics(index) for index in (76, 77, 78, 79))
-        return ((x - left) * 65535 // max(wide - 1, 1), (y - top) * 65535 // max(high - 1, 1))
+        # Windows maps the 16-bit value into half-open desktop pixels. Aim at the pixel centre.
+        return ((2 * (x - left) + 1) * 65536 // (2 * wide),
+                (2 * (y - top) + 1) * 65536 // (2 * high))
 
     def send(self, point, button, clicks):
         """Move to `point` and press and release, all in one call: the input lands on the point that was

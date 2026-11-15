@@ -56,9 +56,14 @@ class NativeHostTests(unittest.IsolatedAsyncioTestCase):
         await bridge.accept(reader({"token": "wrong"}), writer)
         self.assertTrue(writer.closed)
         self.assertEqual(output.getvalue(), b"")
-        bridge.client = object()
+        stale = Writer()
+        bridge.client = NativeSocket(reader(), stale)  # a half-open helper: the newest helper replaces it
         await bridge.accept(reader({"token": "secret"}), Writer())
-        self.assertEqual(output.getvalue(), b"")
+        self.assertTrue(stale.closed)
+        output.seek(0)
+        self.assertTrue(read_frame(output)["helper_connected"])
+        output.seek(0)
+        output.truncate()
         bridge.client = None
         await bridge.accept(reader({"token": "secret"}, {"id": 1, "method": "DOM.enable"}), Writer())
         output.seek(0)
@@ -258,7 +263,7 @@ class NativeHostTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(native_host.Bridge, "receive", AsyncMock()):
             server = starting.return_value
             server.sockets = [Mock(getsockname=lambda: ("", 1234))]
-            server.close = Mock()
+            server.close = server.close_clients = Mock()
             server.wait_closed = AsyncMock()
             locking.return_value.acquire.side_effect = [False, True]
             wait = Mock(return_value=True)

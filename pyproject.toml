@@ -82,3 +82,5 @@ packages = ["partyline", "partyline_helper"]
 "partyline_chrome/relay.js" = "partyline_helper/chrome_extension/relay.js"
 "partyline_chrome/attachments.js" = "partyline_helper/chrome_extension/attachments.js"
 "partyline_chrome/wire.js" = "partyline_helper/chrome_extension/wire.js"
+"partyline_chrome/status.js" = "partyline_helper/chrome_extension/status.js"
+"partyline_chrome/refusal.js" = "partyline_helper/chrome_extension/refusal.js"

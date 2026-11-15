@@ -12,7 +12,8 @@ SAFETY = ("Same rules as screen_window_click: the window must not have moved, re
           "gets the input without the mouse; any other window takes the real mouse and keyboard after "
           "the person agrees on their computer, once per window grant. Never a terminal, password manager "
           "or system dialog. Answers with route (cdp or cursor), settle and what changed; capture=thumb "
-          "adds a picture afterwards. ")
+          "adds a picture afterwards. landing reports image/screen points, DPI, hit HWND/class, foreground; "
+          "unchanged outcomes include a crosshair landing_thumb. ")
 WINDOW = {"type": "string",
           "description": "Window grant id or title; includes grants inherited from ancestors."}
 CAPTURE = {"type": "string", "enum": ["none", "thumb"],
