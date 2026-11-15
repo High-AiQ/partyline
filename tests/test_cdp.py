@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 from partyline.screen_tree import Snapshot
 from partyline.screen_tree_answer import answer, size
 from partyline_helper.cdp_actions import evaluate
-from partyline_helper.cdp_recipes import STATE, normalize
+from partyline_helper.cdp_recipes import HIT, STATE, normalize
 from partyline_helper.cdp_transport import BrowserConnection, CDPError, discover
 from partyline_helper.uia_task import WindowTask
 from tests.cdp_fakes import Fixture, Socket
@@ -176,10 +176,22 @@ class CDPTests(IsolatedAsyncioTestCase):
         self.assertEqual(result["events"], "trusted keyboard input/change")
 
     async def test_composed_hit_test_descends_shadow_roots_and_tracks_slot_assignment(self):
-        self.assertIn("shadowRoot.elementFromPoint(x,y)", STATE)
-        self.assertIn("n.assignedSlot||n.parentNode||(n.host||null)", STATE)
+        self.assertIn("shadowRoot.elementFromPoint(x,y)", HIT)
+        self.assertIn("n.assignedSlot||n.parentNode||(n.host||null)", HIT)
+        self.assertNotIn("while(", HIT + STATE)  # every composed walk is bounded
         self.assertIn("a.shadowRoot.activeElement", STATE)
-        self.assertIn("composedContains(n,e)", STATE)  # closed-root host / slotted light child
+        self.assertIn("composedContains(n,e)", HIT)  # closed-root host / slotted light child
+
+    async def test_reads_never_hit_test_or_read_covering_text(self):
+        # Per-node hit tests reading a covering container's text exhausted renderer memory.
+        self.assertNotIn("elementFromPoint", STATE)
+        self.assertNotIn("innerText", HIT)
+        self.assertNotIn("textContent", HIT)
+        await self.f.read()
+        recipes = [m["params"]["functionDeclaration"] for m in self.f.socket.calls
+                   if m["method"] == "Runtime.callFunctionOn"]
+        self.assertTrue(recipes)
+        self.assertNotIn(HIT, recipes)
 
     async def test_hit_test_refusal_prevents_a_click_on_covered_shadow_element(self):
         await self.f.read()
