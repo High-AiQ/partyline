@@ -21,7 +21,7 @@ class Extension:
         read, self.write_fd = os.pipe()
         self.stdin = os.fdopen(read, "rb")
         self.buffer, self.decoder, self.seen, self.hellos = bytearray(), Decoder(), [], []
-        self.suspended = asyncio.Event()
+        self.suspended, self.changed, self.messages = asyncio.Event(), asyncio.Event(), []
 
     def write(self, raw):
         self.buffer += raw
@@ -36,6 +36,8 @@ class Extension:
             if message is None:
                 continue
             self.seen.append(message["method"])
+            self.messages.append(message)
+            self.changed.set()
             if message["method"] == "Partyline.hello":
                 self.hellos.append(message)
             if message["method"] == "Partyline.suspend":
@@ -43,6 +45,11 @@ class Extension:
             if "id" in message:
                 for part in packets({"id": message["id"], "result": {"product": "extension"}}):
                     os.write(self.write_fd, frame(part))
+
+    async def until(self, predicate):
+        while not predicate():
+            self.changed.clear()
+            await self.changed.wait()
 
     def close(self):  # Chrome closes the native port: the host's stdin reaches end of file
         with contextlib.suppress(OSError):
@@ -102,6 +109,8 @@ class LateHostTests(unittest.IsolatedAsyncioTestCase):
         await extension.suspended.wait()
         await self.finish(extension, host)
         await asyncio.wait_for(suspending, 5)
+        suspend = next(m for m in extension.messages if m["method"] == "Partyline.suspend")
+        self.assertIs(suspend["release"], True)  # only an installer asks Chrome to close the port
         self.assertIsNone(native_host.discover())
         self.assertFalse(native_host.endpoint_path().exists())
         # The pause ends: the extension reconnects, and the same running helper takes the new host.
@@ -111,6 +120,25 @@ class LateHostTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([h["helper_connected"] for h in again.hellos], [False, True])
         self.assertIn("Browser.getVersion", again.seen)
         await self.finish(again, host)  # also ends while the helper is still attached
+
+    async def test_host_outlives_a_helper_that_quits_and_greets_the_next_one_without_chrome(self):
+        extension, host = await self.start_host()
+        await extension.until(lambda: len(extension.hellos) == 1)  # the endpoint file is written first
+        first = ExtensionTransport()
+        self.assertTrue(await first.ensure())
+        await extension.until(lambda: len(extension.hellos) == 2)
+        await first.close()  # the helper quits: Chrome's port is untouched
+        await extension.until(lambda: "Partyline.reset" in extension.seen)
+        self.assertFalse(host.done())
+        self.assertIsNotNone(native_host.discover())
+        second = ExtensionTransport()  # the restarted helper finds the same host by its endpoint file
+        self.addAsyncCleanup(second.close)
+        self.assertTrue(await second.ensure())
+        await extension.until(lambda: len(extension.hellos) == 3)
+        self.assertEqual([h["helper_connected"] for h in extension.hellos], [False, True, True])
+        self.assertEqual((await second.call("Browser.getVersion"))["product"], "extension")
+        await second.close()
+        await self.finish(extension, host)
 
     async def test_newest_authenticated_helper_replaces_a_stale_one(self):
         from partyline_helper.native_socket import NativeSocket

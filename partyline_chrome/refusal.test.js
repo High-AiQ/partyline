@@ -57,8 +57,8 @@ test('child detached, revoked and an unknown failure use their codes', async () 
   assert.equal(code(await f.send({ method: 'DOM.enable', sessionId: 'c' })), 'revoked'); // unknown child session
   await f.relay.command({ method: 'Partyline.revoke', grant: 'g' });
   assert.equal(code(await f.send({ method: 'DOM.enable', sessionId: session })), 'revoked');
-  assert.equal(codeOf(Error('anything')), 'debugger_command_failed');
-  assert.equal(refuse('not-a-code').code, 'debugger_command_failed');
+  assert.equal(codeOf(Error('anything')), 'unknown');
+  assert.equal(refuse('not-a-code').code, 'unknown');
   assert.equal(chromeFailure(refuse('revoked'), 'x').code, 'revoked');
   assert.equal(chromeFailure(Error('whatever'), 'debugger_attach_failed').code, 'debugger_attach_failed');
 });
@@ -103,4 +103,41 @@ test('a new hello drops every attachment and orphan from before it', async () =>
   await f.relay.attachments.reset();
   await f.scope('new');
   assert.ok((await f.send({ method: 'Target.attachToTarget', params: { targetId: '1' } }, 'new')).result.sessionId);
+});
+
+test('Chrome debugger messages map to fixed sub-codes and the raw text stays local', () => {
+  const cases = [
+    ['Cannot access a chrome-extension:// URL of different extension', 'other_extension_frame'],
+    ['Another debugger is already attached to the tab with id: 4', 'debugger_already_attached'],
+    ['Cannot access a chrome:// URL', 'restricted_page'],
+    ['Cannot access contents of url "https://x.test". Extension manifest must request permission', 'restricted_page'],
+    ['No tab with given id 7.', 'tab_gone'],
+    ['Debugger is not attached to the tab with id: 4.', 'debugger_detached'],
+    ['Something Chrome has never said before', 'debugger_attach_failed'],
+  ];
+  for (const [text, code] of cases) {
+    const error = chromeFailure(Error(text), 'debugger_attach_failed');
+    assert.equal(error.code, code, text);
+    assert.equal(error.message, code); // the wire message is the code, never Chrome's text
+    assert.equal(error.detail, text); // the raw text stays in this service worker
+  }
+  assert.equal(chromeFailure(Error('x'.repeat(900)), 'debugger_command_failed').detail.length, 300);
+});
+
+test('the service worker console gets the method and Chrome\'s raw error for each refused command', async () => {
+  const f = fixture();
+  f.api.debugger.sendCommand = async () => { throw Error('Cannot access a chrome-extension:// URL of different extension'); };
+  const relay = new Relay(f.api, m => f.messages.push(m));
+  const warnings = [], save = console.warn;
+  console.warn = (...a) => warnings.push(a.join(' '));
+  try {
+    await relay.receive({ id: 1, method: 'Partyline.scope', grant: 'g', params: { tabs: [1], windowId: 9 } });
+    await relay.receive({ id: 2, method: 'Partyline.begin', grant: 'g' });
+    await relay.receive({ id: 3, method: 'Target.attachToTarget', grant: 'g', params: { targetId: '1' } });
+  } finally { console.warn = save; }
+  const refused = f.messages.find(m => m.id === 3);
+  assert.equal(refused.error.code, 'other_extension_frame');
+  assert.ok(!JSON.stringify(refused).includes('different extension')); // nothing raw crosses to the helper
+  assert.ok(warnings.some(line => line.includes('Target.attachToTarget') && line.includes('other_extension_frame')
+    && line.includes('different extension')));
 });

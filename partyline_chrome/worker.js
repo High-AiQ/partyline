@@ -14,8 +14,9 @@ const relay = new Relay(chrome, message => {
 async function connect(resetBudget = false, why = 'startup', force = false) {
   if (resetBudget) reconnects = 0;
   await closing;
-  if (current && force && !current.greeted) {
-    log.warn(`${why}: the native port never greeted; reconnecting`);
+  if (current && force && (!current.greeted || status.state?.name !== 'connected')) {
+    // A click while no helper is attached (or a port that never greeted) starts over with a new host.
+    log.warn(`${why}: no helper is attached; reconnecting the native port`);
     current.disconnect();
     await closing;
   }
@@ -51,10 +52,12 @@ async function connect(resetBudget = false, why = 'startup', force = false) {
     connection.disconnect();
   }
   async function hello(message) {
+    if (ended) return; // a hello queued behind a closed port must not repaint or reset the new one
     self.greeted = true;
     // A new hello starts a new helper session: nothing attached before it (an update, a lock, a
     // reconnect) may collide with the grants that follow. The revoke gates run synchronously here.
     const dropped = relay.attachments.reset().catch(() => {});
+    if (ended) return;
     if (message.helper_connected === false) {
       log.info('native host is up; waiting for the helper to attach');
       status.set('waiting');
@@ -80,13 +83,21 @@ async function connect(resetBudget = false, why = 'startup', force = false) {
         received = true;
         hellos = hellos.then(() => hello(message)).catch(disconnect);
       } else if (message?.method === 'Partyline.suspend') {
-        log.info('the helper paused the native host for an update');
-        disconnect();
-        status.set('paused');
+        // The helper is away. The port stays up, so the next helper that attaches is greeted with no click;
+        // only an installer that must free the host's files asks for `release`.
+        if (message.release === true) {
+          log.info('the installer asked the native host to release its files; click the button to reconnect');
+          disconnect();
+          status.set('paused');
+        } else {
+          log.info('the helper is away (paused); keeping the native port for its return');
+          relay.attachments.reset().catch(() => {});
+          status.set('waiting');
+        }
       } else if (message) {
         received = true;
         if (message.method === 'Partyline.reset') {
-          log.info('the helper detached');
+          log.info('the helper is away; keeping the native port for its return');
           status.set('waiting');
         }
         void relay.receive(message);

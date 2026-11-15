@@ -1424,12 +1424,13 @@ for the reason in plain words. It uses `chrome.action` only, which needs no extr
 
 | Badge | Colour | Meaning |
 | --- | --- | --- |
-| `…` | grey | Connecting to the native host, or the host is up and **waiting for Partyline Helper to attach**. Start the helper if it stays grey. |
+| `…` | grey | Connecting to the native host, or the extension is **ready and the helper is away** (not started yet, quit, restarting or updating). Nothing to do: the extension keeps its port to Chrome's native host, and the helper attaches by itself when it starts. Start the helper if it stays grey. |
 | `✓` | green | Connected: the helper greeted the extension (`Partyline: connected to helper <version>`). The tray's **Chrome** row reads *extension connected*. |
-| `!` | red | Not connected; the title says why. *Native host not found*: Chrome has no registration for the helper's host, so reinstall or restart the helper. *Access forbidden*: the extension id does not match; load the extension from the helper's own folder. *Native host has exited*: the helper bridge stopped, so make sure the helper is running. *Paused for a helper update*: click the button to reconnect. |
+| `!` | red | Not connected; the title says why. *Native host not found*: Chrome has no registration for the helper's host, so reinstall or restart the helper. *Access forbidden*: the extension id does not match; load the extension from the helper's own folder. *Native host has exited*: the native host process ended, so click the button (Chrome starts a new one) and make sure the helper is running. *Paused for a helper update*: a manual install or uninstall asked the host to release its files; click the button to reconnect. |
 
-Click the button to retry; the badge turns grey straight away and then green or red. A click on a
-port that never greeted replaces it instead of doing nothing. The service worker console
+Click the button to retry; the badge turns grey straight away and then green or red. A click while
+no helper is attached, or on a port that never greeted, replaces the native port instead of doing
+nothing; a click while connected just repaints the badge. The service worker console
 (`chrome://extensions` → **Inspect views: service worker**) shows concise `[Partyline]` lines for each
 connect attempt, hello, disconnect with Chrome's error text, and reload decision. Page content and
 CDP payloads are never logged.
@@ -1439,6 +1440,15 @@ loaded or reloaded, after Chrome restarts, and after an installer pause (`suspen
 running helper watches the host's endpoint file with an operating-system file event (no timer), and
 the host lets the newest authenticated helper replace a stale one. The host also exits once
 Chrome closes its port, even while a helper is still attached, so the next host can start.
+
+**Helper restarts need no click.** Chrome starts the native host only when the extension connects, so the
+host outlives the helper. When the helper quits, restarts or auto-updates, the host keeps Chrome's port
+and tells the extension the helper is away (grey badge; the extension drops its debugger attachments).
+The next helper finds the host through its endpoint file, authenticates, and the host greets the
+extension again: the badge goes green with no click, no timer and no retry loop. Only an installer that
+has to replace the host's files (a manual install or uninstall; an automatic update does not) sends
+`Partyline.suspend` with `release`, which makes the extension close the port; that is the one case that
+shows red *paused* and needs a click (or Chrome restart) to reconnect.
 
 **Extension refusal codes.** A refused extension command returns one fixed code, never Chrome's own
 text (it can name a URL). The helper reports it as `Chrome extension refused <CDP method>:
@@ -1454,9 +1464,24 @@ text (it can name a URL). The helper reports it as `Chrome extension refused <CD
 | `child_detached` | The frame went away. Read again. |
 | `revoked` | The grant ended or the user cancelled debugging in Chrome. Share the window again. |
 | `restricted_navigation` | The page is not an HTTP(S) page (internal, extension, DevTools or `file:`). Navigate to a web page. |
-| `debugger_attach_failed` | Chrome refused to attach (another debugger, or a protected page). Close other DevTools on the tab and read again. |
-| `debugger_command_failed` | Chrome rejected a command on the attached tab. Read again; if it repeats, reload the page. |
+| `other_extension_frame` | Chrome will not let an extension debug a page that hosts another extension's frame. The helper moves only this grant to Chrome's remote debugging (see below); if that is off, the read's `source_reason` says to enable it at `chrome://inspect/#remote-debugging` or disable the extension that injects the frame. |
+| `debugger_already_attached` | DevTools or another debugging extension holds the tab. Same fallback as above; or close that debugger. |
+| `restricted_page` | Chrome never lets extensions debug this page (a `chrome://` page, the extensions gallery, another extension's page). Use a normal web page. |
+| `tab_gone` | The tab closed between the mapping and the command. Read again. |
+| `debugger_attach_failed` | Chrome refused to attach for a reason the extension does not recognise. Read again. |
+| `debugger_command_failed` | Chrome rejected a command on the attached tab for an unrecognised reason. Read again; if it repeats, reload the page. |
+| `unknown` | A failure that was not a recognised refusal at all. Open the extension's service worker console. |
 | `debugger_detached` | Chrome detached the debugger (the tab closed or navigated away). Reload the page and read again. |
+
+**Remote-debugging fallback, per grant.** Only a grant whose tab Chrome refuses with `other_extension_frame`
+or `debugger_already_attached` changes transport; every other grant keeps the extension. The helper
+tells the extension to drop that grant, and, when Chrome's remote debugging is enabled
+(`DevToolsActivePort` exists), reads continue over remote debugging after Chrome's normal Allow prompt
+(UIA answers meanwhile; the read reports `transport: remote_debugging`). The tray's Chrome row keeps
+describing the extension. When remote debugging is off the grant stays on UIA with the actionable
+`source_reason`. Ending the grant closes the remote connection. The extension's own service worker
+console logs each refused command's method and Chrome's raw error text for the person at that machine;
+that text is never sent to the helper.
 
 A new `Partyline.hello` (after an update, a lock, or any reconnect) drops every attachment and
 orphan the extension held from before it, and a failed detach is retried by the next attach, so a
@@ -1662,10 +1687,12 @@ and any difference. Upload sanitized evidence to the line; keep host/account det
 0. **Extension badge and late connect:** start the helper first, with the extension not yet
    loaded. Load it unpacked: the badge goes grey, then green (`Partyline: connected to helper
    <version>`) and the tray row reads *extension connected* without restarting the helper. Quit
-   the helper: the badge turns red `!` (*helper bridge stopped*) and the tray row follows. Start it
-   again and click the button: green again. Reload the extension and restart Chrome: both
-   reconnect. Run the installer over a running helper (it pauses the host): the badge shows
-   *paused for a helper update* and the button reconnects. Open the service worker console and
+   the helper: the badge stays grey (*helper away*). Start it again with no
+   click: green again. Restart the helper, and let it auto-update: green again each time with no
+   click. Reload the extension and restart Chrome: both reconnect. Run the manual installer over a
+   running helper (it asks the host to release its files): the badge shows *paused for a helper
+   update* and the button reconnects. On a page that hosts another extension's frame, expect
+   `other_extension_frame` and, with remote debugging on, a read over `remote_debugging`. Open the service worker console and
    confirm `[Partyline]` lines for each step and no page content. Rename the native host
    registration to see *native host not found*, and load the extension from another folder to see
    *access forbidden*.

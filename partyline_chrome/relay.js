@@ -30,8 +30,11 @@ export class Relay {
       const result = await this.command(message);
       this.emit({ id: message.id, result: result || {} });
     } catch (error) {
-      this.emit({ id: message.id, error: { message: 'Extension command refused or interrupted',
-        code: codeOf(error) } });
+      const code = codeOf(error);
+      // This service worker's own console only: Chrome's raw text helps a person, and never leaves it.
+      console.warn(`[Partyline] ${message.params?.method || message.method} refused: ${code}`,
+        error?.detail || error?.message || '');
+      this.emit({ id: message.id, error: { message: 'Extension command refused or interrupted', code } });
     }
   }
   async command({ method, params = {}, sessionId, grant }) {

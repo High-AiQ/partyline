@@ -19,7 +19,8 @@ INSTRUCTION = ("Extension not installed/connected; remote debugging fallback. "
 REFUSAL_CODES = frozenset({
     "tab_outside_grant", "tab_owned_by_other_grant", "previous_detach_incomplete", "domain_refused",
     "child_outside_grant", "child_detached", "revoked", "restricted_navigation", "debugger_attach_failed",
-    "debugger_command_failed", "debugger_detached"})
+    "debugger_command_failed", "debugger_detached", "other_extension_frame", "restricted_page",
+    "debugger_already_attached", "tab_gone", "unknown"})
 DETACHED_CODES = frozenset({"debugger_detached", "child_detached"})
 METHOD = re.compile(r"[A-Za-z]{1,40}\.[A-Za-z]{1,60}")
 

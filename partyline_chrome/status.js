@@ -23,7 +23,7 @@ export function explain(message) {
 
 const STATES = {
   connecting: () => ['…', 'neutral', 'Partyline: connecting to the helper…'],
-  waiting: () => ['…', 'neutral', 'Partyline: connected to Chrome, waiting for Partyline Helper to attach'],
+  waiting: () => ['…', 'neutral', 'Partyline: ready, waiting for Partyline Helper to attach (it connects by itself when it starts)'],
   connected: version => ['✓', 'connected', `Partyline: connected to helper ${version || ''}`.trim()],
   paused: () => ['!', 'error', 'Partyline: paused for a helper update. Click this button to reconnect'],
   error: reason => ['!', 'error', `Partyline: ${reason}`],

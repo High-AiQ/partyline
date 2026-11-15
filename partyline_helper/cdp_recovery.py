@@ -65,8 +65,9 @@ class Recovery:
 
 async def reload(chrome, access, page):
     if not page:
-        if chrome.browser.state != "connected":
-            raise CDPError(chrome.browser.reason())
+        browser = chrome.browser_of(access)
+        if browser.state != "connected":
+            raise CDPError(browser.reason())
         reason = chrome.reasons.get(access, "").removesuffix("; using UIA")
         raise CDPError("reload needs a mapped Chrome page on the approved browser connection"
                        + (f" ({reason})" if reason else ""))
@@ -103,12 +104,12 @@ async def reattach(chrome, access, page):
     except BaseException:
         if pages.get(target) is not page:
             page.stop()
-            chrome.shares.spawn(chrome.detach(page.session))
+            chrome.shares.spawn(chrome.detach(page.session, access))
         raise
     fresh.url = url
     fresh.quiet = page.quiet
     page.stop()
-    await chrome.detach(page.session)
+    await chrome.detach(page.session, access)
     fresh.guard(document=False, healthy=False)
     return fresh
 

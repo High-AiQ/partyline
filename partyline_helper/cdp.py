@@ -10,7 +10,8 @@ from .cdp_mapping import frame, map_window, title_matches
 from .cdp_page import Page
 from .cdp_recovery import HINT, reload, read as read_page
 from .cdp_transport import CDPError, INSTRUCTION
-from .chrome_operations import audit, chrome_label, operation, preferred
+from .chrome_fallback import Fallback
+from .chrome_operations import audit, chrome_label, operation, preferred, status
 
 
 class Chrome:
@@ -21,6 +22,7 @@ class Chrome:
         self.pages, self.reasons, self.selected, self.sources = {}, {}, {}, {}
         self.connecting, self.dialogs = None, dialogs
         self.transport_lock = asyncio.Lock()
+        self.fallback = Fallback(self)
 
     def report(self, state, detail):
         label = chrome_label(self.browser, state)
@@ -53,9 +55,13 @@ class Chrome:
             state.changed()
             self.shares.queue_change(access.session.window_grant_id)
 
+    def browser_of(self, access):
+        return self.fallback.of(access, self.browser)
+
     def revoke(self, access):
         if hasattr(self.browser, "revoke"):
             self.browser.revoke(access)
+        self.fallback.drop(access)
         self.invalidate(access)  # synchronous: no more page commands or event payloads
         for page in self.pages.pop(access, {}).values():
             self.shares.spawn(page.close())
@@ -68,15 +74,7 @@ class Chrome:
             self.connecting.cancel()
 
     def status(self, access):
-        entry = self.shares.grants.get(access.session.window_grant_id, {})
-        state = entry.get("event_state")
-        result = state.status() if state else {"event_counter": 0, "events_supported": False,
-                                               "subscription_live": False}
-        if any(p.live and p.page_state == "alive" and (not hasattr(self.browser, "is_attached")
-                          or self.browser.is_attached(p.session))
-               for p in self.pages.get(access, {}).values()):
-            result.update(events_supported=True, subscription_live=True)
-        return result
+        return status(self, access)
 
     def audit(self, access, message, operation):
         audit(self, access, message, operation)
@@ -88,16 +86,17 @@ class Chrome:
             return
         if access.grant.get("chrome_cancelled"):
             return
+        browser = self.browser_of(access)
         if retry:
-            self.browser.request_retry()
-        if not self.browser.can_attempt():
+            browser.request_retry()
+        if not browser.can_attempt():
             return
         if self.connecting and not self.connecting.done():
             return
-        if not self.browser.discovery():
-            self.browser.report("not_enabled", INSTRUCTION)
+        if not browser.discovery():
+            browser.report("not_enabled", INSTRUCTION)
             return
-        self.connecting = self.shares.spawn(self.browser.ensure())
+        self.connecting = self.shares.spawn(browser.ensure())
 
     async def attach(self, access, target, pages, guard):
         def arrived(result, abandoned):
@@ -109,17 +108,18 @@ class Chrome:
                 if abandoned:
                     raise CDPError("attach abandoned")
             except CDPError:
-                self.shares.spawn(self.detach(session))
+                self.shares.spawn(self.detach(session, access))
                 return
             # Own the session before waking the waiting command: revoke can now always find it.
-            pages[target] = Page(self.browser, access, target, session, lambda: self.changed(access, target))
-        await self.browser.call("Target.attachToTarget", {"targetId": target, "flatten": True},
+            pages[target] = Page(self.browser_of(access), access, target, session,
+                                 lambda: self.changed(access, target))
+        await self.browser_of(access).call("Target.attachToTarget", {"targetId": target, "flatten": True},
                                 guard=guard, on_result=arrived)
         return pages[target]
 
-    async def detach(self, session):
+    async def detach(self, session, access=None):
         with contextlib.suppress(CDPError):
-            await self.browser.call("Target.detachFromTarget", {"sessionId": session})
+            await self.browser_of(access).call("Target.detachFromTarget", {"sessionId": session})
 
     @operation
     async def page(self, access):
@@ -141,16 +141,17 @@ class Chrome:
             guard()
             if reason:
                 raise CDPError(reason)
-            if self.browser.state != "connected" or not self.browser.socket:
+            browser = self.browser_of(access)
+            if browser.state != "connected" or not browser.socket:
                 self.start(access)
                 pending = self.connecting and not self.connecting.done()
                 self.reasons[access] = ("Awaiting Chrome approval; using UIA meanwhile" if pending
-                                        else self.browser.reason())
+                                        else browser.reason())
                 return None
             guard()
             prior = self.pages.get(access, {}).get(self.selected.get(access))
             recovery_target = prior.target if prior and prior.page_state != "alive" else None
-            (_, targets), window = await map_window(self.browser, access, guard, self.bounds, recovery_target)
+            (_, targets), window = await map_window(browser, access, guard, self.bounds, recovery_target)
             pages = self.pages.setdefault(access, {})
             scope = {target["targetId"] for target in targets}
             for ident in list(pages):
@@ -183,8 +184,8 @@ class Chrome:
                 access.forget()
                 self.selected[access] = page.target
                 self.changed(access)
-            if hasattr(self.browser, "resume") and page.page_state == "alive":
-                await self.browser.resume(page)
+            if hasattr(browser, "resume") and page.page_state == "alive":
+                await browser.resume(page)
             if not page.initialized and page.page_state == "alive":
                 try:
                     await page.initialize()
@@ -194,8 +195,10 @@ class Chrome:
             self.reasons.pop(access, None)
             return page
         except (CDPError, OSError, KeyError, TypeError) as exc:
-            self.reasons[access] = (str(exc) + "; using UIA" if isinstance(exc, CDPError)
-                                    else "Chrome mapping unavailable; using UIA")
+            if await self.fallback.take(access, exc):
+                return await self.page(access)
+            self.reasons[access] = (self.fallback.reason(exc) or str(exc)) + "; using UIA" \
+                if isinstance(exc, CDPError) else "Chrome mapping unavailable; using UIA"
             if not any(p.live and p.page_state != "alive" for p in self.pages.get(access, {}).values()):
                 self.invalidate(access)
             return None
@@ -227,14 +230,14 @@ class Chrome:
         if (message.get("action") not in ("reload", "set_files") and message.get("type") != "window_eval"
                 and self.sources.get(access) == "uia" and message.get("element_id") in access.elements):
             return None
-        if message.get("action") == "reload" and not self.browser.socket:
+        if message.get("action") == "reload" and not self.browser_of(access).socket:
             if not access.grant or access.gate.revoked.is_set():
                 return {"status": "failed", "source": "cdp", "error": "consent revoked"}
             self.start(access, retry=True)
             pending = self.connecting and not self.connecting.done()
             return {"status": "failed", "source": "cdp", "error": (
                 "Awaiting Chrome approval; call reload again after Chrome allows the connection"
-                if pending else self.browser.reason())}
+                if pending else self.browser_of(access).reason())}
         page = await self.page(access)
         if message.get("action") == "set_files" and (not page or self.sources.get(access) != "cdp"):
             return {"status": "failed", "error": "CDP unavailable; use the Open dialog path instead"}
@@ -275,16 +278,12 @@ class Chrome:
 
     @operation
     async def tabs(self, access):
-        """Provider hook for standing-window enumeration: only call with a locally authorized HWND.
-
-        The caller owns the standing-access toggle/grant. Chrome approval remains independent.
-        Includes inactive tabs without activating them; other windows stay out of this grant.
-        """
+        """Standing-window enumeration for a locally authorized HWND; inactive tabs are not activated."""
         if not await self.page(access):
             return []
         pages = self.pages.get(access, {})
         page = pages[self.selected[access]]
-        (_, targets), _ = await map_window(self.browser, access, page.guard, self.bounds)
+        (_, targets), _ = await map_window(self.browser_of(access), access, page.guard, self.bounds)
         return [{"hwnd": access.grant["hwnd"], "title": target.get("title", ""),
                  "url": target.get("url", ""), "target_id": target["targetId"],
                  "active": target["targetId"] == page.target} for target in targets]
@@ -297,4 +296,5 @@ class Chrome:
                 await self.connecting
         for access in list(self.pages):
             self.revoke(access)
+        await self.fallback.close()
         await self.browser.close()

@@ -18,6 +18,7 @@ class ExtensionPeer:
         self.resumed = {}
         self.attach_count = 0
         self.pid, self.ambiguous = 12, False
+        self.refuse = {}  # tab -> the fixed code the extension answers every attach with
         self.stale, self.released = {}, []  # tab -> a grant id from before an update that still holds it
         self.windows = [dict(id=1, left=10, top=20, width=800, height=600, tabs=[
             dict(id=1, title="Lab", active=True, url="https://example.test"),
@@ -41,6 +42,10 @@ class ExtensionPeer:
                 if self.stale.get(tab) not in live:
                     self.stale.pop(tab, None)
             result = {"released": 1}
+        elif method == "Target.attachToTarget" and int(params["targetId"]) in self.refuse:
+            code = self.refuse[int(params["targetId"])]
+            self.feed({"id": ident, "error": {"message": "refused", "code": code}})
+            return
         elif method == "Target.attachToTarget" and int(params["targetId"]) in self.stale:
             self.feed({"id": ident, "error": {"message": "refused", "code": "tab_owned_by_other_grant"}})
             return

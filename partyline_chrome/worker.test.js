@@ -36,7 +36,7 @@ test('self disconnect cleanup, toolbar recovery and bounded automatic reconnect 
   f.api.action.onClicked.fire(); await flush();
   assert.equal(ports.length, 2);
   await attach(ports[1]);
-  ports[1].onMessage.fire({ method: 'Partyline.suspend' });
+  ports[1].onMessage.fire({ method: 'Partyline.suspend', release: true });
   assert.equal(ports[1].disconnected, true);
   assert.equal(f.calls.filter(c => c[0] === 'detach').length, 2);
   await flush(); assert.equal(ports.length, 2);

@@ -82,9 +82,9 @@ test('every Chrome failure turns the badge red with its reason, and a click retr
   delete globalThis.chrome;
 });
 
-test('suspend shows paused; clicking a connected button refreshes it; a silent stale port is replaced', async () => {
+test('an installer release shows paused; clicking a connected button refreshes it; a silent stale port is replaced', async () => {
   const w = await boot('badge-suspend');
-  await w.fire(w.ports[0], p => p.onMessage.fire({ method: 'Partyline.suspend' }));
+  await w.fire(w.ports[0], p => p.onMessage.fire({ method: 'Partyline.suspend', release: true }));
   assert.equal(w.ports[0].disconnected, true);
   assert.match(w.badge.title, /paused for a helper update/);
   await w.click();
@@ -101,7 +101,7 @@ test('suspend shows paused; clicking a connected button refreshes it; a silent s
   await w.click();
   assert.equal(w.ports.length, 4);
   assert.equal(w.ports[2].disconnected, true);
-  assert.ok(w.logs.some(([, line]) => /never greeted/.test(line)));
+  assert.ok(w.logs.some(([, line]) => /no helper is attached; reconnecting/.test(line)));
   delete globalThis.chrome;
 });
 
@@ -118,5 +118,62 @@ test('reload decisions and logs carry versions only, never page content or comma
   });
   assert.ok(alive.logs.length > 0);
   assert.ok(alive.logs.every(([, line]) => !line.includes(secret) && !line.includes('abc')));
+  delete globalThis.chrome;
+});
+
+const hello = { method: 'Partyline.hello', helper_connected: true, helper_version: '1.6.2' };
+
+test('a helper that quits or pauses leaves the native port up, grey, and its return needs no click', async () => {
+  const w = await boot('badge-away');
+  await w.fire(w.ports[0], p => p.onMessage.fire(hello));
+  await w.fire(w.ports[0], p => p.onMessage.fire({ method: 'Partyline.reset' })); // helper quit
+  assert.equal(w.ports.length, 1);
+  assert.equal(w.ports[0].disconnected, false);
+  assert.deepEqual([w.badge.text, w.badge.color], ['…', '#9aa0a6']);
+  assert.match(w.badge.title, /waiting for Partyline Helper to attach/);
+  await w.fire(w.ports[0], p => p.onMessage.fire(hello)); // the restarted helper attaches: no click
+  assert.deepEqual([w.badge.text, w.badge.color], ['✓', '#1e8e3e']);
+  await w.fire(w.ports[0], p => p.onMessage.fire({ method: 'Partyline.suspend' })); // update pause, no release
+  assert.equal(w.ports[0].disconnected, false);
+  assert.match(w.badge.title, /waiting for Partyline Helper/);
+  await w.fire(w.ports[0], p => p.onMessage.fire(hello)); // update done
+  assert.equal(w.badge.text, '✓');
+  assert.equal(w.ports.length, 1);
+  delete globalThis.chrome;
+});
+
+test('clicking while the helper is away starts over with a new native port', async () => {
+  const w = await boot('badge-away-click');
+  await w.fire(w.ports[0], p => p.onMessage.fire(hello));
+  await w.fire(w.ports[0], p => p.onMessage.fire({ method: 'Partyline.reset' }));
+  await w.click();
+  assert.equal(w.ports.length, 2);
+  assert.equal(w.ports[0].disconnected, true);
+  assert.equal(w.badge.text, '…');
+  assert.ok(w.logs.some(([, line]) => /no helper is attached; reconnecting/.test(line)));
+  delete globalThis.chrome;
+});
+
+test('a hello queued behind a closed port cannot repaint or reset the replacement port', async () => {
+  const w = await boot('badge-stale-hello');
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  w.f.api.debugger.detach = async d => { w.f.calls.push(['detach', d]); await gate; };
+  const first = w.ports[0];
+  await w.fire(first, p => p.onMessage.fire(hello));
+  await w.fire(first, p => {
+    p.onMessage.fire({ id: 1, method: 'Partyline.scope', grant: 'g', params: { tabs: [1], windowId: 9 } });
+    p.onMessage.fire({ id: 2, method: 'Partyline.begin', grant: 'g' });
+    p.onMessage.fire({ id: 3, method: 'Target.attachToTarget', grant: 'g', params: { targetId: '1' } });
+  });
+  await w.fire(first, p => { p.onMessage.fire(hello); p.onMessage.fire(hello); }); // reset waits on the detach
+  await w.fire(first, p => p.remoteDisconnect('Native host has exited.')); // the port closes, a retry waits
+  release();
+  await w.fire(first, () => {});
+  assert.equal(w.ports.length, 2);
+  assert.deepEqual([w.badge.text, w.badge.color], ['…', '#9aa0a6']); // the new port never greeted: not green
+  assert.match(w.badge.title, /connecting/);
+  await w.fire(w.ports[1], p => p.onMessage.fire(hello));
+  assert.equal(w.badge.text, '✓');
   delete globalThis.chrome;
 });
