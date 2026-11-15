@@ -85,8 +85,9 @@ def blocker(runtime, att: dict) -> str:
         return "the server is stopping"
     if getattr(runtime, "restart_plan_order", None):
         return "a sequential reattachment plan is active"
-    if runtime.db.get_restart_plan() is not None:
-        return "a restart plan is pending"
+    plan = runtime.db.get_restart_plan()
+    if plan is not None and att["id"] in plan["attachment_ids"]:
+        return "this attachment is pending in a restart plan"
     if att["id"] in runtime.reattaching:
         return "it is being restored"
     if state_text(runtime.db, att["id"]):

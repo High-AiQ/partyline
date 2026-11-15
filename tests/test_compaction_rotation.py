@@ -378,14 +378,20 @@ class GuardsTest(RotationFixture):
         await self.turn("worker")
         self.assertEqual(len(self.starts), 1)
 
-    async def test_a_pending_restart_plan_defers_rotation_until_the_plan_is_resolved(self):
+    async def test_a_preserved_restart_plan_blocks_only_its_attachments(self):
         await self.reach_the_ask()
+        self.db.add_attachment("other", "root", "other", "fake", ["fake"], self.repo, "o1")
+        self.db._exec("UPDATE attachments SET preset='builder' WHERE id='other'")
+        self.go_live("other")
         self.db.save_restart_plan("root", ["worker"], "resume")
         await self.turn("worker")
         self.assertEqual(self.starts, [])
+        await self.reach_the_ask("other")
+        await self.turn("other")
+        self.assertEqual([start[0]["id"] for start in self.starts], ["other"])
         self.db._exec("DELETE FROM restart_plan")
         await self.turn("worker")
-        self.assertEqual(len(self.starts), 1)
+        self.assertEqual([start[0]["id"] for start in self.starts], ["other", "worker"])
 
     async def test_a_pending_handover_defers_the_rotation_for_either_party(self):
         await self.reach_the_ask("captain")
