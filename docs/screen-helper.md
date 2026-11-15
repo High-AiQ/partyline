@@ -1471,3 +1471,38 @@ files are deleted after ten minutes, or on a later call if the helper was restar
 The existing general media per-file cap applies to every file, with a 200 MiB total
 per call. The helper and server audit media IDs, resolved local paths and their sizes,
 the grant, caller, file count and total size, without recording file contents.
+
+### Window interaction benchmark
+
+The `/lab/window-bench/` fixtures measure live Chrome window behavior using Partyline's MCP tools. The pages cover
+open, nested, slotted and closed shadow roots; a covering overlay; same-origin and cross-origin frames; native and
+custom selection; text entry; file controls; scrolling; settling; dialogs, toast and navigation; and a canvas that
+requires visual point grounding. Each fixture exposes an AX-readable event log with `isTrusted`, event type and
+target. The cross-origin page accepts a second-origin URL with `--cross-origin-url`; serve the built `partyline/static`
+directory from a second port or hostname reachable by the paired computer.
+
+After a person grants a Chrome window, run the bench from the attached Partyline process environment with its MCP
+connection available. The command prompts you to open each fixture in the granted window. It never chooses a window
+or grants access itself. Reads and actions use the same `screen_elements` and `screen_element_action` MCP tools as an
+agent, so the UIA transport does not require Chrome debugging. `--transport` records which sibling path is being
+measured; `--helper-version` records the helper build when it is not returned by discovery.
+
+```bash
+PARTYLINE_MCP_CONNECTION=/path/to/connection.json uv run --locked python scripts/window_bench.py \
+  --i-have-a-granted-window --base-url https://<partyline-host> --window '<granted-window-id>' \
+  --transport uia --helper-version '<helper-version>' \
+  --cross-origin-url https://<second-origin> --output window-bench-results.json
+```
+
+The run writes JSON plus a Markdown summary next to the chosen output. A step is verified only from the fixture's
+trusted event log and observed page state; an action response saying `completed` is not proof. Refusal cases count
+as successful when the page confirms the cover or closed root and records no trusted target event. File chooser,
+file selection and canvas point-click rows prompt for the person to perform that local action; their trusted event
+logs are still verified. Those manual steps do not contribute to action latency. Compare verified and failed counts first, then p50/p95 action time,
+response bytes, and estimated tokens. Text cost is response bytes divided by four; a screenshot row uses the
+recorded `thumb`, `slim` or `original` tier estimate. Compare runs with the same fixtures and helper/transport labels.
+Each scenario carries a tool and argument map, so point, scroll, type and drag MCP tools can be added as rows without
+changing the runner; the row keeps the selected transport alongside each result.
+
+Historical UIA medians remain: press **8.1 s**, select **4.9 s**, invoke **3.4 s** p50. They predate this bench and
+are context, not a matched run.

@@ -1,0 +1,31 @@
+{
+  "verified": {
+    "action_response": {"status": "completed", "claim": "done"},
+    "observation": {
+      "url": "https://partyline.example/lab/window-bench/input-text.html",
+      "events": [{"trusted": true, "type": "input", "target": "target"}],
+      "value": "bench text",
+      "covered_or_closed": false
+    }
+  },
+  "untrusted_claim": {
+    "action_response": {"status": "completed", "claim": "clicked"},
+    "observation": {
+      "url": "https://partyline.example/lab/window-bench/overlay.html",
+      "events": [{"trusted": false, "type": "click", "target": "target"}],
+      "covered_or_closed": true
+    }
+  },
+  "refused": {
+    "action_response": {"status": "failed", "claim": "blocked"},
+    "observation": {"url": "https://partyline.example/lab/window-bench/overlay.html",
+      "events": [], "covered_or_closed": true}
+  },
+  "ax_log": {
+    "source": "uia",
+    "lines": "Fixture state: state value=bench text\nisTrusted=true type=input target=target"
+  },
+  "image_response": {
+    "variants": {"thumb": {"url": "/api/media/id/thumb"}, "slim": {"url": "/api/media/id/slim"}}
+  }
+}

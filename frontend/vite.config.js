@@ -43,6 +43,14 @@ export default defineConfig(({ command }) => ({
       input: {
         index: fileURLToPath(new URL("./index.html", import.meta.url)),
         "lab/a11y/index": fileURLToPath(new URL("./lab/a11y/index.html", import.meta.url)),
+        ...Object.fromEntries(
+          readdirSync(join(frontendDir, "lab/window-bench"))
+            .filter((file) => file.endsWith(".html"))
+            .map((file) => [
+              `lab/window-bench/${file.replace(/\.html$/, "")}`,
+              join(frontendDir, "lab/window-bench", file),
+            ]),
+        ),
       },
     },
     // The server serves this directory; anything stale in it is a bug waiting
@@ -109,6 +117,9 @@ function sourceBuildId() {
   const files = [
     "index.html",
     "lab/a11y/index.html",
+    ...readdirSync(join(frontendDir, "lab/window-bench"))
+      .filter((file) => file.endsWith(".html"))
+      .map((file) => `lab/window-bench/${file}`),
     "package.json",
     "package-lock.json",
     "vite.config.js",

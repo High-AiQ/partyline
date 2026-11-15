@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><title>Navigation result</title></head>
+<body><h1>Navigation complete</h1><p id="fixture-state">state navigation=complete</p>
+<h2>Trusted event log</h2><ol id="event-log" aria-label="Trusted event log"></ol>
+<script>const event=sessionStorage.getItem('window-bench-event');if(event){const row=document.createElement('li');row.textContent=event;document.querySelector('#event-log').append(row)}</script></body></html>
