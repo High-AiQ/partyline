@@ -184,7 +184,7 @@ const el=(tagName,parentNode=null,attrs={})=>({tagName,parentNode,assignedSlot:n
 const shadow=(host,mode,hit)=>{const root={host,mode,parentNode:null,elementFromPoint:()=>hit(),
   getRootNode:()=>host.getRootNode()};if(mode==='open')host.shadowRoot=root;return root;};
 const body=el('BODY',doc);
-const host=el('KAT-BUTTON',body);
+const host=el('X-BUTTON',body);
 let target, top;
 switch(SCENE){
  case 'open-host': {const root=shadow(host,'open',()=>host);target=el('BUTTON',root);top=host;break;}
