@@ -324,7 +324,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             hello = await receive(ws, "hello")
             self.assertEqual(hello["monitors"], [MONITOR])
             self.assertEqual(hello["protocol"], 1)
-            self.assertEqual(hello["windows"], 2)  # shared with a line, and screenshots
+            self.assertEqual(hello["windows"], 3)  # shared with a line, screenshots, point clicks
             self.assertEqual(hello["press"], 1)
             self.assertEqual(hello["chrome"]["state"], "not_enabled")
             self.assertIn("chrome://inspect", hello["chrome"]["detail"])

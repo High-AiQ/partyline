@@ -17,9 +17,12 @@ from .uia_events import UIAEventSubscription
 from .uia_event_state import EventState
 from .cdp import Chrome
 from .window_outline import WindowOutline
-from .window_snapshot import SNAPSHOT_VERSION, WindowSnapshots
+from .point_consent import clear
+from .window_click import POINT_VERSION, PointClicks
+from .window_snapshot import WindowSnapshots
 
-WINDOWS_VERSION = SNAPSHOT_VERSION  # 1: a window is shared with a line; 2: it can also be screenshotted
+# 1: a window is shared with a line; 2: it can also be screenshotted; 3: it can also be clicked at a point
+WINDOWS_VERSION = POINT_VERSION
 MESSAGES = ("share_targets", "window_grant_result", "revoke_window")
 
 
@@ -53,6 +56,7 @@ class WindowShares:
         self.standing_calls, self.event_timers = set(), {}
         self.picking, self.generation, self.standing_toast = False, 0, False
         self.snapshots = WindowSnapshots(self)
+        self.clicks = PointClicks(self)
 
     async def standing_call(self, message):
         from .window_standing_calls import standing_call
@@ -219,6 +223,8 @@ class WindowShares:
 
     def revoke_standing(self, notify=True):
         self.generation += 1
+        for entry in self.grants.values():
+            clear(entry)  # switching window access off also ends every approval of the real mouse
         from .uia_window_list import release_standing_rows
         release_standing_rows(self.session)
         for task in tuple(self.standing_calls):

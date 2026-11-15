@@ -14,15 +14,17 @@ import threading
 from . import foreground
 
 
-def encode_request(title, message, timeout, kind="ask", parent=None, box=None):
+def encode_request(title, message, timeout, kind="ask", parent=None, box=None, labels=None):
     data = {"title": title, "message": message, "timeout": timeout, "kind": kind,
             "parent": os.getpid() if parent is None else parent}
     if box:
         data["box"] = box  # an unchecked checkbox beside Yes/No; ticked only counts with a Yes
+    if labels:
+        data["labels"] = list(labels)  # the words on the Yes and No buttons
     return base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
 
 
-def tk_ask(title, message, timeout, kind="ask", box=None, ticked=None):
+def tk_ask(title, message, timeout, kind="ask", box=None, ticked=None, labels=None):
     """tkinter yes/no (or a single OK); in front of other windows; closes itself after `timeout`.
 
     With `box`, an unchecked checkbox is shown and its value is appended to `ticked` on Yes."""
@@ -44,7 +46,8 @@ def tk_ask(title, message, timeout, kind="ask", box=None, ticked=None):
             ticked.append(bool(ticks.get()))
         root.destroy()
 
-    for text, value in (("OK", True),) if kind == "info" else (("Yes", True), ("No", False)):
+    yes, no = labels or ("Yes", "No")
+    for text, value in (("OK", True),) if kind == "info" else ((yes, True), (no, False)):
         tkinter.Button(buttons, text=text, width=10, command=lambda value=value: choose(value)).pack(
             side="left", padx=6)
     root.protocol("WM_DELETE_WINDOW", root.destroy)
@@ -62,12 +65,12 @@ def message_box(title, message, kind):  # pragma: no cover - Windows-only ctypes
     return ctypes.windll.user32.MessageBoxW(None, message, title, flags) in (1, 6)
 
 
-def ask(title, message, timeout, kind="ask", box=None, ticked=None):
+def ask(title, message, timeout, kind="ask", box=None, ticked=None, labels=None):
     try:
         import tkinter  # noqa: F401
     except ImportError:  # no checkbox without Tk: the box stays unticked
         return message_box(title, message, kind) if os.name == "nt" else False
-    return tk_ask(title, message, timeout, kind, box, ticked)
+    return tk_ask(title, message, timeout, kind, box, ticked, labels)
 
 
 def process_gone(pid):
@@ -95,7 +98,8 @@ def main(argv=None, watch=watch_parent):
         watch(int(data["parent"]))
         kind = "info" if data.get("kind") == "info" else "ask"
         box, ticked = (str(data["box"]) if data.get("box") else None), []
-        yes = ask(str(data["title"]), str(data["message"]), float(data["timeout"]), kind, box, ticked)
+        labels = tuple(str(item) for item in data["labels"][:2]) if data.get("labels") else None
+        yes = ask(str(data["title"]), str(data["message"]), float(data["timeout"]), kind, box, ticked, labels)
         return (4 if ticked == [True] else 0) if yes else 1  # 4: Yes with the box ticked
     except Exception:  # noqa: BLE001 - any failure must decline, never crash into an accept
         return 2

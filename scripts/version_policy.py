@@ -150,7 +150,7 @@ def git(*args: str) -> str:
 
 HELPER_SHARED = {"partyline/file_events.py", "partyline/file_watch_paths.py", "partyline/process_events.py",
                  "partyline/file_notify_kqueue.py", "partyline/file_notify_linux.py",
-                 "partyline/file_notify_windows.py"}
+                 "partyline/file_notify_windows.py", "partyline/point_geometry.py"}
 HELPER_VERSION_PATH = "partyline_helper/__init__.py"
 
 

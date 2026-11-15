@@ -17,6 +17,7 @@ ELEMENT_ACTION_NOTE = (
     "select uses value; set_value edits text; press uses enter/tab/escape. force overrides disabled. "
     "then re-reads after CDP settles. UIA window_* targets the shared window; drag: screen_drag.")
 ELEMENT_ACTION_TIMEOUT = 100  # a 20s capture deadline may be followed by a 35s exchange, then action
+WINDOW_CLICK_TIMEOUT = 100  # the person may be asked first; the helper answers within 35 s, then a thumb
 ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and event barrier
 ELEMENT_ACTION_PROPERTIES = {
     "window": {"type": "string",
@@ -58,12 +59,36 @@ ELEMENT_ACTION_PROPERTIES = {
 }
 
 
+WINDOW_CLICK_NOTE = (
+    "Click a point you see in a screen_window_snapshot of a shared window, only when screen_elements and "
+    "screen_element_action cannot do it (a canvas, an odd widget, a control the tree misses). Prefer "
+    "element actions. Take screen_window_snapshot first (marks=true numbers the elements and adds a "
+    "coordinate grid) and pass its id; x and y are that image's pixels, (0, 0) at its top left. Refused "
+    "when the window moved, resized, closed or was re-granted since the snapshot, or when the point is "
+    "outside the window's client area. A Chrome page with a debugging connection is clicked without the "
+    "mouse; any other window moves the real cursor after the person agrees on their computer, once per "
+    "window grant. Never a terminal, password manager or system dialog. Answers with route (cdp or "
+    "cursor), settle and what changed; capture=thumb adds a picture afterwards.")
+WINDOW_CLICK_PROPERTIES = {
+    "window": ELEMENT_ACTION_PROPERTIES["window"],
+    "snapshot": {"type": "string", "minLength": 1, "maxLength": 64,
+                 "description": "The id returned by screen_window_snapshot; the click uses its pixels."},
+    "x": {"type": "integer", "minimum": 0, "maximum": 100000, "description": "X in the snapshot image."},
+    "y": {"type": "integer", "minimum": 0, "maximum": 100000, "description": "Y in the snapshot image."},
+    "button": {"type": "string", "enum": ["left", "right"], "description": "Mouse button; default left."},
+    "clicks": {"type": "integer", "enum": [1, 2], "description": "1, or 2 for a double-click."},
+    "capture": {"type": "string", "enum": ["none", "thumb"],
+                "description": "thumb: also return a thumbnail picture taken after the click."},
+}
+NO_FRAME = ("screen_control_request", "screen_element_action", "screen_eval", "screen_window_click")
+
+
 def _int(description):
     return {"type": "integer", "description": description}
 
 
 def _tool(name, description, properties, required):
-    if name not in ("screen_control_request", "screen_element_action", "screen_eval"):
+    if name not in NO_FRAME:
         properties = {**properties, "frame": {"type": "string", "enum": ["none", "thumb", "full"],
                       "description": "Frame tier: none, thumb (default), or full (original)."}}
     return {"name": name, "description": description, "inputSchema": {
@@ -77,7 +102,7 @@ def tool_list(state):
             return []
         allowed = set()
         if state.get("screen_windows"):
-            allowed.update({"screen_element_action", "screen_eval"})
+            allowed.update({"screen_element_action", "screen_eval", "screen_window_click"})
         if state.get("screen_control"):
             allowed.update({"screen_click", "screen_move", "screen_drag", "screen_scroll",
                             "screen_type", "screen_key"})
@@ -101,6 +126,7 @@ def tool_list(state):
                "window": ELEMENT_ACTION_PROPERTIES["window"]}, ["expression"]),
         _tool("screen_element_action", ELEMENT_ACTION_NOTE, ELEMENT_ACTION_PROPERTIES,
               ["element_id", "action"]),
+        _tool("screen_window_click", WINDOW_CLICK_NOTE, WINDOW_CLICK_PROPERTIES, ["snapshot", "x", "y"]),
         _tool("screen_control_request",
               "Ask the person sharing their screen to let you drive its mouse and keyboard. "
               "Returns at once; you are @mentioned when they answer on their computer.", {}, []),
@@ -143,6 +169,8 @@ def call(client, name, args, state):
     base = f"/api/conversations/{quote(client.home, safe='')}/screen-control"
     if name == "screen_eval":
         return client.request("POST", base.removesuffix("/screen-control") + "/screen-eval", args, timeout=60)
+    if name == "screen_window_click":
+        return client.request("POST", base + "/window-click", args, timeout=WINDOW_CLICK_TIMEOUT)
     if name == "screen_control_request":
         return client.request("POST", base + "/request")
     if name == "screen_element_action":

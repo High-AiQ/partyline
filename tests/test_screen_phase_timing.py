@@ -11,6 +11,7 @@ from partyline import screen_timing
 from partyline.screen_elements import ElementsHub
 from partyline_helper.session_transport import SessionTransport
 from partyline_helper.timing import Timing
+from partyline_helper.uia_gate import DispatchGate
 from partyline_helper.uia_access import WindowAccess
 from partyline_helper.uia_process import read
 from partyline_helper.uia_task import WindowTask
@@ -137,12 +138,15 @@ class HelperTimingTests(unittest.IsolatedAsyncioTestCase):
         from partyline.screen_window_snapshot import WindowSnapshots as ServerSnapshots
         clock, packets = Clock(), []
         grant = {'hwnd': 1, 'title': 'App', 'process': 'app'}
-        access = SimpleNamespace(grant=grant, generation=1, check=AsyncMock(return_value=None))
+        gate = DispatchGate()
+        gate.grant()
+        access = SimpleNamespace(grant=grant, generation=1, check=AsyncMock(return_value=None), gate=gate)
         async def send(*args, **kwargs):
             packets.append(kwargs)
         shares = SimpleNamespace(session=SimpleNamespace(send=send), changed=Mock())
         backend = SimpleNamespace(minimized=lambda _: False,
-                                  grab=lambda _: clock.advance(5) or SimpleNamespace(width=1, height=1))
+                                  grab=lambda _: clock.advance(5) or SimpleNamespace(width=1, height=1,
+                                                                          info={}))
         async def thread(function, *args):
             return function(*args)
         def encode(image):

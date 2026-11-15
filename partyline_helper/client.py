@@ -169,8 +169,8 @@ class Session(SessionTransport):
             await self.tools.dispatch(message)
         elif kind in WINDOW_MESSAGES:
             await self.windows.receive(message)
-        elif kind in ("read_window_elements", "window_element_action", "window_eval", "snapshot_window") \
-                and "grant_id" in message:
+        elif kind in ("read_window_elements", "window_element_action", "window_eval", "snapshot_window",
+                      "window_click") and "grant_id" in message:
             await self.windows.dispatch(message)
         elif kind == "read_window_elements":
             await self.window_task.submit(message["request_id"], read_options(message))

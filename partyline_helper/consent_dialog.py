@@ -28,13 +28,14 @@ def dialog_command(request, frozen=None, executable=None):
 class ProcessDialog:
     """A dialog in a child process: `wait()` is True only for an explicit Yes; `close()` kills it."""
 
-    def __init__(self, title, message, timeout, popen=subprocess.Popen, kind="ask", box=None):
+    def __init__(self, title, message, timeout, popen=subprocess.Popen, kind="ask", box=None, labels=None):
         options = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
         if os.name == "nt":  # pragma: no cover - Windows flag
             options["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
         # The request travels in argv (no stdin in a windowed process); the child watches our pid and
         # exits if this helper dies (e.g. is restarted after re-pairing), so no dialog outlives it.
-        self.proc = popen(dialog_command(encode_request(title, message, timeout, kind, box=box)), **options)
+        request = encode_request(title, message, timeout, kind, box=box, labels=labels)
+        self.proc = popen(dialog_command(request), **options)
         self.checked = False
 
     def wait(self):
@@ -96,7 +97,12 @@ async def confirm_with_box(title, message, box, timeout=TIMEOUT, backend=None, s
     return await _confirm(title, message, timeout, backend, sleep, box)
 
 
-async def _confirm(title, message, timeout, backend, sleep, box=None):
+async def confirm_labeled(title, message, labels, timeout=TIMEOUT, backend=None, sleep=asyncio.sleep):
+    """`confirm` with its own words on the two buttons: `labels` = (yes text, no text)."""
+    return (await _confirm(title, message, timeout, backend, sleep, labels=labels))[0]
+
+
+async def _confirm(title, message, timeout, backend, sleep, box=None, labels=None):
     backend = backend or default_backend()
     if backend is None:
         return False, False
@@ -104,7 +110,8 @@ async def _confirm(title, message, timeout, backend, sleep, box=None):
     loop = asyncio.get_running_loop()
     result = loop.create_future()
     try:
-        handle = backend(title, message, max(0, timeout - PROMPT_DELAY), **({"box": box} if box else {}))
+        options = {**({"box": box} if box else {}), **({"labels": labels} if labels else {})}
+        handle = backend(title, message, max(0, timeout - PROMPT_DELAY), **options)
     except Exception:  # noqa: BLE001 - no display, spawn failure: decline
         return False, False
 

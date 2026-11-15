@@ -221,6 +221,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
     app.include_router(file_input_router(hub))
     from .screen_window_snapshot import snapshot_router
     app.include_router(snapshot_router(runtime, hub, store))
+    from .screen_window_click import click_router
+    app.include_router(click_router(runtime, hub, store))
     app.include_router(grant_router(runtime, hub))
     from .screen_standing_routes import router_for as standing_router
     app.include_router(standing_router(runtime, hub))

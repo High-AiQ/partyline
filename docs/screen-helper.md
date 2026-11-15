@@ -62,8 +62,9 @@ in-flight calls. Local gates close before awaited cleanup; disconnect starts ind
 transport and browser teardown.
 
 Standing access covers discovery, window screenshots, UI Automation reads and actions, and scoped key
-commits. Real-cursor or synthetic mouse and keyboard control, full-monitor capture and clipboard keep
-their separate consent paths. Partyline Helper, terminals and shells, password managers, UAC and OS
+commits, and clicking a point of a Chrome page through CDP (no cursor moves). A real-cursor click in
+any other window asks the person first, once per grant (see *Click at a point in the chosen window*).
+Synthetic keyboard control, full-monitor capture and clipboard keep their separate consent paths. Partyline Helper, terminals and shells, password managers, UAC and OS
 security windows are never listed or attachable this way; password values remain redacted. The tray shows
 window access as off, on or active; the active tooltip names the line and agent. **Recent activity** shows
 the helper's append-only metadata log. The server also keeps a durable, hash-chained per-line audit of call
@@ -371,7 +372,7 @@ replaced by a compaction rotation does not end it. Ending one grant leaves other
 Consent is never restored after a restart. Grants and revocations are recorded in the helper's local
 audit.
 
-Window grants cover `screen_elements`, `screen_element_action` and `screen_window_snapshot`. With one window the target is
+Window grants cover `screen_elements`, `screen_element_action`, `screen_window_snapshot` and `screen_window_click`. With one window the target is
 unambiguous. With several, pass `window` as the grant ID or title; an ambiguous call lists every
 choice with its owning line, and each snapshot returns its grant ID as `window`. Inherited reads
 also name the owning line in `inherited_from`. Snapshots and element caches are per grant, shared by
@@ -505,6 +506,13 @@ window grant never has to ask for the whole screen.
 - **Result.** Also `file` (the same reference as `screen_frame`, whose `urls` an agent can post to the line),
   `window`, `title`, and `unchanged`: true when the bytes match this agent's previous capture of the window, in which
   case the stored file is reused.
+- **Marks.** `marks: true` overlays a light coordinate grid (a line every 100 image pixels, labelled at the
+  edges) and numbered boxes for the elements of the latest `screen_elements` read of that grant (at most 60,
+  actionable ones first), and lists each as `{n, id, name, box}`. Every coordinate is a pixel of the returned
+  image, (0, 0) at its top left. With no earlier read the grid still appears and `marks_note` says so; a read
+  and a click discard the stored tree, so read again before asking for boxes. Every snapshot returns a
+  `snapshot` id and its `coordinates` note; the helper records the picture's window rectangle, per-axis
+  scale, DPI, client areas and grant generation under that id, for `screen_window_click`.
 - **Audit.** Each capture is recorded in the screen control audit (who asked, the grant, the size) and noted in the
   line; the helper's local audit records it too. The tray's window label reads "last screenshot HH:MM by @handle"
   and the web window-grant list carries `last_screenshot` for the grant.
@@ -625,6 +633,56 @@ process, role, name, action and outcome. For `set_value` the audit records the v
 not the submitted text; numeric and enumerated parameters (direction, amount, percentages, number,
 coordinates, size) are recorded as given. Every action uses its window grant,
 dispatch gate, rate limit, local audit and revocation, independently of pointer control.
+
+### Click at a point in the chosen window
+
+Prefer `screen_element_action`: it names a control, so it survives layout changes and needs no picture. When
+the tree cannot act on something (a canvas, a custom-drawn widget, an element a hit-test misses), take
+`screen_window_snapshot` (`marks: true` adds the grid and numbered boxes), look for the point, and call
+`screen_window_click(window, snapshot, x, y, button=left|right, clicks=1|2, capture=none|thumb)`. It is
+listed beside `screen_element_action` wherever a window grant is, and answers with the route taken, a
+`settle` state and, with `capture: thumb`, a thumbnail taken after the click. It types nothing: text goes
+through elements or CDP.
+
+- **Coordinates.** `x` and `y` are pixels of the named snapshot's image. The server converts them with the
+  geometry the helper reported for that snapshot (`rect`, per-axis `scale`, `dpi` and the client areas) and
+  refuses a point outside the image or outside the window's client area (frame, title bar and shadows are not
+  clickable; controls there go through `window_*` element actions). The helper converts again with its own
+  record, never with the server's numbers, and the two must agree.
+- **Stale pictures.** The click is refused, with "take a fresh `screen_window_snapshot`", when the snapshot
+  is unknown or older than the last eight for that grant, or when the window moved, resized, closed, or was
+  re-granted, or when the secure desktop is up. The check compares the live rectangle and client areas with the
+  recorded ones and the grant generation, so a picture can never misdirect a click.
+- **Hard floor.** Terminals, password managers, OS security windows and Partyline's own windows are never
+  clickable, by grant or by what is under the point.
+- **Route 1, Chrome with a CDP connection.** The click goes through `Input.dispatchMouseEvent` on the page's
+  own session (hover, then press and release, `clickCount` 2 for a double-click). The helper maps the point to
+  CSS pixels from the page area's rectangle and the viewport width, so browser zoom and DPI are exact; a
+  point on the browser's own controls, a pinch-zoomed page, or a grant on a tab that is not the one
+  shown in the window is refused. No cursor moves, no window comes
+  forward and no consent prompt is shown: it is allowed under standing access and under any window grant, as
+  CDP element actions are. It works over iframes, since the events enter at the top-level page.
+- **Route 2, any other window (or Chrome without CDP).** A real-cursor click with `SendInput`, confined to the
+  window. The helper brings the window forward the way UIA actions do (best effort, never restoring a
+  minimised window), moves the cursor to the point, and checks that the window under the point is the granted
+  window or a dialog it owns, is not a hard-floor program, and that the foreground has not changed. Any miss
+  refuses with nothing sent. All presses and releases go in one `SendInput` call, so no button stays down. It
+  then puts the cursor and the previous foreground back where it can; `cursor_restored`,
+  `foreground_restored` and `target_came_forward` report what happened.
+- **Consent.** The first real-cursor click on a grant shows a prompt on that computer, "Allow
+  `<line>/<agent>` to click with the mouse in `<window title>`?", with **Allow for this window** and
+  **Deny**. Allow lasts as long as that grant: it ends when the grant is stopped or its window closes, when
+  access is paused, when the helper disconnects, and when standing access is switched off (an answer that arrives after that is discarded). A Deny refuses
+  that click and any further asks for two minutes. While a click is running the tray shows
+  "using your mouse".
+- **Audit.** Each click writes the grant, line, process, operation, route (`cdp` or `cursor`), the point (image
+  and screen pixels) and the result to the helper's tool audit before any input is sent (a log that cannot be
+  written refuses the click), and again with the outcome; the server's screen control audit and the line
+  notice carry the same, and the helper's recent-activity log lists `point_click`. No pixels are recorded.
+- **Protocol.** The server sends `window_click` (`request_id`, `grant_id`, `snapshot`, `x`, `y`, `screen`,
+  `button`, `clicks`) and the helper answers `window_element_result`. A snapshot reply carries `snapshot_id`,
+  `geometry` and `marks`. Only a helper whose hello says `windows: 3` is asked; an older one is told to
+  update at once.
 
 ## Accessibility lab
 
@@ -843,6 +901,12 @@ its own checkout; there is no network polling. The tray shows an update and a
 notification when available. On Windows the tray item opens the installer; on other
 platforms rerun the helper install command. The Computers list also shows updates.
 Older helpers that reported a Partyline 2.x version are treated as outdated.
+
+### Helper 1.4.0
+
+Marked window snapshots and `screen_window_click`: a worker on a window grant can look at the picture and
+click a point the element tree cannot reach, through CDP on a Chrome page or with a consented real-cursor
+click in any other window. See *Click at a point in the chosen window*. The hello reports `windows: 3`.
 
 ### Helper 1.3.0
 

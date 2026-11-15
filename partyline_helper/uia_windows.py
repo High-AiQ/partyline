@@ -88,35 +88,8 @@ class WindowsProvider(PatternState, PressState):  # pragma: no cover - Windows f
 
     def restore_foreground(self, hwnd, expected_current):
         """Restore the prior foreground and z-order if the action's window is still active."""
-        if not hwnd or self.foreground() != expected_current:
-            return False
-        kernel32 = ctypes.windll.kernel32
-        kernel32.GetCurrentThreadId.restype = ctypes.c_ulong
-        current_thread = kernel32.GetCurrentThreadId()
-        self.user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-        self.user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
-        self.user32.AttachThreadInput.argtypes = [ctypes.c_ulong, ctypes.c_ulong, ctypes.c_bool]
-        self.user32.AttachThreadInput.restype = ctypes.c_bool
-        foreground_thread = self.user32.GetWindowThreadProcessId(expected_current, None)
-        attached = bool(foreground_thread and foreground_thread != current_thread and
-                        self.user32.AttachThreadInput(current_thread, foreground_thread, True))
-        if self.foreground() != expected_current:
-            if attached:
-                self.user32.AttachThreadInput(current_thread, foreground_thread, False)
-            return False
-        self.user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
-                                             ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
-        self.user32.SetWindowPos.restype = ctypes.c_bool
-        # Restore the prior top-of-band order without activating until SetForegroundWindow below.
-        ordered = self.user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
-        self.user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
-        self.user32.SetForegroundWindow.restype = ctypes.c_bool
-        try:
-            activated = self.user32.SetForegroundWindow(hwnd) if ordered else False
-            return bool(activated and self.foreground() == hwnd)
-        finally:
-            if attached:
-                self.user32.AttachThreadInput(current_thread, foreground_thread, False)
+        from .foreground_swap import activate
+        return activate(self.user32, lambda: ctypes.windll.kernel32, hwnd, expected_current)
 
     def root(self):
         """The window element; the first call fetches the cache, so a deep prefetch happens once."""

@@ -16,6 +16,7 @@ on:
       - "partyline/file_notify_windows.py"
       - "partyline/file_watch_paths.py"
       - "partyline/process_events.py"
+      - "partyline/point_geometry.py"
   workflow_dispatch:
     inputs:
       tag:
