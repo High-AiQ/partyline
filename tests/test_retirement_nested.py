@@ -21,6 +21,9 @@ class NestedWorktreeTest(SafetyFixture, unittest.TestCase):
         owner = Path(self.directory.name, "owner")
         owner.mkdir()
         _git("init", "-q", "-b", "main", cwd=owner)
+        # No detached auto-maintenance: it rewrites objects/ while a test copies or edits the store.
+        _git("config", "maintenance.auto", "false", cwd=owner)
+        _git("config", "gc.auto", "0", cwd=owner)
         _git("commit", "-qm", "root", "--allow-empty", cwd=owner)
         full = Path(child["cwd"], "nested")
         _git("worktree", "add", "-qb", "line/nested", str(full), cwd=owner)
