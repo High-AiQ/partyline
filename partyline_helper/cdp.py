@@ -5,7 +5,7 @@ import contextlib
 from websockets.exceptions import ConnectionClosed
 
 from .cdp_actions import act, evaluate
-from .cdp_dialogs import dialog_pointer
+from .cdp_dialogs import dialog_pointer, with_dialog_pointer
 from .cdp_mapping import frame, map_window, title_matches
 from .cdp_page import Page
 from .cdp_recovery import HINT, reload, read as read_page
@@ -19,8 +19,7 @@ class Chrome:
         self.auto_transport = connection is None
         self.browser = connection or preferred(self.report)
         self.pages, self.reasons, self.selected, self.sources = {}, {}, {}, {}
-        self.connecting = None
-        self.dialogs = dialogs
+        self.connecting, self.dialogs = None, dialogs
         self.transport_lock = asyncio.Lock()
 
     def report(self, state, detail):
@@ -211,14 +210,7 @@ class Chrome:
 
     @operation
     async def read(self, access, options, message):
-        result = await read_page(self, access, options, message)
-        if result is not None:
-            page = self.pages[access][self.selected[access]]
-            pointer = await asyncio.to_thread(self.dialogs, access.grant)
-            page.guard()
-            if pointer:
-                result["source_reason"] = pointer
-        return result
+        return await with_dialog_pointer(self, access, await read_page(self, access, options, message))
 
     def metadata(self, access):
         if access.grant and access.grant.get("chrome_cancelled"):

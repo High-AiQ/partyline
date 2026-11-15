@@ -1,4 +1,5 @@
 """Point CDP readers to safe native dialogs owned by their granted Chrome HWND."""
+import asyncio
 import ctypes
 import sys
 
@@ -38,3 +39,14 @@ def dialog_pointer(grant, platform=sys.platform, list_windows=windows, scope_fac
             "with the dialog's returned id (or share the dialog from the helper), "
             "then screen_elements(query='File name') "
             "to read its UIA controls under the same window-access consent and safety rules.")
+
+
+async def with_dialog_pointer(chrome, access, result):
+    """Point a CDP read at a safe native dialog the Chrome window owns (CDP cannot see it)."""
+    if result is not None:
+        page = chrome.pages[access][chrome.selected[access]]
+        pointer = await asyncio.to_thread(chrome.dialogs, access.grant)
+        page.guard()
+        if pointer:
+            result["source_reason"] = pointer
+    return result
