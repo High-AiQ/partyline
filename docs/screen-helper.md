@@ -795,6 +795,8 @@ only during agent control, injects input and listens for the kill switch. Automa
 headless development server cannot verify real desktop capture; native interactive
 smoke testing is still required on each platform.
 
+Window reading and actions are generic. The helper follows DOM, shadow-DOM, accessibility-tree and UI Automation rules that hold on every site and app; it carries no selectors, names or special cases for a particular website. When a site misbehaves, fix the general rule and test it with a neutral fixture.
+
 ## Agent control
 
 An agent on the line can ask to drive the mouse and keyboard **inside the shared

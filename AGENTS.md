@@ -10,6 +10,7 @@ from structured transcripts, never screen scrapes; `partyline/static/` is built,
 | DO | DO NOT |
 | --- | --- |
 | Post media and service links as host-relative paths (`/api/media/<id>/slim`) or the LAN host | Post `0.0.0.0`, `127.0.0.1`, or `localhost` URLs; people reach this over LAN or HTTPS |
+| Keep code, tests, fixtures, docs and commits generic: follow web, platform and accessibility standards | Name or special-case a website, a client project or a site's components, selectors or URLs — even in a test fixture |
 | Upload screenshots, mockups and renders to the line (or `/var/tmp`) | Commit them to the repo — CI rejects it |
 
 **Gates before every commit** (`docs/agent-rules.md`, Gates): `uv run --locked ruff check .`,
