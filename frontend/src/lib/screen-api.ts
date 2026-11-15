@@ -80,6 +80,12 @@ export const screenApi = {
       schema: z.object({ ok: z.literal(true) }),
       method: "DELETE",
     }),
+  authorizeWindowLine: (deviceId: string, convId: string | null) =>
+    request("/api/screen/devices/" + encodeURIComponent(deviceId) + "/window-access-line", {
+      schema: z.object({ ok: z.literal(true) }),
+      method: "PUT",
+      body: { conv_id: convId },
+    }),
   preview: (deviceId: string, monitorId: string | number) =>
     request(
       "/api/screen/preview?device_id=" +

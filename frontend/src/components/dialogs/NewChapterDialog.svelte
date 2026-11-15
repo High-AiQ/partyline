@@ -74,9 +74,16 @@
         notice = `the new chapter is ready, but its captain could not be appointed: ${why}`;
       }
     }
+    // The start reply is a status: the new line is read whole before the room opens it.
+    let created: Conversation | null = null;
+    try {
+      ({ conversation: created } = await api.conversation(started.conversation.id, false));
+    } catch {
+      notice ||= "the new chapter is ready, but it could not be opened";
+    }
     await room.loadConversations();
     close();
-    void room.open(started.conversation);
+    if (created) void room.open(created);
     if (notice) room.showNotice(notice, "error");
   }
 </script>

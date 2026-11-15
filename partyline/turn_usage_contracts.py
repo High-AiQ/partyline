@@ -12,6 +12,11 @@ class Totals(BaseModel):
     reasoning_tokens: int
     total_tokens: int
     max_context_tokens: int
+    # How long the model took per response (previous tool result or user message to completion),
+    # over the responses whose transcript could say; None when none could. Not tool time.
+    model_time_turns: int = 0
+    p50_model_ms: int | None = None
+    p95_model_ms: int | None = None
 
 
 class LineTotals(Totals):
@@ -34,6 +39,9 @@ class ToolRow(BaseModel):
     p95_total_tokens: int
     max_total_tokens: int
     total_tokens: int
+    model_time_turns: int = 0
+    p50_model_ms: int | None = None
+    p95_model_ms: int | None = None
 
 
 class TurnSummary(BaseModel):

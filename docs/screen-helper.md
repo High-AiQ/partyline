@@ -23,14 +23,46 @@ Screen-control tools appear only after control consent.
 Claude Code and OpenCode V2 refresh their tool list on MCP `list_changed`. Codex CLI does not, so its
 screen tools remain listed for the session and return a clear denial when no screen is shared.
 
+## Standing window access
+
+After pairing, the tray item **Let agents on my lines see and use my windows** is off by default and
+persists across restarts. In **Settings → Computers**, the paired person selects a **Window access**
+line for each computer. That line and its sublines are authorized; **No lines** removes the binding and
+revokes standing grants. Pairing from a line initially selects that line. Settings pairing and existing
+account-wide helpers start with no authorized lines until their owner selects one. An unknown owner
+never receives standing access. Turn the tray toggle on to let agents on an authorized line call
+`screen_windows` and `screen_attach_window(window, reason)`. Discovery returns the HWND, process, title
+and state Windows UIA provides. If Chrome approval is active, the list can also include inactive tabs
+with their titles and URLs; otherwise it returns what UIA exposes. For example, a worker can select the
+**Catalog Dashboard** window, choose `shop.us` or `shop.uk`, follow **Manage listing content** to the
+**Listing Content Manager** page, then attach with a short reason.
+
+Attach creates the same line window grant as an explicit share. Existing per-call checks still apply, and
+sublines inherit through the existing grant tree. The first attach in each helper session shows a toast
+naming the line and agent. Turning the item off blocks the next call: the helper checks its saved setting
+on every request, and the server's mirror also denies requests while off. Access pauses while Windows is
+locked or on its secure desktop. **Pause and disconnect** revokes active window grants and cancels
+in-flight calls. Local gates close before awaited cleanup; disconnect starts independently of capture,
+transport and browser teardown.
+
+Standing access covers discovery, window screenshots, UI Automation reads and actions, and scoped key
+commits. Real-cursor or synthetic mouse and keyboard control, full-monitor capture and clipboard keep
+their separate consent paths. Partyline Helper, terminals and shells, password managers, UAC and OS
+security windows are never listed or attachable this way; password values remain redacted. The tray shows
+window access as off, on or active; the active tooltip names the line and agent. **Recent activity** shows
+the helper's append-only metadata log, and per-line audit notices record call type, app, title and result
+without contents.
+
 Each granted window has a thin blue outline just outside its visible frame. It follows the window and
 hides while the window is minimized or on another virtual desktop. It is click-through, does not take
 focus, and supported Windows versions exclude it from screen capture. The outline stays above other
 windows while the grant is active and is removed as soon as the grant ends.
 
 Some UI Automation actions can bring the granted window forward. When an action does that, the helper
-restores the window that was in front before the action, provided the granted window is still in front
-when the action completes. Actions intended to activate a window are not restored.
+attempts to restore the window that was in front, provided the granted window is still in front when
+the action completes. Windows can refuse this best-effort restore; `foreground_restored` reports whether
+it succeeded. The helper does not synthesize global input to force activation, and skips restoration
+when another window is observed in front. Actions intended to activate a window are not restored.
 
 The Partyline Computers dialog shows these
 commands with your server's address and a pairing code filled in, each with a copy
@@ -504,8 +536,11 @@ is `completed` only if the immediate read observes a value, focus, title or addr
 `observation` contains `before`, `after`, and `changed`; the baseline is taken after focus preparation,
 so SetFocus alone never counts as a key effect. Observation text is bounded in bytes (with
 `truncated:true` when shortened); comparisons use the full values. Password values are excluded. The URL observation
-uses the browser chrome's address-bar Value, never a page field (recognized English names or
-omnibox/addressEditBox automation IDs). Unsupported providers, missing HWNDs, focus/delivery failures,
+is available only when the action target itself is a recognized address control (English names or
+omnibox/addressEditBox automation IDs), using its Value, never a page field. Helper 1.3.0 no longer
+walks browser chrome to find a separate address bar for a page-field target; use `then` to read the page
+after a key, and do not treat a missing URL observation as proof that navigation did not happen.
+Unsupported providers, missing HWNDs, focus/delivery failures,
 or unchanged state return `status:"no_effect"` plus `hint`. A stale element after navigation can also
 prevent immediate confirmation. Use `then` or a fresh read for delayed effects; `no_effect` describes
 the immediate observation, and `after` independently reports the later tree. Never retry automatically.
@@ -575,7 +610,7 @@ the intentional **Count** rename. The DOM state and UIA state should be compared
 | --- | --- | --- |
 | 1. Sync enable | A real `disabled` attribute removed synchronously by `change` | `Sync target` starts `disabled`; selecting A removes that flag. |
 | 2. Delayed enable | Real `disabled` attributes removed at 300 ms and 2500 ms | An immediate `then` reads at its event-counter boundary; it may precede either deadline. Once both targets visibly enable, a fresh read shows neither as `disabled`. |
-| 3. Looks enabled, accessibility says disabled | Only the link's CSS class changes | **`Class-only link` remains `disabled` in UIA after selection**, even though it looks enabled. This is the deliberate KDP-style divergence. |
+| 3. Looks enabled, accessibility says disabled | Only the link's CSS class changes | **`Class-only link` remains `disabled` in UIA after selection**, even though it looks enabled. This deliberately models the listing dashboard’s accessibility divergence. |
 | 4. aria-disabled link done right | Selection removes `aria-disabled` | `ARIA link` starts `disabled`; selecting A removes that flag. |
 | 5. Disabled ancestor | A button inherits disabled state from `<fieldset disabled>` | `Fieldset target` is `disabled` while `Fieldset disabled` is on, and enabled after toggle off. |
 | 6. Name change | The button increments its own accessible name | Invoking `Count 0` produces `Count 1`, then `Count 2`. |
@@ -783,22 +818,33 @@ notification when available. On Windows the tray item opens the installer; on ot
 platforms rerun the helper install command. The Computers list also shows updates.
 Older helpers that reported a Partyline 2.x version are treated as outdated.
 
-### Dropdown options and reported-disabled controls (helper 1.2)
+### Helper 1.3.0
+
+This release combines scoped owned dialogs, UIA action latency instrumentation and filtered
+reads with retained action IDs, and approved Chrome CDP reads and actions. These changes
+share one helper version.
+
+#### Dropdown options and reported-disabled controls
 
 A window snapshot includes its visible owned popups, labelled `popup: …` under the
-shared window. Win32's owner chain must reach the granted HWND, with the same process
-at every link; popup UIA ProcessId and NativeWindowHandle are checked too. Other browser
-windows and foreign-process popups are excluded. Content hosted by another process inside
-the granted HWND remains readable and actionable through that granted subtree. Popup options are action targets under the
-same grant. Hidden or closed popups add nothing to subsequent reads. UIA events are
-scoped to the granted element and each discovered popup root. PID-scoped WinEvent
+shared window. Win32's owner chain must reach the granted HWND. Same-process popups
+remain in scope; a popup in another process must be a top-level `#32770` dialog,
+and every foreign process on its owner chain must have the same executable image path
+as the granted process. Image lookup failures deny access. Popup UIA ProcessId and
+NativeWindowHandle are checked too. An unrelated window, even from the same browser
+image, cannot join without that owner chain. Content hosted by another process inside
+the granted HWND remains readable and actionable through that granted subtree. Popup
+controls are action targets under the same grant; actions identify their popup in the
+local audit. Screenshots compose pixels captured from the granted window and its scoped
+popups, with blank space between them. Hidden or closed popups add nothing to subsequent
+reads. UIA events are scoped to the granted element and each discovered popup root. WinEvent
 show/hide/destroy notifications invalidate reads and post messages to reconcile popup
 subscriptions outside the callbacks. Persistent UIA handlers do not inspect sender
 properties or walk desktop ancestry. Desktop scope is used only during the short Expand
 deadline. No timed popup discovery runs.
 
 Use `select` for dropdowns and `set_value` for text fields. On a ComboBox,
-`select(value="Amazon.co.uk")` expands it if needed, searches its children, then nearby
+`select(value="shop.uk")` expands it if needed, searches its children, then nearby
 Lists and owned popups (newly appeared lists first), uses SelectionItem.Select on the
 exact option name, and requests collapse. Chrome can expose a dropdown's List as a
 sibling under the Document rather than under the ComboBox. Ambiguous names require
@@ -856,27 +902,27 @@ After collapse the same summary returns to 515 bytes: popup support adds no byte
 closed-popup reads. Summary and query output retain the existing 4 KB budget; expand
 previews at most eight option names rather than returning every option in the action.
 
-**Native Chrome check.** Run against a granted KDP Chrome window with the marketplace
-select and Manage A+ Content link; another Chrome window can remain open to check
+**Native Chrome check.** Run against a granted Catalog Dashboard Chrome window with the marketplace
+select and Manage listing content link; another Chrome window can remain open to check
 exclusion. These are MCP calls, in order. Bind `W` to the existing window grant id,
-`C` to the ComboBox id in step 1, `O` to the Amazon.co.uk ListItem id in step 3,
+`C` to the ComboBox id in step 1, `O` to the shop.uk ListItem id in step 3,
 and `L` to the link id in step 8. Use the returned ids, not old examples.
 
 1. `screen_elements(window=W, refresh=true, control_type="ComboBox", query="=Choose a marketplace…")`
 2. `screen_element_action(window=W, element_id=C, action="expand", then={root:C, depth:2})`
    — root is listed; inspect effect and any option observations, including a stale reported state.
-3. `screen_elements(window=W, control_type="ListItem", query="=Amazon.co.uk")`
+3. `screen_elements(window=W, control_type="ListItem", query="=shop.uk")`
    — find the sibling or popup option; no controls from the other Chrome window should appear.
-4. `screen_element_action(window=W, element_id=O, action="select", then={query:"=Manage A+ Content"})`
+4. `screen_element_action(window=W, element_id=O, action="select", then={query:"=Manage listing content"})`
    — verify the link href switches to the UK domain (the page's `change` handler ran).
-5. `screen_element_action(window=W, element_id=C, action="select", value="Amazon.com", then={root:C})`
-   — selected_option is Amazon.com; value_changed is true; select requests collapse.
-6. `screen_element_action(window=W, element_id=C, action="set_value", value="Amazon.com", then={root:C})`
+5. `screen_element_action(window=W, element_id=C, action="select", value="shop.us", then={root:C})`
+   — selected_option is shop.us; value_changed is true; select requests collapse.
+6. `screen_element_action(window=W, element_id=C, action="set_value", value="shop.us", then={root:C})`
    — effect is none; the root still appears.
-7. `screen_element_action(window=W, element_id=C, action="select", value="Amazon.com", then={root:C})`
+7. `screen_element_action(window=W, element_id=C, action="select", value="shop.us", then={root:C})`
    — value_changed is false and effect is none for an already-selected option.
-8. `screen_elements(window=W, refresh=true, query="=Manage A+ Content")`
-   — inspect disabled evidence and the restored .com href.
+8. `screen_elements(window=W, refresh=true, query="=Manage listing content")`
+   — inspect disabled evidence and the restored shop.us href.
 9. `screen_element_action(window=W, element_id=L, action="invoke")`
    — when reported disabled, refusal explains the force override.
 10. After the person confirms the link works:
@@ -886,7 +932,14 @@ and `L` to the link id in step 8. Use the returned ids, not old examples.
     — inspect the destination and confirm a dismissed popup no longer appears.
 
 
-### Diagnose live state and snapshot races
+#### UIA latency, scoped reads and live state diagnostics
+
+Reads, actions and window snapshots include local monotonic phase timings. Name/type queries
+use scoped UIA capture; prior IDs stay in a bounded action-only map and require live identity
+validation before dispatch. Press observes the target and window title without a broad browser
+scan. See [the latency audit](screen-action-latency.md) for phases, retained-ID limits and the
+remaining costs to measure. CDP reads may return a full tree for the same query scope; the
+server then clears the scoped marker and applies its normal full-tree filtering.
 
 `screen_elements(inspect="<element id>")` compares the retained snapshot with a new **uncached**
 UIA read of that same identity. It deliberately bypasses refresh/TTL/invalidation: refreshing first
@@ -948,11 +1001,11 @@ Whether the real Chrome provider emits the expected event remains part of the li
 | Socket hello/binary 45 s and heartbeat receive 15 s | Bound failed helper transport; protocol liveness, never tree freshness. |
 | Picker 65 s / consent exchange 70 s | Bound independent human consent, outside snapshot correctness. |
 
-#### Exact manual retest
+##### Exact manual retest
 
-Deploy the state-truth server **and helper** first; helper version remains 1.2.0. Share Chrome with
-the testing line using the tray, and attach an ordinary person-owned process to that line. No
-captain is required. Run from the repository with that process's existing connection JSON (or omit
+Deploy the state-truth server **and helper** first; use helper 1.3.0 or newer for the latency timings
+and filtered captures. Share Chrome with the testing line using the tray, and attach an ordinary
+person-owned process to that line. No captain is required. Run from the repository with that process's existing connection JSON (or omit
 `--connection` when `PARTYLINE_MCP_CONNECTION` is set):
 
 ```bash
@@ -963,10 +1016,10 @@ The script sends these actual MCP `tools/call` requests over stdio, retaining th
 and element id in variables rather than requiring an id to be transcribed:
 
 ```json
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"screen_elements","arguments":{"query":"=Manage A+ Content","control_type":"Hyperlink","refresh":true}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"screen_elements","arguments":{"query":"=Manage listing content","control_type":"Hyperlink","refresh":true}}}
 ```
 
-At the prompt, choose the marketplace **by hand** in the real KDP window, observe the visible link,
+At the prompt, choose the marketplace **by hand** in the real Catalog Dashboard window, observe the visible link,
 then press Enter. The next request is exactly `screen_elements({"window": before["window"],
 "inspect": link_id})`. It never refreshes between the manual change and inspect. Save the before
 and inspect JSON and the final one-line verdict. Repeat the run if the snapshot was evicted or the
@@ -983,8 +1036,8 @@ the unique hyperlink in each card (copy its exact accessible name from the lab p
    ancestor. Record live/snapshot/ancestor evidence; visual styling alone is not proof of enabled UIA.
 3. Name change, structure change and input/change checks: record clock advancement, use a fresh
    `screen_elements(changes=true)` for the state/structure delta, and note if a renamed identity is gone.
-4. Finish with the default script on KDP's actual Manage A+ Content link after choosing a marketplace
-   by hand. Agree-disabled identifies Chrome's exposed state; live-enabled/snapshot-disabled identifies
+4. Finish with the default script on the Catalog Dashboard’s Manage listing content link after
+   choosing a marketplace by hand. Agree-disabled identifies Chrome's exposed state; live-enabled/snapshot-disabled identifies
    stale Partyline state; ancestor-disabled names the source. ProviderDescription/FrameworkId distinguish
    native Chrome UIA from an MSAA proxy.
 
@@ -992,3 +1045,150 @@ The script performs no artificial waits. A live result must include the actual J
 provider tests establish invariants but cannot decide which side of Greg's real page reports disabled.
 Tool result sizes and image estimates can be compared in the line's Usage section;
 see [tool telemetry](telemetry.md) for estimators, privacy and retention.
+
+#### Chrome page state without an extension
+
+In an already running **Chrome 144 or newer**, open `chrome://inspect/#remote-debugging`
+and enable remote debugging once. Share the Chrome window from the helper tray. Chrome asks whether to allow the debugging connection as soon as the window is shared;
+choose **Allow**. Reads use UIA with an awaiting-approval reason while that prompt is open,
+so slow approval does not block a read or require sharing again.
+The helper keeps one browser connection until it disconnects or exits. It never starts
+Chrome, changes its command line, copies a profile, or installs an extension. Denying or
+closing the prompt leaves UIA available. Share again to retry a refused connection.
+
+The tray and server device snapshot report `not_enabled` (with the setting instruction),
+`awaiting_approval`, `connected`, or `refused`. `screen_elements` includes `source: cdp|uia`
+and an explanation when Chrome mapping falls back to UIA. Chrome discovery follows
+[Chrome's approved-session flow](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session)
+and the `DevToolsActivePort` reader in
+[Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/src/BrowserManager.ts).
+This attaches to the ordinary signed-in session; the old command-line debugging restriction
+on default profiles is a different mechanism.
+
+The grant covers **all tabs of the selected HWND**, following its active tab. Mapping checks
+the browser process, CDP window bounds against the DWM frame (with DPI conversion), the
+active tab's title against the current HWND title; visibility only breaks duplicate-title
+ties. A uniquely matched tab stays on CDP when its HWND is covered and Chrome reports all
+tabs hidden. Missing or
+ambiguous evidence uses UIA; another Chrome window needs its own grant. Page actions are
+on by default. Ignored AX nodes are omitted before chunking; exposed descendants attach
+to the nearest exposed ancestor. Reads use Chrome AX plus live DOM native disabled, ARIA disabled, readonly,
+inert, value, checked and selected state. With `bounds=true`, CDP adds `viewport@` rectangles
+in CSS pixels; it does not infer screen/frame coordinates from browser decorations. A class-only link can look enabled while reporting
+`disabled(aria_disabled)`; that provenance is retained. Password values are omitted.
+
+`screen_element_action` sends page-scoped mouse/keyboard input, focuses the actual DOM node,
+and edits through `Input.insertText`. `select value=<label or value>` reads the native options,
+then uses trusted `Input.dispatchKeyEvent` navigation from the **current** option. For a
+native dropdown it opens the picker with Alt+Down, moves with arrow keys, and commits with
+Enter. `selection_mode: keyboard_popup` should commit only the requested option once. If the
+native picker ignores CDP keys, it cancels the picker and falls back to current-option arrow
+steps plus Tab (`keyboard_steps`). It never resets through Home/End. The fallback can emit
+one native change per step; results include `trusted_input_events` and `trusted_change_events`
+so its behavior is explicit. It verifies the selected option, never sets the value or
+constructs DOM input/change events, and reports `none (already selected)` for the current
+sole option. Document navigation stops further input and returns an unconfirmed outcome.
+The picker-open probe uses Chrome's
+[`:open` support](https://developer.chrome.com/release-notes/133), and keys use the
+[CDP Input protocol](https://chromedevtools.github.io/devtools-protocol/tot/Input/).
+Unsupported CDP actions report an error; they never also run a UIA action.
+
+`screen_eval(expression=<JavaScript>, window=<grant>)` runs agent JavaScript in the active
+page and returns bounded JSON (a truncated preview for large results). It has the same
+window grant and write authorization as page actions. It can access the page's signed-in
+session. Calls are audited with grant, calling line/process, operation and input length;
+code and typed text are not placed in this audit. The helper keeps its local chained audit,
+and the server records calls including cached reads. Ending the grant synchronously gates
+page commands and stops subscriptions; disconnect and helper exit close the browser socket.
+An already dispatched action cannot be undone; an interrupted command is unconfirmed and
+must not be retried automatically.
+
+DOM/AX/lifecycle events and an isolated-world MutationObserver advance the same monotonic
+counter used by the UIA state-truth barrier. CDP action settling uses an event-reset 100 ms
+quiet deadline and an absolute 2 s failure deadline, without periodic page checks. Results
+say `settle: quiet|changing|deadline`. A renderer round trip and counter comparison detect
+events during capture. Quiet describes the observed boundary; later application work can
+still change the page and invalidates the cache through events. Only the selected tab
+advances the CDP grant counter; switching tabs detaches the previous page, so background
+mutations cannot break continuations or settling.
+Iframe navigation/removal advances the counter without resetting page-wide element IDs or
+interrupting input. Main-frame navigation and `DOM.documentUpdated` invalidate those IDs.
+When a link invoke reaches mouse release and main-frame navigation is observed, the result
+is `completed` with `navigated: true` and `settle: changing`, without reading the old element.
+This confirms the click/navigation boundary; it does not assert the destination finished loading.
+Navigation before mouse release, document replacement without observed navigation, and
+revocation remain interrupted outcomes.
+
+##### Windows live comparison checklist
+
+This implementation is tested against a fake CDP websocket and fake HWND lists on Linux.
+**Live Windows connection, DPI/window matching and website behavior remain to be run.**
+Record Chrome/helper versions, each card's CDP line and UIA line, DOM state, page event log,
+and any difference. Upload sanitized evidence to the line; keep host/account details out.
+
+1. Open `/lab/a11y` in the existing signed-in Chrome window. Disable remote debugging and
+   share it. Run `screen_elements(refresh=true)`; expect `source: uia` and the Chrome setting
+   instruction. Enable the setting, read again, approve Chrome's prompt, and expect `source: cdp`.
+   Verify tray/device states through not enabled, awaiting approval and connected. On a separate
+   session deny once, confirm refused/UIA, then share again and approve.
+2. **Sync enable:** find the select and Sync target. Select B with `then={}`. Check the page
+   logged trusted input/change and the target's native disabled flag cleared. Verify
+   `isTrusted` in a temporary lab event listener installed/read through `screen_eval`. Count
+   trusted change events: moving from a middle option to an adjacent and a distant option
+   should produce one commit in `keyboard_popup` mode, with no intermediate values. Record
+   `selection_mode` and `trusted_change_events`. If the popup does not accept keys, verify
+   fallback starts at the current option; an adjacent move must commit only its target,
+   while a multi-step fallback may emit one change per step. Compare with UIA after
+   disconnecting debugging; restore CDP and refresh before the next card.
+3. **Delayed enable:** select B, record `settle`, read each delayed target before and after its
+   page-side change. Expect a new event counter and fresh enabled state after each transition;
+   a quiet result before delayed work is allowed. Compare UIA card by card.
+4. **Class-only link:** select B, then find Class-only link. Its style looks enabled, but CDP
+   must show `disabled(aria_disabled)` with DOM `aria_disabled=true`; record UIA's disabled
+   provenance too. **ARIA done right:** its parallel link becomes enabled after ARIA removal.
+5. **Disabled ancestor:** toggle the fieldset checkbox. Compare native disabled state on its
+   child before/after. **Name change:** invoke Count 0; record stable identity and the new label.
+   **Structure change:** invoke Load list; read again after the page inserts its three items.
+6. **Text field:** set a value, then press Tab or Enter. Compare its value and input/change/key
+   events with UIA set_value. **Reset/event log:** reset the lab and verify event/counter changes.
+7. Evaluate `({title:document.title, cards:document.querySelectorAll('select').length})` with
+   `screen_eval`; check bounded JSON. Return a very long Unicode string and confirm truncation.
+   Inspect audits for calling grant/line/process/operation/length and absence of supplied text.
+8. Open another Chrome window, including an identical-title/overlapping-window case. Confirm
+   it is excluded, or mapping explicitly refuses with UIA fallback. Fully cover the shared
+   window: a unique title must remain on CDP even if every tab reports hidden; duplicate
+   titles with no visible tiebreaker must refuse. Switch tabs in the granted
+   window; the next read follows that tab and old page IDs fail. Leave the old tab changing
+   in the background: the selected tab's counter, `more` cursor and quiet settle must remain stable. Move a tab to the other window;
+   verify it is no longer read through this grant. Repeat at Windows display scaling 100%/150%.
+9. On Catalog Dashboard, find **Manage listing content** and record its CDP AX disabled state, DOM native/ARIA/
+   readonly/inert state (use `screen_elements(inspect=<id>)`), and the matching UIA inspect.
+   Count native `change` events and log selected marketplace values during the operation;
+   record popup/fallback mode and verify that no unintended marketplace was committed.
+   Change the marketplace, repeat all readings, then invoke only the intended link. Confirm the
+   Listing Content Manager page opens. Record actual navigation and discrepancies between style, AX/UIA and DOM. Do not infer success
+   from an input dispatch acknowledgement. While an iframe navigates or is removed, verify
+   that main-page IDs remain usable and clicks/selects finish. A link navigating the main page
+   should report `completed`, `navigated: true`, invalidate old IDs and require a fresh read.
+10. Record capture and event-status latency on the lab and Catalog Dashboard pages. DOM observation now
+    uses two calls per exposed DOM node plus one object-group release per capture chunk;
+    event-status checks still remap the HWND. Revoke while a read/eval/action or tab attach is in flight; expect no subsequent page command/result
+    disclosure, stale IDs refused, and another separately shared window unaffected. Disconnect
+    the helper and quit Chrome; verify the browser socket closes and UIA fallback is explicit.
+
+
+##### Windows foundations source audit
+
+Read alongside the helper changes: `tests/test_windows_uia.py::test_background_tk_window`,
+`tests/windows_uia_window.py` (native controls and separate foreground window), and
+`tests/windows_uia_patterns.py` (selection, expand/collapse, range, scroll and window actions).
+The foreground assertions check both a transient activation followed by restoration and a native
+restore refusal, using the reported observations; the cursor must remain unchanged. Background reads
+still require the foreground fixture to remain active. The shared assertion helper has a Linux
+regression in `tests/test_cdp_active_select.py`; `tests/test_uia_worker.py` fakes native Win32 restore
+refusals through the SetValue dispatch path.
+Also read `tests/test_windows_capture_events.py` including its native Tk capture smoke test,
+`tests/test_windows_packaging.py`, `tests/test_windows_startup.py`, and
+`tests/test_windows_platform.py`. Their capture, packaging and startup contracts remain
+applicable. This is a source audit; native Windows execution is still required by CI, and
+these UIA fixtures do not establish Chrome popup/event-trust behavior for the checklist above.

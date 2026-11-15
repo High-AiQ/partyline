@@ -42,7 +42,9 @@ def _body(rows):
         text = f"{entry} ×{count}" if count > 1 else entry
         lines.append(f"{agent}: {text}" if agent != actor else text)
         actor = agent
-    return "Agent control audit — " + " · ".join(lines) + f" [audit sha256: {rows[-1]['entry_hash']}]"
+    label = ("Window access audit" if rows[0]["share_id"].startswith("window-access:")
+             else "Agent control audit")
+    return label + " — " + " · ".join(lines) + f" [audit sha256: {rows[-1]['entry_hash']}]"
 
 
 def publish(db, share_id):
@@ -75,3 +77,29 @@ def recover(db):
     shares = db._exec("SELECT DISTINCT share_id FROM screen_control_audit WHERE message_id IS NULL")
     for row in shares.fetchall():
         publish(db, row["share_id"])
+
+
+async def record_window_access(runtime, conv_id, agent, call, app, title, result):
+    """Persist and publish metadata-only audit events for standing window calls."""
+    from .contracts import MessageEvent, MessageResponse
+
+    share_id = "window-access:" + conv_id
+    record(runtime.db, share_id, conv_id, agent,
+           f"{call}: {app[:128]} — {title[:256]} ({result[:80]})")
+    message = publish(runtime.db, share_id)
+    if message:
+        await runtime.broadcast(conv_id, MessageEvent(message=MessageResponse.model_validate(message)))
+
+
+async def record_standing_window_access(runtime, hub, principal, conv_id, call, window, device_name, result):
+    """Resolve audit labels without allowing a missing grant to skip the audit."""
+    from fastapi import HTTPException
+    from .screen_grants import resolve_window
+
+    app = title = ""
+    try:
+        grant, _ = resolve_window(hub, principal, window, device_name)
+        app, title = grant.get("process", ""), grant.get("title", "")
+    except HTTPException:
+        result = "denied"
+    await record_window_access(runtime, conv_id, principal.name, call, app, title, result)

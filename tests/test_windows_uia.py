@@ -83,6 +83,14 @@ class WindowsUIATests(unittest.TestCase):
                            for item in result["elements"])
                 self.assertTrue(any(matches), (expected, result))
             assert_foreground()
+            from partyline_helper.uia_process import read
+            # Multiword name conditions are native candidate supersets; type filtering is exact.
+            filtered = read(window["hwnd"], query={"query": "=Snapshot button", "control_type": "Button"})
+            self.assertTrue(filtered.get("scoped"), filtered)
+            self.assertEqual(1, sum(item["name"] == "Snapshot button" for item in filtered["elements"]))
+            self.assertFalse(any(item["name"] == "Snapshot checkbox" for item in filtered["elements"]))
+            self.assertIn("walk_ms", filtered["timing"])
+            assert_foreground()
             # Read the same window in tiny parts: a first deep part, then per-parent resumed parts.
             import comtypes  # noqa: F401 - initialises COM for this thread
             from partyline_helper.uia_snapshot import snapshot as walk
@@ -115,17 +123,9 @@ class WindowsUIATests(unittest.TestCase):
                     answer = await worker.perform(message)
                     after = user32.GetForegroundWindow()
                     self.assertEqual(pointer, cursor(), f"{action} moved the cursor")
-                    self.assertIsInstance(answer.get("foreground_changed"), bool, (action, answer))
-                    self.assertIsInstance(answer.get("target_came_forward"), bool, (action, answer))
-                    if answer.get("foreground_restored"):
-                        self.assertEqual(before, after, (action, before, after, answer))
-                    elif answer.get("target_came_forward"):
-                        self.assertEqual(window["hwnd"], after, (action, before, after, answer))
-                    # A restored round trip still counts as a foreground change.
-                    if before == after and not answer.get("foreground_restored"):
-                        self.assertFalse(answer.get("foreground_changed"), (action, before, after, answer))
-                    elif not answer.get("foreground_changed"):
-                        print(f"{action}: test saw a foreground change outside helper samples", flush=True)
+                    from tests.windows_uia_patterns import foreground_observation
+                    # Windows may refuse restoration; verify the reported outcome in either case.
+                    foreground_observation(self, answer, before, after, window["hwnd"])
                     if action == "set_value":
                         print(f"SetValue foreground changed: {answer.get('foreground_changed')}", flush=True)
                     answers.append(answer)

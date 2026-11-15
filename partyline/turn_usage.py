@@ -23,11 +23,12 @@ def store(db, att: dict, turn: dict) -> bool:
     with db.lock:
         row = db.conn.execute(
             "SELECT input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens,"
-            " calls, model, timestamp FROM turn_usage WHERE attachment_id=? AND response_id=?",
+            " calls, model, timestamp, model_ms FROM turn_usage WHERE attachment_id=? AND response_id=?",
             (att["id"], turn["response_id"])).fetchone()
         numbers = [turn[key] for key in COLUMNS]
-        calls, model = turn["calls"], turn["model"]
+        calls, model, took = turn["calls"], turn["model"], turn.get("model_ms")
         if row is not None:
+            took = max((ms for ms in (took, row[8]) if ms is not None), default=None)
             numbers = [max(new, old) for new, old in zip(numbers, row[:5], strict=True)]
             calls = list(dict.fromkeys([*json.loads(row[5]), *calls]))
             model, when = model or row[6], min(when, row[7])
@@ -36,15 +37,16 @@ def store(db, att: dict, turn: dict) -> bool:
         db.conn.execute(
             "INSERT INTO turn_usage(conv_id, attachment_id, adapter, response_id, model, input_tokens,"
             " cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, total_tokens,"
-            " context_tokens, context_window, calls, timestamp) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            " context_tokens, context_window, calls, timestamp, model_ms)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(attachment_id, response_id) DO UPDATE SET model=excluded.model,"
             " input_tokens=excluded.input_tokens, cache_read_tokens=excluded.cache_read_tokens,"
             " cache_write_tokens=excluded.cache_write_tokens, output_tokens=excluded.output_tokens,"
             " reasoning_tokens=excluded.reasoning_tokens, total_tokens=excluded.total_tokens,"
             " context_tokens=excluded.context_tokens, context_window=excluded.context_window,"
-            " calls=excluded.calls, timestamp=excluded.timestamp",
+            " calls=excluded.calls, timestamp=excluded.timestamp, model_ms=excluded.model_ms",
             (att["conv_id"], att["id"], att["adapter"], turn["response_id"], model, *numbers[:4], reasoning,
-             total, turn["context"], turn["window"], json.dumps(calls, separators=(",", ":")), when))
+             total, turn["context"], turn["window"], json.dumps(calls, separators=(",", ":")), when, took))
         db.conn.commit()
     if row is None:
         prune(db, now)

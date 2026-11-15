@@ -37,10 +37,12 @@ EXTRAS_OPS = frozenset({
 # Clients that never re-list cannot gain a screen tool when a share starts, so the
 # whole control set is reached through extras there; the others list it while shared.
 SCREEN_CONTROL = frozenset({
-    "screen_element_action", "screen_control_request", "screen_click", "screen_move",
+    "screen_eval", "screen_element_action", "screen_control_request", "screen_click", "screen_move",
     "screen_drag", "screen_scroll", "screen_type", "screen_key",
 })
 SCREEN = SCREEN_CONTROL | {"screen_frame", "screen_elements", "screen_window_snapshot"}
+WINDOW_ACCESS = frozenset({"screen_windows", "screen_attach_window"})
+SCREEN |= WINDOW_ACCESS
 # Captain and task operations that stay listed; every other one runs as captain(op, args).
 EVERYDAY = frozenset({
     "attach_worker", "detach_worker", "create_child", "accept", "ack_report", "list_presets", "reports",
@@ -59,6 +61,9 @@ def every_tool(state: dict) -> list[dict]:
 
 def door(name: str, state: dict) -> str | None:
     """The tool that runs ``name`` when it is not listed itself; None when it is listed."""
+    if (name in WINDOW_ACCESS and state.get("dynamic_screen_tools")
+            and not state.get("window_access")):
+        return "-"
     if name in EXTRAS_OPS or (name in SCREEN_CONTROL | {tools_bridge.NAME}
                               and not state.get("dynamic_screen_tools")):
         return EXTRAS

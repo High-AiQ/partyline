@@ -1,5 +1,6 @@
 """Read current UIA properties without BuildCache or a cached property accessor."""
 from .uia_action import find
+from .timing import Timing
 from .uia_windows import WindowsProvider
 
 PROPERTIES = {"enabled": 30010, "name": 30005, "value": 30045, "toggle": 30086,
@@ -32,6 +33,10 @@ class LiveProvider(WindowsProvider):  # pragma: no cover - native Windows walker
         while child and len(children) < 20000:
             children.append(child)
             child = self.walker.GetNextSiblingElement(child)
+        popup = self.popup_nodes.get(tuple(self.runtime_id(node)))
+        if popup is not None:
+            for child in children:
+                self.popup_nodes[tuple(self.runtime_id(child))] = popup
         if self.prop(node, "NativeWindowHandle") == self.hwnd:
             known = {self.prop(child, "NativeWindowHandle") for child in children}
             children.extend(popup for popup in self.popups()
@@ -50,9 +55,18 @@ def current(node, ident):
 
 
 def inspect(provider, target, path=None):
-    node = find(provider, target, path)
+    timing = Timing()
+    with timing.phase("target_ms"):
+        node = find(provider, target, path)
     if node is None:
-        return {"error": "stale or unknown element; find it again"}
+        return timing.finish({"error": "stale or unknown element; find it again"})
+    with timing.phase("post_read_ms"):
+        result = _inspect(provider, node)
+    timing.values.update(nodes=1 + len(result["ancestors"]), com_calls=getattr(provider, "com_calls", 0))
+    return timing.finish(result)
+
+
+def _inspect(provider, node):
     password = provider.password(node)
     live = {key: None if key == "value" and password else current(node, ident)
             for key, ident in PROPERTIES.items()}

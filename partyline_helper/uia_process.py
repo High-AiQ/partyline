@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 
 from .uia_snapshot import BUDGET
+from .timing import Timing
 
 KILL_SLACK = 4  # a part may overrun its budget by one slow call before the kill; see uia_task.READ_TIMEOUT
 START_LIMIT = 25
@@ -19,7 +20,14 @@ def command(payload):
 
 
 def read(hwnd, frame=None, state=None, deep=True, popen=subprocess.Popen, platform=sys.platform,
-         ready_wait=None, probe=None):
+         ready_wait=None, probe=None, query=None):
+    timing = Timing()
+    result = _read(hwnd, frame, state, deep, popen, platform, ready_wait, probe, query, timing)
+    result.setdefault("timing", {}).update(timing.values)
+    return result
+
+
+def _read(hwnd, frame, state, deep, popen, platform, ready_wait, probe, query, timing):
     if platform != "win32":
         return {"elements_unavailable": "Windows UI Automation is not available on this platform"}
     with tempfile.TemporaryDirectory(prefix="partyline-uia-") as directory:
@@ -30,10 +38,13 @@ def read(hwnd, frame=None, state=None, deep=True, popen=subprocess.Popen, platfo
         payload = json.dumps([hwnd, frame, str(path), str(ready), str(saved) if state else None, deep])
         if probe:
             payload = json.dumps([hwnd, frame, str(path), str(ready), None, False, probe])
+        if query:
+            payload = json.dumps([hwnd, frame, str(path), str(ready), None, False, None, query])
         process = None
         try:
-            process = popen(command(payload), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                            creationflags=0x08000000)
+            with timing.phase("process_start_ms"):
+                process = popen(command(payload), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                creationflags=0x08000000)
             ready_event = threading.Event()
             announcement = []
 
@@ -48,19 +59,25 @@ def read(hwnd, frame=None, state=None, deep=True, popen=subprocess.Popen, platfo
             threading.Thread(target=initialized, name='uia-ready', daemon=True).start()
             wait_ready = ready_wait or ready_event.wait
             # Windows text-mode stdout writes CRLF, so compare the stripped line.
-            if not wait_ready(START_LIMIT) or [line.strip() for line in announcement] != [b"READY"]:
+            with timing.phase("initialize_ms"):
+                initialized_ok = wait_ready(START_LIMIT)
+            if not initialized_ok or [line.strip() for line in announcement] != [b"READY"]:
                 process.kill()
                 process.wait()
                 return {"elements_unavailable": "timeout", "truncated": True}
             try:
-                process.wait(timeout=BUDGET + KILL_SLACK)
+                with timing.phase("child_read_ms"):
+                    process.wait(timeout=BUDGET + KILL_SLACK)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
                 return {"elements_unavailable": "timeout", "truncated": True}
             if process.returncode:
                 return {"elements_unavailable": "Windows UI Automation failed"}
-            return json.loads(path.read_text(encoding="utf-8"))
+            with timing.phase("reply_ms"):
+                result = json.loads(path.read_text(encoding="utf-8"))
+            result.setdefault("timing", {}).update(timing.values)
+            return result
         except (OSError, ValueError, subprocess.SubprocessError):
             return {"elements_unavailable": "Windows UI Automation failed"}
         finally:
@@ -84,17 +101,25 @@ def main(request=None):  # pragma: no cover - isolated Windows child process
     payload = json.loads(request or sys.argv[1])
     hwnd, frame, path, ready, saved, deep = payload[:6]
     probe = payload[6] if len(payload) > 6 else None
+    query = payload[7] if len(payload) > 7 else None
     if probe:
         from .uia_probe import LiveProvider
         provider = LiveProvider(hwnd)
     else:
         provider = WindowsProvider(hwnd, cached=True, deep=deep and not saved)
+    if query:
+        provider.shallow = provider.request(1)
     provider.root()  # the whole-tree prefetch runs under the start limit, not the walk's budget
+    if query:
+        provider.shallow = provider.request(3)
     print("READY", flush=True)
     state = json.loads(Path(saved).read_text(encoding="utf-8")) if saved else None
     if probe:
         from .uia_probe import inspect
         result = inspect(provider, probe["id"], probe.get("path"))
+    elif query:
+        from .uia_query import snapshot as query_snapshot
+        result = query_snapshot(provider, query, frame)
     else:
         result = snapshot(provider, frame, state=state)
     Path(path).write_text(json.dumps(result), encoding="utf-8")

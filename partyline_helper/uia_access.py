@@ -8,12 +8,14 @@ import uuid
 from pathlib import Path
 
 from .uia_process import read
+from .timing import Timing
 from .window_events import WindowEvents
 from partyline.file_events import Changes
 from .uia_gate import DispatchGate
 from .uia_window_identity import live, unmark
 
 MAX_WALKS = 4
+MAX_RETAINED_IDS = 120_000  # match the server tree cap, including IDs merged by filtered reads
 
 
 def select_window(platform=sys.platform, run=subprocess.run):
@@ -122,7 +124,14 @@ class WindowAccess:
             self.picking = False
 
     async def snapshot(self, options=None):
-        """Read one part of the window. Without a cursor that starts a new snapshot and drops the old IDs."""
+        timing = Timing()
+        with timing.phase("read_ms"):
+            result = await self._snapshot(options, timing)
+        result.setdefault("timing", {}).update(timing.values)
+        return result
+
+    async def _snapshot(self, options, timing):
+        """A full read resets IDs; a filtered read only adds live targets to the current ID set."""
         if self.platform != "win32":
             return {"elements_unavailable": "not Windows"}
         grant, generation = self.grant, self.generation
@@ -134,12 +143,14 @@ class WindowAccess:
             return {"elements_unavailable": "tree inconsistent: event during continuation; refresh"}
         if cursor and state is None:
             return {"elements_unavailable": "cursor expired; start a new snapshot"}
-        if not cursor and not (options or {}).get("inspect"):
+        scoped = bool((options or {}).get("query_scope"))
+        if not cursor and not scoped and not (options or {}).get("inspect"):
             self.forget()
             self.event_counter = counter
         if not grant:
             return {"elements_unavailable": self.unavailable}
-        reason = await self.check(grant)
+        with timing.phase("window_check_ms"):
+            reason = await self.check(grant)
         if generation != self.generation or self.grant is not grant:
             return {"elements_unavailable": "consent revoked"}
         if reason:
@@ -152,17 +163,24 @@ class WindowAccess:
         share = self.session.share
         if share and self.session.accepted:
             frame = self.session.last_uia_frame
+        queued = timing.clock()
+        def reader(*args, **kwargs):
+            timing.values["worker_queue_ms"] = timing.elapsed(queued)
+            return self.reader(*args, **kwargs)
         if (options or {}).get("inspect"):
             target = options["inspect"]
-            result = await asyncio.to_thread(self.reader, grant["hwnd"], probe={
+            result = await asyncio.to_thread(reader, grant["hwnd"], probe={
                 "id": target, "path": self.paths.get(target)})
+        elif (options or {}).get("query_scope"):
+            result = await asyncio.to_thread(reader, grant["hwnd"], frame, query=options["query_scope"])
         else:
-            result = await asyncio.to_thread(self.reader, grant["hwnd"], frame, state, self.deep)
+            result = await asyncio.to_thread(reader, grant["hwnd"], frame, state, self.deep)
         if self.event_status:
             result.update(self.event_status(), captured_event_counter=counter)
         if generation != self.generation or self.grant is not grant:
             return {"elements_unavailable": "consent revoked"}
-        reason = await self.check(grant)
+        with timing.phase("window_check_ms"):
+            reason = await self.check(grant)
         if generation != self.generation or self.grant is not grant:
             return {"elements_unavailable": "consent revoked"}
         if reason:
@@ -176,22 +194,27 @@ class WindowAccess:
                     or frame != self.session.last_uia_frame):
                 for element in result["elements"]:
                     element.pop("frame_bounds", None)
-            self.keep(result, cursor)
+            self.keep(result, cursor, scoped=scoped)
             result.update(window_title=grant["title"], process_name=grant["process"])
         elif result.get("elements_unavailable") == "timeout" and state is None:
             self.deep = False  # the one-call prefetch outran the budget: read per parent from now on
         return result
 
-    def keep(self, result, cursor):
+    def keep(self, result, cursor, scoped=False):
         """Remember every part's IDs and paths until a new snapshot starts; hand back the next cursor."""
-        if not cursor:
-            self.epoch = result.get("snapshot_id")
-        result["snapshot_id"] = self.epoch
+        if not scoped:
+            if not cursor:
+                self.epoch = result.get("snapshot_id")
+            result["snapshot_id"] = self.epoch
         for item in result["elements"]:
             if "id" in item:
                 self.elements[item["id"]] = {"id": item["id"], "control_type": item.get("control_type"),
                                              "name": item.get("name")}
         self.paths.update(result.pop("paths", {}))
+        while len(self.elements) > MAX_RETAINED_IDS:
+            oldest = next(iter(self.elements))
+            self.elements.pop(oldest)
+            self.paths.pop(oldest, None)
         if rest := result.pop("state", None):
             token = uuid.uuid4().hex[:12]
             self.walks[token] = rest

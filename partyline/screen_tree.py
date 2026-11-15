@@ -14,7 +14,8 @@ NAME_FIELD = 1000  # characters of a name kept; lines clip it, `id` reads it who
 VALUE_FIELD = 600
 LINE_NAME = 240  # characters of a name shown on a line
 LINE_VALUE = 80
-STATE_FIELDS = ("enabled", "value", "toggle", "selected", "expand_state", "name", "aria_properties")
+STATE_FIELDS = ("enabled", "value", "toggle", "selected", "expand_state", "name", "aria_properties",
+                "source", "provider_identity", "disabled_provenance", "readonly", "inert", "viewport_bounds")
 
 
 def clean(value, limit=NAME_FIELD):
@@ -68,6 +69,19 @@ class Snapshot:
         self.old_helper = False  # ids from a helper that predates cursors: it reads one 200-element part
         self.changed = False  # a resumed read found the page different: elements may be missing or repeated
         self.counts = None
+        self.scope, self.scoped = None, False
+        self.prior_helpers = {}
+        self.action_ids = {}  # older IDs are for live action validation, never cached query answers
+
+    def retain_actions(self, previous):
+        """A filtered capture cannot say that an earlier action target disappeared."""
+        if previous is None:
+            return
+        self.action_ids = dict(previous.action_ids) if previous.scoped else {}
+        self.action_ids.update((node.id, node.helper) for node in previous.nodes.values())
+        while len(self.action_ids) > MAX_TREE:
+            del self.action_ids[next(iter(self.action_ids))]
+        self.prior_helpers = {helper: ident for ident, helper in self.action_ids.items()}
 
     def add(self, items):
         for item in items:
@@ -84,7 +98,8 @@ class Snapshot:
             base = above if named(node) else node.parent
             place = (base, fingerprint(node))
             self.places[place] = self.places.get(place, -1) + 1
-            node.id = self.space.give(identity(base, node, self.places[place]))
+            node.id = (self.prior_helpers.get(node.helper, node.helper) if self.scoped else
+                       self.space.give(identity(base, node, self.places[place])))
             self.anchors[node.id] = node.id if named(node) else above
             self.by_helper[node.helper] = node.id
             self.nodes[node.id] = node
@@ -145,6 +160,9 @@ class Snapshot:
         if node.toggle in TOGGLE:
             parts.append("toggle:" + TOGGLE[node.toggle])
         flags = list(node.flags)
+        if "disabled" in flags and node.cached.get("source") == "cdp":
+            evidence = node.cached.get("disabled_provenance", [])
+            flags[flags.index("disabled")] = "disabled(" + ";".join(evidence) + ")"
         if "disabled" in flags:
             evidence, ancestor = ["IsEnabled=false"], self.nodes.get(node.parent)
             for _ in range(20):
@@ -156,11 +174,18 @@ class Snapshot:
             if node.aria:
                 evidence.append("aria:" + node.aria)
             flags[flags.index("disabled")] = "disabled(" + ";".join(evidence) + ")"
+        if node.cached.get("source") == "cdp" and "selected" in node.cached:
+            flags.append("selected:" + str(node.cached["selected"]).lower())
+        for flag in ("readonly", "inert"):
+            if node.cached.get(flag):
+                flags.append(flag)
         parts.extend(flags)
         if bounds and node.bounds:
             parts.append("@" + ",".join(str(int(v)) for v in node.bounds))
             if node.frame:
                 parts.append("frame@" + ",".join(str(int(v)) for v in node.frame))
+        if bounds and (viewport := node.cached.get("viewport_bounds")):
+            parts.append("viewport@" + ",".join(str(round(v, 2)) for v in viewport))
         if extra:
             parts.append(extra)
         return " ".join(parts)

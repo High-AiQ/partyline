@@ -10,6 +10,7 @@ from .machine_scope import deny_unless
 from .screen_grants import resolve_window
 from .screen_tree import OUT_BYTES
 from .screen_tree_answer import size
+from .screen_timing import timed, phase
 
 
 ACTIONS = Literal["invoke", "toggle", "set_value", "press", "select", "add_to_selection",
@@ -92,6 +93,7 @@ async def after(hub, principal, grant, then, result):
     return {key: item for key, item in reply.items() if key not in ("window", "snapshot_id")}
 
 
+@timed
 async def element_action(runtime, hub, conv_id: str, body: ElementAction, request: Request):
     principal = request_principal(request)
     deny_unless(runtime.db, principal, conv_id, "write")
@@ -102,7 +104,8 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
         message = body.parameters()
         if body.action == "press" and device.get("press", 0) < WINDOW_PRESS_VERSION:
             raise ValueError("update the Partyline helper to use press")
-        target, _ = await hub.elements.action_target(principal, grant, body.element_id)
+        with phase("target_ms"):
+            target, _ = await hub.elements.action_target(principal, grant, body.element_id)
         if target is None:
             return {"status": "failed", "error": REFRESH_FAILED}
         async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window
@@ -113,11 +116,17 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
                 return {"status": "failed", "error": STALE}
             hub.window_grants.spend(grant)
             response = await hub.elements.exchange(principal, grant, device, "window_element_action",
-                                                   agent=principal.name, **message)
+                agent=principal.name, title=grant.get("title", ""),
+                process=grant.get("process", ""), **message)
         result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
         if result.get("status") in ("completed", "no_effect") and not result.get("grant_ended"):
             if body.then:
                 result["after"] = await after(hub, principal, grant, body.then, result)
+                if result.get("source") == "cdp" and result.get("settle") == "quiet":
+                    observed = result["after"].get("snapshot_event_counter")
+                    if (observed != result.get("settled_event_counter")
+                            or result["after"].get("change_event_since_snapshot")):
+                        result["settle"] = "changing"
             tree = hub.elements.snapshots.get(grant["id"])
             hub.elements.action_completed(grant["id"], bool(body.then and tree))
         return result

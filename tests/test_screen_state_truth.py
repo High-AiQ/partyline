@@ -49,7 +49,7 @@ class StateTests(unittest.IsolatedAsyncioTestCase):
         return {**self.status(), "captured_event_counter": captured, "snapshot_id": str(self.captures),
                 "next_cursor": self.cursor, "elements": [
                     {"id": "w", "name": "Chrome", "control_type": "Window", "enabled": True},
-                    {"id": "link", "parent": "w", "name": "Manage A+ Content",
+                    {"id": "link", "parent": "w", "name": "Manage listing content",
                      "control_type": "Hyperlink", "enabled": self.enabled, "bounds": [1, 2, 30, 40]}]}
 
     async def read(self, **options):
@@ -62,7 +62,7 @@ class StateTests(unittest.IsolatedAsyncioTestCase):
         result = await self.read(changes=True)
         self.assertEqual(2, self.captures)
         self.assertIn("~1", result["diff"])
-        self.assertIn("Manage A+ Content", result["lines"])
+        self.assertIn("Manage listing content", result["lines"])
         self.assertNotIn("disabled", result["lines"])
         self.assertFalse(result["change_event_since_snapshot"])
 
@@ -90,7 +90,7 @@ class StateTests(unittest.IsolatedAsyncioTestCase):
         result = await self.read(changes=True)
         self.assertEqual("+0 -0 ~1", result["diff"])
         self.assertEqual(1, result["total"])
-        self.assertIn("Manage A+ Content", result["lines"])
+        self.assertIn("Manage listing content", result["lines"])
         self.assertNotIn('Document "Page"', result["lines"])
         # A layout-only change is not a semantic state delta.
         shifted = False
@@ -147,7 +147,7 @@ class StateTests(unittest.IsolatedAsyncioTestCase):
         self.hub.action_completed("g", retain_snapshot=True)
         delta = await self.read(changes=True)
         self.assertIn("~1", delta["diff"])
-        self.assertIn("Manage A+ Content", delta["lines"])
+        self.assertIn("Manage listing content", delta["lines"])
 
     async def test_more_across_event_restarts_from_root(self):
         await self.read()

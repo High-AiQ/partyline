@@ -75,7 +75,7 @@ class ChapterApiTest(unittest.TestCase):
         write_notes(self.db, "root", "attachment", "private", attachment_id="lead-att")
         response = self.chapter()
         self.assertEqual(response.status_code, 200, response.text)
-        new = response.json()["conversation"]
+        new = self.stored(response)
         self.assertEqual(new["name"], "Root · ch 2")
         self.assertEqual((new["topic"], new["goal"], new["cwd"]), ("the topic", "the goal", "/work/here"))
         self.assertEqual((new["captain_mode"], new["default_review_policy"]), ("orchestrator", "none"))
@@ -98,10 +98,14 @@ class ChapterApiTest(unittest.TestCase):
         self.assertEqual(listed[new["id"]]["chapter_of"], "root")
         self.assertEqual(listed["root"]["chapter"], 1)
 
+    def stored(self, response):
+        """The line a chapter reply names, read as the full record (the reply is a status)."""
+        return self.db.get_conversation(response.json()["conversation"]["id"])
+
     def test_chapter_number_increments_across_a_chain(self):
-        first = self.chapter().json()["conversation"]
-        second = self.chapter(first["id"]).json()["conversation"]
-        third = self.chapter(second["id"]).json()["conversation"]
+        first = self.stored(self.chapter())
+        second = self.stored(self.chapter(first["id"]))
+        third = self.stored(self.chapter(second["id"]))
         self.assertEqual([c["chapter"] for c in (first, second, third)], [2, 3, 4])
         self.assertEqual(third["name"], "Root · ch 4")  # the suffix is replaced, not stacked
         self.assertEqual(third["chapter_of"], second["id"])
@@ -168,3 +172,18 @@ class ChapterApiTest(unittest.TestCase):
         long = next_name({"name": "x" * 120, "chapter": 1})
         self.assertEqual((len(long), long.endswith(" · ch 2")), (120, True))
         self.assertEqual(next_name({"name": " · ch 2", "chapter": 2}), "untitled · ch 3")
+
+    def test_a_new_chapter_replies_with_line_statuses_not_goals(self):
+        goal = "the long goal " * 200  # longer than any reply should echo
+        self.db._exec("UPDATE conversations SET goal=? WHERE id='root'", (goal.strip(),))
+        started = self.chapter()
+        self.assertEqual(started.status_code, 200, started.text)
+        self.assertLess(len(started.content), 1200, started.text)  # a status pair, not the records
+        body = started.json()
+        for line in (body["conversation"], body["previous"]):
+            self.assertNotIn("goal", line)
+            self.assertNotIn("topic", line)
+        self.assertEqual(body["previous"]["goal_chars"], len(goal.strip()))
+        self.assertNotIn(goal.strip(), started.text)
+        self.assertEqual(self.stored(started)["goal"], goal.strip())  # carried on, read as a record
+        self.assertEqual(self.db.get_conversation("root")["goal"], goal.strip())

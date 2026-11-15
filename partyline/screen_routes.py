@@ -52,7 +52,13 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
             raise HTTPException(403, "screen helper pairing is available to people")
         if not hub.limits.issue(principal.user_id):
             raise HTTPException(429, "too many pairing codes; try again later")
-        code = hub.issue_pair_code(principal.user_id)
+        if conv_id:
+            line = runtime.db.get_conversation(conv_id)
+            if not line:
+                raise HTTPException(404, "line not found")
+            if line.get("archived_at"):
+                raise HTTPException(409, "cannot pair a helper to an archived line")
+        code = hub.issue_pair_code(principal.user_id, conv_id)
         return {"code": code, "expires_in": 300}
 
     @router.post("/api/screen/pair/claim")
@@ -213,6 +219,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
     from .screen_window_snapshot import snapshot_router
     app.include_router(snapshot_router(runtime, hub, store))
     app.include_router(grant_router(runtime, hub))
+    from .screen_standing_routes import router_for as standing_router
+    app.include_router(standing_router(runtime, hub))
     app.include_router(router)
     app.include_router(control_router(runtime, hub, store))
     app.include_router(tools_router(runtime, hub, store))

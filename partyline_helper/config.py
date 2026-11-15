@@ -68,4 +68,4 @@ def pair(server, code, name):
             raise CertificateError(message) from None
         raise
     save_config({"server": server, "device_id": data["device_id"], "token": data["token"],
-                 "device_name": name})
+                 "device_name": name, "window_access_enabled": False})

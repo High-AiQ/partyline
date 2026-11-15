@@ -20,6 +20,7 @@ from .screen_errors import screen_error
 from .screen_frame_store import frame_reference
 from .screen_grants import require_window, resolve_window
 from .screen_protocol import HEARTBEAT_TIMEOUT
+from .screen_timing import timed, phase, locked
 
 MAX_CHUNKS = 8  # binary messages one screenshot may travel in; the image itself is capped by the media store
 MIN_WINDOWS = 2  # the helper's `windows` hello value that can take window screenshots
@@ -71,11 +72,12 @@ class WindowSnapshots:
             data = b"".join(parts) if sum(map(len, parts)) <= MAX_IMAGE_BYTES else None
         self.hub.elements.receive(device, {**message, "data": data})
 
+    @timed
     async def take(self, principal, store, window=None, device_name=None):
         grant, device = resolve_window(self.hub, principal, window, device_name)
         if device.get("windows", 0) < MIN_WINDOWS:
             raise HTTPException(409, OLD_HELPER)
-        async with self.locks.setdefault(grant["id"], asyncio.Lock()):
+        async with locked(self.locks.setdefault(grant["id"], asyncio.Lock())):
             try:
                 answer = await self.hub.elements.exchange(principal, grant, device, "snapshot_window",
                                                           agent=principal.name)
@@ -85,7 +87,8 @@ class WindowSnapshots:
             if answer.get("ok") is not True:
                 reason = answer.get("error") or "the computer could not take the screenshot"
                 raise HTTPException(409, str(reason)[:300])
-            return await self.keep(store, principal, grant, answer)
+            with phase("image_store_ms"):
+                return await self.keep(store, principal, grant, answer)
 
     async def keep(self, store, principal, grant, answer):
         data, mime = answer.get("data"), answer.get("mime")
@@ -110,7 +113,8 @@ class WindowSnapshots:
                 share.agent_frames.pop(principal.name, None)
                 await asyncio.to_thread(store.delete_file, ref.id)
             record(self.hub.runtime.db, grant["id"], grant["conv_id"], principal.name,
-                   "window screenshot withheld: the grant ended before it was delivered")
+                   f"window screenshot withheld: {grant['process']} — {grant['title']} "
+                   "(result=withheld; the grant ended before delivery)")
             raise
         result = {"file": ref.model_dump(mode="json"), "window": grant["id"], "title": grant["title"],
                   "width": ref.width, "height": ref.height, "variants": variants(ref),
@@ -122,8 +126,10 @@ class WindowSnapshots:
     async def audit(self, principal, grant, ref):
         self.last[grant["id"]] = {"at": self.wall(), "by": principal.name}
         db = self.hub.runtime.db
+        detail = (f"({ref.width}x{ref.height}, {ref.bytes // 1024} KB; "
+                  f"app={grant['process']}; result=completed)")
         record(db, grant["id"], grant["conv_id"], principal.name,
-               f"window screenshot of «{grant['title']}» ({ref.width}x{ref.height}, {ref.bytes // 1024} KB)")
+               f"window screenshot of «{grant['title']}» {detail}")
         message = publish(db, grant["id"])
         if message:
             await self.hub.runtime.broadcast(
@@ -135,6 +141,7 @@ def snapshot_router(runtime, hub, store):
     router = APIRouter()
 
     @router.post("/api/conversations/{conv_id}/screen-window-snapshot")
+    @timed
     async def window_snapshot(conv_id: str, request: Request, device: str | None = None,
                               window: str | None = None):
         principal = request_principal(request)

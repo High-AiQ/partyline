@@ -18,6 +18,16 @@ worker told to "improve the tests" thrashes; a worker told "add cases for X
 in tests/test_y.py and run only that file" lands. Context is the scarce
 resource: a captain that rations it well replaces fewer workers.
 
+## Delegate a task that needs a desktop window
+
+When the paired person has enabled standing window access in the helper tray, staff a subline or task for
+work that needs one of their open applications. Tell the worker to call `screen_windows`, choose the
+matching safe window, then call `screen_attach_window(window, reason)` before reading or acting. The worker
+uses the resulting normal window grant and existing UIA tools; sublines inherit it through the live grant
+tree. For example, a captain asked to update a product description can staff a task to locate the open
+catalog page and revise its text. If the toggle is off, the server and helper refuse discovery and attach.
+Mouse control, full-monitor capture and clipboard remain separate consent paths.
+
 ## Replace a thrashing worker
 
 Three compactions in three turns means the assignment does not fit the

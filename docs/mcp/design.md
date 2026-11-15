@@ -383,6 +383,19 @@ mirror's `refs/partyline/shared/<name>`, and privately notifies the live impleme
 names need the same SHA or explicit replacement; invalid names, non-commits and non-captains
 are refused. See [task workspaces and shared refs](../hierarchy.md#depth-worktrees-and-where-work-goes).
 
+Task write replies are short status objects, not the record: the line ids, `status`, `round`,
+`sha`, handles, `policy`, `mode`, `repositories` (reviewed SHAs and paths), `report_id`,
+`wait_until`, `overridden_by`, `creation_error`, and `goal_chars` after a goal write. They never
+echo the goal, findings, previous findings, wait reason or workspace detail. Report writes
+(`reports` post, captain `ack_report`) reply with the report's id, parent and child lines,
+`revision` and acknowledgement state, not its body. The full record is still one read away:
+`tasks(conv_id)` for a task, `goal` for its goal, `reports get` for a report body.
+
+Line writes reply with a `LineStatus`: the line's `id`, `name`, `parent_id`, `cwd` and `goal_chars`,
+never its goal or topic. That covers a goal write (`goal` set, captain `set_goal`), `create_child`
+and `new_chapter` (which also reports the previous line). The full line is read on its conversation
+record; the chapter dialog reads the new line that way before it opens it.
+
 The root captain supplies `conv_id` to `review_verdict`; assigned reviewers use
 their home task line. An ordinary call stays the reviewer's alone: the captain
 records a verdict on a staffed review only with the explicit `override=true`

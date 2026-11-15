@@ -6,7 +6,7 @@ from .hierarchy import ancestors
 from .machine_scope import is_human, visible_conversation_ids
 
 
-GRANTS = ("SELECT g.id,g.device_id,g.conv_id,g.title,g.process,g.hwnd,c.name AS line_name,"
+GRANTS = ("SELECT g.id,g.device_id,g.conv_id,g.title,g.process,g.hwnd,g.standing_access,c.name AS line_name,"
           "d.owner_id,d.name AS device_name FROM screen_line_window_grants g "
           "JOIN conversations c ON c.id=g.conv_id AND c.archived_at IS NULL "
           "JOIN screen_devices d ON d.id=g.device_id WHERE d.revoked_at IS NULL")
@@ -46,8 +46,13 @@ def line_grants(db, conv_id):
 
 def resolve_window(hub, principal, window=None, device_name=None):
     """A person's own window, or one shared with the caller's line or its live ancestors."""
+    from .screen_device_access import standing_devices
+
     rows = [dict(row) for row in hub.runtime.db._exec(GRANTS).fetchall()]
-    online = [g for g in rows if g["device_id"] in hub.devices]
+    online = [g for g in rows if g["device_id"] in hub.devices and
+              (not g["standing_access"] or
+               any(device["id"] == g["device_id"] for device in standing_devices(
+                   hub, getattr(principal, "conv_id", None) or g["conv_id"])))]
     if device_name:
         online = [g for g in online if hub.devices[g["device_id"]]["name"] == device_name]
     if is_human(principal):

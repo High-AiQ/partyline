@@ -11,11 +11,13 @@ def replace_grant(db, device_id, conv_id, body):
             db.conn.execute("DELETE FROM screen_line_window_grants WHERE device_id=? AND hwnd=?",
                             (device_id, body.hwnd))
             result = db.conn.execute(
-                "INSERT INTO screen_line_window_grants(id,device_id,conv_id,title,process,hwnd) "
-                "SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM conversations WHERE id=? "
+                "INSERT INTO screen_line_window_grants"
+                "(id,device_id,conv_id,title,process,hwnd,standing_access) "
+                "SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM conversations WHERE id=? "
                 "AND archived_at IS NULL) "
                 "AND EXISTS (SELECT 1 FROM screen_devices WHERE id=? AND revoked_at IS NULL)",
-                (body.grant_id, device_id, conv_id, body.title, body.process, body.hwnd, conv_id, device_id))
+                (body.grant_id, device_id, conv_id, body.title, body.process, body.hwnd,
+                 int(body.standing_access), conv_id, device_id))
             if result.rowcount != 1:
                 raise ValueError("the selected line is no longer available")
             db.conn.commit()

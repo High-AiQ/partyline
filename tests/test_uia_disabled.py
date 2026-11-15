@@ -16,15 +16,15 @@ from tests.uia_dropdown_fakes import Chrome, Node
 class DisabledChrome(Chrome):
     def __init__(self, fallback=False):
         super().__init__()
-        self.link = Node(30, 0, 50005, "Manage A+ Content", ("Invoke", "Value", "LegacyIAccessible"),
-                         value="https://kdp.amazon.com/aplus/content-manager")
+        self.link = Node(30, 0, 50005, "Manage listing content", ("Invoke", "Value", "LegacyIAccessible"),
+                         value="https://catalog.example.com/listing/content-manager")
         self.link.props.update(IsEnabled=False, AriaProperties="disabled=true")
         self.window.kids.append(self.link)
         self.fallback = fallback
 
     def navigate(self):
         self.link.props["HasKeyboardFocus"] = True
-        self.window.props["Name"] = "A+ Content Manager"
+        self.window.props["Name"] = "Listing Content Manager"
 
     def action_call(self, node, action, arg):
         if node is not self.link:
@@ -48,7 +48,7 @@ class DisabledTests(unittest.TestCase):
             app.window.props["IsEnabled"] = not inherited
             tree = Snapshot("s", 0)
             tree.add(snapshot(app, clock=lambda: 0)["elements"])
-            reply = answer(tree, {}, {"query": "Manage A+ Content"})
+            reply = answer(tree, {}, {"query": "Manage listing content"})
             self.assertIn("IsEnabled=false", reply["lines"])
             self.assertIn("aria:disabled=true", reply["lines"])
             root = tree.order[0]
@@ -72,7 +72,7 @@ class DisabledTests(unittest.TestCase):
                 self.assertTrue(result["focus_changed"])
                 self.assertTrue(result["focused_after"])
                 self.assertTrue(result["window_title_changed"])
-                self.assertEqual("A+ Content Manager", result["window_title_after"])
+                self.assertEqual("Listing Content Manager", result["window_title_after"])
                 self.assertFalse(result["value_changed"])
                 self.assertEqual("LegacyIAccessible.DoDefaultAction" if fallback else "pattern",
                                  result["action_method"])

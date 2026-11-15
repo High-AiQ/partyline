@@ -66,12 +66,16 @@ class ScreenRequestTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_screen_elements_route(self):
         with patch.object(self.hub.elements, "read",
-                          return_value={"elements_unavailable": "not consented"}) as read:
+                          return_value={"elements_unavailable": "not consented"}) as read, \
+                patch("partyline.screen_elements.resolve_window",
+                      return_value=({"id": "g", "conv_id": "line"}, {})), \
+                patch("partyline.screen_elements.audit_call"):
             response = await self.client.post(
                 "/api/conversations/line/screen-elements?device=PC&query=next&control_type=Hyperlink"
                 "&root=abc&text=true&offset=5&refresh=true")
             bad = await self.client.post("/api/conversations/line/screen-elements?depth=9")
-        self.assertEqual(response.json(), {"elements_unavailable": "not consented"})
+        self.assertIn("timing", response.json())
+        self.assertEqual(response.json()["elements_unavailable"], "not consented")
         self.assertEqual(422, bad.status_code)
         read.assert_awaited_once()
         principal, device, window, options = read.await_args.args

@@ -6,7 +6,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, StringConstraints
 
-from .contracts import ConversationResponse
+from .conversation_contracts import LineStatus
 from .goal import MAX_GOAL, MAX_TASK_GOAL, MAX_TOPIC
 
 MAX_REPORT_BODY = 2000
@@ -213,6 +213,19 @@ class Report(BaseModel):
     created_at: float
 
 
+class ReportStatus(BaseModel):
+    """A report write's reply: its id and revision. The body is read with `reports get`."""
+
+    id: int
+    parent_conv_id: str
+    child_conv_id: str
+    author_attachment_id: str | None = None
+    revision: int = 1
+    notify: bool = False
+    notified_at: float | None = None
+    acknowledged_at: float | None = None
+
+
 class AckIn(BaseModel):
     revision: int = Field(ge=1)
 
@@ -252,4 +265,4 @@ class MessageIn(BaseModel):
 
 
 class ChildCreatedResponse(BaseModel):
-    conversation: ConversationResponse
+    conversation: LineStatus

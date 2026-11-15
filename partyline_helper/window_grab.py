@@ -26,6 +26,10 @@ class WindowGrab:
         """One RGB image of the window, from Graphics Capture or else PrintWindow."""
         if sys.platform != "win32":
             raise GrabError("window screenshots need Windows")
+        from .window_grab_owned import grab_owned
+        return grab_owned(hwnd, self.grab_one)
+
+    def grab_one(self, hwnd):
         try:
             return self.wgc(hwnd)
         except Exception:  # noqa: BLE001 - any Graphics Capture failure falls back to PrintWindow

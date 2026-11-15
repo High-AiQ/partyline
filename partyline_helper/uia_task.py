@@ -5,6 +5,7 @@ import contextlib
 from websockets.exceptions import ConnectionClosed
 
 from .uia_action_worker import ActionWorker, audit
+from .timing import Timing
 
 
 READ_TIMEOUT = 33  # seconds; START_LIMIT + BUDGET + KILL_SLACK must stay below it
@@ -14,6 +15,10 @@ def read_options(message):
     """The only fields of a read request the helper honours."""
     if isinstance(message.get("inspect"), str):
         return {"inspect": message["inspect"][:128]}
+    scope = message.get("query_scope")
+    if isinstance(scope, dict):
+        return {"query_scope": {key: value[:200] for key, value in scope.items()
+                                if key in ("query", "control_type") and isinstance(value, str)}}
     cursor = message.get("cursor")
     return {"cursor": cursor[:64]} if isinstance(cursor, str) and cursor else {}
 
@@ -28,12 +33,12 @@ class WindowTask:
     def busy(self):
         return any(task and not task.done() for task in (self.task, self.read_task))
 
-    async def submit(self, request_id, options=None):
+    async def submit(self, request_id, options=None, message=None):
         if self.busy():
             await self.session.send("window_elements", request_id=request_id,
                                     elements_unavailable="window read already in progress")
             return
-        self.task = asyncio.create_task(self._read(request_id, options))
+        self.task = asyncio.create_task(self._read(request_id, options, message, Timing()))
 
     async def submit_action(self, message):
         previous = self.actions.task and not self.actions.task.done()
@@ -49,35 +54,96 @@ class WindowTask:
                 result = {"status": "failed", "error": "audit unavailable"}
             await self.session.send("window_element_result", request_id=message["request_id"], **result)
             return
-        self.task = asyncio.create_task(self._action(message))
+        self.task = asyncio.create_task(self._action(message, Timing()))
 
-    async def _action(self, message):
+    async def _action(self, message, queued=None):
+        timing = queued or Timing()
+        timing.values["task_queue_ms"] = timing.elapsed(timing.started)
+        from .screen_access_audit import begin_window_call, end_window_call
+        active = begin_window_call(self.session, message.get("agent", ""),
+                                   message.get("line_name") or message.get("line"))
+        audited = False
         try:
-            result = await self.actions.perform(message)
+            chrome = getattr(self.session, "chrome", None)
+            result = await chrome.action(self.session.window, message) if chrome else None
+            if result is None:
+                result = await self.actions.perform(message)
+                result.setdefault("source", "uia")
+            elif chrome:
+                from .screen_access_audit import audit_window
+                audit_window(self.session, "uia_action", message.get("agent", ""),
+                             result.get("status", "failed"), message.get("line"))
+                audited = True
+            result.setdefault("timing", {}).update(timing.values)
             await self.session.send("window_element_result", request_id=message["request_id"], **result)
         except ConnectionClosed:
             pass
+        except (ValueError, OSError):
+            if chrome and not audited:
+                from .screen_access_audit import audit_window
+                audit_window(self.session, "uia_action", message.get("agent", ""), "failed",
+                             message.get("line"))
+            await self.session.send("window_element_result", request_id=message["request_id"],
+                                    status="unconfirmed", error="Chrome command interrupted")
+        finally:
+            end_window_call(active)
 
-    async def _read(self, request_id, options=None):
+    async def snapshot(self, options, message):
+        chrome = getattr(self.session, "chrome", None)
+        result = await chrome.read(self.session.window, options, message or {}) if chrome else None
+        if result is None:
+            result = await self.session.window.snapshot(options)
+            result["source"] = "uia"
+            if chrome and self.session.window in chrome.reasons:
+                result["source_reason"] = chrome.reasons[self.session.window]
+        return result
+
+    async def _read(self, request_id, options=None, message=None, queued=None):
+        timing = queued or Timing()
+        timing.values["task_queue_ms"] = timing.elapsed(timing.started)
+        from .screen_access_audit import begin_window_call, end_window_call
+        active = begin_window_call(self.session, (message or {}).get("agent", ""),
+                                   (message or {}).get("line_name") or (message or {}).get("line"))
+        try:
+            await self._read_call(request_id, options, message, timing)
+        finally:
+            end_window_call(active)
+
+    async def _read_call(self, request_id, options=None, message=None, timing=None):
+        timing = timing or Timing()
         try:
             try:
-                self.read_task = asyncio.create_task(self.session.window.snapshot(options))
+                self.read_task = asyncio.create_task(self.snapshot(options, message))
                 result = await asyncio.wait_for(asyncio.shield(self.read_task), READ_TIMEOUT)
             except TimeoutError:
                 self.session.window.abandon_read()
+                chrome = getattr(self.session, "chrome", None)
+                if chrome and chrome.sources.get(self.session.window) == "cdp":
+                    self.read_task.cancel()  # CDP is cancellable; a UIA COM thread is not
                 result = {"elements_unavailable": "timeout", "truncated": True}
             except (ValueError, KeyError, TypeError, RuntimeError, OSError):
                 result = {"elements_unavailable": "window read failed"}
+            result.setdefault("timing", {}).update(timing.values)
+            from .screen_access_audit import audit_window
+            try:
+                audit_window(self.session, "uia_read", (message or {}).get("agent", ""),
+                             "read" if result.get("elements_unavailable") is None else "failed",
+                             (message or {}).get("line"))
+            except OSError:
+                result = {"elements_unavailable": "audit unavailable"}
             await self.session.send("window_elements", request_id=request_id, **result)
         except ConnectionClosed:
             pass
 
+    def cancel(self):
+        """Cancel queued and in-flight reads/actions before any awaited teardown."""
+        for task in (self.task, self.read_task):
+            if task:
+                task.cancel()
+
     async def close(self):
-        if self.task:
-            self.task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.task
-        if self.read_task:
-            self.read_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.read_task
+        self.cancel()
+        for task in (self.task, self.read_task):
+            if task:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task

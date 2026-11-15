@@ -49,16 +49,18 @@ class Chrome(WindowsProvider):
     """Exercise the production scope, children, popup labelling and property reads with fake COM."""
     def __init__(self):
         self.user32, self.hwnd = User(), 1
-        self.scope = WindowScope(self.user32, 1, lambda: list(self.user32.pids))
+        self.scope = WindowScope(self.user32, 1, lambda: list(self.user32.pids),
+                                 image_path=lambda pid: {10: "chrome", 20: "other"}.get(pid),
+                                 class_name=lambda hwnd: "#32770")
         self.cached, self.deep, self.cache, self.shallow = False, False, None, None
         self.top, self.popup_roots = None, None
         self.popup_nodes = {}
         self.window = Node(1, 1, 50032, "Chrome dropdown fixture")
         self.combo = Node(10, 0, 50003, "Choose a marketplace…", ("Value", "ExpandCollapse"),
-                          value="Amazon.com", expand_state="collapsed")
+                          value="shop.us", expand_state="collapsed")
         self.popup = Node(2, 2, 50008, "")
-        self.first = Node(20, 0, 50007, "Amazon.com", ("SelectionItem",), selected=True)
-        self.second = Node(21, 0, 50007, "Amazon.co.uk", ("SelectionItem",), selected=False)
+        self.first = Node(20, 0, 50007, "shop.us", ("SelectionItem",), selected=True)
+        self.second = Node(21, 0, 50007, "shop.uk", ("SelectionItem",), selected=False)
         self.popup.kids = [self.first, self.second]
         self.window.kids = [self.combo]
         self.other = Node(3, 3, 50032, "Unrelated Chrome window")
@@ -73,7 +75,7 @@ class Chrome(WindowsProvider):
         return next((parent for parent in roots if node in parent.kids), None)
 
     def prop(self, node, name):
-        return node.props[name]
+        return node.props.get(name, False)
 
     def available(self, node, ident):
         from partyline_helper.uia_windows import PATTERNS
@@ -120,10 +122,10 @@ class Chrome(WindowsProvider):
 
 
 class SiblingChrome(Chrome):
-    """The live KDP layout: a sibling List inside Document > Group, and stale Collapsed state."""
+    """The live dashboard layout: a sibling List inside Document > Group, and stale Collapsed state."""
     def __init__(self):
         super().__init__()
-        self.document = Node(40, 0, 50030, "KDP")
+        self.document = Node(40, 0, 50030, "Catalog Dashboard")
         self.group = Node(41, 0, 50026, "Marketplaces")
         self.document.kids = [self.group]
         self.group.kids = [self.combo]

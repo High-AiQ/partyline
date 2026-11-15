@@ -21,6 +21,8 @@ def named(node):
 
 def identity(parent, node, ordinal):
     """What an element is: its anchor, type, name, value and place among identical siblings."""
+    if provider := node.cached.get("provider_identity"):
+        return hashlib.blake2b(f"cdp\0{provider}".encode(), digest_size=16).digest()
     return hashlib.blake2b(f"{parent}\0{fingerprint(node)}\0{ordinal}".encode(), digest_size=16).digest()
 
 

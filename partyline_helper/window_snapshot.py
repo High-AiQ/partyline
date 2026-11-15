@@ -7,6 +7,7 @@ from io import BytesIO
 from websockets.exceptions import ConnectionClosed
 
 from .window_grab import GrabError, WindowGrab
+from .timing import Timing
 
 SNAPSHOT_VERSION = 2  # the `windows` hello value that includes window screenshots
 MAX_BYTES = 20 * 1024 * 1024  # the media store's own image limit: a larger one loses quality, never size
@@ -46,15 +47,25 @@ class WindowSnapshots:
     async def handle(self, entry, message):
         """Answer one `snapshot_window` request: an image, or `ok: false` with the reason."""
         request_id = message["request_id"]
+        from .screen_access_audit import begin_window_call, end_window_call
+        active = (begin_window_call(getattr(entry["access"], "session", self.shares.session),
+                                    message.get("agent", ""), message.get("line_name")
+                                    or message.get("line")) if entry else None)
         try:
             await self.take(entry, message, request_id)
         except GrabError as exc:
+            self.audit(entry, message, "failed")
             await self.reply(request_id, ok=False, error=str(exc))
         except Exception as exc:  # noqa: BLE001 - whatever fails, the caller gets an answer, not a timeout
             print(f"Window screenshot failed: {exc!r}", flush=True)
+            self.audit(entry, message, "failed")
             await self.reply(request_id, ok=False, error="the screenshot failed; see the helper's terminal")
+        finally:
+            if active:
+                end_window_call(active)
 
     async def take(self, entry, message, request_id):
+        timing = Timing()
         access = entry["access"] if entry else None
         grant = access.grant if access else None
         if not grant:
@@ -63,8 +74,10 @@ class WindowSnapshots:
         await self.check(access, grant, generation)
         if await asyncio.to_thread(self.backend.minimized, grant["hwnd"]):
             raise GrabError(MINIMIZED)
-        image = await asyncio.to_thread(self.backend.grab, grant["hwnd"])
-        binary, mime, black = await asyncio.to_thread(prepare, image)
+        with timing.phase("capture_ms"):
+            image = await asyncio.to_thread(self.backend.grab, grant["hwnd"])
+        with timing.phase("encode_ms"):
+            binary, mime, black = await asyncio.to_thread(prepare, image)
         agent = str(message.get("agent") or "an agent")[:80]
 
         async def gate():
@@ -72,17 +85,32 @@ class WindowSnapshots:
             await self.check(access, grant, generation)
             entry["last_screenshot"] = {"at": self.clock(), "by": agent}
             self.shares.changed()
+            self.audit(entry, message, "captured")
             try:
+                names = image.info.get("scoped_popups", [])
+                popup_info = f", owned popups: {', '.join(names)}" if names else ""
                 self.shares.session.tools.audit.append(
                     "event", "window", agent, "window_snapshot",
                     f"{grant['title']} ({grant['process']}): {image.width}x{image.height}, "
-                    f"{len(binary)} bytes")
+                    f"{len(binary)} bytes{popup_info}")
             except OSError as exc:  # the person's record comes first: no entry, no image
                 raise GrabError("the helper could not write its audit log") from exc
         chunks = [binary[i:i + CHUNK] for i in range(0, len(binary), CHUNK)]
         await self.reply(request_id, chunks, gate, ok=True, mime=mime, width=image.width,
-                         height=image.height, media=True, chunks=len(chunks),
+                         height=image.height, media=True, chunks=len(chunks), timing=timing.values,
                          **({"blank": True} if black else {}))
+
+    @staticmethod
+    def audit(entry, message, result):
+        if entry:
+            from .screen_access_audit import audit_window
+            session = getattr(entry["access"], "session", None)
+            if session is not None:
+                audit_window(session, "screenshot", message.get("agent", ""), result,
+                             message.get("line"))
+        else:
+            from .screen_access_audit import append_metadata
+            append_metadata(message, "screenshot", result)
 
     @staticmethod
     async def check(access, grant, generation):

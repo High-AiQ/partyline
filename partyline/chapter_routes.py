@@ -7,7 +7,8 @@ from fastapi import FastAPI, Request
 from . import chapters
 from .auth_guard import request_principal
 from .chapters import ChapterIn, ChapterPreview, ChapterResponse
-from .contracts import ConversationResponse, ConversationsChangedEvent
+from .contracts import ConversationsChangedEvent
+from .conversation_contracts import LineStatus
 from .machine_scope import deny_unless
 from .system_notice import post_system_notice
 
@@ -33,6 +34,6 @@ def register_chapter_routes(app: FastAPI, server) -> None:
         await post_system_notice(runtime, new["id"], f"☏ continues from {chapters.link(old)}{who}",
                                  actor=principal)
         await runtime.broadcast_all(ConversationsChangedEvent())
-        return ChapterResponse(conversation=ConversationResponse.model_validate(new),
-                               previous=ConversationResponse.model_validate(db.get_conversation(conv_id)),
+        return ChapterResponse(conversation=LineStatus.of(new),
+                               previous=LineStatus.of(db.get_conversation(conv_id)),
                                captain_preset=chapters.captain_preset(db, conv_id))

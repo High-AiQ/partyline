@@ -12,10 +12,10 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 
 ELEMENT_ACTION_NOTE = (
-    "UIA on a screen_elements id in a shared/inherited window. select value=option name; set_value=text. "
-    "press key=enter/tab/escape targets its HWND after focus; no global input/activation. Prefer invoke "
-    "on submit buttons; no_effect has a hint. force=true: disabled only if person confirms it works. "
-    "then re-reads (empty=changes). Event-counter cache barrier. Drag: screen_drag.")
+    "Act on a screen_elements id using its provider (CDP or UIA). select value=option name; "
+    "set_value edits text; press key=enter/tab/escape commits. force overrides reported disabled. "
+    "then re-reads after an event quiet deadline for CDP, reporting quiet/changing/deadline. "
+    "UIA window_* actions target the shared window. Drag: screen_drag.")
 ELEMENT_ACTION_TIMEOUT = 100  # a 20s capture deadline may be followed by a 35s exchange, then action
 ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and event barrier
 ELEMENT_ACTION_PROPERTIES = {
@@ -57,7 +57,7 @@ def _int(description):
 
 
 def _tool(name, description, properties, required):
-    if name not in ("screen_control_request", "screen_element_action"):
+    if name not in ("screen_control_request", "screen_element_action", "screen_eval"):
         properties = {**properties, "frame": {"type": "string", "enum": ["none", "thumb", "full"],
                       "description": "Frame tier: none, thumb (default), or full (original)."}}
     return {"name": name, "description": description, "inputSchema": {
@@ -71,7 +71,7 @@ def tool_list(state):
             return []
         allowed = set()
         if state.get("screen_windows"):
-            allowed.add("screen_element_action")
+            allowed.update({"screen_element_action", "screen_eval"})
         if state.get("screen_control"):
             allowed.update({"screen_click", "screen_move", "screen_drag", "screen_scroll",
                             "screen_type", "screen_key"})
@@ -87,6 +87,10 @@ def tool_list(state):
         return []
     point = {"x": _int("X, " + FRAME + "."), "y": _int("Y, " + FRAME + ".")}
     tools = [
+        _tool("screen_eval", "Run JavaScript in the active tab of a shared Chrome window; bounded JSON. "
+              "Requires an approved Chrome debugging connection. Calls are audited by input length.",
+              {"expression": {"type": "string", "minLength": 1, "maxLength": 16000},
+               "window": ELEMENT_ACTION_PROPERTIES["window"]}, ["expression"]),
         _tool("screen_element_action", ELEMENT_ACTION_NOTE, ELEMENT_ACTION_PROPERTIES,
               ["element_id", "action"]),
         _tool("screen_control_request",
@@ -129,6 +133,8 @@ def call(client, name, args, state):
         raise ApiError("screen control needs write access to your line")
     validate_arguments(available[name]["inputSchema"], args)
     base = f"/api/conversations/{quote(client.home, safe='')}/screen-control"
+    if name == "screen_eval":
+        return client.request("POST", base.removesuffix("/screen-control") + "/screen-eval", args, timeout=60)
     if name == "screen_control_request":
         return client.request("POST", base + "/request")
     if name == "screen_element_action":

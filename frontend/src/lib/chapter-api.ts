@@ -1,7 +1,6 @@
 /** Start a new chapter of a line: the preview the dialog shows and the action itself. */
 import { z } from "zod";
 import { request } from "./http";
-import { ConversationSchema } from "./conversation-contracts";
 
 export const CaptainPresetSchema = z.object({
   name: z.string(),
@@ -20,9 +19,19 @@ export const ChapterPreviewSchema = z.object({
 });
 export type ChapterPreview = z.infer<typeof ChapterPreviewSchema>;
 
+/** A line write's reply: where the line is and how long its goal is. The line itself is read whole. */
+export const LineStatusSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  parent_id: z.string().nullable(),
+  cwd: z.string().nullable(),
+  goal_chars: z.number().int().nonnegative(),
+});
+export type LineStatus = z.infer<typeof LineStatusSchema>;
+
 export const ChapterResponseSchema = z.object({
-  conversation: ConversationSchema,
-  previous: ConversationSchema,
+  conversation: LineStatusSchema,
+  previous: LineStatusSchema,
   captain_preset: CaptainPresetSchema.nullable(),
 });
 export type ChapterResponse = z.infer<typeof ChapterResponseSchema>;

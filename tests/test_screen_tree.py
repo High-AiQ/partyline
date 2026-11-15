@@ -175,8 +175,10 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unavailable_first_part_is_reported_and_not_stored(self):
         self.replies = [{"elements_unavailable": "not consented", "truncated": True}]
+        result = await self.hub.read(None)
+        self.assertIn("timing", result)
         self.assertEqual({"elements_unavailable": "not consented", "truncated": True},
-                         await self.hub.read(None))
+                         {key: value for key, value in result.items() if key != "timing"})
         self.assertEqual({}, self.hub.snapshots)
 
     async def test_a_part_that_fails_midway_leaves_a_partial_tree_to_retry(self):

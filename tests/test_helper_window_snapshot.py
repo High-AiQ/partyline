@@ -41,13 +41,14 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.session.tools.audit = SimpleNamespace(append=Mock(), ensure_writable=Mock())
         self.shares = WindowShares(self.session)
         self.session.windows = self.shares
+        self.shares.chrome.revoke = Mock()  # snapshot fixture has no CDP sessions
         self.backend = FakeBackend()
         self.shares.snapshots.backend = self.backend
         self.shares.snapshots.clock = lambda: 1_700_000_000.0
         self.access = SimpleNamespace(grant=dict(GRANT), generation=3, check=AsyncMock(return_value=None),
                                       revoke=Mock())
         self.entry = {"access": self.access, "target": {"line_name": "Alpha"}, "title": "Editor",
-                      "worker": SimpleNamespace(close=AsyncMock())}
+                      "worker": SimpleNamespace(cancel=Mock(), close=AsyncMock())}
         self.shares.grants["g1"] = self.entry
 
     async def asyncTearDown(self):
@@ -220,7 +221,7 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_hello_announces_screenshots_and_the_minor_version_moved(self):
         self.assertEqual(2, WINDOWS_VERSION)
         self.assertEqual(SNAPSHOT_VERSION, WINDOWS_VERSION)
-        self.assertTrue(__version__.startswith("1.2."))
+        self.assertEqual("1.3.0", __version__)
 
 
 class WindowGrabTests(unittest.TestCase):
@@ -236,7 +237,9 @@ class WindowGrabTests(unittest.TestCase):
         grab.wgc = Mock(return_value=image)
         grab.print_window = Mock(return_value="printed")
         grab.iconic = Mock(return_value=True)
-        with patch("partyline_helper.window_grab.sys.platform", "win32"):
+        passthrough = lambda hwnd, capture: capture(hwnd)  # noqa: E731
+        with (patch("partyline_helper.window_grab.sys.platform", "win32"),
+              patch("partyline_helper.window_grab_owned.grab_owned", side_effect=passthrough)):
             self.assertIs(image, grab.grab(10))
             self.assertTrue(grab.minimized(10))
             grab.wgc.side_effect = GrabError("no frame")

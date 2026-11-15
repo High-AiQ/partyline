@@ -6,7 +6,8 @@ import uuid
 from fastapi import HTTPException
 
 from . import checkout_health
-from .contracts import ConversationResponse, ConversationsChangedEvent
+from .contracts import ConversationsChangedEvent
+from .conversation_contracts import LineStatus
 from .hierarchy import HierarchyError, create_child_conversation
 from .hierarchy_contracts import ChildCreatedResponse
 from .line_worktree import describe, line_cwd, place_child, placement_root
@@ -84,5 +85,5 @@ async def create_child(runtime, principal, conv_id, body, workspace=False, on_re
                 runtime, conv["id"], f"☏ goal set by {who}: {goal}", actor=principal)
     await runtime.broadcast_all(ConversationsChangedEvent())
     return ChildCreatedResponse(
-        conversation=ConversationResponse.model_validate(conv)
+        conversation=LineStatus.of(conv)
     )

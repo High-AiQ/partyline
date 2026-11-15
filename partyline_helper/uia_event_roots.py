@@ -1,7 +1,7 @@
 """Persistent UIA subscriptions on the grant and its currently visible popup roots only."""
 from .uia_events import register_handlers, remove_handlers
 
-POPUP_REFRESH = 0x804D  # private thread message; emitted by the pid-scoped WinEvent hook
+POPUP_REFRESH = 0x804D  # private thread message; emitted by the scoped WinEvent callback
 
 
 class WindowHandlers:

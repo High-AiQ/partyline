@@ -40,8 +40,8 @@ class DropdownTests(unittest.TestCase):
         app.refresh()
         opened = snapshot(app, clock=lambda: 0)
         self.assertEqual(["Chrome dropdown fixture", "Choose a marketplace…", "popup: List",
-                          "Amazon.com", "Amazon.co.uk"], [item["name"] for item in opened["elements"]])
-        option_id = next(item["id"] for item in opened["elements"] if item["name"] == "Amazon.co.uk")
+                          "shop.us", "shop.uk"], [item["name"] for item in opened["elements"]])
+        option_id = next(item["id"] for item in opened["elements"] if item["name"] == "shop.uk")
         prepare(app, option_id, "select", path=opened["paths"][option_id])
         self.assertEqual("changed", run(app, app.combo, "collapse")["effect"])
         # Even a retained provider cache must reject the now-hidden popup root.
@@ -66,9 +66,9 @@ class DropdownTests(unittest.TestCase):
         self.assertNotIn("expand_state", expanded["element"])
         # A second expand finds the already-open List without claiming it newly appeared.
         self.assertFalse(run(app, app.combo, "expand")["options_appeared"])
-        result = run(app, app.combo, "select", value="Amazon.co.uk")
+        result = run(app, app.combo, "select", value="shop.uk")
         self.assertTrue(result["value_changed"])
-        self.assertEqual("Amazon.co.uk", result["selected_option"])
+        self.assertEqual("shop.uk", result["selected_option"])
         self.assertEqual([app.combo], app.group.kids)
         self.assertEqual([], app.popups())
 
@@ -104,7 +104,7 @@ class DropdownTests(unittest.TestCase):
         for node, action in ((app.combo, "set_value"), (hosted, "invoke")):
             self.assertTrue(app.same_window(node))
             self.assertEqual("completed", run(app, node, action, **(
-                {"value": "Amazon.co.uk"} if action == "set_value" else {}))["status"])
+                {"value": "shop.uk"} if action == "set_value" else {}))["status"])
         self.assertFalse(app.same_window(app.other))
         app.user32.visible.add(2)
         app.refresh()
@@ -118,8 +118,8 @@ class DropdownTests(unittest.TestCase):
         app.popup_roots = []  # discovered by the native UIA tree, not by the appended root walk
         app.second.props["ProcessId"] = 20
         names = [item["name"] for item in snapshot(app, clock=lambda: 0)["elements"]]
-        self.assertIn("Amazon.com", names)
-        self.assertNotIn("Amazon.co.uk", names)
+        self.assertIn("shop.us", names)
+        self.assertNotIn("shop.uk", names)
 
     def test_nearby_search_never_climbs_past_the_granted_or_popup_root(self):
         app = Chrome()
@@ -129,14 +129,14 @@ class DropdownTests(unittest.TestCase):
                 raise AssertionError("tried to walk into the desktop")
             return parent(node)
         app.parent = scoped_parent
-        result = run(app, app.combo, "select", value="Amazon.co.uk")
+        result = run(app, app.combo, "select", value="shop.uk")
         self.assertEqual("completed", result["status"])
         run(app, app.combo, "expand")
         app.refresh()
         self.assertEqual([app.popup], containers(app, app.first))
 
     def test_collapse_failure_retains_selection_and_does_not_mask_the_original_error(self):
-        for name in ("Amazon.co.uk", "missing"):
+        for name in ("shop.uk", "missing"):
             app = Chrome()
             action_call = app.action_call
             def bind(node, action, arg, original=action_call):
@@ -152,8 +152,8 @@ class DropdownTests(unittest.TestCase):
                 self.assertEqual("completed", result["status"])
                 self.assertTrue(result["collapse_failed"])
                 self.assertTrue(result["value_changed"])
-                self.assertEqual("Amazon.co.uk", result["selected_option"])
-                self.assertEqual("Amazon.co.uk", app.combo.state["value"])
+                self.assertEqual("shop.uk", result["selected_option"])
+                self.assertEqual("shop.uk", app.combo.state["value"])
 
     def test_selection_survives_target_destruction_before_value_reread_and_collapse(self):
         app = Chrome()
@@ -173,9 +173,9 @@ class DropdownTests(unittest.TestCase):
                     destroyed[0] = True
             return call
         app.properties, app.action_call = properties, bind
-        result = run(app, app.combo, "select", value="Amazon.co.uk")
+        result = run(app, app.combo, "select", value="shop.uk")
         self.assertEqual("completed", result["status"])
-        self.assertEqual("Amazon.co.uk", result["selected_option"])
+        self.assertEqual("shop.uk", result["selected_option"])
         self.assertTrue(result["collapse_failed"])
         self.assertIsNone(result["value_changed"])
         self.assertEqual("unknown", result["effect"])
@@ -185,7 +185,7 @@ class DropdownTests(unittest.TestCase):
         app = Chrome()
         app.noop = True
         for action, fields in (("expand", {}), ("collapse", {}),
-                               ("set_value", {"value": "Amazon.com"})):
+                               ("set_value", {"value": "shop.us"})):
             result = run(app, app.combo, action, **fields)
             self.assertEqual(("completed", "none"), (result["status"], result["effect"]))
             self.assertIn("select", result["hint"])
@@ -199,9 +199,9 @@ class DropdownTests(unittest.TestCase):
 
     def test_select_by_name_and_direct_option_use_selection_item(self):
         app = Chrome()
-        result = run(app, app.combo, "select", value="Amazon.co.uk")
+        result = run(app, app.combo, "select", value="shop.uk")
         self.assertEqual("completed", result["status"])
-        self.assertEqual("Amazon.co.uk", result["selected_option"])
+        self.assertEqual("shop.uk", result["selected_option"])
         self.assertTrue(result["value_changed"])
         self.assertEqual("changed", result["effect"])
         self.assertEqual("collapsed", result["element"]["expand_state"])
@@ -210,24 +210,24 @@ class DropdownTests(unittest.TestCase):
         app.refresh()
         result = run(app, app.first, "select")
         self.assertEqual("changed", result["effect"])
-        self.assertEqual("Amazon.com", app.combo.state["value"])
+        self.assertEqual("shop.us", app.combo.state["value"])
         self.assertEqual("none", run(app, app.first, "select")["effect"])
 
     def test_unchanged_named_selection_and_dismissed_popup(self):
         app = Chrome()
-        result = run(app, app.combo, "select", value="Amazon.com")
+        result = run(app, app.combo, "select", value="shop.us")
         self.assertFalse(result["value_changed"])
         self.assertEqual("none", result["effect"])
         app.destroy_on_select = True
-        result = run(app, app.combo, "select", value="Amazon.co.uk")
+        result = run(app, app.combo, "select", value="shop.uk")
         self.assertEqual("changed", result["effect"])
         self.assertEqual("collapsed", result["element"]["expand_state"])
 
     def test_missing_disabled_ambiguous_and_invalid_names_fail_clearly(self):
         for name, setup, error in (
                 ("missing", lambda app: None, "option not found"),
-                ("Amazon.co.uk", lambda app: app.second.props.update(IsEnabled=False), "disabled"),
-                ("Amazon.com", lambda app: app.second.props.update(Name="Amazon.com"), "ambiguous")):
+                ("shop.uk", lambda app: app.second.props.update(IsEnabled=False), "disabled"),
+                ("shop.us", lambda app: app.second.props.update(Name="shop.us"), "ambiguous")):
             app = Chrome()
             setup(app)
             result = run(app, app.combo, "select", value=name)
@@ -240,15 +240,15 @@ class DropdownTests(unittest.TestCase):
             check_argument("select", "")
         run(app, app.combo, "expand")
         app.refresh()
-        self.assertIn("requires a ComboBox", run(app, app.first, "select", value="Amazon.com")["error"])
-        self.assertEqual("Amazon.com", ElementAction(element_id="x", action="select",
-                                                     value="Amazon.com").parameters()["value"])
+        self.assertIn("requires a ComboBox", run(app, app.first, "select", value="shop.us")["error"])
+        self.assertEqual("shop.us", ElementAction(element_id="x", action="select",
+                                                     value="shop.us").parameters()["value"])
 
     def test_named_selection_is_audited_without_treating_text_as_parameter_dict(self):
         sink = Mock()
         audit(SimpleNamespace(tools=SimpleNamespace(audit=sink)), {},
-              {"action": "select", "value": "Amazon.co.uk"}, {}, {"status": "completed"})
-        self.assertIn("Amazon.co.uk", sink.append.call_args.args[-1])
+              {"action": "select", "value": "shop.uk"}, {}, {"status": "completed"})
+        self.assertIn("shop.uk", sink.append.call_args.args[-1])
 
     def test_popup_events_and_handleless_uia_events_stay_in_scope(self):
         app, changes = Chrome(), []
@@ -273,7 +273,7 @@ class DropdownTests(unittest.TestCase):
         app.second.props["ProcessId"] = 20
         self.assertFalse(sender_in_scope(app, app.second))
         self.assertFalse(sender_in_scope(app, object()))
-        self.assertIsNone(option(app, [app.other], "Amazon.com"))
+        self.assertIsNone(option(app, [app.other], "shop.us"))
 
 
 class DropdownTransportTests(unittest.IsolatedAsyncioTestCase):
@@ -320,14 +320,14 @@ class DropdownTransportTests(unittest.IsolatedAsyncioTestCase):
         await self.elements.read(self.principal)
         ident = next(key for key, node in self.elements.snapshots["g"].nodes.items()
                      if node.type == "ComboBox")
-        result = await self.act("set_value", value="Amazon.com", then=Then(root=ident, query="absent"))
+        result = await self.act("set_value", value="shop.us", then=Then(root=ident, query="absent"))
         self.assertEqual(1, result["after"]["total"])
         self.assertIn(ident, result["after"]["lines"])
 
     async def test_then_root_includes_leaf_and_tokens_remain_compact(self):
         closed = await self.elements.read(self.principal)
         filtered = await self.elements.read(self.principal, options={"query": "marketplace"})
-        plain = await self.act("set_value", value="Amazon.com")
+        plain = await self.act("set_value", value="shop.us")
         await self.elements.read(self.principal)
         ident = next(key for key, node in self.elements.snapshots["g"].nodes.items()
                      if node.type == "ComboBox")
@@ -335,11 +335,13 @@ class DropdownTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(rooted["after"]["total"], 1)
         self.assertIn("ComboBox", rooted["after"]["lines"])
         opened = await self.elements.read(self.principal, options={"control_type": "ListItem"})
-        self.assertIn("Amazon.co.uk", opened["lines"])
+        self.assertIn("shop.uk", opened["lines"])
         opened_summary = await self.elements.read(self.principal)
         await self.act("collapse")
         again = await self.elements.read(self.principal)
-        self.assertEqual(size(closed), size(again))  # a closed popup adds no bytes to subsequent reads
+        # Timing digits vary; a closed popup adds no content bytes to subsequent reads.
+        self.assertEqual(size({k: v for k, v in closed.items() if k != "timing"}),
+                         size({k: v for k, v in again.items() if k != "timing"}))
         self.assertLess(size(filtered), size(closed))
         self.assertLess(size(rooted), 4096)
         self.metrics = {key: (size(value), size(value) / 4) for key, value in (

@@ -36,6 +36,7 @@ from .hierarchy_contracts import (
     ParentIn,
     Report,
     ReportIn,
+    ReportStatus,
 )
 from .accept_sha import accepted_note
 from . import checkout_health
@@ -226,7 +227,7 @@ def hierarchy_router(runtime) -> APIRouter:
 
     @router.post(
         "/api/conversations/{conv_id}/reports",
-        response_model=Report,
+        response_model=ReportStatus,
         status_code=201,
     )
     async def post_report(request: Request, conv_id: str, body: ReportIn):
@@ -280,7 +281,7 @@ def hierarchy_router(runtime) -> APIRouter:
 
     @router.post(
         "/api/conversations/{conv_id}/reports/{report_id}/ack",
-        response_model=Report,
+        response_model=ReportStatus,
     )
     def ack_report(request: Request, conv_id: str, report_id: int, body: AckIn):
         deny_unless(db, request_principal(request), conv_id, "read_reports")

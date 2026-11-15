@@ -86,6 +86,14 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
         self.session.tools.audit.append.assert_called_with(
             "event", "window", "local", "window_read", "granted: Editor (editor.exe) to line «Alpha»")
 
+    async def test_chrome_connection_starts_on_local_share_before_any_read(self):
+        self.manager.window_picker = lambda: {**WINDOW, "process": "chrome.exe"}
+        self.manager.chrome.start = Mock()
+        await self.manager.choose()
+        access = next(iter(self.manager.grants.values()))["access"]
+        self.manager.chrome.start.assert_called_once_with(access)
+        self.assertIsNone(next(iter(self.manager.grants.values()))["worker"].read_task)
+
     async def test_two_windows_have_independent_elements_workers_and_revoke(self):
         self.manager.request = AsyncMock(side_effect=[self.targets, {"ok": True, "target": TARGET}] * 2)
         await self.manager.choose()

@@ -495,7 +495,7 @@ class StallTest(TaskFixture):
         self.assertEqual(self.client.post(url, json={'reason': ''}).status_code, 422)
         response = self.client.post(url, json={'reason': 'pytest', 'seconds': 60})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()['wait_reason'], 'pytest')
+        self.assertEqual(self.row()['wait_reason'], 'pytest')
         self.assertTrue(response.json()['wait_until'])
 
     async def test_a_wait_is_only_for_an_implementing_task_and_only_until_it_runs_out(self):

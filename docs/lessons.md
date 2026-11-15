@@ -1,5 +1,110 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — Standing access needs local revocation and an explicit line binding
+
+The false assumptions were that stopping capture finishes promptly, that every paired helper has a
+line root, and that a grant's line identifies every caller. Pause now revokes local gates and cancels
+calls before awaiting cleanup, with disconnect running independently. Settings lets the verified
+paired person authorize a line root for account-wide helpers; unknown owners stay denied. Inherited
+actions keep the calling subline through transport and local audit. Regression tests in
+`tests/test_standing_access_fixes.py` block cleanup on events, exercise Settings and legacy pairing,
+reject other people and machines, and route a child action through a parent grant into the helper log.
+Removing server authorization alone does not clear a helper's local gates, outline, subscriptions or
+tray label. Person-side binding changes must also send each standing grant's revocation to the helper;
+helper-originated toggle-off can remain quiet because it has already revoked locally. The real-route
+regression in `tests/test_standing_scope_revocation.py` feeds those messages into helper dispatch and
+checks local cleanup while preserving explicitly shared windows.
+
+## 2026-11-15 — A native restore attempt is not a foreground guarantee
+
+The false assumption in CDP commit `45143c01` (integrated as `c55eb919`) was that the native
+UIA test could unconditionally require its foreground fixture after each action. The outline
+change shipped in 2.121.0 attempted restoration but explicitly allowed Windows to refuse it:
+`WindowsProvider.restore_foreground` returns false, and the original native test then checked
+that the target remained foreground with truthful observations. That restore method, SetValue
+binding and force path are unchanged in the release integration. The new unconditional assertion
+created the regression; it was not evidence that latency or CDP removed a restore call. Keep
+background-read/cursor assertions and check successful restoration when reported, while accepting
+an accurately reported refusal. Portable regression `tests/test_uia_worker.py` dispatches SetValue
+with fake Win32 z-order/activation refusals and verifies observations plus input-queue cleanup.
+
+## 2026-11-15 — Native query candidates are broader than exact server answers
+
+The false assumption in the Windows filtered-read test was that an exact multiword query
+also produced an exact native name condition. To accommodate name normalization, the helper
+searches a safe token: `=Snapshot button` becomes a substring search for `snapshot`, so both
+Snapshot button and Snapshot checkbox are candidates. Ancestor child caches reconstruct paths;
+those cached siblings are not emitted unless they are candidates or ancestors themselves.
+The server applies the full anchored query to the candidate tree. The native test now also
+requests the exact Button control type, and a portable regression in `tests/test_uia_latency.py`
+checks candidate inclusion, mapping-only sibling exclusion, and the final exact server answer.
+
+## 2026-11-14 — A filtered read must not invalidate unrelated action targets
+
+The false assumption was that replacing a full snapshot with a selective query could also replace
+its target-ID set. After acting on field A with `then query`, field B's previously issued ID failed
+as stale even when the control had not changed, forcing another full capture. Scoped answers now
+retain bounded action-only ID mappings, and the helper merges element paths while preserving the
+full walk's epoch/cursors. A full refresh or revocation resets them; every retained action target
+still needs live runtime/path identity and consent validation. Server and helper regressions in
+`tests/test_screen_latency.py` and `tests/test_uia_latency.py` cover the two-field sequence.
+
+## 2026-11-14 — Reply budgets include timing metadata
+
+The false assumption when combining CDP replies with phase timings was that bounding a result
+before the outer timing wrapper also bounded the final reply. A diagnostic just under 4 KiB
+could overflow after timings were attached. The outer wrapper now applies the shared CDP bound
+once, retaining only allowlisted timing fields when truncation is required. The near-limit and
+large-Unicode action regression in `tests/test_screen_eval.py` checks both size and timings.
+
+## 2026-11-14 — CDP frame boundaries
+
+Iframe navigation/removal is an observed page change, not replacement of the top-level
+document. Resetting the page epoch for every frame event clears unrelated element IDs and
+aborts input on pages with ad/analytics iframes. Only main-frame navigation (a frame without
+`parentId`) and `DOM.documentUpdated` reset the epoch. Regressions must exercise child-frame
+events during mouse input and popup selection. A main navigation after a link's mouse
+release is a completed invoke with a navigation marker; it must never override revocation
+or justify continuing input in the replacement document.
+
+## 2026-11-14 — Tab and native-input state must describe the selected page
+
+Removing visibility-based detach fixed covered windows but left old tabs advancing the
+active page's change counter. Detach the former page on selection changes and scope its
+callback to the selected target; background mutations must not break `more` or settling.
+Home/End on a closed native select commits intermediate choices. Plan from the live current
+option, prefer an open picker and one Enter commit, cancel an unresponsive picker before
+fallback, and report trusted change counts. Stop input across document replacement.
+Linux gates skip real Windows UIA assertions: read the native tests and fixtures too. A
+restored foreground round trip still reports `foreground_changed=true` even when its
+outer before/after HWNDs match. Shared assertion coverage now protects that contract on
+Linux as well. Regressions: `tests/test_cdp_active_select.py`; Windows source audit in
+`docs/screen-helper.md`.
+
+## 2026-11-14 — Chrome AX exposure and visibility are separate facts
+
+The false assumptions were that full AX trees contain only exposed nodes and that the
+active tab must report visible. Ignored AX nodes include hidden/unrendered content and
+must be removed before chunking, with exposed children reparented. Windows occlusion can
+make every tab in a covered HWND report hidden: a unique HWND title match identifies its
+active tab; visibility only breaks duplicate-title ties. Approval belongs in a background
+connection started by sharing, so a person considering Chrome's prompt cannot stall reads.
+Native select setters emit synthetic events, so select now plans without changing the DOM
+and drives trusted keyboard input instead. Attach replies register ownership before waking
+the caller; late replies after revoke/cancel are detached. Bounded result previews must
+also bound their metadata, otherwise trimming the preview cannot ever satisfy the budget. Regressions:
+`tests/test_cdp_revision.py`, `tests/test_cdp.py`, `tests/test_cdp_commands.py`.
+
+## 2026-11-14 — Initial helper state belongs in the hello envelope
+
+The false assumption was that every helper consumer skips unsolicited messages before
+reading a request's response. Adding Chrome status immediately after hello shifted that
+response boundary and stranded test peers. Initial Chrome state now travels inside hello;
+only subsequent connection transitions are pushed. Keep the first-request error, preview,
+share and disconnect checks in `tests/test_screen_helper.py` as protocol regressions.
+Audit metadata also needs defaults in internal exchanges used with legacy test principals;
+authenticated route calls still supply the actual calling line and process.
+
 ## 2026-11-14 — Dropdown options need not be children of the ComboBox
 
 The false assumptions were that a granted HWND subtree contains every dropdown popup,
@@ -795,7 +900,7 @@ contained no goal, so its hello could ask for work while its assignment waited
 for the claim and turn-end retry. Include the goal in the joining pack and repeat it in
 task digests until transcript claim and the cursor prove the pending assignment.
 Then omit the unchanged goal; reset the proof boundary on goal change or restart. Store a child's goal in its initial conversation INSERT, before
-awaiting placement or notices, and read task response goals from that same column.
+awaiting placement or notices, and read goals on task reads (not write replies) from that same column.
 A Codex history snapshot also processed turn ends before user-input receipts.
 That could flush a held claim retry before crediting the original paste in the
 same snapshot. Settle user-input proofs before emitting turn boundaries;

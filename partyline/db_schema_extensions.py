@@ -17,6 +17,7 @@ from .local_tools_schema import MIGRATIONS as LOCAL_TOOLS_AUDIT
 from .screen_audit_schema import MIGRATIONS as SCREEN_AUDIT
 from .screen_schema import MIGRATIONS as SCREEN
 from .screen_account_schema import MIGRATIONS as SCREEN_ACCOUNT
+from .screen_access_schema import MIGRATIONS as SCREEN_ACCESS
 from .screen_grant_schema import MIGRATIONS as SCREEN_GRANTS
 from .screen_line_grant_schema import MIGRATIONS as SCREEN_LINE_GRANTS
 from .write_set_schema import MIGRATIONS as WRITE_SET
@@ -28,4 +29,4 @@ MIGRATIONS = (MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + SCRAT
                   + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR + HANDOVER)
 MIGRATIONS += (["ALTER TABLE attachments ADD COLUMN is_successor INTEGER NOT NULL DEFAULT 0"] + SCREEN
                   + ASR + SCREEN_AUDIT + LOCAL_TOOLS_AUDIT + SCREEN_ACCOUNT)
-MIGRATIONS += SCREEN_GRANTS + WRITE_SET + CAPTAIN_IDLE + SCREEN_LINE_GRANTS
+MIGRATIONS += SCREEN_GRANTS + WRITE_SET + CAPTAIN_IDLE + SCREEN_LINE_GRANTS + SCREEN_ACCESS

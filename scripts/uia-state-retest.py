@@ -33,7 +33,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--connection", help="existing attached process's connection JSON")
     parser.add_argument("--window", help="grant id or title, if several are shared")
-    parser.add_argument("--query", default="=Manage A+ Content", help="exact link name or query")
+    parser.add_argument("--query", default="=Manage listing content", help="exact link name or query")
     args = parser.parse_args()
     env = os.environ.copy()
     if args.connection:

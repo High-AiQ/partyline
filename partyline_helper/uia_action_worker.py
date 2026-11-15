@@ -1,12 +1,12 @@
 """Run a UIA action away from the message loop and enforce the dispatch barrier."""
 import asyncio
-import json
-import threading
 
 from .uia_action import prepare
+from .timing import Timing
+from .uia_worker_support import audit, spawn_worker
 from .uia_force import forced_call
 from .uia_options import expand_call
-from .uia_patterns import ActionRefused, argument, number
+from .uia_patterns import ActionRefused, argument
 from .uia_press import press
 from .uia_snapshot import MAX_TEXT
 from .uia_selection import effect, select_call
@@ -25,27 +25,38 @@ def provider_factory(hwnd):  # pragma: no cover - Windows COM provider
 
 
 def run_action(access, grant, generation, message, factory=provider_factory):
+    timing = Timing({key: 0 for key in ("target_ms", "foreground_ms", "uia_ms", "gate_lock_ms",
+                                       "post_read_ms", "barrier_ms")})
+    return timing.finish(_run_action(access, grant, generation, message, factory, timing))
+
+
+def _run_action(access, grant, generation, message, factory, timing):
     observed, foreground_samples = {"foreground_restored": False}, []
     dispatched = False
     try:
-        provider = factory(grant["hwnd"])
+        with timing.phase("initialize_ms"):
+            provider = factory(grant["hwnd"])
         arg = argument(message)
         path = getattr(access, "paths", {}).get(message["element_id"])
         force = message.get("force", False)
-        node, _ = prepare(provider, message["element_id"], message["action"], arg, path, force)
 
-        windows = access.list_windows()
+        def windows_now():
+            with timing.phase("window_check_ms"):
+                return access.list_windows()
+        windows = windows_now()
         if windows is None:
             raise ValueError("secure desktop active")
         if not any(item["hwnd"] == grant["hwnd"] and item["pid"] == grant["pid"] for item in windows):
             raise ValueError("window closed")
         if grant.get("marker") and not live(grant):
             raise ValueError("window closed")
-        fresh, initial = prepare(provider, message["element_id"], message["action"], arg, path, force)
+        with timing.phase("target_ms"):
+            fresh, initial = prepare(provider, message["element_id"], message["action"], arg, path, force)
+        node = fresh
         def check():
             if access.gate.revoked.is_set() or access.gate.generation != generation:
                 raise ValueError("revoked")
-            current = access.list_windows()
+            current = windows_now()
             if current is None:
                 raise ValueError("secure desktop active")
             if (not any(item["hwnd"] == grant["hwnd"] and item["pid"] == grant["pid"] for item in current)
@@ -65,7 +76,7 @@ def run_action(access, grant, generation, message, factory=provider_factory):
             call = forced_call(provider, fresh, message["action"], arg, initial, check, call)
         elif call is None:
             call = provider.action_call(fresh, message["action"], arg)
-        windows = access.list_windows()
+        windows = windows_now()
         if windows is None:
             raise ValueError("secure desktop active")
         if (not any(item["hwnd"] == grant["hwnd"] and item["pid"] == grant["pid"] for item in windows)
@@ -73,7 +84,7 @@ def run_action(access, grant, generation, message, factory=provider_factory):
             raise ValueError("window closed")
         def invoke():
             nonlocal dispatched
-            current = access.list_windows()
+            current = windows_now()
             if current is None:
                 raise ValueError("secure desktop active")
             if (not any(item["hwnd"] == grant["hwnd"] and item["pid"] == grant["pid"] for item in current)
@@ -81,13 +92,16 @@ def run_action(access, grant, generation, message, factory=provider_factory):
                 raise ValueError("window closed")
             if access.gate.revoked.is_set():
                 raise ValueError("revoked")
-            before = provider.foreground()
+            with timing.phase("foreground_ms"):
+                before = provider.foreground()
             if access.gate.revoked.is_set():
                 raise ValueError("revoked")
             try:
                 dispatched = True
-                return call()
+                with timing.phase("uia_ms"):
+                    return call()
             finally:
+                foreground_start = timing.clock()
                 after = provider.foreground()
                 foreground_samples.extend((before, after))
                 changed = before != after
@@ -104,8 +118,13 @@ def run_action(access, grant, generation, message, factory=provider_factory):
                 observed.update(foreground_changed=changed,
                                 target_came_forward=bool(changed and after == grant["hwnd"]),
                                 foreground_restored=restored)
+                timing.values["foreground_ms"] += timing.elapsed(foreground_start)
 
-        selection, revoked_during = access.gate.dispatch(generation, invoke)
+        events = getattr(access, "event_state", None)
+        counter = events.status()["event_counter"] if events else None
+        selection, revoked_during = access.gate.dispatch(generation, invoke, timing)
+        with timing.phase("barrier_ms"):
+            timing.values["barrier_stop"] = events.settle(counter) if events else "unsupported"
         selection = selection if isinstance(selection, dict) else {}
         if message["action"] == "select" and not named_select:
             selection.update(selected_option=str(initial.get("name", ""))[:MAX_TEXT], value_changed=None)
@@ -116,8 +135,9 @@ def run_action(access, grant, generation, message, factory=provider_factory):
             return {"status": "completed", "revoked_during": False, "close_requested": True,
                     "window_closed": not provider.current(), **observed}
         try:
-            state = provider.properties(node)
-            provider.state(node, state)
+            with timing.phase("post_read_ms"):
+                state = provider.properties(node)
+                provider.state(node, state)
             if provider.password(node):
                 state.pop("value", None)
             element = {key: state[key] for key in STATE_KEYS if key in state}
@@ -158,64 +178,11 @@ def run_action(access, grant, generation, message, factory=provider_factory):
     except Exception:
         return {"status": "failed", "error": "UI Automation failed", **observed}
     finally:
+        if "provider" in locals():
+            timing.values["com_calls"] = getattr(provider, "com_calls", 0)
         if factory is provider_factory:  # pragma: no cover - Windows COM apartment
             import comtypes
             comtypes.CoUninitialize()
-
-
-def audit(session, grant, message, props, result):
-    info = {"process": grant.get("process", "unknown"), "role": props.get("control_type", "unknown"),
-            "name": props.get("name", "unknown"), "action": message.get("action"),
-            "result": result.get("status"), "revoked_during": result.get("revoked_during", False),
-            "foreground_changed": result.get("foreground_changed"),
-            "target_came_forward": result.get("target_came_forward"),
-            "foreground_restored": result.get("foreground_restored", False)}
-    if message.get("force"):
-        info["force"] = True
-        info["reported_disabled"] = result.get("reported_disabled", False)
-    args = argument(message)
-    if isinstance(args, str):
-        args = {"option": args}
-    params = {} if message.get("action") == "set_value" else {
-        key: value for key, value in args.items()
-        if number(value) or (isinstance(value, str) and len(value) <= 16)}
-    if params:
-        info["params"] = params
-    if result.get("close_requested"):
-        info["window_closed"] = bool(result.get("window_closed"))
-    if message.get("action") == "set_value":
-        value = message.get("value")
-        info["value_length"] = len(value) if isinstance(value, str) else 0
-        if isinstance(value, str) and value:
-            for key in ("process", "role", "name"):
-                info[key] = str(info[key]).replace(value, "[redacted]")
-    session.tools.audit.append("action", "window", str(message.get("agent", ""))[:120], "window_action",
-                               json.dumps(info, ensure_ascii=False, separators=(",", ":")))
-
-
-def spawn_worker(function, *args):
-    loop = asyncio.get_running_loop()
-    future = loop.create_future()
-
-    def finish(result, error):
-        if not future.done():
-            if error is not None:
-                future.set_exception(error)
-            else:
-                future.set_result(result)
-
-    def run():
-        try:
-            result, error = function(*args), None
-        except Exception as exc:
-            result, error = None, exc
-        try:
-            loop.call_soon_threadsafe(finish, result, error)
-        except RuntimeError:
-            pass  # the session has already shut down
-
-    threading.Thread(target=run, daemon=True).start()
-    return future
 
 
 class ActionWorker:
@@ -225,6 +192,13 @@ class ActionWorker:
         self.abandoned = False
 
     async def perform(self, message):
+        timing = Timing()
+        result = await self._perform(message, timing)
+        result.setdefault("timing", {}).update(timing.values)
+        result["timing"]["action_total_ms"] = timing.elapsed(timing.started)
+        return result
+
+    async def _perform(self, message, timing):
         access = self.session.window
         grant = access.grant or {}
         props = access.elements.get(message.get("element_id"), {})
@@ -242,11 +216,16 @@ class ActionWorker:
             deadline = asyncio.get_running_loop().time() + self.timeout
             try:
                 probe = asyncio.to_thread(self.session.tools.audit.ensure_writable)
-                await asyncio.wait_for(probe, self.timeout)
+                with timing.phase("audit_ms"):
+                    await asyncio.wait_for(probe, self.timeout)
             except (OSError, TimeoutError):
                 return {"status": "failed", "error": "audit unavailable"}
             self.abandoned = False
-            self.task = spawn_worker(self.runner, access, grant, generation, message)
+            queued = timing.clock()
+            def run():
+                timing.values["worker_queue_ms"] = timing.elapsed(queued)
+                return self.runner(access, grant, generation, message)
+            self.task = spawn_worker(run)
             try:
                 remaining = max(0, deadline - asyncio.get_running_loop().time())
                 result = await asyncio.wait_for(asyncio.shield(self.task), remaining)

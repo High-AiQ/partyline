@@ -18,8 +18,8 @@ def screen_frame_tool():
 
 
 ELEMENTS_NOTE = (
-    "Read a window shared with this line or inherited from an ancestor (Windows UI Automation, "
-    "not DOM; ~4 KB). No arguments: "
+    "Read a shared/inherited window (CDP for Chrome pages, UIA otherwise; ~4 KB; source in header). "
+    "No arguments: "
     "summary. find by query/name, value, control_type; root=<id> lists children; text=true reads text; "
     "id=<id> reads one element; inspect=<id> compares live UIA with the stored snapshot and event clock. "
     "Use screen_element_action on ids. Cache reuse requires a live event-counter barrier on new "
@@ -50,6 +50,22 @@ ELEMENTS_PROPERTIES = {
 }
 ELEMENTS_FLAGS = ("refresh", "more", "text", "bounds")
 WINDOW_TOOLS = ("screen_elements", "screen_window_snapshot")  # what a window grant alone allows
+
+
+def screen_windows_tool():
+    return {"name": "screen_windows", "description": "List safe windows on the paired person's computer.",
+            "inputSchema": {"type": "object", "properties": {}, "required": [],
+                            "additionalProperties": False}}
+
+
+def screen_attach_window_tool():
+    return {"name": "screen_attach_window", "description": (
+        "Attach one listed window to this line under the person's standing permission. Give a reason."),
+        "inputSchema": {"type": "object", "properties": {
+            "window": {"type": "string", "minLength": 1, "maxLength": 2048,
+                       "description": "hwnd/id returned by screen_windows."},
+            "reason": {"type": "string", "minLength": 1, "maxLength": 500},
+        }, "required": ["window", "reason"], "additionalProperties": False}}
 
 
 def screen_elements_tool():
@@ -84,11 +100,19 @@ def elements_query(args):
 
 def call(client, name, args, state, conv):
     from .client import ApiError
+    if name in ("screen_windows", "screen_attach_window") and not state.get("window_access"):
+        raise ApiError("window access is off for the paired computer")
+    standing_tool = name in ("screen_windows", "screen_attach_window") and state.get("window_access")
     if state.get("dynamic_screen_tools") and not (
-            state.get("screen_read") or (name in WINDOW_TOOLS and state.get("screen_windows"))):
+            state.get("screen_read") or standing_tool
+            or (name in WINDOW_TOOLS and state.get("screen_windows"))):
         raise ApiError("no screen shared with you")
     from urllib.parse import quote
     base = f"/api/conversations/{quote(conv, safe='')}"
+    if name == "screen_windows":
+        return client.request("POST", base + "/screen-windows", {}, timeout=60)
+    if name == "screen_attach_window":
+        return client.request("POST", base + "/screen-attach-window", args, timeout=60)
     if name == "screen_elements":
         return client.request("POST", base + "/screen-elements" + elements_query(args), timeout=60)
     if name == "screen_window_snapshot":

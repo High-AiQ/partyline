@@ -31,12 +31,14 @@ class WindowGrantFixture:
         for ident, line in (("a", "alpha"), ("b", "beta"), ("peer", "alpha"), ("ended", "empty")):
             self.db.add_attachment(ident, line, ident, "raw", ["shell"], "/tmp", "activation-" + ident)
         self.db.set_attachment_status("ended", "detached", "activation-ended")
-        code = self.hub.issue_pair_code(self.owner["id"], "paired")
+        code = self.hub.issue_pair_code(self.owner["id"], "alpha")
         device_id, _, _, _ = self.hub.claim_pair_code(code, "Computer", "test")
         self.sent = []
-        self.device = {"id": device_id, "owner_id": self.owner["id"],
+        self.device = {"id": device_id, "owner_id": self.owner["id"], "conv_id": "alpha",
                        "name": "Computer", "monitors": [], "helper_version": "1.2.0", "windows": 2,
-                       "socket": SimpleNamespace(send_json=self.receive)}
+                       "window_access_enabled": True, "socket": SimpleNamespace(send_json=self.receive)}
+        self.db._exec("INSERT INTO screen_device_window_access(device_id,enabled) VALUES(?,1) "
+                      "ON CONFLICT(device_id) DO UPDATE SET enabled=1", (device_id,))
         self.hub.devices[device_id] = self.device
 
     async def asyncTearDown(self):
