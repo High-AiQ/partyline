@@ -666,10 +666,13 @@ through elements or CDP.
   holds the clicked point; a point on none of them is on the browser's own controls, and the click is
   refused as ambiguous only when two of the same size both hold it. Recent Chrome builds can drop the
   renderer child window altogether; the helper then uses, in order, the UI Automation `Document` element of
-  the active tab inside the granted window (its `BoundingRectangle`, chosen the same way if there are several)
-  and, failing that, the window's CDP bounds (`Browser.getWindowForTarget`) with the window's DPI scale and
-  the page's viewport metrics. The last source assumes a thin window frame (at most 32 screen pixels at each
-  side) and refuses otherwise. Every source goes through the same pinch-zoom and resize check, and
+  the active tab inside the granted window (its `BoundingRectangle`; empty rectangles are ignored, and it must
+  be the viewport's size, chosen the same way if there are several) and, when there is no such document,
+  the window's CDP bounds (`Browser.getWindowForTarget`) with the window's DPI scale and the page's viewport
+  metrics. Those bounds say nothing about where the page begins inside the window, so the helper takes the
+  page to fill the window except for a thin frame (at most 32 screen pixels at each side) and at most
+  170 DIPs of browser controls above it, and refuses any other layout (a docked panel, for example) rather
+  than guess. Every source goes through the same pinch-zoom and resize check, and
   `screen_window_snapshot` marks use the same resolver, so a snapshot and a click agree. When nothing is
   found the error says what was seen, for example "found 0 renderer windows and no page document" or
   "found 3 renderer windows, none matching the viewport". No cursor moves, no window comes

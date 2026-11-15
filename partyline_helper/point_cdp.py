@@ -2,7 +2,7 @@
 import asyncio
 
 from .cdp_transport import CDPError
-from .page_area import CHROME, VIEWPORT, choose, describe, read_metrics, verify, window_area
+from .page_area import CHROME, VIEWPORT, choose, describe, fits, read_metrics, usable, verify, window_area
 from .page_windows import PageSources
 
 BUTTONS = {"left": 1, "right": 2}
@@ -28,13 +28,17 @@ async def page_frame(page, hwnd, point=None, sources=None):
     reply = await page.call("Runtime.evaluate", {"expression": VIEWPORT, "returnByValue": True})
     metrics = read_metrics(reply)
     renderers = await asyncio.to_thread(sources.renderers, hwnd)
-    documents = [] if renderers else await asyncio.to_thread(sources.documents, hwnd)
+    if renderers:
+        return verify(choose(renderers, metrics, point, describe(renderers, [])), metrics)
+    found = await asyncio.to_thread(sources.documents, hwnd)
+    documents = [area for area in found if usable(area)]
     what = describe(renderers, documents)
-    if renderers or documents:
-        return verify(choose(renderers or documents, metrics, point, what), metrics)
+    sized = [area for area in documents if fits(area, metrics)]  # a document must be the viewport's size
+    if sized:
+        return verify(choose(sized, metrics, point, what), metrics)
     area = await window_bounds(page, hwnd, metrics, sources)
     if area is None:
-        raise CDPError(f"{what} and no page document")
+        raise CDPError(f"{what}, none matching the viewport" if documents else f"{what} and no page document")
     return verify(area, metrics)
 
 

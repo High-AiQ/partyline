@@ -12,6 +12,7 @@ PAGE = (100, 200, 1300, 1000)  # 1200 x 800 screen pixels: a 600 x 400 viewport 
 PANEL = (1300, 200, 1700, 1000)
 SPLIT = (700, 200, 1300, 1000)  # a second pane of 600 x 800
 BOUNDS = {"left": 50, "top": 60, "width": 700, "height": 520, "windowState": "normal"}
+THIN = {"left": 50, "top": 60, "width": 604, "height": 440, "windowState": "normal"}  # 4-pixel frame at 2x
 
 
 class FakePage:
@@ -35,6 +36,11 @@ def sources(renderers=(), documents=(), scale=2.0):
 class RendererChoiceTests(unittest.IsolatedAsyncioTestCase):
     async def frame(self, found, point=None, **page):
         return await page_frame(FakePage(**page), 7, point, sources(found))
+
+    async def test_an_empty_renderer_is_not_a_page(self):
+        with self.assertRaises(CDPError) as error:
+            await self.frame([(5, 5, 5, 5)])
+        self.assertIn("could not be read", str(error.exception))
 
     async def test_one_renderer_is_the_page_and_the_zoom_check_still_applies(self):
         self.assertEqual((100, 200, 2.0, PAGE), await self.frame([PAGE]))
@@ -100,10 +106,27 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
             await page_frame(FakePage(viewport=(600, 400, 2, 2)), 7, None, sources([], [PAGE]))
         self.assertIn("pinch-zoomed", str(error.exception))
 
-    async def test_an_empty_document_is_not_a_page(self):
+    async def test_documents_that_are_empty_or_the_wrong_size_fall_through_to_the_cdp_bounds(self):
+        page = FakePage(bounds=THIN)
+        self.assertEqual((104, 196, 2.0, (104, 196, 1304, 996)),
+                         await page_frame(page, 7, None, sources([], [(5, 5, 5, 5)])))
+        self.assertIn("Browser.getWindowForTarget", page.calls)
+        # one document, but not the page's size
+        page = FakePage(bounds=THIN)
+        self.assertEqual((104, 196, 2.0, (104, 196, 1304, 996)),
+                         await page_frame(page, 7, None, sources([], [PANEL])))
+        for broken in ((5, 5), None, "x"):
+            frame = await page_frame(FakePage(), 7, None, sources([], [broken, PAGE]))
+            self.assertEqual(PAGE, frame[3])
+
+    async def test_documents_that_fit_nothing_and_no_bounds_name_the_count(self):
         with self.assertRaises(CDPError) as error:
             await page_frame(FakePage(), 7, None, sources([], [(5, 5, 5, 5)]))
-        self.assertIn("could not be read", str(error.exception))
+        self.assertEqual("found 0 renderer windows and no page document", str(error.exception))
+        with self.assertRaises(CDPError) as error:
+            await page_frame(FakePage(), 7, None, sources([], [PANEL]))
+        self.assertEqual("found 0 renderer windows and 1 page document, none matching the viewport",
+                         str(error.exception))
 
     async def test_several_documents_none_matching_name_both_counts(self):
         with self.assertRaises(CDPError) as error:
@@ -116,8 +139,7 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(CDPError) as error:
             await page_frame(FakePage(), 7, None, sources())
         self.assertEqual("found 0 renderer windows and no page document", str(error.exception))
-        thin = {"left": 50, "top": 60, "width": 604, "height": 440, "windowState": "normal"}
-        page = FakePage(bounds=thin)
+        page = FakePage(bounds=THIN)
         frame = await page_frame(page, 7, (500, 500), sources())
         # the window is 1208 x 880 screen pixels at (100, 120): a 4-pixel frame at each side and below
         self.assertEqual((104, 196, 2.0, (104, 196, 1304, 996)), frame)
@@ -130,6 +152,11 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(window_area({**thin, "width": 700}, 2.0, metrics))  # a frame that is not thin
         self.assertIsNone(window_area({**thin, "width": 590}, 2.0, metrics))  # narrower than the viewport
         self.assertIsNone(window_area({**thin, "height": 300}, 2.0, metrics))  # shorter than the viewport
+        # a panel docked at the bottom would put the page's origin inside the browser's controls
+        docked = read_metrics({"result": {"value": [1200, 400, 1, 1]}})
+        self.assertIsNone(window_area({"left": 0, "top": 0, "width": 1216, "height": 900}, 1.0, docked))
+        plain = {"left": 0, "top": 0, "width": 1216, "height": 500}  # 92 DIPs of controls above the page
+        self.assertEqual((8, 92, 1208, 492), window_area(plain, 1.0, docked))
         self.assertIsNone(window_area({"left": 1}, 2.0, metrics))
         self.assertIsNone(window_area({**thin, "left": "x"}, 2.0, metrics))
         for broken in (None, {"bounds": None}):
