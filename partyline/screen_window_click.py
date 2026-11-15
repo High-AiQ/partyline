@@ -87,7 +87,8 @@ async def audit(runtime, grant, principal, body, route, result, points=()):
                                 MessageEvent(message=MessageResponse.model_validate(message)))
 
 
-async def point_operation(runtime, hub, store, conv_id, body: PointInput, request: Request):
+async def point_operation(runtime, hub, store, conv_id, body: PointInput, request: Request,
+                          mark=None, generation=None):
     principal = request_principal(request)
     deny_unless(runtime.db, principal, conv_id, "write")
     if body.capture != "none":
@@ -110,17 +111,22 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
             await attach(runtime, hub, store, principal, conv_id, grant, result)
             return result
     name = f"point_{body.operation}"
-    await audit(runtime, grant, principal, body, "pending", "requested", points)
-    await record_standing_window_access(runtime, hub, principal, conv_id, name, body.window, None, "started")
     result = {"status": "unconfirmed"}
     try:
         async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window
+            if mark is not None:
+                look, _, _ = hub.snapshots.looks.target(principal, grant, mark)
+                if look["generation"] != generation:
+                    raise HTTPException(409, "stale mark; take a fresh screen_window_look")
+            await audit(runtime, grant, principal, body, "pending", "requested", points)
+            await record_standing_window_access(
+                runtime, hub, principal, conv_id, name, body.window, None, "started")
             hub.window_grants.spend(grant)
             kind, extra = ("window_click", {}) if body.operation == "click" else (
                 "window_point", {"op": body.operation})
             response = await hub.elements.exchange(
                 principal, grant, device, kind, agent=principal.name, **extra, **body.wire(points),
-                budget=BUDGET, wait=WAIT)
+                budget=BUDGET, wait=WAIT, **({"look_generation": generation} if generation else {}))
         result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
     except (TimeoutError, OSError, RuntimeError):
         result = {"status": "unconfirmed", "note": "The helper did not confirm the input; it may have run. "

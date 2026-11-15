@@ -75,7 +75,13 @@ class PointClicks:
         message = {**message, "deadline": self.clock() + self.budget(message)}
         operation = which(message)
         try:
-            route, result = await self.run(entry, message, active)
+            from .window_look import check, operation_lock
+            async with operation_lock(entry):
+                try:
+                    check(access, message)
+                except ValueError as exc:
+                    raise Refused(str(exc)) from exc
+                route, result = await self.run(entry, message, active)
         except (Refused, PointRefused, CDPError) as exc:
             result = {"status": "failed", "error": str(exc),
                       **({"reason": code} if (code := reason_code(str(exc))) else {})}

@@ -319,30 +319,37 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             writer.close()
             await writer.wait_closed()
 
+        handler_errors = []
         async def handler(ws):
-            self.assertEqual(ws.request.headers["Authorization"], "Bearer secret")
-            hello = await receive(ws, "hello")
-            self.assertEqual(hello["monitors"], [MONITOR])
-            self.assertEqual(hello["protocol"], 1)
-            self.assertEqual(hello["windows"], 4)  # shared with a line, screenshots, point input
-            self.assertEqual(hello["press"], 1)
-            self.assertEqual(hello["chrome"]["state"], "not_enabled")
-            self.assertIn("chrome://inspect", hello["chrome"]["detail"])
-            await ws.send(json.dumps(dict(type="get_preview", request_id="pick", monitor_id=1, long_edge=64)))
-            await receive(ws, "preview")
-            await ws.send(json.dumps(request()))
-            await receive(ws, "share_accepted")
-            frame = await receive(ws, "frame")
-            self.assertEqual(frame["pointer"]["x"], -20)
-            await term.waiting.get()
-            clock.advance(1)
-            await ws.send(json.dumps(dict(type="snap", share_id="share", request_id="fresh")))
-            frame = await receive(ws, "frame")
-            self.assertEqual(frame["request_id"], "fresh")
-            await ws.send(json.dumps(dict(type="stop_share", share_id="share")))
-            await receive(ws, "share_stopped")
-            await ws.close(code=4001, reason="revoked")
-            completed.set()
+            try:
+                self.assertEqual(ws.request.headers["Authorization"], "Bearer secret")
+                hello = await receive(ws, "hello")
+                self.assertEqual(hello["monitors"], [MONITOR])
+                self.assertEqual(hello["protocol"], 1)
+                self.assertEqual(hello["windows"], 5)  # shared windows, screenshots, point input and looks
+                self.assertEqual(hello["press"], 1)
+                self.assertEqual(hello["chrome"]["state"], "not_enabled")
+                self.assertIn("chrome://inspect", hello["chrome"]["detail"])
+                await ws.send(json.dumps(dict(type="get_preview", request_id="pick",
+                                              monitor_id=1, long_edge=64)))
+                await receive(ws, "preview")
+                await ws.send(json.dumps(request()))
+                await receive(ws, "share_accepted")
+                frame = await receive(ws, "frame")
+                self.assertEqual(frame["pointer"]["x"], -20)
+                await term.waiting.get()
+                clock.advance(1)
+                await ws.send(json.dumps(dict(type="snap", share_id="share", request_id="fresh")))
+                frame = await receive(ws, "frame")
+                self.assertEqual(frame["request_id"], "fresh")
+                await ws.send(json.dumps(dict(type="stop_share", share_id="share")))
+                await receive(ws, "share_stopped")
+                await ws.close(code=4001, reason="revoked")
+            except Exception as exc:
+                handler_errors.append(exc)
+                await ws.close(code=4001, reason="test assertion failed")
+            finally:
+                completed.set()
 
         async with websocket_server(handler, "127.0.0.1", 0, ping_interval=None) as server, \
                 await asyncio.start_server(claim, "127.0.0.1", 0) as http:
@@ -356,7 +363,14 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertWarns(UserWarning):
                     await serve(paired, fake_desktop, term, clock=clock)
             await completed.wait()
+            if handler_errors:
+                raise handler_errors[0]
             self.assertTrue(term.consent.called)
+
+    async def test_handler_assertions_surface_without_waiting_for_a_reconnect(self):
+        with patch("partyline_helper.client.WINDOWS_VERSION", 0), \
+                self.assertRaisesRegex(AssertionError, "0 != 5"):
+            await self.test_pair_hello_preview_consent_frames_snap_stop()
 
     async def test_reconnect_and_revoke(self):
         calls = []

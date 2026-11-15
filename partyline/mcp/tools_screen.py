@@ -19,7 +19,8 @@ def screen_frame_tool():
 
 ELEMENTS_NOTE = (
     "The first way to read a window, and screen_element_action the first way to act (precise, fast, cheap; "
-    "a screenshot is the fallback, never a step of its own). Read a shared/inherited window (CDP for "
+    "use screen_window_look when the text does not explain the screen). Read a shared/inherited window "
+    "(CDP for "
     "Chrome pages, UIA otherwise; ~4 KB; source in header). "
     "No arguments: "
     "summary. find by query/name, value, control_type; root=<id> lists children; text=true reads text; "
@@ -52,7 +53,7 @@ ELEMENTS_PROPERTIES = {
     "bounds": {"type": "boolean", "description": "Add screen and frame pixel rectangles."},
 }
 ELEMENTS_FLAGS = ("refresh", "more", "text", "bounds")
-WINDOW_TOOLS = ("screen_elements", "screen_window_snapshot")  # what a window grant alone allows
+WINDOW_TOOLS = ("screen_elements", "screen_window_snapshot", "screen_window_look")
 
 
 def screen_windows_tool():
@@ -108,6 +109,20 @@ def screen_window_snapshot_tool():
                             "additionalProperties": False}}
 
 
+def screen_window_look_tool():
+    return {"name": "screen_window_look", "description": (
+        "Look when text does not explain the screen; otherwise read screen_elements. One fresh read and "
+        "image share a generation, with a light grid and up to 80 numbered boxes, including no-action "
+        "elements. The matching compact list includes actions and state. Act with screen_element_action "
+        "mark=n; named actions use CDP/UIA, invoke/click otherwise uses the guarded point-click route. "
+        "Old marks require a fresh look. Thumb defaults to 1000 px/700k pixels (~930 image tokens). "
+        "Deltas after actions stay text."), "inputSchema": {"type": "object", "properties": {
+            "window": ELEMENTS_PROPERTIES["window"],
+            "detail": {"type": "string", "enum": ["thumb", "slim", "full"], "default": "thumb"},
+            "query": ELEMENTS_PROPERTIES["query"],
+        }, "required": [], "additionalProperties": False}}
+
+
 def elements_query(args):
     from urllib.parse import quote
     pairs = [f"{key}={quote(str(args[key]), safe='')}" for key in ELEMENTS_PROPERTIES
@@ -133,6 +148,11 @@ def call(client, name, args, state, conv):
         return client.request("POST", base + "/screen-attach-window", args, timeout=60)
     if name == "screen_elements":
         return client.request("POST", base + "/screen-elements" + elements_query(args), timeout=60)
+    if name == "screen_window_look":
+        pairs = [f"{key}={quote(str(args[key]), safe='')}" for key in ("window", "detail", "query")
+                 if args.get(key)]
+        query = "?" + "&".join(pairs) if pairs else ""
+        return client.request("POST", base + "/screen-window-look" + query, timeout=100)
     if name == "screen_window_snapshot":
         pairs = [f"{key}={quote(str(args[key]), safe='')}" for key in ("device", "window") if args.get(key)]
         pairs += ["marks=true"] if args.get("marks") else []

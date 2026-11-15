@@ -31,6 +31,7 @@ def read_options(message):
 class WindowTask:
     def __init__(self, session):
         self.session = session
+        self.operation_lock = asyncio.Lock()
         self.task = None
         self.read_task = None
         self.actions = ActionWorker(session)
@@ -62,6 +63,10 @@ class WindowTask:
         self.task = asyncio.create_task(self._action(message, Timing()))
 
     async def _action(self, message, queued=None):
+        async with self.operation_lock:
+            await self._action_locked(message, queued)
+
+    async def _action_locked(self, message, queued=None):
         timing = queued or Timing()
         timing.values["task_queue_ms"] = timing.elapsed(timing.started)
         from .screen_access_audit import begin_window_call, end_window_call
@@ -69,6 +74,13 @@ class WindowTask:
                                    message.get("line_name") or message.get("line"))
         audited = False
         try:
+            from .window_look import check
+            try:
+                check(self.session.window, message)
+            except ValueError as exc:
+                await self.session.send("window_element_result", request_id=message["request_id"],
+                                        status="failed", error=str(exc))
+                return
             chrome = getattr(self.session, "chrome", None)
             result = await chrome.action(self.session.window, message) if chrome else None
             if result is None and message.get("action") == "set_files":
@@ -108,6 +120,10 @@ class WindowTask:
         return result
 
     async def _read(self, request_id, options=None, message=None, queued=None):
+        async with self.operation_lock:
+            await self._read_locked(request_id, options, message, queued)
+
+    async def _read_locked(self, request_id, options=None, message=None, queued=None):
         timing = queued or Timing()
         timing.values["task_queue_ms"] = timing.elapsed(timing.started)
         from .screen_access_audit import begin_window_call, end_window_call

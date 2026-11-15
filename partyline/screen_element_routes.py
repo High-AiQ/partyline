@@ -48,16 +48,28 @@ def elements_router(runtime, hub, store=None):
         core.audit_call(hub, principal, grant, "screen_element_action", len(body.value or body.key or ""))
         if body.then:
             core.deny_unless(runtime.db, principal, conv_id, "read")
-        await core.record_standing_window_access(
-            runtime, hub, principal, conv_id, "uia_action", body.window, None, "started")
-        try:
-            result = await core.element_action(runtime, hub, conv_id, body, request)
-        except HTTPException:
+        call = "uia_action"
+        if body.mark is not None:
+            _, _, node = hub.snapshots.looks.target(principal, grant, body.mark)
+            if body.action in ("invoke", "click") and body.action not in node.actions:
+                call = None  # point_operation owns the standing audit for this input
+        if call:
             await core.record_standing_window_access(
-                runtime, hub, principal, conv_id, "uia_action", body.window, None, "failed")
+                runtime, hub, principal, conv_id, call, body.window, None, "started")
+        try:
+            if body.mark is not None:
+                from .screen_window_look import mark_action
+                result = await mark_action(runtime, hub, store, conv_id, body, request)
+            else:
+                result = await core.element_action(runtime, hub, conv_id, body, request)
+        except HTTPException:
+            if call:
+                await core.record_standing_window_access(
+                    runtime, hub, principal, conv_id, call, body.window, None, "failed")
             raise
-        await core.record_standing_window_access(
-            runtime, hub, principal, conv_id, "uia_action", body.window, None, result.get("status", "failed"))
+        if call:
+            await core.record_standing_window_access(
+                runtime, hub, principal, conv_id, call, body.window, None, result.get("status", "failed"))
         if store is not None:
             from .screen_failure_snapshot import attach, failed
             if failed(result):  # a failure a picture explains carries one, with marks

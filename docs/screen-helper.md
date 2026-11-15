@@ -372,7 +372,7 @@ replaced by a compaction rotation does not end it. Ending one grant leaves other
 Consent is never restored after a restart. Grants and revocations are recorded in the helper's local
 audit.
 
-Window grants cover `screen_elements`, `screen_element_action`, `screen_window_snapshot` and the point tools
+Window grants cover `screen_elements`, `screen_window_look`, `screen_element_action`, `screen_window_snapshot` and the point tools
 (`screen_window_click`, `_scroll`, `_drag`, `_type`, `_key`). With one window the target is
 unambiguous. With several, pass `window` as the grant ID or title; an ambiguous call lists every
 choice with its owning line, and each snapshot returns its grant ID as `window`. Inherited reads
@@ -477,6 +477,42 @@ once a Windows box is available and tune `MAX_ELEMENTS`, `BUDGET` and `KILL_SLAC
 Errors, denied consent, closed windows and unsupported platforms return an unavailable reason.
 macOS AX and Linux AT-SPI are planned. The Windows-only helper dependency `comtypes`
 supplies the typed UI Automation COM interfaces; it is not installed on other platforms.
+
+### Look at a window
+
+Use `screen_window_look(window=W, detail="thumb", query?)` when the text read does not explain
+what is on screen; otherwise prefer `screen_elements` and text deltas after actions. It is listed
+wherever window grants are available, and callable through `extras` for clients that do not re-list.
+Helper 1.7.0 (`windows: 5`) takes a fresh element read and the window image back to back under
+one window operation lock, for both CDP transports and UIA. They carry one shared `generation`.
+Events during capture add a `changing` note: element state may lag the image. A busy page
+still returns a bounded look, and boxes and list always use the same captured nodes.
+
+The MCP answer contains one image with a light coordinate grid and numbered boxes, plus one
+compact state line per box, for example `[7] Button "Save" invoke,press focused`. Lines also show
+checked, selected, disabled and value state when available. Visible elements with bounds get
+boxes even without actions (`no actions`). Actionable elements come first, then smaller areas;
+at most 80 boxes are drawn, with a truncation note. `query` uses the same name matching as
+`screen_elements`, before the cap; every drawn box has exactly one matching list entry. Elements
+clipped outside the image or too small to draw have no box and no list entry. Partial tree reads
+also report truncation. The answer includes `snapshot`, `generation`, a coordinates note and
+`image_tokens`. Box geometry uses the same screen/CSS-to-image mapping as snapshot marks.
+
+`thumb` fits within 1000 pixels on the longest edge and 700,000 total pixels (about 930 image
+tokens). `slim` fits within 1600 pixels; `full` preserves the window's own size. The helper resizes
+before drawing so labels stay readable and point coordinates name the delivered image's pixels.
+
+Act with `screen_element_action(window=W, mark=7, action="invoke")`, giving exactly one of
+`mark` or `element_id`. A supported named action uses the normal CDP/UIA element route and its
+guards. Otherwise `invoke` or `click` uses the box centre through `screen_window_click`'s existing
+route: snapshot freshness, geometry, hard floor, consent, deadlines, hit and cover checks all
+apply. It uses CDP page input or the consented real cursor, never script clicks. `force` cannot
+bypass point guards. Other unsupported actions are refused. Marks have increasing numbers and
+belong to the latest look by that caller; another look invalidates the older generation.
+Unrelated events and ordinary reads or actions do not discard marks. Named actions still perform
+the existing source-scoped freshness checks, and point actions retain snapshot and geometry guards.
+A stale mark says `take a fresh screen_window_look`. Successful actions keep text deltas; use `then={}`
+to read them.
 
 ### Screenshot of the chosen window
 

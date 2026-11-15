@@ -3208,3 +3208,24 @@ held the entire window queue and survived revocation. Reload now starts approval
 returns a failed, explicit retry instruction immediately. The blocking-connector test
 in `tests/test_cdp_reconnect.py` proves reads and UIA actions continue while the prompt
 is unanswered, approval cannot silently reload, and revocation cancels the pending attempt.
+
+### Pixel budgets must survive integer sizing
+
+A proportional resize rounded to nearest whole pixels can exceed its total pixel budget:
+4000×3000 fitted to 700,000 pixels became 966×725 (700,350). Assuming the floating-point
+scale alone enforced the cap was false. Floor each positive output dimension before resizing;
+`tests/test_helper_window_look.py` checks both the longest edge and total pixels after capture.
+
+### Surface protocol handler failures to their test waiter
+
+An integration test waited forever after a WebSocket handler's helper-version assertion failed:
+assuming a handler exception would fail its parent test was false. The server logged the exception,
+but the completion event remained unset. The fake protocol handler now sets completion in `finally`
+and propagates its saved exception in the test, so capability-version failures report an assertion.
+
+### A look generation is independent of the window event clock
+
+Assuming every window event invalidated a look made a clock or spinner starve captures and marks.
+Look generations now change only with a new look. Capture-time events produce a `changing` note,
+while named actions retain source-scoped target checks and point actions retain their geometry and
+input guards. Tests cover unrelated changes, repeated mark actions and a busy continuation.

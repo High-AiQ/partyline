@@ -19,13 +19,14 @@ from .uia_event_state import EventState
 from .cdp import Chrome
 from .window_outline import WindowOutline
 from .point_consent import clear
-from .window_click import POINT_VERSION, PointClicks
+from .window_click import PointClicks
 from .window_snapshot import WindowSnapshots
+from .window_look import LOOK_VERSION
 
 log = logging.getLogger(__name__)
 
-# 1: a window is shared with a line; 2: it can also be screenshotted; 3: it can also be clicked at a point
-WINDOWS_VERSION = POINT_VERSION
+# 1: shares; 2: screenshots; 3: point clicks; 4: point input; 5: combined looks
+WINDOWS_VERSION = LOOK_VERSION
 MESSAGES = ("share_targets", "window_grant_result", "revoke_window")
 
 

@@ -55,6 +55,8 @@ KEPT_WHEN_UNCHANGED = ("snapshot", "note", "budget", "source", "page_state", "re
 
 class WindowSnapshots:
     def __init__(self, hub, wall=time.time):
+        from .screen_window_look import WindowLooks
+        self.looks = WindowLooks(hub)
         self.hub, self.wall = hub, wall
         self.last = {}  # window grant id -> {"at": epoch seconds, "by": handle} of its latest capture
         self.shares = {}  # window grant id -> what frame_reference needs to say "unchanged"
@@ -63,6 +65,7 @@ class WindowSnapshots:
         self.marks = {}  # (window grant id, handle) -> the marks that process was last sent
 
     def end(self, grant_id):
+        self.looks.end(grant_id)
         for table in (self.last, self.shares, self.locks):
             table.pop(grant_id, None)
         for key in [key for key in self.marks if key[0] == grant_id]:
@@ -195,5 +198,15 @@ def snapshot_router(runtime, hub, store):
         principal = request_principal(request)
         deny_unless(runtime.db, principal, conv_id, "read")
         return await hub.snapshots.take(principal, store, window, device, marks, tier)
+
+    @router.post("/api/conversations/{conv_id}/screen-window-look")
+    @timed
+    async def window_look(conv_id: str, request: Request, window: str | None = None,
+                          detail: Literal["thumb", "slim", "full"] = "thumb", query: str | None = None):
+        principal = request_principal(request)
+        deny_unless(runtime.db, principal, conv_id, "read")
+        if query is not None and not 1 <= len(query) <= 200:
+            raise HTTPException(422, "query must have 1–200 characters")
+        return await hub.snapshots.looks.take(principal, store, window, detail, query)
 
     return router

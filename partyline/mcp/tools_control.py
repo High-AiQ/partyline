@@ -13,7 +13,9 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 
 ELEMENT_ACTION_NOTE = (
-    "Act on screen_elements IDs with CDP/UIA: the first choice (precise, cheap); never script clicks. "
+    "Act on screen_elements IDs or latest screen_window_look mark=n. Named actions use CDP/UIA; "
+    "invoke/click on a mark without that action uses guarded point input. Never reuse old marks; "
+    "never script clicks. "
     "set_files: 1–10 media IDs/local paths to CDP file inputs (media cap per file, 200 MiB total; helper "
     "data refused). select uses value; set_value edits; press: enter/tab/escape; force overrides disabled. "
     'then reads after CDP settles, changes only; then.snapshot adds a picture. A failure a picture '
@@ -26,9 +28,10 @@ ELEMENT_ACTION_PROPERTIES = {
     "window": {"type": "string",
                "description": "Window grant id or title; includes grants inherited from ancestors."},
     "force": {"type": "boolean", "description": "Try a reported-disabled control the person confirms works."},
+    "mark": {"type": "integer", "minimum": 1, "description": "Latest look box; alternative to element_id."},
     "element_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "action": {"type": "string", "enum": [
-        "invoke", "toggle", "set_value", "set_files", "press", "select", "add_to_selection",
+        "click", "invoke", "toggle", "set_value", "set_files", "press", "select", "add_to_selection",
         "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent", "scroll_into_view",
         "set_range_value", "window_close",
         "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize", "reload"]},
@@ -133,7 +136,7 @@ def tool_list(state):
               {"expression": {"type": "string", "minLength": 1, "maxLength": 16000},
                "window": ELEMENT_ACTION_PROPERTIES["window"]}, ["expression"]),
         _tool("screen_element_action", ELEMENT_ACTION_NOTE, ELEMENT_ACTION_PROPERTIES,
-              ["element_id", "action"]),
+              ["action"]),
         _tool("screen_window_click", WINDOW_CLICK_NOTE, WINDOW_CLICK_PROPERTIES, ["snapshot", "x", "y"]),
         *point_tools(),
         _tool("screen_control_request",

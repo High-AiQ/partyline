@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw, ImageFont
 from partyline.point_geometry import to_image
 
 GRID = 100  # image pixels between grid lines
-MAX_MARKS = 60
+MAX_MARKS = 80
 MIN_SIDE = 3  # a box thinner than this after clipping is not worth a number
 COLORS = ((230, 50, 50), (30, 120, 230), (20, 150, 70), (200, 110, 0), (150, 50, 200))
 
@@ -26,7 +26,7 @@ def clean_inputs(marks):
     return found[:MAX_MARKS]
 
 
-def boxes(marks, geometry, page=None):
+def boxes(marks, geometry, page=None, min_side=MIN_SIDE):
     """`[(mark, (left, top, right, bottom))]` in image pixels, clipped to the image.
 
     A screen box converts with the geometry; a page box (CSS pixels of the viewport) first goes through
@@ -46,7 +46,7 @@ def boxes(marks, geometry, page=None):
             continue
         (a, b), (c, d) = to_image(geometry, left, top), to_image(geometry, right, bottom)
         box = (max(0, round(a)), max(0, round(b)), min(width, round(c)), min(height, round(d)))
-        if box[2] - box[0] >= MIN_SIDE and box[3] - box[1] >= MIN_SIDE:
+        if box[2] - box[0] >= min_side and box[3] - box[1] >= min_side:
             found.append((mark, box))
     return found
 
