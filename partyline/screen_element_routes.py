@@ -1,0 +1,61 @@
+"""Routes for window trees, element actions, and screen evaluation."""
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from . import screen_elements as core
+from .screen_element_actions import ElementAction
+from .screen_eval import ScreenEval
+from .screen_tree_answer import elements_options
+
+ELEMENT_OPTIONS = Annotated[dict, Depends(elements_options)]
+
+
+def elements_router(runtime, hub):
+    router = APIRouter()
+
+    @router.post("/api/conversations/{conv_id}/screen-elements")
+    @core.timed
+    async def elements(conv_id: str, request: Request, options: ELEMENT_OPTIONS,
+                       device: str | None = None, window: str | None = None):
+        principal = core.request_principal(request)
+        core.deny_unless(runtime.db, principal, conv_id, "read")
+        grant, _ = core.resolve_window(hub, principal, window, device)
+        core.audit_call(hub, principal, grant, "screen_elements")
+        await core.record_standing_window_access(runtime, hub, principal, conv_id, "uia_read", window, device,
+                                                 "started")
+        try:
+            result = await hub.elements.read(principal, device, window, options)
+        except HTTPException:
+            await core.record_standing_window_access(
+                runtime, hub, principal, conv_id, "uia_read", window, device, "failed")
+            raise
+        await core.record_standing_window_access(runtime, hub, principal, conv_id, "uia_read", window, device,
+                                                 "failed" if result.get("elements_unavailable") else "read")
+        return result
+
+    @router.post("/api/conversations/{conv_id}/screen-control/element-action")
+    async def act(conv_id: str, body: ElementAction, request: Request):
+        principal = core.request_principal(request)
+        core.deny_unless(runtime.db, principal, conv_id, "write")
+        grant, _ = core.resolve_window(hub, principal, body.window)
+        core.audit_call(hub, principal, grant, "screen_element_action", len(body.value or body.key or ""))
+        if body.then:
+            core.deny_unless(runtime.db, principal, conv_id, "read")
+        await core.record_standing_window_access(
+            runtime, hub, principal, conv_id, "uia_action", body.window, None, "started")
+        try:
+            result = await core.element_action(runtime, hub, conv_id, body, request)
+        except HTTPException:
+            await core.record_standing_window_access(
+                runtime, hub, principal, conv_id, "uia_action", body.window, None, "failed")
+            raise
+        await core.record_standing_window_access(
+            runtime, hub, principal, conv_id, "uia_action", body.window, None, result.get("status", "failed"))
+        return result
+
+    @router.post("/api/conversations/{conv_id}/screen-eval")
+    async def evaluate(conv_id: str, body: ScreenEval, request: Request):
+        return await core.screen_eval(runtime, hub, conv_id, body, request)
+
+    return router

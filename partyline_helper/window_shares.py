@@ -10,7 +10,7 @@ from websockets.exceptions import ConnectionClosed
 from .uia_access import WindowAccess, select_window
 from .window_events import WindowEvents
 from partyline.file_events import Changes
-from .uia_task import WindowTask, read_options
+from .uia_task import WindowTask
 from .uia_window_identity import unmark
 from .window_target_picker import select_target
 from .uia_events import UIAEventSubscription
@@ -50,9 +50,13 @@ class WindowShares:
         self.outline_factory = outline_factory
         self.grants, self.waiters, self.tasks = {}, {}, set()
         self.chrome = Chrome(self)
-        self.event_timers = {}
-        self.picking, self.generation = False, 0
+        self.standing_calls, self.event_timers = set(), {}
+        self.picking, self.generation, self.standing_toast = False, 0, False
         self.snapshots = WindowSnapshots(self)
+
+    async def standing_call(self, message):
+        from .window_standing_calls import standing_call
+        return await standing_call(self, message)
 
     async def request(self, kind, **fields):
         ident = uuid.uuid4().hex
@@ -79,14 +83,20 @@ class WindowShares:
         task.add_done_callback(self.tasks.discard)
         return task
 
+    def spawn_standing(self, message):
+        task = asyncio.create_task(self.standing_call(message))
+        self.standing_calls.add(task)
+        task.add_done_callback(self.standing_calls.discard)
+        return task
+
     async def send_revoked(self, ident, reason="revoked by the person"):
         with contextlib.suppress(ConnectionClosed, OSError):
             await self.session.send("window_revoked", grant_id=ident, reason=reason)
 
     def changed(self):
         self._changes.notify()
-        labels = {ident: f"{entry['title']} → «{entry['target']['line_name']}» (and its sublines)"
-                  + shot(entry)
+        labels = {ident: (f"{entry['title']} → «{entry['target']['line_name']}» (and its sublines)"
+                          + shot(entry))
                   for ident, entry in self.grants.items()}
         self.session.status.window_grants = labels
         self.session.status.window_title = "; ".join(labels.values()) or None
@@ -129,7 +139,7 @@ class WindowShares:
             access.gate.grant()
             worker = WindowTask(access_session)
             self.grants[ident] = {"access": access, "worker": worker, "target": response["target"],
-                                  "title": selected["title"]}
+                                  "title": selected["title"], "process": selected["process"]}
             state = EventState()
             self.grants[ident]["event_state"] = state
             access.event_status = state.status
@@ -206,33 +216,24 @@ class WindowShares:
         with contextlib.suppress(ConnectionClosed, OSError):
             await self.session.send("window_changed", grant_id=ident)
 
+    def revoke_standing(self, notify=True):
+        self.generation += 1
+        from .uia_window_list import release_standing_rows
+        release_standing_rows(self.session)
+        for task in tuple(self.standing_calls):
+            task.cancel()
+        for ident, entry in list(self.grants.items()):
+            if entry.get("standing_access"):
+                self.revoke(ident, notify)
+
     def revoke_all(self, notify=True):
-        self.generation += 1  # also cancels consent currently open in a native picker
+        self.revoke_standing(notify)
         for ident in list(self.grants):
             self.revoke(ident, notify)
 
     async def dispatch(self, message):
-        entry = self.grants.get(message.get("grant_id"))
-        if message["type"] == "snapshot_window":
-            self.spawn(self.snapshots.handle(entry, message))
-        elif not entry:
-            kind = "window_elements" if message["type"] == "read_window_elements" else "window_element_result"
-            await self.session.send(kind, request_id=message["request_id"],
-                                    elements_unavailable="consent revoked",
-                                    status="failed", error="consent revoked")
-        elif message.get("event_status"):
-            access = entry["access"]
-            if getattr(access, "grant", None) and access.grant.get("process", "").lower() == "chrome.exe":
-                await self.chrome.page(access)
-                status = self.chrome.status(access)
-            else:
-                state = entry.get("event_state")
-                status = state.status() if state else {}
-            await self.session.send("window_elements", request_id=message["request_id"], **status)
-        elif message["type"] == "read_window_elements":
-            await entry["worker"].submit(message["request_id"], read_options(message), message)
-        else:
-            await entry["worker"].submit_action(message)
+        from .window_share_dispatch import dispatch
+        await dispatch(self, message)
 
     async def watch(self):
         async with WindowEvents(self._changes) as events:
@@ -259,5 +260,5 @@ class WindowShares:
         for future in list(self.waiters.values()):
             if not future.done():
                 future.cancel()
-        if self.tasks:
-            await asyncio.gather(*list(self.tasks), return_exceptions=True)
+        if self.tasks or self.standing_calls:
+            await asyncio.gather(*self.tasks, *self.standing_calls, return_exceptions=True)

@@ -35,6 +35,10 @@ def audit(session, grant, message, props, result):
                 if key not in info:
                     continue
                 info[key] = str(info[key]).replace(value, "[redacted]")
+    if getattr(session, "window_grant_id", None):
+        from .screen_access_audit import audit_window
+        audit_window(session, "uia_action", message.get("agent", ""), result.get("status", "failed"),
+                     message.get("line"))
     session.tools.audit.append("action", "window", str(message.get("agent", ""))[:120], "window_action",
                                json.dumps(info, ensure_ascii=False, separators=(",", ":")))
 

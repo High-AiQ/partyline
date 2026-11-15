@@ -47,13 +47,22 @@ class WindowSnapshots:
     async def handle(self, entry, message):
         """Answer one `snapshot_window` request: an image, or `ok: false` with the reason."""
         request_id = message["request_id"]
+        from .screen_access_audit import begin_window_call, end_window_call
+        active = (begin_window_call(getattr(entry["access"], "session", self.shares.session),
+                                    message.get("agent", ""), message.get("line_name")
+                                    or message.get("line")) if entry else None)
         try:
             await self.take(entry, message, request_id)
         except GrabError as exc:
+            self.audit(entry, message, "failed")
             await self.reply(request_id, ok=False, error=str(exc))
         except Exception as exc:  # noqa: BLE001 - whatever fails, the caller gets an answer, not a timeout
             print(f"Window screenshot failed: {exc!r}", flush=True)
+            self.audit(entry, message, "failed")
             await self.reply(request_id, ok=False, error="the screenshot failed; see the helper's terminal")
+        finally:
+            if active:
+                end_window_call(active)
 
     async def take(self, entry, message, request_id):
         timing = Timing()
@@ -76,6 +85,7 @@ class WindowSnapshots:
             await self.check(access, grant, generation)
             entry["last_screenshot"] = {"at": self.clock(), "by": agent}
             self.shares.changed()
+            self.audit(entry, message, "captured")
             try:
                 names = image.info.get("scoped_popups", [])
                 popup_info = f", owned popups: {', '.join(names)}" if names else ""
@@ -89,6 +99,18 @@ class WindowSnapshots:
         await self.reply(request_id, chunks, gate, ok=True, mime=mime, width=image.width,
                          height=image.height, media=True, chunks=len(chunks), timing=timing.values,
                          **({"blank": True} if black else {}))
+
+    @staticmethod
+    def audit(entry, message, result):
+        if entry:
+            from .screen_access_audit import audit_window
+            session = getattr(entry["access"], "session", None)
+            if session is not None:
+                audit_window(session, "screenshot", message.get("agent", ""), result,
+                             message.get("line"))
+        else:
+            from .screen_access_audit import append_metadata
+            append_metadata(message, "screenshot", result)
 
     @staticmethod
     async def check(access, grant, generation):

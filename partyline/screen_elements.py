@@ -4,23 +4,21 @@ import time
 import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
-from typing import Annotated
+from fastapi import HTTPException
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-
-from .auth_guard import request_principal
-from .machine_scope import deny_unless
+from .auth_guard import request_principal  # noqa: F401 - kept as the screen route patch surface
+from .machine_scope import deny_unless  # noqa: F401
+from .screen_audit import record_standing_window_access  # noqa: F401
+from .screen_element_actions import ElementAction, element_action  # noqa: F401
+from .screen_eval import ScreenEval, audit_call, screen_eval  # noqa: F401
 from .screen_grants import require_window, resolve_window
-from .screen_element_actions import ElementAction, element_action
 from .screen_tree import OUT_BYTES, Snapshot
 from .screen_element_state import ElementState, compare
-from .screen_eval import ScreenEval, audit_call, screen_eval
 from .screen_tree_ids import IdSpace
-from .screen_tree_answer import answer, elements_options
+from .screen_tree_answer import answer
 from .op_timing import pushed
 from .screen_timing import timed, phase, helper
 
-ELEMENT_OPTIONS = Annotated[dict, Depends(elements_options)]
 SNAPSHOT_TTL = 3  # seconds a captured tree answers queries before it must be taken again
 MAX_SNAPSHOTS = 16
 MAX_STORED = 300_000  # nodes all stored trees together keep; the least recently used go first
@@ -44,12 +42,16 @@ class ElementsHub(ElementState):
         self.waiters[ident] = (device["id"], future)
         try:
             async with asyncio.timeout(35):
+                line_id = getattr(principal, "conv_id", None) or grant.get("conv_id", "")
+                line = self.hub.runtime.db.get_conversation(line_id) if line_id else None
                 with phase("send_ms"):
                     await pushed("screen", device["socket"].send_json({"type": kind, "request_id": ident,
-                                                     "grant_id": grant["id"],
-                                                     "line_id": getattr(principal, "conv_id", None)
-                                                     or grant.get("conv_id", ""),
-                                                     "agent": getattr(principal, "name", ""), **fields}))
+                        "grant_id": grant["id"],
+                        "line": line_id,
+                        "line_id": line_id,
+                        "line_name": line["name"] if line else line_id,
+                        "agent": getattr(principal, "name", ""),
+                        "title": grant.get("title", ""), "process": grant.get("process", ""), **fields}))
                 with phase("helper_roundtrip_ms"):
                     response = await future
                 helper(response.get("timing", {}))
@@ -260,28 +262,5 @@ class ElementsHub(ElementState):
 
 
 def elements_router(runtime, hub):
-    router = APIRouter()
-
-    @router.post("/api/conversations/{conv_id}/screen-elements")
-    @timed
-    async def elements(conv_id: str, request: Request, options: ELEMENT_OPTIONS,
-                       device: str | None = None, window: str | None = None):
-        principal = request_principal(request)
-        deny_unless(runtime.db, principal, conv_id, "read")
-        grant, _ = resolve_window(hub, principal, window, device)
-        audit_call(hub, principal, grant, "screen_elements")
-        return await hub.elements.read(principal, device, window, options)
-
-    @router.post("/api/conversations/{conv_id}/screen-control/element-action")
-    async def act(conv_id: str, body: ElementAction, request: Request):
-        principal = request_principal(request)
-        deny_unless(runtime.db, principal, conv_id, "write")
-        grant, _ = resolve_window(hub, principal, body.window)
-        audit_call(hub, principal, grant, "screen_element_action", len(body.value or body.key or ""))
-        return await element_action(runtime, hub, conv_id, body, request)
-
-    @router.post("/api/conversations/{conv_id}/screen-eval")
-    async def evaluate(conv_id: str, body: ScreenEval, request: Request):
-        return await screen_eval(runtime, hub, conv_id, body, request)
-
-    return router
+    from .screen_element_routes import elements_router as build_router
+    return build_router(runtime, hub)

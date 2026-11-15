@@ -318,8 +318,8 @@ class FakeIcon:
 
 
 FAKE_BACKEND = SimpleNamespace(Icon=FakeIcon, Menu=lambda *items: list(items),
-                               MenuItem=lambda text, action, enabled=True: SimpleNamespace(
-                                   text=text, action=action, enabled=enabled))
+                               MenuItem=lambda text, action, enabled=True, **kwargs: SimpleNamespace(
+                                   text=text, action=action, enabled=enabled, **kwargs))
 
 
 class TrayTests(unittest.TestCase):
@@ -328,7 +328,7 @@ class TrayTests(unittest.TestCase):
         shown = tray.start_tray(status, FAKE_BACKEND)
         icon = FakeIcon.instances[0]
         self.assertTrue(icon.running)
-        label, stop, stop_all, choose_window, end_tools, end_checks, quit_item = icon.menu
+        label, stop, stop_all, choose_window, end_tools, end_checks, quit_item = icon.menu[:7]
         self.assertEqual((stop.text, stop_all.text), ("Stop screen sharing", "Stop all sharing"))
         picked, revoked = [], []
         status.choose_window, status.stop_window = lambda: picked.append(1), lambda: revoked.append(1)
@@ -357,13 +357,24 @@ class TrayTests(unittest.TestCase):
         self.assertEqual(ended, [1])
         self.assertEqual(label.text(None), "Not connected to Partyline")
         self.assertFalse(stop.enabled(None))
+        access = next(item for item in icon.menu if item.text ==
+                      "Let agents on my lines see and use my windows")
+        self.assertFalse(access.checked(None))
+        self.assertFalse(access.enabled(None))
+        enabled = []
+        status.window_access_toggle = enabled.append
+        status.state = "paired"
+        self.assertTrue(access.enabled(None))
+        access.action()
+        self.assertEqual(enabled, [True])
+        status.state = "offline"
         stops, quits = [], []
         status.stop_share, status.quit = lambda: stops.append(1), lambda: quits.append(1)
         status.set("paired")
         status.set("sharing")
         self.assertTrue(stop.enabled(None))
         self.assertTrue(stop_all.enabled(None))
-        self.assertEqual(label.text(None), "Sharing part of your screen")
+        self.assertEqual(label.text(None), "Sharing part of your screen; window access is off")
         self.assertIn("Sharing", icon.title)
         stop.action()
         stop_all.action()
@@ -567,12 +578,12 @@ class StartupRaceTests(unittest.TestCase):
 
     def backend(self, icon_type):
         return SimpleNamespace(Icon=icon_type, Menu=lambda *items: list(items),
-                               MenuItem=lambda text, action, enabled=True: SimpleNamespace(
-                                   text=text, action=action, enabled=enabled))
+                               MenuItem=lambda text, action, enabled=True, **kwargs: SimpleNamespace(
+                                   text=text, action=action, enabled=enabled, **kwargs))
 
     def assert_paired(self, icon):
-        self.assertEqual(icon.icon.getpixel((32, 32)), tray.draw_icon("paired").getpixel((32, 32)))
-        self.assertEqual(icon.title, "Partyline Helper: Paired with Partyline")
+        self.assertEqual(icon.icon.getpixel((32, 32)), tray.draw_icon("window_off").getpixel((32, 32)))
+        self.assertEqual(icon.title, "Partyline Helper: Paired with Partyline; window access is off")
 
     def test_pairing_while_the_icon_is_built_is_not_lost(self):
         status = Status()
@@ -650,11 +661,11 @@ class StartupRaceTests(unittest.TestCase):
         self.assertIsNone(icon.drawn)
         icon.setup(icon)
         colour = lambda image: image.getpixel((32, 32))  # noqa: E731
-        self.assertEqual(colour(icon.drawn), colour(tray.draw_icon("paired")))
+        self.assertEqual(colour(icon.drawn), colour(tray.draw_icon("window_off")))
         shown.refresh("offline")  # a stale argument: the latest state wins
-        self.assertEqual(colour(icon.drawn), colour(tray.draw_icon("paired")))
+        self.assertEqual(colour(icon.drawn), colour(tray.draw_icon("window_off")))
         status.set("control")
-        self.assertEqual(colour(icon.drawn), colour(tray.draw_icon("control")))
+        self.assertEqual(colour(icon.drawn), colour(tray.draw_icon("window_off")))
 
     def test_the_normal_ordering_still_pairs_the_icon(self):
         status = Status()

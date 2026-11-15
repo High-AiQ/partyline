@@ -9,11 +9,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .auth_guard import Principal
 from .auth_store import user_by_id
+from .hierarchy import descendants
 from .machine_scope import visible_conversation_ids
 from .screen_window_notices import announce, live_processes
 from .preset_traits import match_preset
 from .screen_grants import GRANTS
 from .screen_grant_store import replace_grant
+from .screen_device_access import standing_root
 from .op_timing import pushed
 
 MESSAGES = ("list_share_targets", "window_grant", "window_revoked", "window_changed")
@@ -50,9 +52,10 @@ class WindowGrantMessage(BaseModel):
     hwnd: int = Field(gt=0)
     title: str = Field(max_length=500)
     process: str = Field(max_length=200)
+    standing_access: bool = False
 
 
-def share_targets(db, owner_id, *, offered=None, window_lines=True):
+def share_targets(db, owner_id, *, offered=None, window_lines=True, standing_lines=()):
     """Every line the computer's owner can see, each with its live processes (maybe none).
 
     Helpers that predate line grants pick one process, so they are offered only lines that have one.
@@ -76,7 +79,8 @@ def share_targets(db, owner_id, *, offered=None, window_lines=True):
                               "preset": preset["title"] if preset else att["adapter"]})
         if processes or window_lines:
             groups.append({"line_id": line["id"], "line_name": line["name"],
-                           "parent_id": line.get("parent_id"), "processes": processes})
+                           "parent_id": line.get("parent_id"), "processes": processes,
+                           "standing_access": line["id"] in standing_lines})
     return groups
 
 
@@ -114,9 +118,14 @@ class WindowGrants:
             except ValidationError:
                 return
             offered = {}  # attachment id -> (line id, name), for helpers that still pick a process
+            root = standing_root(self.hub.runtime.db, device)
+            root_line = self.hub.runtime.db.get_conversation(root) if root else None
+            standing_lines = ({root, *descendants(self.hub.runtime.db, root, include_archived=False)}
+                              if root_line and not root_line.get("archived_at") else set())
             lines = share_targets(self.hub.runtime.db, device["owner_id"], offered=offered,
-                                  window_lines=bool(device.get("windows")))
-            self.offers[device["id"]] = (device["socket"], ident, offered, {g["line_id"] for g in lines})
+                                  window_lines=bool(device.get("windows")), standing_lines=standing_lines)
+            self.offers[device["id"]] = (device["socket"], ident, offered,
+                                          {g["line_id"] for g in lines}, standing_lines)
             await pushed("screen", device["socket"].send_json(
                 {"type": "share_targets", "request_id": ident, "lines": lines}))
             return
@@ -141,11 +150,19 @@ class WindowGrants:
         response = {"type": "window_grant_result", "request_id": ident, "ok": False}
         try:
             body = WindowGrantMessage.model_validate(message)
+            if body.standing_access and not device.get("window_access_enabled", False):
+                raise ValueError("window access is off on the server")
             offer = self.offers.get(device["id"])
             if not offer or offer[:2] != (device["socket"], body.targets_request_id):
                 raise ValueError("choose a line from the current picker")
             line_id, name = self.target_line(device, body, offer)
             line = self.hub.runtime.db.get_conversation(line_id)
+            root = standing_root(self.hub.runtime.db, device)
+            root_line = self.hub.runtime.db.get_conversation(root) if root else None
+            current_standing = ({root, *descendants(self.hub.runtime.db, root, include_archived=False)}
+                                if root_line and not root_line.get("archived_at") else set())
+            if body.standing_access and line_id not in current_standing:
+                raise ValueError("the selected line is not owned by the paired person")
             if (line is None or line.get("archived_at") or line_id not in offer[3]
                     or body.grant_id in self.known):
                 raise ValueError("the selected line is unavailable")
@@ -153,7 +170,8 @@ class WindowGrants:
             self.offers.pop(device["id"], None)
             user = user_by_id(self.hub.runtime.db, device["owner_id"])
             entry = {"device_id": device["id"], "device_name": device["name"], "conv_id": line_id,
-                     "line_name": line["name"], "title": body.title, "shared_by": user["handle"]}
+                     "line_name": line["name"], "title": body.title, "shared_by": user["handle"],
+                     "standing_access": body.standing_access}
             self.known[body.grant_id] = entry
             response.update(ok=True, target={"line_id": line_id, "line_name": line["name"],
                                              **({"name": name} if name else {})})
@@ -161,7 +179,7 @@ class WindowGrants:
                 await self.revoke(grant_id, reason="replaced by another grant")
             await self.changed(device["id"])
         except (ValidationError, ValueError) as exc:
-            response["error"] = (str(exc) if isinstance(exc, ValueError) and "helper" in str(exc)
+            response["error"] = (str(exc) if isinstance(exc, ValueError)
                                  else "the selected line is unavailable; choose a line from the picker")
         if self.connected(device):
             await pushed("screen", device["socket"].send_json(response))
@@ -197,6 +215,14 @@ class WindowGrants:
                 pass  # Server authorization is already gone, even if the helper disconnected.
         if device_id:
             await self.changed(device_id)
+
+    async def revoke_standing(self, device_id):
+        rows = self.hub.runtime.db._exec(
+            "SELECT id FROM screen_line_window_grants WHERE device_id=? AND standing_access=1",
+            (device_id,),
+        ).fetchall()
+        for row in rows:
+            await self.revoke(row["id"], tell_helper=False)
 
     async def expire(self):
         active = {row["id"] for row in self.hub.runtime.db._exec(GRANTS).fetchall()}

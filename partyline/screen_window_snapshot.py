@@ -113,7 +113,8 @@ class WindowSnapshots:
                 share.agent_frames.pop(principal.name, None)
                 await asyncio.to_thread(store.delete_file, ref.id)
             record(self.hub.runtime.db, grant["id"], grant["conv_id"], principal.name,
-                   "window screenshot withheld: the grant ended before it was delivered")
+                   f"window screenshot withheld: {grant['process']} — {grant['title']} "
+                   "(result=withheld; the grant ended before delivery)")
             raise
         result = {"file": ref.model_dump(mode="json"), "window": grant["id"], "title": grant["title"],
                   "width": ref.width, "height": ref.height, "variants": variants(ref),
@@ -125,8 +126,10 @@ class WindowSnapshots:
     async def audit(self, principal, grant, ref):
         self.last[grant["id"]] = {"at": self.wall(), "by": principal.name}
         db = self.hub.runtime.db
+        detail = (f"({ref.width}x{ref.height}, {ref.bytes // 1024} KB; "
+                  f"app={grant['process']}; result=completed)")
         record(db, grant["id"], grant["conv_id"], principal.name,
-               f"window screenshot of «{grant['title']}» ({ref.width}x{ref.height}, {ref.bytes // 1024} KB)")
+               f"window screenshot of «{grant['title']}» {detail}")
         message = publish(db, grant["id"])
         if message:
             await self.hub.runtime.broadcast(

@@ -138,7 +138,10 @@ class Chrome:
                     page = pages.pop(ident)
                     page.stop()
                     await page.close()
-            candidates = [t for t in targets if title_matches(t.get("title", ""), window["title"])]
+            selected_target = grant.get("target_id")
+            candidates = ([t for t in targets if t.get("targetId") == selected_target]
+                          if selected_target else
+                          [t for t in targets if title_matches(t.get("title", ""), window["title"])])
             matching = []
             for target in candidates:
                 ident = target["targetId"]

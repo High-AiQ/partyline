@@ -4,11 +4,14 @@ Setters may run on any thread; listeners are called on the setter's thread. `sto
 thread-safe callbacks the running session and runner register so the tray can act on them.
 """
 import contextlib
+import itertools
 
 LABELS = {"offline": "Not connected to Partyline", "paired": "Paired with Partyline",
           "sharing": "Sharing part of your screen",
           "control": "An agent is controlling your mouse and keyboard",
-          "tools": "An agent is running a local tool session"}
+          "tools": "An agent is running a local tool session",
+          "window_off": "Window access is off", "window_on": "Agents can use your windows",
+          "window_active": "An agent is using a window"}
 
 
 class Status:
@@ -25,9 +28,22 @@ class Status:
         self.stop_window_grant = None
         self.choose_window = self.stop_window = None
         self.checks_active, self.stop_checks = False, None
+        self.window_access_enabled = False
+        self.window_access_active = None
+        self.window_calls = {}
+        self.window_call_ids = itertools.count()
+        self.window_access_toggle = None
+        self.window_access_pause = None
+        self.window_access_audit = None
 
     @property
     def label(self):
+        if self.window_access_active:
+            line, agent = self.window_access_active
+            return f"Active: {line} / {agent}"
+        if self.state != "offline":
+            permission = LABELS["window_on" if self.window_access_enabled else "window_off"]
+            return f"{LABELS[self.state]}; {permission.lower()}"
         label = LABELS[self.state]
         label += "; " + self.chrome if self.chrome else ""
         return label + f"; reading {self.window_title}" if self.window_title else label
@@ -82,6 +98,26 @@ class Status:
         """End the screen share and every window grant."""
         self.request_stop_share()
         self.request_stop_window()
+
+    def request_window_access(self, enabled):
+        if self.window_access_toggle:
+            self.window_access_toggle(bool(enabled))
+
+    def begin_window_call(self, line, agent):
+        ident = next(self.window_call_ids)
+        self.window_calls[ident] = (str(line)[:80], str(agent)[:80])
+        self.window_access_active = next(iter(self.window_calls.values()))
+        self.changed()
+        return ident
+
+    def end_window_call(self, ident):
+        self.window_calls.pop(ident, None)
+        self.window_access_active = next(iter(self.window_calls.values()), None)
+        self.changed()
+
+    def request_pause_windows(self):
+        if self.window_access_pause:
+            self.window_access_pause()
 
     def request_stop_checks(self):
         if self.stop_checks:

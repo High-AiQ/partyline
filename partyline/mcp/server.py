@@ -57,7 +57,7 @@ class MCPServer:
     @staticmethod
     def _signature(state):
         screen_state = ((bool(state.get("screen_read")), bool(state.get("screen_control")),
-                         bool(state.get("screen_windows")))
+                         bool(state.get("screen_windows")), bool(state.get("window_access")))
                         if state.get("dynamic_screen_tools") else ())
         screen_state += (bool(state.get("bridge_open")),)
         return (state.get("kind"), state.get("role"), state.get("conv_id"),

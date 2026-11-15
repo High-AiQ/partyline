@@ -10,7 +10,8 @@ import webbrowser
 from PIL import Image, ImageDraw
 
 COLORS = {"offline": (128, 128, 128), "paired": (46, 160, 67), "sharing": (240, 165, 0),
-          "control": (215, 58, 73), "tools": (130, 80, 220)}
+          "control": (215, 58, 73), "tools": (130, 80, 220), "window_off": (128, 128, 128),
+          "window_on": (46, 160, 67), "window_active": (130, 80, 220)}
 TITLE = "Partyline Helper"
 TIP_LIMIT = 127  # szTip holds 127 UTF-16 units and a terminator; pystray raises on more
 
@@ -76,6 +77,7 @@ class Tray:
 
     def menu(self):
         item = self.backend.MenuItem
+        recent = self.status.window_access_audit.recent() if self.status.window_access_audit else []
         return self.backend.Menu(
             item(lambda _: self.status.label, None, enabled=False),
             *([item(f"Update available ({self.status.update[0]})", self.open_update)]
@@ -92,7 +94,19 @@ class Tray:
                  enabled=lambda _: self.tools()),
             item("Stop render checks", lambda *_: self.status.request_stop_checks(),
                  enabled=lambda _: self.status.checks_active),
-            item("Quit Partyline Helper", lambda *_: self.status.request_quit()))
+            item("Quit Partyline Helper", lambda *_: self.status.request_quit()),
+            item("Let agents on my lines see and use my windows",
+                 lambda *_: self.status.request_window_access(not self.status.window_access_enabled),
+                 enabled=lambda _: self.status.state != "offline",
+                 checked=lambda _: self.status.window_access_enabled),
+            item("Pause and disconnect", lambda *_: self.status.request_pause_windows(),
+                 enabled=lambda _: self.status.window_access_enabled
+                 or self.status.window_access_active is not None or bool(self.status.window_grants)),
+            item("Recent activity", self.backend.Menu(*(item(
+                f"{row['call_type']}: @{row['agent']} on {row['line']} — "
+                f"{row['app']} / {row['title']} ({row['result']})", None, enabled=False)
+                for row in recent)) if recent else self.backend.Menu(item("No recent activity", None,
+                                                                           enabled=False))))
 
     def start(self):
         # Listen first: the session may pair in the middle of building the icon.
@@ -118,7 +132,9 @@ class Tray:
             icon = self.icon
             if icon:
                 self.apply("menu", lambda: self.set_menu(icon))
-                self.apply("icon", lambda: setattr(icon, "icon", draw_icon(self.status.state)))
+                state = ("window_active" if self.status.window_access_active else
+                         "window_on" if self.status.window_access_enabled else "window_off")
+                self.apply("icon", lambda: setattr(icon, "icon", draw_icon(state)))
                 self.apply("title", lambda: setattr(icon, "title", tooltip(f"{TITLE}: {self.status.label}")))
 
     def set_menu(self, icon):

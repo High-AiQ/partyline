@@ -59,19 +59,34 @@ class WindowTask:
     async def _action(self, message, queued=None):
         timing = queued or Timing()
         timing.values["task_queue_ms"] = timing.elapsed(timing.started)
+        from .screen_access_audit import begin_window_call, end_window_call
+        active = begin_window_call(self.session, message.get("agent", ""),
+                                   message.get("line_name") or message.get("line"))
+        audited = False
         try:
             chrome = getattr(self.session, "chrome", None)
             result = await chrome.action(self.session.window, message) if chrome else None
             if result is None:
                 result = await self.actions.perform(message)
                 result.setdefault("source", "uia")
+            elif chrome:
+                from .screen_access_audit import audit_window
+                audit_window(self.session, "uia_action", message.get("agent", ""),
+                             result.get("status", "failed"), message.get("line"))
+                audited = True
             result.setdefault("timing", {}).update(timing.values)
             await self.session.send("window_element_result", request_id=message["request_id"], **result)
         except ConnectionClosed:
             pass
         except (ValueError, OSError):
+            if chrome and not audited:
+                from .screen_access_audit import audit_window
+                audit_window(self.session, "uia_action", message.get("agent", ""), "failed",
+                             message.get("line"))
             await self.session.send("window_element_result", request_id=message["request_id"],
                                     status="unconfirmed", error="Chrome command interrupted")
+        finally:
+            end_window_call(active)
 
     async def snapshot(self, options, message):
         chrome = getattr(self.session, "chrome", None)
@@ -86,6 +101,16 @@ class WindowTask:
     async def _read(self, request_id, options=None, message=None, queued=None):
         timing = queued or Timing()
         timing.values["task_queue_ms"] = timing.elapsed(timing.started)
+        from .screen_access_audit import begin_window_call, end_window_call
+        active = begin_window_call(self.session, (message or {}).get("agent", ""),
+                                   (message or {}).get("line_name") or (message or {}).get("line"))
+        try:
+            await self._read_call(request_id, options, message, timing)
+        finally:
+            end_window_call(active)
+
+    async def _read_call(self, request_id, options=None, message=None, timing=None):
+        timing = timing or Timing()
         try:
             try:
                 self.read_task = asyncio.create_task(self.snapshot(options, message))
@@ -99,6 +124,13 @@ class WindowTask:
             except (ValueError, KeyError, TypeError, RuntimeError, OSError):
                 result = {"elements_unavailable": "window read failed"}
             result.setdefault("timing", {}).update(timing.values)
+            from .screen_access_audit import audit_window
+            try:
+                audit_window(self.session, "uia_read", (message or {}).get("agent", ""),
+                             "read" if result.get("elements_unavailable") is None else "failed",
+                             (message or {}).get("line"))
+            except OSError:
+                result = {"elements_unavailable": "audit unavailable"}
             await self.session.send("window_elements", request_id=request_id, **result)
         except ConnectionClosed:
             pass

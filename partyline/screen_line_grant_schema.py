@@ -13,7 +13,8 @@ MIGRATIONS = [
         conv_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
         title TEXT NOT NULL,
         process TEXT NOT NULL,
-        hwnd INTEGER NOT NULL
+        hwnd INTEGER NOT NULL,
+        standing_access INTEGER NOT NULL DEFAULT 0
     )""",
     "CREATE INDEX IF NOT EXISTS idx_screen_line_window_grants_line ON screen_line_window_grants(conv_id)",
     """CREATE TRIGGER IF NOT EXISTS screen_line_window_device_revoked

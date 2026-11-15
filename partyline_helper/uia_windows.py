@@ -65,8 +65,7 @@ class WindowsProvider(PatternState, PressState):  # pragma: no cover - Windows f
         # Both requests follow the control view, so cached child indices match the live walker's.
         self.cache = self.request(SUBTREE)  # the whole tree under a node in one cross-process call
         self.shallow = self.request(SHALLOW)  # a node and its direct children, one call per parent
-        self.deep = deep  # a first snapshot part prefetches the window's whole tree
-        self.cached = cached  # snapshots read the cache; action rechecks always read live state
+        self.deep, self.cached = deep, cached  # actions recheck live state after a cached snapshot
 
     def request(self, scope):
         cache = self.automation.CreateCacheRequest()

@@ -23,6 +23,8 @@ from .screen_share_stop import stop_share as stop_screen_share
 from .screen_elements import ElementsHub
 from .screen_window_snapshot import WindowSnapshots
 from .screen_window_grants import MESSAGES as WINDOW_MESSAGES, WindowGrants
+from .screen_standing import StandingWindows, update_mirror
+from .screen_device_access import connected_device
 from .screen_pair_limits import PairLimits
 from .screen_requests import capture, preview
 from .walkthrough_takes import Takes
@@ -41,12 +43,13 @@ class ScreenHub:
         self.limits = PairLimits()
         self.shares: dict[str, ShareBuffer] = {}
         self.walkthroughs = Takes(self)
-        self.pending_codes: dict[str, tuple[int, float]] = {}
+        self.pending_codes: dict[str, tuple[int, str | None, float]] = {}
         self.snap_waiters: dict[str, tuple[ShareBuffer, asyncio.Future]] = {}
         self.preview_waiters: dict[str, tuple[str, str | int, asyncio.Future]] = {}
         self.elements = ElementsHub(self)
         self.snapshots = WindowSnapshots(self)
         self.window_grants = WindowGrants(self)
+        self.standing_windows = StandingWindows(self)
         self.control = ControlHub(self)
         self.tools = LocalTools(self)
 
@@ -56,23 +59,24 @@ class ScreenHub:
 
     def issue_pair_code(self, owner_id: int, conv_id: str | None = None) -> str:
         code = secrets.token_hex(4).upper()
-        self.pending_codes = {k: v for k, v in self.pending_codes.items() if v[1] > time.time()}
+        self.pending_codes = {k: v for k, v in self.pending_codes.items() if v[2] > time.time()}
         while code in self.pending_codes:
             code = secrets.token_hex(4).upper()
-        self.pending_codes[code] = (owner_id, time.time() + 300)
+        self.pending_codes[code] = (owner_id, conv_id, time.time() + 300)
         return code
 
     def claim_pair_code(self, code: str, name: str, os_name: str) -> tuple[str, str, int, None] | None:
         row = self.pending_codes.pop(code.upper(), None)
-        if not row or row[1] <= time.time():
+        if not row or row[2] <= time.time():
             return None
-        owner_id, _ = row
+        owner_id, conv_id, _ = row
         device_id, token = str(uuid.uuid4()), secrets.token_urlsafe(32)
-        self.runtime.db._exec(
-            "INSERT INTO screen_devices(id,owner_id,conv_id,name,os,token_hash,created_at) "
-            "VALUES(?,?,?,?,?,?,?)",
-            (device_id, owner_id, None, name[:120], os_name[:40], self.digest(token), time.time()),
-        )
+        self.runtime.db._exec("INSERT INTO screen_devices(id,owner_id,conv_id,name,os,token_hash,created_at) "
+                              "VALUES(?,?,?,?,?,?,?)",
+                              (device_id, owner_id, None, name[:120], os_name[:40], self.digest(token),
+                               time.time()))
+        self.runtime.db._exec("INSERT INTO screen_device_window_access(device_id,enabled,owner_conv_id) "
+                              "VALUES(?,0,?)", (device_id, conv_id))
         return device_id, token, owner_id, None
 
     async def connect(self, ws: WebSocket, device: dict) -> None:
@@ -88,13 +92,7 @@ class ScreenHub:
             if not device_valid(self, ident):
                 await ws.close(code=4403, reason="device revoked")
                 return
-            current = {**device, "socket": ws, "name": hello.device_name,
-                       "os": hello.os, "helper_version": hello.helper_version, "control": hello.control,
-                       "tools": hello.tools, "windows": hello.windows, "press": hello.press,
-                       "chrome_dom": hello.chrome_dom,
-                       "chrome": hello.chrome.model_dump() if hello.chrome else None,
-                       "monitors": [item.model_dump() for item in hello.monitors],
-                       "last_seen": time.monotonic()}
+            current = {**connected_device(device, ws, hello), "last_seen": time.monotonic()}
             old = self.devices.get(ident)
             if old:
                 await old["socket"].close(code=4409, reason="reconnected")
@@ -106,6 +104,10 @@ class ScreenHub:
                 await ws.close(code=4403, reason="device revoked")
                 return
             self.devices[ident] = current
+            self.runtime.db._exec("INSERT INTO screen_device_window_access(device_id,enabled) VALUES(?,?) "
+                                  "ON CONFLICT(device_id) DO UPDATE SET enabled=excluded.enabled",
+                                  (ident, int(hello.window_access)))
+            bump_runtime(self.runtime)
             self.pending_sockets.get(ident, set()).discard(ws)
             if hello.update_check:
                 await pushed("screen", ws.send_json({"type": "ping", "helper_update": {
@@ -132,6 +134,9 @@ class ScreenHub:
                     await pushed("screen", ws.send_json({"type": "pong"}))
                     continue
                 if kind == "pong":
+                    continue
+                if kind == "window_access_changed":
+                    await update_mirror(self, current, message)
                     continue
                 if kind == "frame":
                     meta = HelperFrame.model_validate(message)
@@ -165,6 +170,8 @@ class ScreenHub:
                         await self.stop_share(share.share_id, result.reason)
                 elif kind in WINDOW_MESSAGES:
                     await self.window_grants.from_helper(current, message)
+                elif kind in ("screen_windows_result", "attach_window_result"):
+                    self.standing_windows.receive(current, message)
                 elif kind in ("window_elements", "window_element_result"):
                     self.elements.receive(current, message)
                 elif kind == "window_snapshot":

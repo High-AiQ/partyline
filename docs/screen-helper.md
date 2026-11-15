@@ -23,6 +23,31 @@ Screen-control tools appear only after control consent.
 Claude Code and OpenCode V2 refresh their tool list on MCP `list_changed`. Codex CLI does not, so its
 screen tools remain listed for the session and return a clear denial when no screen is shared.
 
+## Standing window access
+
+After pairing, the tray item **Let agents on my lines see and use my windows** is off by default and
+persists across restarts. Turn it on to let agents on a line the paired person can access call
+`screen_windows` and `screen_attach_window(window, reason)`. Discovery returns the HWND, process, title
+and state Windows UIA provides. If Chrome approval is active, the list can also include inactive tabs
+with their titles and URLs; otherwise it returns what UIA exposes. For example, a worker can select the
+**Catalog Dashboard** window, choose `shop.us` or `shop.uk`, follow **Manage listing content** to the
+**Listing Content Manager** page, then attach with a short reason.
+
+Attach creates the same line window grant as an explicit share. Existing per-call checks still apply, and
+sublines inherit through the existing grant tree. The first attach in each helper session shows a toast
+naming the line and agent. Turning the item off blocks the next call: the helper checks its saved setting
+on every request, and the server's mirror also denies requests while off. Access pauses while Windows is
+locked or on its secure desktop. **Pause and disconnect** revokes active window grants and cancels
+in-flight calls.
+
+Standing access covers discovery, window screenshots, UI Automation reads and actions, and scoped key
+commits. Real-cursor or synthetic mouse and keyboard control, full-monitor capture and clipboard keep
+their separate consent paths. Partyline Helper, terminals and shells, password managers, UAC and OS
+security windows are never listed or attachable this way; password values remain redacted. The tray shows
+window access as off, on or active; the active tooltip names the line and agent. **Recent activity** shows
+the helper's append-only metadata log, and per-line audit notices record call type, app, title and result
+without contents.
+
 Each granted window has a thin blue outline just outside its visible frame. It follows the window and
 hides while the window is minimized or on another virtual desktop. It is click-through, does not take
 focus, and supported Windows versions exclude it from screen capture. The outline stays above other

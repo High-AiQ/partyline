@@ -5,7 +5,8 @@ from .client import ApiError, MAX_UPLOAD, MAX_MODEL_UPLOAD
 from .pages import message_page
 from .uploads import validate_uploads
 from .tools_media import GET_MEDIA_DESCRIPTION, model_upload_tool, multi_upload_tool, validate_model_path
-from .tools_screen import screen_elements_tool, screen_frame_tool, screen_window_snapshot_tool
+from .tools_screen import (screen_elements_tool, screen_frame_tool, screen_window_snapshot_tool,
+                           screen_windows_tool, screen_attach_window_tool)
 from . import tools_captain, tools_worker, tools_screen
 from .core_ops import _goal, _notes, _reports, _target, _whoami
 def _schema(properties=None, required=None):
@@ -37,6 +38,8 @@ def tool_list(state):
         tools.extend([
             *([screen_frame_tool()] if screen_read else []),
             *([screen_elements_tool(), screen_window_snapshot_tool()] if screen_elements else []),
+            *([screen_windows_tool(), screen_attach_window_tool()]
+              if state.get("window_access") or not state.get("dynamic_screen_tools") else []),
             {
                 "name": "read_messages",
                 "description": ("Read a bounded page, optionally around a message id. A page too large "
@@ -197,7 +200,8 @@ def call(client, name: str, args: dict, home_state: dict):
         return client.request(method, path, None if method == "DELETE" else {"emoji": args["emoji"]})
     if name == "get_media":
         return client.download(args["file_id"], args["variant"], args["destination"])
-    if name in ("screen_elements", "screen_frame", "screen_window_snapshot"):
+    if name in ("screen_elements", "screen_frame", "screen_window_snapshot",
+                "screen_windows", "screen_attach_window"):
         conv, _ = _target(client, home_state, None, ("read",))
         return tools_screen.call(client, name, args, home_state, conv)
     if name == "upload_files":

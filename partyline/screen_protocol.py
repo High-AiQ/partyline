@@ -74,7 +74,13 @@ class HelperHello(HelperMessage):
     press: int = 0  # element-scoped key messages; absent before helper 1.2.0
     chrome_dom: int = 0
     chrome: ChromeState | None = None
+    window_access: bool = False  # helper-owned standing permission; fail closed for older helpers
     update_check: bool = False
+
+
+class WindowAccessChanged(HelperMessage):
+    type: Literal["window_access_changed"]
+    enabled: bool
 
 
 class HelperFrame(HelperMessage):
