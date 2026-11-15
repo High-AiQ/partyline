@@ -1486,7 +1486,10 @@ The person authorizes use through window access; the captain or agent decides
 what to upload. Local paths must resolve to readable regular files. Symlinks are
 followed, and files inside the helper's own data and config directory are refused,
 including paths that reach it through a symlink; this protects pairing credentials
-and audit files. This is the only path restriction. Local files are passed directly
+and audit files. This is the only path restriction. The helper opens paths as the
+signed-in user, so network share paths work wherever that user can open them. When a
+path cannot be opened, the error gives the operating system's reason, such as a
+network path that was not found, but never the path itself. Local files are passed directly
 to Chrome without copying. Media IDs must be readable through `get_media` and are
 downloaded into a fresh helper data directory with sanitized names. Staged media
 files are deleted after ten minutes, or on a later call if the helper was restarted.

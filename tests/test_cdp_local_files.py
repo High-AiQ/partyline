@@ -42,6 +42,14 @@ class LocalPaths(TestCase):
         with self.assertRaises(CDPError):
             prepare([str(link)], [], self.limits)
 
+    def test_an_unreadable_path_names_the_os_reason_and_never_the_path(self):
+        secret = self.root / 'unreachable-share' / 'photo.jpg'
+        with self.assertRaises(CDPError) as caught:
+            prepare([str(secret)], [], self.limits)
+        message = str(caught.exception)
+        self.assertRegex(message, r'regular file: \S')  # the OS reason, worded per platform
+        self.assertNotIn('unreachable-share', message)
+
     def test_non_regular_file_is_refused_without_opening_it(self):
         if not hasattr(os, 'mkfifo'):
             self.skipTest('named pipes are unavailable')
