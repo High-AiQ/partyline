@@ -15,7 +15,8 @@ VALUE_FIELD = 600
 LINE_NAME = 240  # characters of a name shown on a line
 LINE_VALUE = 80
 STATE_FIELDS = ("enabled", "value", "toggle", "selected", "expand_state", "name", "aria_properties",
-                "source", "provider_identity", "disabled_provenance", "readonly", "inert", "viewport_bounds")
+                "source", "provider_identity", "disabled_provenance", "readonly", "inert", "viewport_bounds",
+                "hidden")
 
 
 def clean(value, limit=NAME_FIELD):
@@ -44,6 +45,7 @@ class Node:
         self.actions = tuple(item.get("actions") or ())
         self.toggle = item.get("toggle")
         self.flags = tuple(flag for flag, on in (("off", item.get("offscreen")),
+                                                 ("hidden", item.get("hidden")),
                                                  ("disabled", item.get("enabled") is False),
                                                  ("focused", item.get("focused"))) if on)
         self.bounds = tuple(item["bounds"]) if item.get("bounds") else None

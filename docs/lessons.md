@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — Native window pointers need discovery before attach
+
+The false assumption was that a safe owned dialog's HWND could be passed directly to
+`screen_attach_window`. Standing attach consumes a current window identity and lifetime marker
+registered by `screen_windows`; a bare HWND is refused before that discovery. CDP dialog pointers
+and their documentation now state the complete sequence. The fake-only regression in
+`tests/test_cdp_dialogs.py` follows the returned pointer, proves attach fails before discovery,
+and then runs the real discovery and attach functions with fake native boundaries to obtain a grant.
+
 ## 2026-11-15 — Audit redaction tests must distinguish identifiers from content
 
 The false assumption was that a short file-content substring could never appear in a random media

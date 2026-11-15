@@ -1359,6 +1359,32 @@ file input and must allow multiple files when more than one file is supplied.
 Request `then` for the names and count read back from Chrome and the usual settle
 state. If CDP is unavailable, use the Open dialog path.
 
+CDP reads also discover file inputs missing from Chrome's accessibility tree,
+including hidden inputs, open shadow roots and embedded documents in the same
+DOM session. Discovery uses one pierced DOM snapshot per new read and visits at
+most 10,000 nodes, exposing up to 100 additional inputs as `FileInput` controls
+with `set_files`. Inputs without rendered bounds or with hidden visibility report
+`hidden`; inspect reads their current file names and count. Names use bounded
+label/button text or input attributes, with `aria-label` taking priority over label
+text. These additional inputs follow the document root, before the remaining AX
+nodes, so they stay within the server's tree cap. Existing visible input actions
+stay the same.
+
+Piercing the DOM also lets Chrome send native DOM mutation events from shadow
+trees that the document's MutationObserver cannot see. These events advance the
+same state counter and quiet deadline. Continuously changing shadow content may
+keep action settling active until its absolute two-second deadline; this has not
+been measured on a live Chrome session. The helper retains these events so reads
+are invalidated when shadow content changes.
+
+When Chrome owns a native dialog, CDP reads include a `source_reason` pointer
+with its HWND. Call `screen_windows` first to register current window identities,
+then `screen_attach_window(window="<hwnd>")` with the dialog's returned window id
+(or share the dialog from the helper). Then read its UIA controls, for example
+`screen_elements(query='File name')`. The pointer includes
+only visible, safely enumerable native dialogs within the existing HWND ownership
+boundary; terminal, password-manager and security windows remain excluded.
+
 The person authorizes use through window access; the captain or agent decides
 what to upload. Local paths must resolve to readable regular files. Symlinks are
 followed, and files inside the helper's own data and config directory are refused,

@@ -4,6 +4,7 @@ import uuid
 
 from .cdp_recipes import OBSERVER, STATE, normalize
 from .cdp_ax import exposed
+from .cdp_file_nodes import discover
 from .cdp_settle import Quiet
 from .cdp_transport import CDPError, DocumentChanged, PageUnavailable
 from .cdp_recovery import Recovery
@@ -113,13 +114,16 @@ class Page(Recovery):
             node = self.nodes.get(ident)
             if not node or not node.get("backendDOMNodeId"):
                 return {"error": "stale or virtual CDP element"}
-            fresh = await self.call("Accessibility.getPartialAXTree",
-                                    {"backendNodeId": node["backendDOMNodeId"], "fetchRelatives": False})
+            fresh = {} if node.get("file_input_discovered") else await self.call(
+                "Accessibility.getPartialAXTree",
+                {"backendNodeId": node["backendDOMNodeId"], "fetchRelatives": False})
             node = next((n for n in fresh.get("nodes", [])
                          if n.get("backendDOMNodeId") == node["backendDOMNodeId"]), node)
             if node.get("ignored"):
                 return {"error": "element is no longer exposed in Chrome accessibility"}
             dom = await self.function(node["backendDOMNodeId"], STATE)
+            if node.get("file_input_discovered") and (dom.get("tag"), dom.get("type")) != ("INPUT", "file"):
+                return {"error": "element is no longer a file input"}
             item = normalize(node, ident, None, dom)
             return {"source": "cdp", "live": {**dom, "enabled": item["enabled"],
                     "disabled_provenance": item["disabled_provenance"]},
@@ -135,6 +139,8 @@ class Page(Recovery):
             self.nodes.clear()
             epoch = self.epoch
             nodes = exposed((await self.call("Accessibility.getFullAXTree"))["nodes"])
+            # Keep upload targets in the first chunk, before a large AX tree reaches the server cap.
+            nodes[1:1] = await discover(self, nodes)
             index = 0
         ids = {n["nodeId"]: hashlib.blake2b(
             f'{self.access.session.window_grant_id}:{self.identity}:{self.target}:{epoch}:'

@@ -6,6 +6,7 @@ STATE = r"""function() {
  const inert=e.closest('[inert]');
  const disabled=e.matches(':disabled');
  const password=e.tagName==='INPUT' && e.type==='password';
+ const file=e.tagName==='INPUT' && e.type==='file';
  return {native_disabled:disabled, aria_disabled:!!aria, readonly:!!e.readOnly,
    inert:!!inert, value:password?null:('value' in e?String(e.value).slice(0,600):null),
    password, checked:'checked' in e?e.checked:null, selected:'selected' in e?e.selected:null,
@@ -16,6 +17,8 @@ STATE = r"""function() {
      return a===e;})(),
    files:e.tagName==='INPUT' && e.type==='file'?Array.from(e.files, f=>f.name):null,
    file_count:e.tagName==='INPUT' && e.type==='file'?e.files.length:null,
+   ...(file?{hidden:!r.width||!r.height||['hidden','collapse'].includes(
+     e.ownerDocument.defaultView.getComputedStyle(e).visibility)}:{}),
    bounds:[r.left,r.top,r.right,r.bottom]};
 }"""
 # Action-only: never run per node during reads (layout hit tests and text reads on large
@@ -120,4 +123,6 @@ def normalize(node, ident, parent, dom=None):
         if role in ("ComboBox", "ListItem"):
             actions.append("select")
     item["actions"] = actions
+    if node.get("file_input_discovered"):
+        item.update(control_type="FileInput", hidden=bool(dom.get("hidden")), actions=["set_files"])
     return item
