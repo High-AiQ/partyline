@@ -2,6 +2,7 @@
 import json
 
 from .cdp_recipes import HIT, STATE
+from .cdp_dom_nodes import DETAIL
 from .cdp_input import key
 from .cdp_select import select_option
 from .cdp_transport import CDPError, DocumentChanged
@@ -16,6 +17,8 @@ async def act(page, message):
     backend = node["backendDOMNodeId"]
     state = await page.function(backend, STATE)
     action = message["action"]
+    if node.get("dom_discovered") and (await page.function(backend, DETAIL)).get("hidden"):
+        raise CDPError("element is no longer visible")
     if not message.get("force") and any(state.get(k) for k in ("native_disabled", "aria_disabled", "inert")):
         raise CDPError("element reports disabled (DOM/ARIA/inert)")
     if action == "set_value" and (state.get("readonly") or state.get("password")):

@@ -58,10 +58,3 @@ def file_nodes(root):
                        "role": {"value": "fileInput"}, "name": {"value": name[:MAX_NAME]},
                        "file_input_discovered": True})
     return result
-
-
-async def discover(page, nodes):
-    document = await page.call("DOM.getDocument", {"depth": -1, "pierce": True})
-    known = {node.get("backendDOMNodeId") for node in nodes}
-    return [node for node in file_nodes(document.get("root", {}))
-            if node["backendDOMNodeId"] not in known]

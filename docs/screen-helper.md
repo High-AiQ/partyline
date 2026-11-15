@@ -659,7 +659,21 @@ through elements or CDP.
   own session (hover, then press and release, `clickCount` 2 for a double-click). The helper maps the point to
   CSS pixels from the page area's rectangle and the viewport width, so browser zoom and DPI are exact; a
   point on the browser's own controls, a pinch-zoomed page, or a grant on a tab that is not the one
-  shown in the window is refused. No cursor moves, no window comes
+  shown in the window is refused.
+  **Finding the page area.** The helper takes the visible `Chrome_RenderWidgetHostHWND` child windows of the
+  granted window. One is the page. Of several (side panel, split view, embedded surface) the page is the one
+  whose size is the viewport's (`innerWidth` and `innerHeight` times `devicePixelRatio`, within 2%) and that
+  holds the clicked point; a point on none of them is on the browser's own controls, and the click is
+  refused as ambiguous only when two of the same size both hold it. Recent Chrome builds can drop the
+  renderer child window altogether; the helper then uses, in order, the UI Automation `Document` element of
+  the active tab inside the granted window (its `BoundingRectangle`; empty rectangles are ignored, and it must
+  be the viewport's size within the same 2%, chosen the same way if there are several). With neither, the
+  click is refused: the window's CDP bounds give the page's size but not its place (a toolbar above the page
+  cannot be told from a panel below it), so they are never used to guess where the page is. Every source goes through the same pinch-zoom and
+  resize check, and `screen_window_snapshot` marks use the same resolver, so a snapshot and a click agree.
+  When nothing is
+  found the error says what was seen, for example "found 0 renderer windows and no page document" or
+  "found 3 renderer windows, none matching the viewport". No cursor moves, no window comes
   forward and no consent prompt is shown: it is allowed under standing access and under any window grant, as
   CDP element actions are. It works over iframes, since the events enter at the top-level page.
 - **Route 2, any other window (or Chrome without CDP).** A real-cursor click with `SendInput`, confined to the
@@ -1270,12 +1284,24 @@ active tab's title against the current HWND title; visibility only breaks duplic
 ties. A uniquely matched tab stays on CDP when its HWND is covered and Chrome reports all
 tabs hidden. Missing or
 ambiguous evidence uses UIA; another Chrome window needs its own grant. Page actions are
-on by default. Ignored AX nodes are omitted before chunking; exposed descendants attach
-to the nearest exposed ancestor. Chrome hit testing descends open shadow roots and follows composed-tree
+on by default. Ignored AX nodes without an interactive DOM target are omitted before
+chunking; exposed descendants attach to the nearest exposed ancestor. Chrome hit testing descends open shadow roots and follows composed-tree
 ancestry, including assigned slots; an element covered by a separate subtree is still refused. Reads use Chrome AX plus live DOM native disabled, ARIA disabled, readonly,
 inert, value, checked and selected state. With `bounds=true`, CDP adds `viewport@` rectangles
 in CSS pixels; it does not infer screen/frame coordinates from browser decorations. A class-only link can look enabled while reporting
 `disabled(aria_disabled)`; that provenance is retained. Password values are omitted.
+
+Helper **1.4.5** also discovers keyboard-focusable DOM elements without an ARIA role,
+including triggers inside shadow roots and custom hosts. Their names use the accessible
+name, `aria-label`, `title`, then at most 240 characters of visible text from a bounded
+32-node walk. Reads never hit-test or read whole-container text. These elements offer
+`scroll_into_view`, `press` and `invoke`; invocation uses the same covering-element HIT
+check and trusted mouse input as a button. Visible `option`, `menuitemradio`,
+`menuitemcheckbox`, `switch`, `treeitem`, and actionable `gridcell` widgets offer
+`invoke` and `select`. Open a custom popup with `invoke`, then read again to discover
+its newly visible options and select an option by its element ID. Hidden options are
+omitted. `tests/test_cdp_focusable.py` covers a role-less focusable shadow trigger and
+custom option elements.
 
 `screen_element_action` sends page-scoped mouse/keyboard input, focuses the actual DOM node,
 and edits through `Input.insertText`. `select value=<label or value>` reads the native options,

@@ -146,7 +146,8 @@ class WindowSnapshots:
             page = chrome.pages.get(access, {}).get(chrome.selected.get(access))
             if not page or not page.live or page.page_state != "alive":
                 return None
-            return (await page_frame(page, grant["hwnd"]))[:3]
+            sources = getattr(getattr(self.shares, "clicks", None), "sources", None)  # the clicks' own
+            return (await page_frame(page, grant["hwnd"], None, sources))[:3]
         except (CDPError, OSError):
             return None
 

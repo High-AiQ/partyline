@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — Zero-size boxes do not negate AX exposure
+
+The false assumption was that zero width or height meant an AX-exposed control should disappear.
+Styled checkbox inputs can use visible labels, and links can wrap floated content while their own
+boxes have no height. Keep AX-exposed controls, state and parent links; apply supplemental DOM
+visibility filtering only to newly discovered candidates. Bounded text fallback is needed only when
+AX, `aria-label` and `title` provide no name. Regressions in `tests/test_cdp_focusable.py` retain
+zero-size controls and children, and prove named AX controls avoid extra detail calls.
+
 ## 2026-11-15 — Native window pointers need discovery before attach
 
 The false assumption was that a safe owned dialog's HWND could be passed directly to
