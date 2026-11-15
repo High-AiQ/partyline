@@ -3096,3 +3096,17 @@ returning a crash error. Probe only after `Inspector.targetReloadedAfterCrash`;
 known-crashed reads must reach UIA without a renderer round trip. The recovery fake
 leaves evaluate/AX/frame-tree commands pending and drives their deadlines with a
 fake clock, so an immediate synthetic error cannot hide a ten-second stall.
+
+An approved browser socket dropping is distinct from approval refusal. Treating both
+as a permanent refusal stranded standing window grants because only the local picker
+reset the state. Dropped sockets may reconnect on demand; new grants and explicit
+reloads can retry refusals, all under one helper-wide 60-second prompt budget.
+`tests/test_cdp_reconnect.py` uses a fake clock for disconnect, standing/local regrant,
+reload, cooldown reporting and concurrent request storms.
+
+Starting Chrome approval outside the operation queue is insufficient if a page action
+then awaits that approval task. The Allow prompt has no deadline, so such a reload
+held the entire window queue and survived revocation. Reload now starts approval and
+returns a failed, explicit retry instruction immediately. The blocking-connector test
+in `tests/test_cdp_reconnect.py` proves reads and UIA actions continue while the prompt
+is unanswered, approval cannot silently reload, and revocation cancels the pending attempt.

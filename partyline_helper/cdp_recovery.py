@@ -65,6 +65,8 @@ class Recovery:
 
 async def reload(chrome, access, page):
     if not page:
+        if chrome.browser.state != "connected":
+            raise CDPError(chrome.browser.reason())
         raise CDPError("reload needs a mapped Chrome page on the approved browser connection")
     page.guard(document=False, healthy=False)
     if page.page_state != "alive" and not page.url:

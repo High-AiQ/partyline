@@ -80,11 +80,14 @@ class Chrome:
         self.session.tools.audit.append("action", "window", str(info["process"])[:120], "chrome",
                                         json.dumps(info, separators=(",", ":")))
 
-    def start(self, access):
+    def start(self, access, retry=False):
         """Start approval outside the operation queue; reads continue through UIA while it is pending."""
-        if not access.grant or access.grant.get("process", "").lower() != "chrome.exe":
+        if (not access.grant or access.grant.get("process", "").lower() != "chrome.exe"
+                or access.gate.revoked.is_set()):
             return
-        if self.browser.socket or self.browser.closed or self.browser.state == "refused":
+        if retry:
+            self.browser.request_retry()
+        if not self.browser.can_attempt():
             return
         if self.connecting and not self.connecting.done():
             return
@@ -132,7 +135,7 @@ class Chrome:
                 self.start(access)
                 pending = self.connecting and not self.connecting.done()
                 self.reasons[access] = ("Awaiting Chrome approval; using UIA meanwhile" if pending
-                                        else self.browser.detail)
+                                        else self.browser.reason())
                 return None
             guard()
             prior = self.pages.get(access, {}).get(self.selected.get(access))
@@ -207,6 +210,14 @@ class Chrome:
         if (message.get("action") not in ("reload", "set_files") and message.get("type") != "window_eval"
                 and self.sources.get(access) == "uia" and message.get("element_id") in access.elements):
             return None
+        if message.get("action") == "reload" and not self.browser.socket:
+            if not access.grant or access.gate.revoked.is_set():
+                return {"status": "failed", "source": "cdp", "error": "consent revoked"}
+            self.start(access, retry=True)
+            pending = self.connecting and not self.connecting.done()
+            return {"status": "failed", "source": "cdp", "error": (
+                "Awaiting Chrome approval; call reload again after Chrome allows the connection"
+                if pending else self.browser.reason())}
         page = await self.page(access)
         if message.get("action") == "set_files" and (not page or self.sources.get(access) != "cdp"):
             return {"status": "failed", "error": "CDP unavailable; use the Open dialog path instead"}

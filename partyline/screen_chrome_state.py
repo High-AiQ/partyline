@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class ChromeState(BaseModel):
-    state: Literal["not_enabled", "awaiting_approval", "connected", "refused"]
+    state: Literal["not_enabled", "awaiting_approval", "connected", "disconnected", "refused"]
     detail: str = Field(default="", max_length=300)
 
 
