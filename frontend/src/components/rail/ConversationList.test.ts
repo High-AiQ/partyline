@@ -5,6 +5,7 @@ import { screenStatus } from "../../state/screen-status.svelte";
 import { tick } from "svelte";
 import { room } from "../../state/room.svelte.js";
 import * as starState from "../../state/conversation-star";
+import { dialogs } from "../../state/dialogs.svelte";
 
 function props() {
   return { onmanagement: vi.fn(), onrename: vi.fn(), oncloseprocesses: vi.fn(), ondelete: vi.fn() };
@@ -184,6 +185,43 @@ describe("starred conversation rail", () => {
       expect(open).not.toHaveBeenCalled();
       expect(document.querySelector(".conv.active")).toBeNull();
     } finally {
+      await unmount(list);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("stars in one click with no confirmation dialog", async () => {
+    room.conversations = [
+      { id: "line", name: "Line", topic: "", created_at: 1, archived_at: null, live_count: 0 },
+    ];
+    const toggleStar = vi.spyOn(starState, "toggleConversationStar").mockResolvedValue(undefined);
+    const list = mount(ConversationList, { target: document.body, props: props() });
+    try {
+      star("Star Line").click();
+      expect(toggleStar).toHaveBeenCalledWith(room, "line");
+      expect(dialogs.stack).toHaveLength(0);
+    } finally {
+      await unmount(list);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("asks before unstarring and leaves the star alone until confirmed", async () => {
+    room.conversations = [
+      { id: "line", name: "Line", topic: "", created_at: 1, archived_at: null, live_count: 0, starred: true },
+    ];
+    const toggleStar = vi.spyOn(starState, "toggleConversationStar").mockResolvedValue(undefined);
+    const list = mount(ConversationList, { target: document.body, props: props() });
+    try {
+      star("Unstar Line").click();
+      expect(dialogs.stack).toHaveLength(1);
+      expect(toggleStar).not.toHaveBeenCalled();
+      // Escape is the dialog stack's: App pops the top entry.
+      dialogs.closeTop();
+      expect(dialogs.stack).toHaveLength(0);
+      expect(toggleStar).not.toHaveBeenCalled();
+    } finally {
+      dialogs.closeAll();
       await unmount(list);
       vi.restoreAllMocks();
     }
