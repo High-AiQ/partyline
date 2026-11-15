@@ -1,5 +1,16 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — Native query candidates are broader than exact server answers
+
+The false assumption in the Windows filtered-read test was that an exact multiword query
+also produced an exact native name condition. To accommodate name normalization, the helper
+searches a safe token: `=Snapshot button` becomes a substring search for `snapshot`, so both
+Snapshot button and Snapshot checkbox are candidates. Ancestor child caches reconstruct paths;
+those cached siblings are not emitted unless they are candidates or ancestors themselves.
+The server applies the full anchored query to the candidate tree. The native test now also
+requests the exact Button control type, and a portable regression in `tests/test_uia_latency.py`
+checks candidate inclusion, mapping-only sibling exclusion, and the final exact server answer.
+
 ## 2026-11-14 — A filtered read must not invalidate unrelated action targets
 
 The false assumption was that replacing a full snapshot with a selective query could also replace

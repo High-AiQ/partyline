@@ -40,6 +40,12 @@ helper 1.3.0 must be deployed and the Catalog Dashboard sequence repeated to est
 | 8 | 100 ms pushed-change debounce | Retained off the action/read path: the event counter advances synchronously before a push is coalesced. Reads validate the counter directly | Zero critical-path delay from this debounce |
 | 9 | Native screenshot capture, PNG encoding, media transforms | Instrumented separately; no speculative quality/format changes | No claimed saving |
 
+Native name conditions are candidate supersets: a multiword query such as `=Snapshot button`
+uses the safe substring `snapshot`, so `Snapshot checkbox` can also reach the helper result.
+The server applies the full anchored query before returning lines. A control-type condition is
+exact; the Windows fixture uses `control_type="Button"` to exclude its CheckBox sibling.
+Sibling caches used only for path mapping do not add rows to the helper result.
+
 Filtered matches still require control-view path reconstruction: each newly encountered ancestor
 calls `children`, which uses an all-children `BuildUpdatedCache` in shallow mode. Shared ancestors
 are reused within a query, but wide/deep ancestor chains can remain costly; watch `helper_walk_ms`

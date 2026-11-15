@@ -84,7 +84,8 @@ class WindowsUIATests(unittest.TestCase):
                 self.assertTrue(any(matches), (expected, result))
             assert_foreground()
             from partyline_helper.uia_process import read
-            filtered = read(window["hwnd"], query={"query": "=Snapshot button"})
+            # Multiword name conditions are native candidate supersets; type filtering is exact.
+            filtered = read(window["hwnd"], query={"query": "=Snapshot button", "control_type": "Button"})
             self.assertTrue(filtered.get("scoped"), filtered)
             self.assertEqual(1, sum(item["name"] == "Snapshot button" for item in filtered["elements"]))
             self.assertFalse(any(item["name"] == "Snapshot checkbox" for item in filtered["elements"]))

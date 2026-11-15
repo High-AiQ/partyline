@@ -79,6 +79,31 @@ class QueryTests(unittest.TestCase):
         self.assertEqual([1], result['paths'][result['elements'][1]['id']])
         self.assertNotIn('unrelated', str(result))
 
+    def test_multiword_native_candidates_are_exactly_filtered_by_the_server(self):
+        from partyline.screen_tree import Snapshot
+        from partyline.screen_tree_answer import answer
+        query = {'query': '=Snapshot button'}
+        automation = Mock()
+        condition(SimpleNamespace(automation=automation), query)
+        automation.CreatePropertyConditionEx.assert_called_once_with(30005, 'snapshot', 3)
+        provider = Provider([{'rect': (0, 0, 9, 9), 'children': [1, 2, 3]},
+                             {'rect': (0, 0, 1, 1), 'name': 'Snapshot button'},
+                             {'rect': (0, 0, 1, 1), 'name': 'Snapshot checkbox'},
+                             {'rect': (0, 0, 1, 1), 'name': 'Unrelated sibling'}])
+        provider.parent = lambda _: 0
+        result = query_snapshot(provider, query, finder=lambda *_: [1, 2])
+        self.assertEqual([0, 1, 2], provider.reads)
+        self.assertEqual(['', 'Snapshot button', 'Snapshot checkbox'],
+                         [item['name'] for item in result['elements']])
+        tree = Snapshot(result['snapshot_id'], 0)
+        tree.scoped = True
+        tree.add(result['elements'])
+        reply = answer(tree, {}, query)
+        self.assertEqual(1, reply['total'])
+        self.assertIn('Snapshot button', reply['lines'])
+        self.assertNotIn('Snapshot checkbox', reply['lines'])
+        self.assertNotIn('Unrelated sibling', reply['lines'])
+
     def test_mid_walk_mutations_skip_the_match_and_mark_the_capture_changed(self):
         for failure in ('removed', 'foreign', 'properties'):
             provider = Provider([{'rect': (0, 0, 9, 9), 'children': [1, 2]},
