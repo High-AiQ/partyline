@@ -1284,12 +1284,24 @@ active tab's title against the current HWND title; visibility only breaks duplic
 ties. A uniquely matched tab stays on CDP when its HWND is covered and Chrome reports all
 tabs hidden. Missing or
 ambiguous evidence uses UIA; another Chrome window needs its own grant. Page actions are
-on by default. Ignored AX nodes are omitted before chunking; exposed descendants attach
-to the nearest exposed ancestor. Chrome hit testing descends open shadow roots and follows composed-tree
+on by default. Ignored AX nodes without an interactive DOM target are omitted before
+chunking; exposed descendants attach to the nearest exposed ancestor. Chrome hit testing descends open shadow roots and follows composed-tree
 ancestry, including assigned slots; an element covered by a separate subtree is still refused. Reads use Chrome AX plus live DOM native disabled, ARIA disabled, readonly,
 inert, value, checked and selected state. With `bounds=true`, CDP adds `viewport@` rectangles
 in CSS pixels; it does not infer screen/frame coordinates from browser decorations. A class-only link can look enabled while reporting
 `disabled(aria_disabled)`; that provenance is retained. Password values are omitted.
+
+Helper **1.4.5** also discovers keyboard-focusable DOM elements without an ARIA role,
+including triggers inside shadow roots and custom hosts. Their names use the accessible
+name, `aria-label`, `title`, then at most 240 characters of visible text from a bounded
+32-node walk. Reads never hit-test or read whole-container text. These elements offer
+`scroll_into_view`, `press` and `invoke`; invocation uses the same covering-element HIT
+check and trusted mouse input as a button. Visible `option`, `menuitemradio`,
+`menuitemcheckbox`, `switch`, `treeitem`, and actionable `gridcell` widgets offer
+`invoke` and `select`. Open a custom popup with `invoke`, then read again to discover
+its newly visible options and select an option by its element ID. Hidden options are
+omitted. `tests/test_cdp_focusable.py` covers a role-less focusable shadow trigger and
+custom option elements.
 
 `screen_element_action` sends page-scoped mouse/keyboard input, focuses the actual DOM node,
 and edits through `Input.insertText`. `select value=<label or value>` reads the native options,

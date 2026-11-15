@@ -2,9 +2,9 @@
 import hashlib
 import uuid
 
-from .cdp_recipes import OBSERVER, STATE, normalize
+from .cdp_recipes import OBSERVER, STATE, WIDGET_ROLES, normalize, value
 from .cdp_ax import exposed
-from .cdp_file_nodes import discover
+from .cdp_dom_nodes import DETAIL, discover
 from .cdp_settle import Quiet
 from .cdp_transport import CDPError, DocumentChanged, PageUnavailable
 from .cdp_recovery import Recovery
@@ -118,11 +118,15 @@ class Page(Recovery):
             fresh = {} if node.get("file_input_discovered") else await self.call(
                 "Accessibility.getPartialAXTree",
                 {"backendNodeId": node["backendDOMNodeId"], "fetchRelatives": False})
-            node = next((n for n in fresh.get("nodes", [])
-                         if n.get("backendDOMNodeId") == node["backendDOMNodeId"]), node)
-            if node.get("ignored"):
+            node = {**node, **next((n for n in fresh.get("nodes", [])
+                                  if n.get("backendDOMNodeId") == node["backendDOMNodeId"]), {})}
+            if node.get("ignored") and not node.get("dom_discovered"):
                 return {"error": "element is no longer exposed in Chrome accessibility"}
             dom = await self.function(node["backendDOMNodeId"], STATE)
+            if node.get("dom_discovered"):
+                dom.update(await self.function(node["backendDOMNodeId"], DETAIL))
+                if dom.get("hidden"):
+                    return {"error": "element is no longer visible"}
             if node.get("file_input_discovered") and (dom.get("tag"), dom.get("type")) != ("INPUT", "file"):
                 return {"error": "element is no longer a file input"}
             item = normalize(node, ident, None, dom)
@@ -139,9 +143,10 @@ class Page(Recovery):
             self.access.forget()
             self.nodes.clear()
             epoch = self.epoch
-            nodes = exposed((await self.call("Accessibility.getFullAXTree"))["nodes"])
+            raw = (await self.call("Accessibility.getFullAXTree"))["nodes"]
+            nodes = exposed(raw)
             # Keep upload targets in the first chunk, before a large AX tree reaches the server cap.
-            nodes[1:1] = await discover(self, nodes)
+            nodes[1:1] = await discover(self, raw)
             index = 0
         ids = {n["nodeId"]: hashlib.blake2b(
             f'{self.access.session.window_grant_id}:{self.identity}:{self.target}:{epoch}:'
@@ -153,6 +158,13 @@ class Page(Recovery):
                 ident = ids[node["nodeId"]]
                 dom = (await self.function(node["backendDOMNodeId"], STATE, release=False)
                        if node.get("backendDOMNodeId") else {})
+                named = value(node.get("name")) or dom.get("aria_label") or dom.get("title")
+                if not node.get("file_input_discovered") and (node.get("dom_discovered") or not named
+                        and (dom.get("focusable") or dom.get("role") in WIDGET_ROLES | {"gridcell"})):
+                    dom.update(await self.function(node["backendDOMNodeId"], DETAIL, release=False))
+                    # AX can expose zero-size controls activated through their visible labels.
+                    if node.get("dom_discovered") and dom.get("hidden"):
+                        continue
                 item = normalize(node, ident, ids.get(node.get("parentId")), dom)
                 elements.append(item)
                 self.nodes[ident] = node
