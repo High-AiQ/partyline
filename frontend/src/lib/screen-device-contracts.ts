@@ -26,6 +26,7 @@ export const ScreenDeviceSchema = z.object({
   online: z.boolean(),
   monitors: z.array(ScreenMonitorSchema),
   window_grants: z.array(ScreenWindowGrantSchema).optional(),
+  window_access_line: z.string().nullable().optional(),
   /** The version the connected helper reported; null while offline. */
   helper_version: z.string().nullable().optional(),
   /** True when the server's own (newer) version is ahead of the connected helper. */

@@ -172,6 +172,7 @@ class WindowShares:
             entry["access"].revoke()
             if outline := entry.get("outline"):
                 outline.close()
+            entry["worker"].cancel()
             self.spawn(entry["worker"].close())
             if subscription := entry.get("events"):
                 self.spawn(asyncio.to_thread(subscription.close))

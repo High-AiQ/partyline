@@ -1,5 +1,20 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — Standing access needs local revocation and an explicit line binding
+
+The false assumptions were that stopping capture finishes promptly, that every paired helper has a
+line root, and that a grant's line identifies every caller. Pause now revokes local gates and cancels
+calls before awaiting cleanup, with disconnect running independently. Settings lets the verified
+paired person authorize a line root for account-wide helpers; unknown owners stay denied. Inherited
+actions keep the calling subline through transport and local audit. Regression tests in
+`tests/test_standing_access_fixes.py` block cleanup on events, exercise Settings and legacy pairing,
+reject other people and machines, and route a child action through a parent grant into the helper log.
+Removing server authorization alone does not clear a helper's local gates, outline, subscriptions or
+tray label. Person-side binding changes must also send each standing grant's revocation to the helper;
+helper-originated toggle-off can remain quiet because it has already revoked locally. The real-route
+regression in `tests/test_standing_scope_revocation.py` feeds those messages into helper dispatch and
+checks local cleanup while preserving explicitly shared windows.
+
 ## 2026-11-15 — A native restore attempt is not a foreground guarantee
 
 The false assumption in CDP commit `45143c01` (integrated as `c55eb919`) was that the native

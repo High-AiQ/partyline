@@ -48,7 +48,7 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.access = SimpleNamespace(grant=dict(GRANT), generation=3, check=AsyncMock(return_value=None),
                                       revoke=Mock())
         self.entry = {"access": self.access, "target": {"line_name": "Alpha"}, "title": "Editor",
-                      "worker": SimpleNamespace(close=AsyncMock())}
+                      "worker": SimpleNamespace(cancel=Mock(), close=AsyncMock())}
         self.shares.grants["g1"] = self.entry
 
     async def asyncTearDown(self):

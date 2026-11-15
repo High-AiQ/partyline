@@ -14,8 +14,38 @@ class AttachWindow(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
 
+class WindowAccessLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    conv_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
 def router_for(runtime, hub):
     router = APIRouter()
+
+    @router.put("/api/screen/devices/{device_id}/window-access-line")
+    async def authorize_line(device_id: str, body: WindowAccessLine, request: Request):
+        principal = request_principal(request)
+        if not is_human(principal):
+            raise HTTPException(403, "only the paired person can authorize window access lines")
+        row = runtime.db._exec("SELECT id FROM screen_devices WHERE id=? AND owner_id=? "
+                               "AND revoked_at IS NULL", (device_id, principal.user_id)).fetchone()
+        if not row:
+            raise HTTPException(404, "computer not found")
+        if body.conv_id:
+            line = runtime.db.get_conversation(body.conv_id)
+            if not line:
+                raise HTTPException(404, "line not found")
+            if line.get("archived_at"):
+                raise HTTPException(409, "cannot authorize an archived line")
+        runtime.db._exec("INSERT INTO screen_device_window_access(device_id,enabled,owner_conv_id) "
+                        "VALUES(?,0,?) ON CONFLICT(device_id) DO UPDATE "
+                        "SET owner_conv_id=excluded.owner_conv_id", (device_id, body.conv_id))
+        # Remove outstanding grants before announcing the changed scope.
+        await hub.window_grants.revoke_standing(device_id, tell_helper=True)
+        from .capability_versions import bump_runtime
+        bump_runtime(runtime)
+        await hub._device_event({"id": device_id, "owner_id": principal.user_id}, device_id in hub.devices)
+        return {"ok": True}
 
     def caller(request, conv_id):
         principal = request_principal(request)

@@ -116,7 +116,7 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
                 return {"status": "failed", "error": STALE}
             hub.window_grants.spend(grant)
             response = await hub.elements.exchange(principal, grant, device, "window_element_action",
-                agent=principal.name, line=grant.get("conv_id", ""), title=grant.get("title", ""),
+                agent=principal.name, title=grant.get("title", ""),
                 process=grant.get("process", ""), **message)
         result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
         if result.get("status") in ("completed", "no_effect") and not result.get("grant_ended"):

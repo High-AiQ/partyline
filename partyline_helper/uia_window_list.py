@@ -16,6 +16,7 @@ HARD_FLOOR = frozenset({
     "credentialuibroker.exe", "consent.exe", "winlogon.exe", "logonui.exe", "lockapp.exe",
     "partylinehelper.exe", "partyline helper.exe",
     "wezterm-gui.exe", "wezterm.exe", "alacritty.exe", "hyper.exe", "tabby.exe",
+    "conemu.exe", "conemu64.exe", "cmder.exe", "mobaxterm.exe", "termius.exe", "warp.exe",
 })
 
 

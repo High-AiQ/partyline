@@ -26,7 +26,11 @@ screen tools remain listed for the session and return a clear denial when no scr
 ## Standing window access
 
 After pairing, the tray item **Let agents on my lines see and use my windows** is off by default and
-persists across restarts. Turn it on to let agents on a line the paired person can access call
+persists across restarts. In **Settings → Computers**, the paired person selects a **Window access**
+line for each computer. That line and its sublines are authorized; **No lines** removes the binding and
+revokes standing grants. Pairing from a line initially selects that line. Settings pairing and existing
+account-wide helpers start with no authorized lines until their owner selects one. An unknown owner
+never receives standing access. Turn the tray toggle on to let agents on an authorized line call
 `screen_windows` and `screen_attach_window(window, reason)`. Discovery returns the HWND, process, title
 and state Windows UIA provides. If Chrome approval is active, the list can also include inactive tabs
 with their titles and URLs; otherwise it returns what UIA exposes. For example, a worker can select the
@@ -38,7 +42,8 @@ sublines inherit through the existing grant tree. The first attach in each helpe
 naming the line and agent. Turning the item off blocks the next call: the helper checks its saved setting
 on every request, and the server's mirror also denies requests while off. Access pauses while Windows is
 locked or on its secure desktop. **Pause and disconnect** revokes active window grants and cancels
-in-flight calls.
+in-flight calls. Local gates close before awaited cleanup; disconnect starts independently of capture,
+transport and browser teardown.
 
 Standing access covers discovery, window screenshots, UI Automation reads and actions, and scoped key
 commits. Real-cursor or synthetic mouse and keyboard control, full-monitor capture and clipboard keep

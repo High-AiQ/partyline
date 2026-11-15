@@ -5,6 +5,7 @@
   import SettingsSection from "../SettingsSection.svelte";
   import SettingRow from "../SettingRow.svelte";
   import PairingSteps from "../../PairingSteps.svelte";
+  import WindowAccessLine from "../../WindowAccessLine.svelte";
   const devices = $derived(screenStatus.devices);
   let code = $state("");
   let error = $state("");
@@ -38,6 +39,7 @@
         {device.name} ({device.online ? "online" : "offline"})
         <button type="button" onclick={() => void revoke(device.id)}>Revoke</button>
       </p>
+      <WindowAccessLine {device} />
     {/each}
     {#if error}<p role="alert">{error}</p>{/if}
     <PairingSteps origin={window.location.origin} code={code || "YOUR-CODE"} />

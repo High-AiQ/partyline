@@ -216,13 +216,15 @@ class WindowGrants:
         if device_id:
             await self.changed(device_id)
 
-    async def revoke_standing(self, device_id):
+    async def revoke_standing(self, device_id, *, tell_helper=False):
         rows = self.hub.runtime.db._exec(
             "SELECT id FROM screen_line_window_grants WHERE device_id=? AND standing_access=1",
             (device_id,),
         ).fetchall()
+        self.hub.runtime.db._exec(
+            "DELETE FROM screen_line_window_grants WHERE device_id=? AND standing_access=1", (device_id,))
         for row in rows:
-            await self.revoke(row["id"], tell_helper=False)
+            await self.revoke(row["id"], tell_helper=tell_helper)
 
     async def expire(self):
         active = {row["id"] for row in self.hub.runtime.db._exec(GRANTS).fetchall()}

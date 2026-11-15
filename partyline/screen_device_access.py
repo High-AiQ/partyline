@@ -31,11 +31,13 @@ def line_devices(hub, conv_id: str, name: str | None = None, db=None) -> list[di
 
 
 def standing_root(db, device) -> str | None:
-    """The line the person paired from, separate from account-wide screen-sharing scope."""
-    row = db._exec("SELECT owner_conv_id FROM screen_device_window_access WHERE device_id=?",
-                   (device.get("id"),)).fetchone()
+    """A person-approved line root, only while the paired owner still exists."""
+    row = db._exec("SELECT a.owner_conv_id FROM screen_device_window_access a "
+                  "JOIN screen_devices d ON d.id=a.device_id JOIN users u ON u.id=d.owner_id "
+                  "WHERE d.id=? AND d.owner_id=? AND d.revoked_at IS NULL",
+                   (device.get("id"), device.get("owner_id"))).fetchone()
     root = row["owner_conv_id"] if row else None
-    return root or device.get("conv_id")
+    return root
 
 
 def standing_devices(hub, conv_id: str) -> list[dict]:

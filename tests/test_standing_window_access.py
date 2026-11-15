@@ -51,6 +51,17 @@ class HelperWindowPermissionTests(unittest.TestCase):
         self.assertEqual("12:https://example.test/edit", found[1]["id"])
         self.assertEqual("active", found[1]["state"])
 
+    def test_additional_windows_terminal_hosts_and_their_tabs_are_never_discovered(self):
+        terminals = ("ConEmu.exe", "ConEmu64.exe", "Cmder.exe", "MobaXterm.exe", "Termius.exe", "Warp.exe")
+        rows = [{"hwnd": index, "process": process, "title": "Terminal", "state": "visible"}
+                for index, process in enumerate(terminals, 1)]
+        safe = {"hwnd": 20, "process": "editor.exe", "title": "Document", "state": "visible"}
+        tabs = [{"hwnd": row["hwnd"], "title": "Terminal tab", "url": "https://example.test"}
+                for row in rows]
+        with patch("partyline_helper.uia_window_list.window_providers",
+                   return_value=(lambda: [*rows, safe], lambda: tabs)):
+            self.assertEqual([{**safe, "id": "20"}], standing_windows())
+
     def test_discovery_scopes_chrome_tabs_to_an_enumerated_safe_window(self):
         row = {"hwnd": 12, "pid": 9, "process": "chrome.exe", "title": "Catalog Dashboard",
                "state": "active", "id": "12"}
@@ -210,10 +221,12 @@ class StandingCallCancellationTests(unittest.IsolatedAsyncioTestCase):
             window=SimpleNamespace(revoke=Mock()),
             windows=SimpleNamespace(revoke_all=Mock(), close=AsyncMock()),
             window_task=SimpleNamespace(close=AsyncMock()),
+            control=SimpleNamespace(end=Mock()), worker=None,
             tools=SimpleNamespace(end=AsyncMock()),
             socket=SimpleNamespace(close=AsyncMock()),
         )
         session.window_access_enabled = True
+        session.window_task.cancel = Mock()
         session.disconnect_requested = False
         with patch("partyline_helper.screen_access_toggle.set_enabled", return_value=False):
             await pause_windows(session)

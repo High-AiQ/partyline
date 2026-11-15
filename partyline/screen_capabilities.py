@@ -35,9 +35,8 @@ def for_attachment(runtime, principal, conv_id, state):
     grant = hub.control.grants.get(share.share_id) if share and share.status == "active" else None
     state["screen_control"] = bool(
         grant and grant.status == "active" and grant.holder in (None, principal.name))
-    from .screen_device_access import line_devices
-    devices = line_devices(hub, principal.conv_id, db=runtime.db)
-    state["window_access"] = any(device.get("window_access_enabled", False) for device in devices)
+    from .screen_device_access import standing_devices
+    state["window_access"] = bool(standing_devices(hub, principal.conv_id))
     from .screen_grants import line_grants
     state["screen_windows"] = bool(line_grants(runtime.db, principal.conv_id))
     return state

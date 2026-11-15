@@ -135,12 +135,15 @@ class WindowTask:
         except ConnectionClosed:
             pass
 
+    def cancel(self):
+        """Cancel queued and in-flight reads/actions before any awaited teardown."""
+        for task in (self.task, self.read_task):
+            if task:
+                task.cancel()
+
     async def close(self):
-        if self.task:
-            self.task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.task
-        if self.read_task:
-            self.read_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.read_task
+        self.cancel()
+        for task in (self.task, self.read_task):
+            if task:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task

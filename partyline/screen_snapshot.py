@@ -3,6 +3,7 @@
 from .op_timing import pushed
 from .helper_release import update_available
 from .screen_grants import device_grants, window_share_indicators
+from .screen_device_access import standing_root
 
 
 def owner_devices(hub, owner_id):
@@ -17,7 +18,8 @@ def owner_devices(hub, owner_id):
         for grant in grants:
             if shot := hub.snapshots.last_screenshot(grant["id"]):
                 grant["last_screenshot"] = shot  # when an agent last took a screenshot, and who
-        item.update(chrome=online.get("chrome") if online else None, window_grants=grants,
+        item.update(window_access_line=standing_root(hub.runtime.db, {**item, "owner_id": owner_id}),
+                    chrome=online.get("chrome") if online else None, window_grants=grants,
                     online=online is not None, monitors=online["monitors"] if online else [],
                     helper_version=online["helper_version"] if online else None,
                     update_available=bool(online) and update_available(online["helper_version"]))
