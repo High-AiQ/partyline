@@ -4,7 +4,7 @@ import { fixture, event, alarms } from './fakes.test.js';
 
 const flush = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
 
-async function boot(tag, { throwNotFound = false } = {}) {
+async function boot(tag, { setup } = {}) {
   const f = fixture(), ports = [], badge = { history: [] }, logs = [];
   const runtime = { onStartup: event(), onInstalled: event(), lastError: null,
     getManifest: () => ({ version: '1.6.2' }), reload() { badge.reloaded = true; },
@@ -27,6 +27,7 @@ async function boot(tag, { throwNotFound = false } = {}) {
     setBadgeText: ({ text }) => { badge.text = text; badge.history.push(text); },
     setBadgeBackgroundColor: ({ color }) => { badge.color = color; },
     setTitle: ({ title }) => { badge.title = title; } };
+  setup?.(f.api);
   globalThis.chrome = f.api;
   const saveInfo = console.info, saveWarn = console.warn;
   console.info = (...a) => logs.push(['info', a.join(' ')]);
@@ -265,4 +266,41 @@ test('automatic update: stop, host exit, new host and helper bring the badge bac
     assert.ok(w.logs.every(([, line]) => !/click/.test(line) || !/toolbar click/.test(line))); // no click happened
     delete globalThis.chrome;
   }
+});
+
+test('a worker restarted mid-schedule leaves the next attempt to its pending alarm', async () => {
+  const w = await boot('mid-schedule', { setup: api => {
+    api.alarms.storage.set({ reconnect: { failures: 4, last: 0 } });
+    api.alarms.pending.set('partyline-reconnect', { when: Date.now() + 120_000 });
+  } });
+  assert.equal(w.ports.length, 0); // no port until the alarm, a click, a browser start or a tab activation
+  await w.fire(null, () => w.alarms.fire('partyline-reconnect'));
+  assert.equal(w.ports.length, 1);
+  delete globalThis.chrome;
+});
+
+test('a worker restarted after the schedule was spent does not connect by itself', async () => {
+  const w = await boot('spent-schedule', { setup: api => { api.alarms.storage.set({ reconnect: { failures: 6, last: 0 } }); } });
+  assert.equal(w.ports.length, 0);
+  await w.click();
+  assert.equal(w.ports.length, 1);
+  delete globalThis.chrome;
+});
+
+test('a startup and an alarm that wake the worker together open one native port, even with storage still loading', async () => {
+  let release;
+  const w = await boot('racing-wake', { setup: api => {
+    api.alarms.storage.set({ reconnect: { failures: 1, last: 0 } });
+    const slow = new Promise(resolve => { release = resolve; });
+    const get = api.alarms.storage.get;
+    api.storage.session = { ...api.alarms.storage, get: async () => { await slow; return get(); } };
+  } });
+  w.f.api.alarms.onAlarm.fire({ name: 'partyline-reconnect' }); // the alarm that woke the worker
+  w.f.api.alarms.onAlarm.fire({ name: 'partyline-reconnect' }); // and another event that arrives with it
+  await flush();
+  assert.equal(w.ports.length, 0); // everything waits for the persisted schedule
+  release();
+  await flush();
+  assert.equal(w.ports.length, 1);
+  delete globalThis.chrome;
 });

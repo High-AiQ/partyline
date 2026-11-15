@@ -45,7 +45,10 @@ async def await_extension(browser, events=file_events, deadline=asyncio.timeout,
 
 async def select_extension(chrome):
     browser = chrome.browser
-    if chrome.auto_transport and not isinstance(browser, ExtensionTransport) and discover():
+    # A live host replaces remote debugging; a known extension between hosts does too unless remote debugging
+    # is serving a grant right now.
+    if (chrome.auto_transport and not isinstance(browser, ExtensionTransport)
+            and (discover() or (known() and not browser.socket))):
         for current in list(chrome.pages):
             chrome.invalidate(current)
         await browser.close()

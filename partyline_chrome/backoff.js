@@ -65,6 +65,14 @@ export class Backoff {
     try { await this.api.alarms.create(ALARM, { when: this.now() + seconds * 1000 }); } catch { /* no alarms */ }
   }
 
+  // A worker that starts mid-schedule leaves the next attempt to its alarm, or to a click, start or tab event.
+  async mayStart() {
+    await this.ready;
+    if (this.failures === 0) return true;
+    if (this.failures >= DELAYS.length) return false;
+    try { return !(await this.api.alarms?.get(ALARM)); } catch { return true; }
+  }
+
   // A browser event (tab activation) may retry only when no alarm is waiting and the last try is not recent.
   async mayRetry() {
     await this.ready;

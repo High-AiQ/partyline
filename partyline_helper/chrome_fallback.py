@@ -130,7 +130,8 @@ class Fallback:
                 await remote.close()
         browser = self.chrome.browser  # the default when the extension was never installed
         if browser.transport == "remote_debugging" and browser.socket and not any(
-                getattr(entry["access"], "grant", None) for entry in self.chrome.shares.grants.values()):
+                (getattr(entry["access"], "grant", None) or {}).get("process", "").lower() == "chrome.exe"
+                for entry in self.chrome.shares.grants.values()):
             await browser.disconnect()
             browser.next_attempt = 0  # a release is not a refusal: the next grant may connect at once
             browser.report("not_enabled", INSTRUCTION)

@@ -12,7 +12,15 @@ let closing = Promise.resolve();
 const relay = new Relay(chrome, message => {
   if (current) for (const packet of packets(message)) current.connection.postMessage(packet);
 });
-async function connect(resetBudget = false, why = 'startup', force = false) {
+// One attempt at a time: a startup, an alarm, a tab activation and a click may all arrive while the persisted
+// schedule is still loading, and must not each open a native port.
+let queue = Promise.resolve();
+function connect(...args) {
+  const run = queue.then(() => open(...args));
+  queue = run.catch(() => {});
+  return run;
+}
+async function open(resetBudget = false, why = 'startup', force = false) {
   if (resetBudget) await backoff.reset();
   await closing;
   if (current && force && (!current.greeted || status.state?.name !== 'connected')) {
@@ -131,8 +139,10 @@ chrome.alarms?.onAlarm.addListener(alarm => { if (alarm.name === ALARM) void con
 chrome.tabs?.onActivated?.addListener(async () => {
   if (!current && await backoff.mayRetry()) void connect(false, 'tab activation');
 });
-// A worker woken by an alarm, or started while the helper is still restarting, continues the schedule.
-void connect(false, 'service worker start');
+// A worker woken by an alarm, or started while the helper is still restarting, continues the schedule: it
+// connects at once only when no alarm is pending and the schedule is not spent.
+void backoff.mayStart().then(ok => ok ? connect(false, 'service worker start')
+  : log.info('service worker start: the reconnect schedule decides when to try again'));
 
 // Reload restarts this service worker, whose startup path reconnects the native host itself.
 export function shouldReload(running, hello) {
