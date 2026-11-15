@@ -54,6 +54,14 @@ describe("ComputerUseSection", () => {
       details.querySelector("summary")?.click();
       expect(details.open).toBe(true);
       expect(document.body.textContent).toContain("68 cached");
+      const cached = document.querySelector("[data-cache-tokens]");
+      const cacheTip = document.getElementById(cached?.getAttribute("aria-describedby") ?? "");
+      expect(cached?.getAttribute("title")).toBeNull();
+      expect(cacheTip?.textContent).toBe("28 cache read + 40 cache write");
+      const basis = document.querySelector("[data-computer-basis]");
+      const basisTip = document.getElementById(basis?.getAttribute("aria-describedby") ?? "");
+      expect(basis?.getAttribute("title")).toBeNull();
+      expect(basisTip?.textContent).toBe(summary.basis);
       expect(document.body.textContent).toContain("1,200 estimated image tokens");
       expect(document.body.textContent).toContain("3.0 s model thinking");
       expect(document.body.textContent).toContain("p50 10.0 s · p95 20.0 s");

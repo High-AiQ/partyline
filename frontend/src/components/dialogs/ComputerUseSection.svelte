@@ -4,6 +4,7 @@
     type ComputerUsePeriod,
     type ComputerUseSummary,
   } from "../../lib/computer-usage-api";
+  import { tooltip } from "../../lib/tooltip";
 
   interface Props {
     convId: string;
@@ -92,7 +93,10 @@
             <dd class="inline">
               {summary.total_tokens.toLocaleString()} total · {summary.input_tokens.toLocaleString()} input ·
               <span
-                title="{summary.cache_read_tokens.toLocaleString()} cache read + {summary.cache_write_tokens.toLocaleString()} cache write"
+                data-cache-tokens
+                use:tooltip={{
+                  label: `${summary.cache_read_tokens.toLocaleString()} cache read + ${summary.cache_write_tokens.toLocaleString()} cache write`,
+                }}
               >
                 {(summary.cache_read_tokens + summary.cache_write_tokens).toLocaleString()} cached
               </span>
@@ -139,7 +143,7 @@
             </dd>
           </div>
         </dl>
-        <p class="dialog-note mt-3" title={summary.basis}>
+        <p class="dialog-note mt-3" data-computer-basis use:tooltip={{ label: summary.basis }}>
           Model tokens count once per computer-use response. Image tokens are estimates; retained history
           covers about 30 days.
         </p>

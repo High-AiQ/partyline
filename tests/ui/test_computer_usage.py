@@ -86,6 +86,12 @@ class ComputerUsageLayoutTest(unittest.TestCase):
             section.get_by_text("1,600 tokens", exact=False).wait_for()
             section.locator("summary").click()
             section.get_by_text("2,000 estimated image tokens", exact=False).wait_for()
+            section.locator("[data-cache-tokens]").hover()
+            tip = ui.page.get_by_role("tooltip").filter(has_text="1,000 cache read + 200 cache write")
+            tip.wait_for(state="visible")
+            ui.shot("computer-use-tooltip")
+            section.locator("h3").hover()
+            tip.wait_for(state="hidden")
             notice = ui.page.locator("#wireNotice")
             if notice.is_visible():
                 notice.get_by_role("button", name="dismiss", exact=True).click()
