@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 from partyline.screen_tree import Snapshot
 from partyline.screen_tree_answer import answer, size
 from partyline_helper.cdp_actions import evaluate
-from partyline_helper.cdp_recipes import normalize
+from partyline_helper.cdp_recipes import STATE, normalize
 from partyline_helper.cdp_transport import BrowserConnection, CDPError, discover
 from partyline_helper.uia_task import WindowTask
 from tests.cdp_fakes import Fixture, Socket
@@ -174,6 +174,37 @@ class CDPTests(IsolatedAsyncioTestCase):
                    if m["method"] == "Runtime.callFunctionOn"]
         self.assertFalse(any("dispatchEvent" in recipe or "setter.call" in recipe for recipe in recipes))
         self.assertEqual(result["events"], "trusted keyboard input/change")
+
+    async def test_composed_hit_test_descends_shadow_roots_and_tracks_slot_assignment(self):
+        self.assertIn("shadowRoot.elementFromPoint(x,y)", STATE)
+        self.assertIn("n.assignedSlot||n.parentNode||(n.host||null)", STATE)
+        self.assertIn("a.shadowRoot.activeElement", STATE)
+        self.assertIn("composedContains(n,e)", STATE)  # closed-root host / slotted light child
+
+    async def test_hit_test_refusal_prevents_a_click_on_covered_shadow_element(self):
+        await self.f.read()
+        page = await self.f.chrome.page(self.f.access)
+        page.quiet.wait = AsyncMock(return_value="quiet")
+        self.f.socket.states[2]["hit"] = False  # recipe reports an overlay from another subtree
+        self.f.socket.states[2]["aria_disabled"] = False
+        ident = next(i["id"] for i in (await page.snapshot())["elements"] if i["control_type"] == "Hyperlink")
+        result = await self.f.chrome.action(self.f.access, dict(action="invoke", element_id=ident))
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"], 'covered by DIV "overlay"')
+        self.assertFalse(any(m["method"] == "Input.dispatchMouseEvent" for m in self.f.socket.calls))
+
+    async def test_open_shadow_ax_button_is_invokable_with_trusted_mouse_input(self):
+        self.f.socket.nodes.append(dict(nodeId="4", parentId="1", backendDOMNodeId=4,
+                                        role={"value": "button"}, name={"value": "Shadow action"}))
+        self.f.socket.states[4] = dict(tag="BUTTON", hit=True)
+        result = await self.f.read()
+        button = next(item for item in result["elements"] if item["name"] == "Shadow action")
+        action = await self.f.chrome.action(self.f.access, dict(action="invoke", element_id=button["id"]))
+        events = [(call["params"]["type"], call["params"]["x"], call["params"]["y"])
+                  for call in self.f.socket.calls if call["method"] == "Input.dispatchMouseEvent"]
+        self.assertEqual(action["status"], "completed")
+        self.assertEqual([event[0] for event in events], ["mousePressed", "mouseReleased"])
+        self.assertEqual(events[0][1:], (50, 20))
 
     async def test_eval_is_bounded_and_audit_has_lengths_without_code(self):
         await self.f.browser.ensure()

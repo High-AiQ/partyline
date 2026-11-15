@@ -221,7 +221,7 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_hello_announces_screenshots_and_the_minor_version_moved(self):
         self.assertEqual(2, WINDOWS_VERSION)
         self.assertEqual(SNAPSHOT_VERSION, WINDOWS_VERSION)
-        self.assertEqual("1.3.0", __version__)
+        self.assertEqual("1.3.1", __version__)
 
 
 class WindowGrabTests(unittest.TestCase):

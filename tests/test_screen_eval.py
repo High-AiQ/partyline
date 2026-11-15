@@ -89,7 +89,11 @@ class EvalToolsTests(unittest.TestCase):
     def test_tool_is_exposed_for_window_write_and_uses_eval_endpoint(self):
         state = dict(dynamic_screen_tools=True, screen_windows=True, actions=["write"])
         client = Mock(home="line")
-        self.assertIn("screen_eval", {t["name"] for t in tools_control.tool_list(state)})
+        tools = tools_control.tool_list(state)
+        self.assertIn("screen_eval", {t["name"] for t in tools})
+        description = next(t["description"] for t in tools if t["name"] == "screen_eval")
+        self.assertIn("Never click or change the page with JavaScript", description)
+        self.assertIn("screen_element_action", description)
         self.assertIn("screen_eval", catalog.SCREEN)
         tools_control.call(client, "screen_eval", dict(expression="1+1"), state)
         client.request.assert_called_once_with("POST", "/api/conversations/line/screen-eval",

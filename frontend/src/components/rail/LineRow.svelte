@@ -20,6 +20,8 @@
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte";
   import { toggleConversationStar } from "../../state/conversation-star";
+  import { dialogs } from "../../state/dialogs.svelte";
+  import UnstarDialog from "../dialogs/UnstarDialog.svelte";
 
   interface Props {
     row: TreeRow<Conversation>;
@@ -97,7 +99,9 @@
       aria-pressed={starred}
       onclick={(event) => {
         event.stopPropagation();
-        void toggleConversationStar(room, conversation.id);
+        // Starring is one click; unstarring asks first.
+        if (starred) dialogs.open(UnstarDialog, { conversation });
+        else void toggleConversationStar(room, conversation.id);
       }}
     >
       <svg
