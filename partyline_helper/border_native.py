@@ -6,6 +6,8 @@ import queue
 import sys
 import threading
 
+from .window_zorder import seat_strips
+
 WINDOWS_CAPTURE_BUILD = 19041  # Windows 10 2004: WDA_EXCLUDEFROMCAPTURE
 WDA_EXCLUDEFROMCAPTURE = 0x11
 
@@ -61,9 +63,19 @@ class ThreadBackend:
 class TkBackend(ThreadBackend):
     """Four override-redirect strips on X11 or no-activate layered windows on Windows."""
 
-    def __init__(self, on_error, windows=False):
+    def __init__(self, on_error, windows=False, above=None, user32=None):
         super().__init__(on_error)
         self.windows = windows
+        self.above = above  # HWND the strips sit directly above; None keeps them topmost.
+        self.user32 = user32
+
+    def place(self):
+        """Ask the GUI thread to re-seat the strips just above their window."""
+        if self.thread is not None and self.above:
+            self.commands.put(("place",))
+
+    def seat(self, tk_strips):
+        seat_strips(self.user32 or ctypes.windll.user32, self.above, tk_strips)
 
     def run(self):
         import tkinter as tk
@@ -98,6 +110,11 @@ class TkBackend(ThreadBackend):
                     clear()
                     for rectangle in command[1]:
                         strips.append(self.make_window(tk, root, rectangle, command[2]))
+                    if self.above:
+                        self.seat(strips)
+                elif command[0] == "place":
+                    if self.above and strips:
+                        self.seat(strips)
                 elif command[0] == "hide":
                     clear()
                 elif command[0] == "close":
@@ -125,13 +142,14 @@ class TkBackend(ThreadBackend):
         window = tk.Toplevel(root)
         window.withdraw()  # Apply Windows capture affinity before the first visible frame.
         window.overrideredirect(True)
-        window.attributes("-topmost", True)
+        if not self.above:
+            window.attributes("-topmost", True)  # Tk's topmost sets WS_EX_TOPMOST.
         window.configure(background=color, borderwidth=0, highlightthickness=0)
         # Plus signs select absolute coordinates; "+-100" preserves a negative desktop origin.
         window.geometry(f"{max(1, width)}x{max(1, height)}+{x}+{y}")
         window.update_idletasks()  # Create Tk's hidden native wrapper before configuring it.
         if self.windows:
-            windows_options(window)
+            windows_options(window, topmost=not self.above)
         else:
             x11_click_through(window)
         window.deiconify()
@@ -182,8 +200,8 @@ def x11_click_through(window, x11=None, xext=None):
         raise OSError(f"X11 refused the border input shape (error {errors[0]})")
 
 
-def windows_options(window, windll=None, build=None):
-    """Make a Tk HWND click-through/topmost and exclude it on supported Windows."""
+def windows_options(window, windll=None, build=None, topmost=True):
+    """Make a Tk HWND click-through (topmost for the monitor border) and capture-excluded."""
     windll = windll or ctypes.windll
     user32 = windll.user32
     child = window.winfo_id()
@@ -199,14 +217,15 @@ def windows_options(window, windll=None, build=None):
     user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
                                     ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
     extended = get_long(hwnd, -20)  # GWL_EXSTYLE
-    flags = 0x00080000 | 0x00000020 | 0x00000080 | 0x00000008 | 0x08000000
+    flags = 0x00080000 | 0x00000020 | 0x00000080 | 0x08000000 | (0x00000008 if topmost else 0)
     set_long(hwnd, -20, extended | flags)
     user32.SetLayeredWindowAttributes.argtypes = [ctypes.c_void_p, ctypes.c_uint,
                                                   ctypes.c_ubyte, ctypes.c_uint]
     user32.SetLayeredWindowAttributes.restype = ctypes.c_bool
     if not user32.SetLayeredWindowAttributes(hwnd, 0, 255, 2):  # LWA_ALPHA, fully opaque
         raise OSError("Windows refused to initialize the layered capture border")
-    user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0020 | 0x0040)
+    if topmost:
+        user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0020 | 0x0040)
     build = sys.getwindowsversion().build if build is None else build
     if build >= WINDOWS_CAPTURE_BUILD:
         user32.SetWindowDisplayAffinity.argtypes = [ctypes.c_void_p, ctypes.c_uint]

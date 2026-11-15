@@ -82,8 +82,13 @@ keep their existing chat behavior.
 
 Each granted window has a thin blue outline just outside its visible frame. It follows the window and
 hides while the window is minimized or on another virtual desktop. It is click-through, does not take
-focus, and supported Windows versions exclude it from screen capture. The outline stays above other
-windows while the grant is active and is removed as soon as the grant ends.
+focus, and supported Windows versions exclude it from screen capture. The outline is not always-on-top: it sits
+in the z-order directly above its granted window, so anything in front of that window (a game, a
+dialog, another browser window) covers the outline exactly as it covers the window. The helper re-seats
+the outline just above its window on foreground and z-order WinEvents (no polling, no timers), moves it
+only when it is not already directly above, never moves the granted window, and never activates the
+outline. It is removed as soon as the grant ends. The whole-monitor capture border is unchanged and
+stays topmost.
 
 Some UI Automation actions can bring the granted window forward. When an action does that, the helper
 attempts to restore the window that was in front, provided the granted window is still in front when
