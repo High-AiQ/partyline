@@ -21,8 +21,21 @@ def observed(node, key):
     return node.cached.get(key)
 
 
-def delta(before, after):
+def options(tree, node, counts):
+    if node.type not in ("List", "Menu"):
+        return ""
+    children = [child for child in tree.children(node.id) if child.type in ("ListItem", "MenuItem")]
+    if not children:
+        return ""
+    names = ", ".join(label(child) for child in children[:5])
+    count = counts.get(node.helper, len(children))
+    more = ", …" if count > min(len(children), 5) else ""
+    return f" ({count} options: {names}{more})"
+
+
+def delta(before, after, option_counts=None):
     lines = []
+    option_counts = option_counts or {}
     # Match by provider ID too: changing a label or value can change a UIA server fingerprint.
     old = {node.helper: node for node in before.nodes.values()}
     new = {node.helper: node for node in after.nodes.values()}
@@ -31,21 +44,15 @@ def delta(before, after):
         node = after.nodes[ident]
         previous = old.get(node.helper) or before.nodes.get(ident)
         if previous is None:
-            line = "appeared: " + label(node)
-            if node.type in ("List", "Menu"):
-                children = [child for child in after.children(node.id)
-                            if child.type in ("ListItem", "MenuItem")]
-                if children:
-                    names = ", ".join(label(child) for child in children[:5])
-                    line += f" ({len(children)} options: {names}" + (", …" if len(children) > 5 else "") + ")"
-            lines.append(line)
+            lines.append("appeared: " + label(node) + options(after, node, option_counts))
         else:
             changes = [f"{key} {state(observed(previous, key))}→{state(observed(node, key))}"
                        for key in FIELDS if observed(previous, key) != observed(node, key)]
             if previous.type != node.type:
                 changes.insert(0, f"control_type {previous.type}→{node.type}")
             if changes:
-                lines.append("changed: " + label(node) + " " + ", ".join(changes))
+                lines.append("changed: " + label(node) + " " + ", ".join(changes) +
+                             options(after, node, option_counts))
     if not partial:
         lines += ["disappeared: " + label(node) for node in before.nodes.values()
                   if node.helper not in new and node.id not in after.nodes]
@@ -76,6 +83,10 @@ def apply(hub, grant_id, result):
             result["changes"] = "unavailable: " + str(raw.get("elements_unavailable", "observation failed"))
             return False
         tree = Snapshot(raw.get("snapshot_id"), hub.clock(), space)
+        if observation.get("compact"):
+            tree.scoped, tree.scope = True, {"point_delta": True}
+            previous = trees[-1] if trees else getattr(hub, "snapshots", {}).get(grant_id)
+            tree.retain_actions(previous)
         tree.add(raw["elements"])
         tree.cursor = raw.get("next_cursor")
         tree.changed = bool(raw.get("changed") or
@@ -86,8 +97,15 @@ def apply(hub, grant_id, result):
         tree.sources = raw.get("event_sources_supported") is True
         tree.source = raw.get("source", "uia")
         trees.append(tree)
-    result["changes"] = delta(*trees)
+    result["changes"] = delta(*trees, observation.get("options"))
+    if observation.get("more"):
+        result["changes"] += f"\nmore: {observation['more']} additional changes; read screen_elements"
     result["changes_observed"] = any(result["changes"].startswith(prefix)
                                      for prefix in ("appeared:", "changed:", "disappeared:"))
+    if observation.get("compact") and not any(tree.partial for tree in trees):
+        for node in trees[0].nodes.values():
+            if node.helper not in trees[-1].by_helper:
+                trees[-1].action_ids.pop(node.id, None)
+                trees[-1].prior_helpers.pop(node.helper, None)
     hub.remember(grant_id, trees[-1])
     return True

@@ -40,6 +40,12 @@ whether a person says so or the captain decides.
 
 Before a full task commit:
 
+Task sublines run only the tests that reach changed modules and their importers, related frontend tests,
+ruff, code-line, media, no-polling and version-policy checks. Run targeted Python tests through
+`./scripts/capped-test <test command>`; never run the full suite or whole-suite coverage on a task subline.
+Build the frontend only when frontend files changed. List the exact tests in the handoff. A separate suite
+subline runs the complete gates below on the merged batch before the PR.
+
 ```bash
 uv run --locked python -m partyline.task_gates  # prints scoped commands; run those commands
 ./scripts/check-no-polling

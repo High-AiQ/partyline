@@ -48,18 +48,42 @@ console.log(JSON.stringify(Object.fromEntries(Object.entries(elements).map(([id,
 
 
 class TriggerTests(unittest.TestCase):
-    def test_uia_owns_resolves_idrefs_only_within_the_granted_root(self):
-        target = object()
-        root = SimpleNamespace(FindFirstBuildCache=Mock(return_value=target))
-        automation = SimpleNamespace(CreatePropertyCondition=Mock(return_value="condition"))
-        provider = SimpleNamespace(prop=lambda n, p: None if p == "ControllerFor" else 50009,
-                                   automation=automation, request=Mock(return_value="cache"),
-                                   root=lambda: root, same_window=lambda n: True)
-        self.assertEqual(["Menu"], controlled_types(provider, object(), "owns=commands"))
-        automation.CreatePropertyCondition.assert_called_once_with(30011, "commands")
-        root.FindFirstBuildCache.assert_called_once_with(4, "condition", "cache")
-        provider.same_window = lambda n: False
-        self.assertEqual([], controlled_types(provider, object(), "controls=commands"))
+    def test_uia_idrefs_share_one_target_index_for_many_triggers(self):
+        targets = ["menu", "list", "foreign"]
+        found = SimpleNamespace(Length=len(targets), GetElement=targets.__getitem__)
+        root = SimpleNamespace(FindAllBuildCache=Mock(return_value=found))
+        automation = Mock()
+        def prop(node, name):
+            if name == "ControllerFor":
+                return None
+            if name == "AutomationId":
+                return node
+            return 50008 if node == "list" else 50009
+        provider = SimpleNamespace(prop=prop, automation=automation, request=Mock(return_value="cache"),
+                                   root=lambda: root, same_window=lambda n: n != "foreign")
+        for _ in range(100):
+            self.assertEqual(["Menu"], controlled_types(provider, object(), "owns=menu"))
+            self.assertEqual(["List"], controlled_types(provider, object(), "controls=list"))
+        root.FindAllBuildCache.assert_called_once()
+        self.assertEqual([], controlled_types(provider, object(), "controls=foreign"))
+
+    def test_native_widget_roles_survive_popup_hints_on_both_transports(self):
+        for tag, role, expected in (("BUTTON", "button", "Button"), ("A", "link", "Hyperlink"),
+                                    ("INPUT", "textbox", "Edit"), ("DIV", "treeitem", "TreeItem")):
+            item = normalize({"backendDOMNodeId": 2, "role": {"value": role}}, "id", None,
+                             {"tag": tag, "popup": True, "expanded": "false"})
+            self.assertEqual(expected, item["control_type"])
+            self.assertEqual("true", item["popup"])
+            props = uia_popup({"control_type": expected}, "expanded=false")
+            self.assertEqual(expected, props["control_type"])
+        app = Chrome()
+        button = Node(41, 0, 50000, "Toggle section", ("Invoke",))
+        button.props["AriaProperties"] = "expanded=false"
+        props = app.properties(button)
+        self.assertEqual("Button", props["control_type"])
+        self.assertEqual("collapsed", props["expand_state"])
+        props = uia_popup({"control_type": "Group", "aria_role": "button"}, "expanded=false")
+        self.assertEqual("Group", props["control_type"])
 
     def test_dom_recipe_and_mapping_cover_has_popup_expanded_controls_and_owns(self):
         observed = states()

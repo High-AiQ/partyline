@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-15 — Bounded tree parts do not make a bounded action reply
+
+The false assumption was that two ordinary tree reads could safely ride together on a point reply.
+Their individually paginated results can exceed the helper socket's message limit when combined. Diff
+locally and cap the changed rows and wire bytes before sending. Read-only diagnostics also need a budget
+separate from starting input, and settling must reserve a final read instead of spending the whole budget
+waiting for quiet. `tests/test_point_delta.py` pins large and Unicode-heavy payloads; fake-clock regressions
+in `tests/test_point_feedback.py` pin slow consent and continuously changing windows.
+
 ## 2026-11-15 — Events during a click do not prove a page is still changing
 
 The false assumption was that an event arriving during a quiet barrier invalidated its eventual quiet

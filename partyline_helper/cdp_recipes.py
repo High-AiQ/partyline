@@ -110,7 +110,9 @@ def normalize(node, ident, parent, dom=None):
     if aria_role in (None, "generic", "none"):
         aria_role = dom.get("role") or aria_role
     role = ROLES.get(aria_role, "Group")
-    popup_trigger = dom.get("popup") and dom.get("role") in (None, "", "none", "generic")
+    popup_trigger = (dom.get("popup") and aria_role in (None, "", "none", "generic", "presentation")
+                     and dom.get("tag") not in
+                     ("BUTTON", "INPUT", "SELECT", "TEXTAREA", "A", "AREA", "SUMMARY"))
     if popup_trigger:
         role = "ComboBox"
     widget = aria_role in WIDGET_ROLES or aria_role == "gridcell" and (

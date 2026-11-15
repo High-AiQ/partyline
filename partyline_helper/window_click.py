@@ -282,7 +282,7 @@ class PointClicks:
 
         def call():
             return cursor_run(self.pointer(grant["hwnd"]), grant, spots, send, alive,
-                              getattr(access, "event_state", None), ready, last, check, partial, operation,
+                              None, ready, last, check, partial, operation,  # Feedback owns the UIA barrier
                               message["landing"])
         try:
             result, revoked = await asyncio.wait_for(

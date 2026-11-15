@@ -21,6 +21,11 @@ and commit the bundle. Only a **suite** subline (or a person outside Partyline) 
 full `./scripts/capped-test`, ≥90% coverage and full frontend verify on the merged
 batch before its PR. Tests get an isolated database; never use a real database.
 
+**Task sublines:** run only tests that reach changed modules and their importers, plus related frontend
+checks, ruff, code-line, media, no-polling and version-policy checks. Keep targeted Python tests capped.
+Never run the full suite or whole-suite coverage on a task subline. Build the frontend only when frontend
+files changed. A separate suite subline tests the merged batch before the PR; list exact tests in handoffs.
+
 **Ship:** one-line Conventional Commit, semver bump in `partyline/__init__.py` in the same
 commit (feat → minor, fix → patch; none for docs/test/chore), branch + PR, CI green. Schema
 changes are new idempotent entries in `partyline/db_schema.py`.

@@ -431,8 +431,10 @@ no new read:
 
 Role-less popup triggers with standard ARIA `haspopup` (`listbox`, `menu`, `true`), `expanded`, or
 `controls`/`owns` targeting a List/Menu are mapped to ComboBox (with a popup hint), so
-`screen_elements(control_type="ComboBox")` can find them on CDP and UIA. A hint adds no input capability;
-use the listed actions or a look mark's guarded point fallback.
+`screen_elements(control_type="ComboBox")` can find them on CDP and UIA. Existing computed/native widget
+roles (Button, Hyperlink, Edit, TreeItem, etc.) stay intact and can expose the popup hint. A hint adds no
+input capability; use the listed actions or a look mark's guarded point fallback. UIA resolves IDREFs
+through one cached List/Menu index per provider read, rather than a descendant search per trigger.
 
 There is no regex search: a backtracking pattern over tens of thousands of names could stall the server, so `find` and `text` take the plain terms above only.
 
@@ -765,11 +767,17 @@ leave the granted window.
   input, on CDP and UIA. `changes` lists appeared/disappeared elements and state transitions (for example,
   `expand_state collapsed→expanded`), with ordinary actionable element IDs. New Lists/Menus include option
   IDs and names. The reply caps the delta at 20 lines plus a `more` note; read `screen_elements` for the rest.
-  Partial observations are labelled and never claim missing elements disappeared. Read failures are explicit;
-  the text delta requires read permission.
-- **Settling.** Quiet barriers reset on real change events; they never poll. Waiting and observations share
-  the action's existing deadline. Events during the final read restart the barrier. If the window keeps
-  changing, `settle: changing` and `still changing after N ms` accompany the delta observed so far.
+  The helper computes this delta locally, sending only changed rows and option samples under a 128 KiB
+  wire cap; whole before/after trees are never combined into a reply. Partial observations are labelled and
+  never claim missing elements disappeared. Read failures are explicit; the text delta needs read permission.
+  The pre-input read has its own 500 ms cap and is skipped with at most one second of input budget left,
+  so a diagnostic read cannot consume the approved input's whole start budget.
+- **Settling.** Quiet barriers reset on real change events; they never poll. Waiting stays within the
+  existing two-second CDP / 200 ms UIA settle limits, plus at most 500 ms for a final read, and never exceeds
+  the action's existing deadline. The final read has reserved time even when quiet waiting expires; a busy
+  page does not hold the window lock for the full consent/input budget. Events during a read can restart
+  the barrier within this short bound. If the window keeps changing, `settle: changing` and
+  `still changing after N ms` accompany that final observation's delta (or an explicit read failure).
 - **Reading a miss.** Unchanged outcomes (`settle: unchanged`, `status: no_effect`, or an unchanged requested
   `after` image) with no clear element change, and windows still changing at the deadline, attach
   `landing_thumb`: a crop of at most 240 × 240 pixels of the granted window around the last
