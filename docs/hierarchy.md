@@ -791,7 +791,7 @@ person is refused.
 A queued process need not poll. When a lease is released, expires, or its
 holder exits or detaches, the server promotes the next waiter by the same queue
 rules and wakes it with a private notice naming the lease and its TTL
-(`lease «godot» is now granted to you (exclusive, ttl 900s)…`). Expiry is lazy:
+(`lease «exclusive-job» is now granted to you (exclusive, ttl 900s)…`). Expiry is lazy:
 every read or write of leases promotes expired ones, and the server's existing
 resource loop (event-driven, no timer of its own) also wakes at the earliest
 expiry that has a waiter behind it. A queued place does not time out; it ends

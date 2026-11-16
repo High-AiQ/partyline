@@ -30,4 +30,7 @@ MIGRATIONS = [
     # A waiter promoted by a release, expiry or exit may not be polling: the
     # flag is its pending wake, claimed once when the notice is delivered.
     "ALTER TABLE resource_leases ADD COLUMN wake_pending INTEGER NOT NULL DEFAULT 0",
+    # 1 = promoted, notice not yet stored; 2 = notice stored (wake_notice_id),
+    # delivery pending. Delivery retries the one stored notice, never a second.
+    "ALTER TABLE resource_leases ADD COLUMN wake_notice_id INTEGER",
 ]

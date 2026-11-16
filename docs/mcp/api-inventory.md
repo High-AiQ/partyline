@@ -119,9 +119,9 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 88 | POST | `/api/attachments/{att_id}/signal` | partyline/process_signal.py:signal_descendant (registration line 80) | owning process or line captain | yes | see Set 2 |
 | 89 | POST | `/api/messages/{message_id}/reactions` | partyline/reaction_routes.py:post_reaction (registration line 104) | H, or machine on the message's line | yes | see Set 2 |
 | 90 | DELETE | `/api/messages/{message_id}/reactions/{emoji}` | partyline/reaction_routes.py:delete_reaction (registration line 108) | H, or machine on the message's line | yes | see Set 2 |
-| 91 | POST | `/api/leases` | partyline/resource_leases.py:post_lease (registration line 255) | process (`attachment_id` required) | yes | see Set 2 |
-| 92 | GET | `/api/leases` | partyline/resource_leases.py:list_leases (registration line 274) | any authenticated caller | yes | see Set 2 |
-| 93 | DELETE | `/api/leases/{name}` | partyline/resource_leases.py:delete_lease (registration line 279) | holding process | yes | see Set 2 |
+| 91 | POST | `/api/leases` | partyline/resource_leases.py:post_lease (registration line 207) | process (`attachment_id` required) | yes | see Set 2 |
+| 92 | GET | `/api/leases` | partyline/resource_leases.py:list_leases (registration line 226) | any authenticated caller | yes | see Set 2 |
+| 93 | DELETE | `/api/leases/{name}` | partyline/resource_leases.py:delete_lease (registration line 231) | holding process | yes | see Set 2 |
 | 94 | GET | `/api/resources` | partyline/resource_routes.py:resources (registration line 16) | any authenticated caller | yes | see Set 2 |
 | 95 | GET | `/api/settings/resources` | partyline/resource_routes.py:get_resource_settings (registration line 22) | H only | no | resource settings are person-only |
 | 96 | PUT | `/api/settings/resources` | partyline/resource_routes.py:put_resource_settings (registration line 35) | H only | no | resource settings are person-only |

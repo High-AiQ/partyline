@@ -62,6 +62,8 @@ def _busy(runtime, presence, captain, lines):
                     and target['id'] != captain['id'] and target.get('is_lead')
                     and target['status'] in LIVE and target['conv_id'] in lines):
                 return True
+    if holds_any_lease(db, captain['id']):
+        return True  # the captain's own granted lease is long work too
     for line in lines:
         if line in presence.goal_stall.pending:
             return True

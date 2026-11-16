@@ -1,11 +1,12 @@
 """What happens around a lease: waking promoted waiters, freeing a settled
 task's leases, and telling a job wrapper whether its process holds one.
 
-Promotion itself is database state (`resource_leases.promote_all`), run lazily
+Promotion itself is database state (`lease_queue.promote_all`), run lazily
 wherever leases are touched or read and from the server's existing resource
 loop, which also wakes at the earliest expiry that has a waiter behind it — a
 deadline computed from the rows, not a timer or a poll. The promoted rows carry
-`wake_pending`; delivery claims each flag once, so a notice is never doubled.
+`wake_pending`; each notice is stored once and delivery of that stored notice
+is retried until it succeeds.
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ import time
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
-from .mention_relay import LIVE, post_private
+from .contracts import MessageEvent, MessageResponse
+from .mention_relay import LIVE
 from .resource_leases import (
     LEASE_NAME,
     MAX_TTL_S,
@@ -49,36 +51,69 @@ def wake_text(row: dict) -> str:
             f"Start your job; release it with DELETE /api/leases/{row['name']} when done.")
 
 
-async def sweep(runtime) -> int:
-    """Promote what the queue rules allow, then wake each promoted process once."""
+def _store_notice(db, row: dict, conv_id: str, body: str, audience: str) -> None:
+    """Persist the one private notice and mark it stored, in a single transaction,
+    so an interruption leaves either nothing or a notice that delivery retries."""
+    with db.lock, db.conn:
+        if not db.conn.execute(
+                "SELECT 1 FROM resource_leases WHERE name=? AND holder_attachment=? "
+                "AND wake_pending=1", (row["name"], row["holder_attachment"])).fetchone():
+            return  # the owner's own poll found the grant meanwhile
+        cursor = db.conn.execute(
+            "INSERT INTO messages(conv_id,sender,sender_type,body,created_at,"
+            "audience_attachment_id) VALUES(?,?,?,?,?,?)",
+            (conv_id, "system", "system", body, time.time(), audience))
+        db.conn.execute(
+            "UPDATE resource_leases SET wake_pending=2, wake_notice_id=? WHERE name=? "
+            "AND holder_attachment=? AND wake_pending=1",
+            (cursor.lastrowid, row["name"], row["holder_attachment"]))
+
+
+async def _deliver(runtime, row: dict, att: dict) -> None:
     db = runtime.db
-    await asyncio.to_thread(promote_all, db)
-    woken = 0
-    while True:
-        rows = [dict(row) for row in db._exec(
-            "SELECT * FROM resource_leases WHERE waiting=0 AND wake_pending=1").fetchall()]
-        if not rows:
-            return woken
-        for row in rows:
-            key = (row["name"], row["holder_attachment"])
-            claimed = db._exec(
-                "UPDATE resource_leases SET wake_pending=0 WHERE name=? AND "
-                "holder_attachment=? AND wake_pending=1", key).rowcount
-            if not claimed:
-                continue
-            att = db.get_attachment(row["holder_attachment"])
-            if att is None or att["status"] not in LIVE:
-                # A promoted waiter that is already gone must not hold the slot.
-                await asyncio.to_thread(release_attachment_leases, db, row["holder_attachment"])
-                continue
-            try:
-                await post_private(runtime, att["conv_id"], "system", "system",
-                                   f"@{att['name']} {wake_text(row)}", audience=att["id"])
-            except BaseException:
-                db._exec("UPDATE resource_leases SET wake_pending=1 WHERE name=? AND "
-                         "holder_attachment=?", key)
-                raise
-            woken += 1
+    message = db.message_by_id(att["conv_id"], row["wake_notice_id"])
+    if message:
+        await runtime.broadcast(att["conv_id"], MessageEvent(
+            message=MessageResponse.model_validate(message)))
+        await runtime.route_mentions(att["conv_id"], message, force=True)
+    db._exec("UPDATE resource_leases SET wake_pending=0 WHERE name=? AND holder_attachment=? "
+             "AND wake_pending=2 AND wake_notice_id=?",
+             (row["name"], row["holder_attachment"], row["wake_notice_id"]))
+
+
+async def sweep(runtime) -> int:
+    """Promote what the queue rules allow, then wake each promoted process once.
+
+    The notice is stored before it is delivered and cleared only after, so an
+    interrupted or failed delivery is retried on the next sweep with the same
+    stored message — never lost, never a second copy.
+    """
+    db = runtime.db
+    lock = runtime.__dict__.setdefault("_lease_sweep_lock", asyncio.Lock())
+    async with lock:
+        await asyncio.to_thread(promote_all, db)
+        woken = 0
+        while True:
+            rows = [dict(row) for row in db._exec(
+                "SELECT * FROM resource_leases WHERE waiting=0 AND wake_pending>0 "
+                "ORDER BY created_at").fetchall()]
+            if not rows:
+                return woken
+            for row in rows:
+                att = db.get_attachment(row["holder_attachment"])
+                if att is None or att["status"] not in LIVE:
+                    # A promoted waiter that is already gone must not hold the slot.
+                    await asyncio.to_thread(release_attachment_leases, db, row["holder_attachment"])
+                    continue
+                if row["wake_pending"] == 1:
+                    await asyncio.to_thread(_store_notice, db, row, att["conv_id"],
+                                            f"@{att['name']} {wake_text(row)}", att["id"])
+                    row = dict(db._exec(
+                        "SELECT * FROM resource_leases WHERE name=? AND holder_attachment=?",
+                        (row["name"], row["holder_attachment"])).fetchone() or row)
+                if row.get("wake_pending") == 2:
+                    await _deliver(runtime, row, att)
+                    woken += 1
 
 
 def next_expiry_delay(db, now: float | None = None) -> float | None:

@@ -18,75 +18,23 @@ import time
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
+from .lease_queue import (
+    MAX_TTL_S,
+    _purge_expired,
+    _rows,
+    _serialized,
+    promote_all,
+    promote_free,
+)
 
 LEASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 MODES = ("exclusive", "shared")
-MAX_TTL_S = 4 * 3600
 DEFAULT_TTL_S = 900
 PURPOSE_MAX = 80
 
 
 class LeaseError(ValueError):
     """A malformed lease request; the route answers 422 with the message."""
-
-
-def _purge_expired(db) -> None:
-    """Drop expired holders. A queued waiter never times out: the server promotes
-    and wakes it, so its place lasts until it is granted, released or its process ends."""
-    db._exec("DELETE FROM resource_leases WHERE expires_at<=? AND waiting=0", (time.time(),))
-
-
-def _promote(db, row: dict, now: float) -> None:
-    """Turn one waiter into the holder, granting exactly the TTL it asked for,
-    capped at the module maximum — queue time must not inflate the lease. The
-    row is flagged for a wake: its owner may not be polling."""
-    ttl = min(row.get("ttl_s") or MAX_TTL_S, MAX_TTL_S)
-    _upsert(db, {**row, "waiting": 0, "expires_at": now + ttl, "wake_pending": 1})
-
-
-def _rows(db, name: str) -> tuple[list[dict], list[dict], list[dict]]:
-    """Every row for one lease name: all, holders, and waiters in queue order."""
-    rows = [dict(row) for row in db._exec(
-        "SELECT * FROM resource_leases WHERE name=?", (name,)).fetchall()]
-    held = [row for row in rows if not row["waiting"]]
-    waiters = sorted((row for row in rows if row["waiting"]),
-                     key=lambda row: row["created_at"])
-    return rows, held, waiters
-
-
-def grantable(held: list[dict], waiters: list[dict]) -> list[dict]:
-    """The waiters the queue rules grant now: nothing while an exclusive holds;
-    an exclusive waiter only first in line with the slot empty; a shared waiter
-    only with no exclusive waiter ahead of it."""
-    if any(row["mode"] == "exclusive" for row in held):
-        return []
-    granted: list[dict] = []
-    for row in waiters:
-        if row["mode"] == "exclusive":
-            if not held and not granted:
-                granted.append(row)
-            break
-        granted.append(row)
-    return granted
-
-
-def promote_free(db, name: str, now: float | None = None) -> list[dict]:
-    """Promote every waiter of one lease name the queue rules allow; the
-    promoted rows are flagged so the server can wake their owners."""
-    now = time.time() if now is None else now
-    promoted = grantable(*_rows(db, name)[1:])
-    for row in promoted:
-        _promote(db, row, now)
-    return promoted
-
-
-def promote_all(db) -> list[dict]:
-    """Drop expired rows, then promote on every name that has waiters. Run
-    wherever leases are touched or read, so expiry needs no timer."""
-    _purge_expired(db)
-    names = [row[0] for row in db._exec(
-        "SELECT DISTINCT name FROM resource_leases WHERE waiting=1").fetchall()]
-    return [row for name in names for row in promote_free(db, name)]
 
 
 def _upsert(db, row: dict) -> None:
@@ -105,6 +53,7 @@ def _upsert(db, row: dict) -> None:
          row.get("purpose", ""), row.get("wake_pending", 0), row.get("ttl_s") or DEFAULT_TTL_S))
 
 
+@_serialized
 def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: str,
                   name: str, mode: str, ttl_s: int, purpose: str = "") -> dict:
     """Take, renew, or queue for one lease; the caller polls, never blocks.
@@ -172,6 +121,7 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
             "queue_position": 0, "expires_at": now + ttl_s}
 
 
+@_serialized
 def release_lease(db, holder_attachment: str, name: str) -> bool:
     """Release one lease held by the caller; False when it holds no such lease."""
     _purge_expired(db)
@@ -182,6 +132,7 @@ def release_lease(db, holder_attachment: str, name: str) -> bool:
     return bool(cursor.rowcount)
 
 
+@_serialized
 def release_attachment_leases(db, holder_attachment: str) -> int:
     """Drop every lease a process holds; it exited or detached, the slot is free."""
     _purge_expired(db)
@@ -199,8 +150,9 @@ def _line_name(db, line_id: str) -> str:
 
 
 def active_lease_report(db) -> list[dict]:
-    """Every held lease with its waiters, for the listing and the staffing line."""
-    _purge_expired(db)
+    """Every held lease with its waiters, for the listing and the staffing line.
+    Expired holders are promoted past before reading, so a successor reads as held."""
+    promote_all(db)
     held: dict[str, dict] = {}
     queued: dict[str, int] = {}
     for row in db._exec(

@@ -7,6 +7,7 @@ import asyncio
 import os
 import tempfile
 import unittest
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -56,9 +57,10 @@ class LeaseWakeTest(unittest.IsolatedAsyncioTestCase):
         self.runtime.route_mentions = AsyncMock()
         self.runtime.broadcast = AsyncMock()
         self.clock = Clock()
-        patcher = patch("partyline.resource_leases.time", self.clock)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for module in ("resource_leases", "lease_queue", "lease_lifecycle"):
+            patcher = patch(f"partyline.{module}.time", self.clock)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         for name in ("a", "b", "c", "d", "e"):
             self.db.create_conversation(f"line-{name}", f"line {name}")
             self.db.add_attachment(name, f"line-{name}", f"proc-{name}", "raw", ["raw"],
@@ -205,21 +207,97 @@ class LeaseWakeTest(unittest.IsolatedAsyncioTestCase):
                 except Exception as exc:
                     self.assertIn("duplicate column", str(exc))
 
-    async def test_the_resource_loop_wakes_a_waiter_on_release(self):
+    async def test_the_resource_loop_wakes_a_waiter_on_release_and_sleeps_to_the_expiry(self):
         from partyline.line_resource_routes import run
 
-        woken = asyncio.Event()
-        self.runtime.route_mentions = AsyncMock(side_effect=lambda *a, **k: woken.set())
+        class FakeEvents:
+            """A subscription whose waits and wakes the test drives by hand."""
+
+            def __init__(self):
+                self.entered, self.changed = asyncio.Queue(), asyncio.Queue()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def processing(self):
+                return nullcontext()
+
+            async def wait(self, delay=None):
+                self.entered.put_nowait(delay)
+                await self.changed.get()
+
+        events = FakeEvents()
+        self.take("a", ttl_s=900)
+        self.take("b")
+        with patch.object(self.db.events, "subscribe", return_value=events):
+            loop = asyncio.create_task(run(self.runtime))
+            try:
+                # The first pass finds a waiter behind a holder: it sleeps to the expiry.
+                self.assertEqual(await events.entered.get(), 900)
+                self.assertEqual(self.wakes("b"), [])
+                release_lease(self.db, "a", "shared-db")
+                events.changed.put_nowait(None)  # the release's write event
+                self.assertIsNone(await events.entered.get())  # nothing left to wait for
+                self.assertEqual(len(self.wakes("b")), 1)
+            finally:
+                loop.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await loop
+
+    async def test_a_failed_delivery_retries_the_one_stored_notice(self):
         self.take("a")
         self.take("b")
-        loop = asyncio.create_task(run(self.runtime))
-        try:
-            await asyncio.sleep(0)  # let the loop subscribe
-            release_lease(self.db, "a", "shared-db")
-            await asyncio.wait_for(woken.wait(), 5)  # event-driven; the bound only fails the test
-        finally:
-            loop.cancel()
-        self.assertEqual(len(self.wakes("b")), 1)
+        release_lease(self.db, "a", "shared-db")
+        self.runtime.route_mentions = AsyncMock(side_effect=[RuntimeError("down"), None])
+        with self.assertRaises(RuntimeError):
+            await sweep(self.runtime)
+        self.assertEqual(len(self.wakes("b")), 1)  # stored before delivery
+        self.assertEqual(await sweep(self.runtime), 1)  # the retry delivers that notice
+        self.assertEqual(len(self.wakes("b")), 1)  # never a second copy
+        self.assertEqual(await sweep(self.runtime), 0)
+        self.assertEqual(self.runtime.route_mentions.await_count, 2)
+
+    async def test_a_stale_promotion_cannot_resurrect_a_cancelled_waiter(self):
+        from partyline.lease_queue import _promote, _rows
+
+        self.take("a")
+        self.take("b")
+        self.take("c")
+        stale = _rows(self.db, "shared-db")[2][0]  # b, as a snapshot saw it
+        release_lease(self.db, "b", "shared-db")  # b cancels
+        release_lease(self.db, "a", "shared-db")  # c is promoted
+        _promote(self.db, stale, self.clock.now)  # the stale write lands late
+        self.assertFalse(self.holds("b"))
+        self.assertTrue(self.holds("c"))
+        rows = self.db._exec("SELECT holder_attachment FROM resource_leases").fetchall()
+        self.assertEqual([row[0] for row in rows], ["c"])
+
+    async def test_every_transition_runs_under_the_one_lock(self):
+        from unittest.mock import MagicMock
+
+        from partyline import lease_queue
+
+        for action in (lambda: self.take("a"), lambda: lease_queue.promote_all(self.db),
+                       lambda: release_lease(self.db, "a", "shared-db"),
+                       lambda: release_attachment_leases(self.db, "a")):
+            lock = MagicMock()
+            with patch.object(lease_queue, "_TRANSITION", lock):
+                action()
+            self.assertGreaterEqual(lock.__enter__.call_count, 1)
+            self.assertEqual(lock.__enter__.call_count, lock.__exit__.call_count)
+
+    async def test_listing_reconciles_an_expired_holder_before_reading(self):
+        from partyline.resource_leases import active_lease_report
+
+        self.take("a", ttl_s=900)
+        self.take("b")
+        self.clock.now += 901
+        entry = active_lease_report(self.db)[0]
+        self.assertEqual([h["handle"] for h in entry["holders"]], ["proc-b"])
+        self.assertEqual(entry["queued"], 0)
 
 
 class HolderRouteTest(unittest.TestCase):
@@ -351,6 +429,29 @@ class TaskLeaseTest(TaskFixture):
                              ReviewRequestIn(sha=self.commit(), what="built", where="code"))
         self.assertEqual(self.row()["status"], "done")
         self.assertFalse(holds_any_lease(self.db, worker))
+
+
+class CaptainLeaseIdleTest(TaskFixture):
+    async def test_a_captain_holding_a_lease_gets_no_idle_alert(self):
+        from partyline.presence import Presence
+
+        await self.create()
+        self.presence = Presence(self.runtime)
+        returns = self.presence.returns
+        returns.sleep = AsyncMock()
+
+        def notices():
+            return [row for row in self.db.messages_after("root", 0)
+                    if "Nothing is running or scheduled" in row["body"]]
+
+        request_lease(self.db, "captain", "captain", "root", "shared-db", "exclusive", 900)
+        await returns.turn_ended("captain")
+        await returns.idle.drain()
+        self.assertEqual(notices(), [])
+        release_attachment_leases(self.db, "captain")
+        await returns.turn_ended("captain")
+        await returns.idle.drain()
+        self.assertNotEqual(notices(), [])  # the same state alerts once the lease is gone
 
 
 class IdleExemptionTest(TaskFixture):
