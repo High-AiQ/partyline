@@ -18,6 +18,7 @@ from fastapi import HTTPException
 
 from .contracts import ConversationsChangedEvent, MessageEvent, MessageResponse
 from .orchestrator_notices import handed_to, notify_root, peer, report
+from .lease_lifecycle import holds_any_lease
 from .orchestrator_sha_check import flag
 from .orchestrator_reopen import unreopened
 from .orchestrator_handles import message_task
@@ -124,6 +125,9 @@ async def settle(runtime, att, review=None):
     if live_wait(row):
         # A declared wait: the implementer is working, not stuck. No reminder,
         # no escalation — the line already says that it is waiting.
+        return
+    if holds_any_lease(db, att['id']):
+        # A granted lease means a long exclusive job is the work; a queue place does not.
         return
     if working(runtime, att['id']):
         # A tool call in flight keeps the harness turn open, so the implementer

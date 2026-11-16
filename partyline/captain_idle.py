@@ -7,6 +7,7 @@ import logging
 from . import features
 from .approval_bubble import pending_approval_rows
 from .hierarchy import ancestors, descendants, lead_attachment
+from .lease_lifecycle import holds_any_lease
 from .mention_relay import LIVE, post_private
 from .orchestrator_wait import live as wait_live
 
@@ -71,7 +72,8 @@ def _busy(runtime, presence, captain, lines):
                 return True
             if att['status'] in LIVE and (presence.is_working(att['id']) or
                                          presence.queue.held_count(att['id']) or
-                                         att['id'] in presence.returns.pending):
+                                         att['id'] in presence.returns.pending or
+                                         holds_any_lease(db, att['id'])):
                 return True
         row = db._exec('SELECT wait_until FROM task_reviews WHERE conv_id=?', (line,)).fetchone()
         if row and wait_live(dict(row)):

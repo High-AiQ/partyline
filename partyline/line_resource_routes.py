@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import line_resources as leases
 from .auth_guard import request_principal
 from .contracts import MessageEvent, MessageResponse
+from .lease_lifecycle import next_expiry_delay, sweep as sweep_leases
 from .machine_scope import deny_unless
 from .line_resource_contracts import AcquireResult, ResourceList
 
@@ -60,12 +61,13 @@ async def maintain(runtime):
 
 async def run(runtime):
     with runtime.db.events.subscribe('line_resources', 'line_resource_claims',
-                                     'attachments', 'conversations') as events:
+                                     'attachments', 'conversations', 'resource_leases') as events:
         while True:
             with events.processing():
                 failed = False
                 try:
                     await maintain(runtime)
+                    await sweep_leases(runtime)  # promote and wake lease waiters
                 except Exception:
                     failed = True
                     logging.getLogger(__name__).exception('resource lease sweep failed')
@@ -77,6 +79,10 @@ async def run(runtime):
                     'AND NOT EXISTS (SELECT 1 FROM line_resource_claims h WHERE '
                     'h.conv_id=q.conv_id AND h.name=q.name AND h.granted_at IS NOT NULL) LIMIT 1'
                 ).fetchone()
+                expiry = next_expiry_delay(runtime.db)
+                if expiry is not None:
+                    # no-poll (b): one deadline computed from the earliest expiring lease with a waiter.
+                    delay = expiry if delay is None else min(delay, expiry)
                 if failed or failed_probe:
                     # no-poll (e): retry failed delivery/probes; success clears the deadline.
                     delay = 5 if delay is None else min(5, delay)

@@ -25,8 +25,20 @@ async def report(runtime, row):
     if row['status'] not in ('done', 'approved', 'blocked') and not (
             row['status'] == 'in_review' and row['policy'] == 'captain') and row['stall_stage'] != 3:
         return
+    freed = []
+    if row['status'] in ('done', 'approved'):
+        from .lease_lifecycle import release_for_task
+        freed = await release_for_task(runtime, row)  # settled work holds no lease
+        if freed:
+            await runtime.post_message(
+                row['conv_id'], 'system', 'system',
+                f"{row['status']}: released the leases held by this task's processes: "
+                f"{', '.join(freed)}.")
     if row['report_id'] is None:
         text = await asyncio.to_thread(report_text, db, row)
+        if freed:
+            note = f"\nReleased leases held by the task's processes: {', '.join(freed)}."
+            text = clip(text, reports.MAX_BODY - len(note)) + note
         # Another caller may have reported while the Git checks ran.
         current = task(db, row['conv_id'])
         if current is None:

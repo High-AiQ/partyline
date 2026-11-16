@@ -119,9 +119,9 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 88 | POST | `/api/attachments/{att_id}/signal` | partyline/process_signal.py:signal_descendant (registration line 80) | owning process or line captain | yes | see Set 2 |
 | 89 | POST | `/api/messages/{message_id}/reactions` | partyline/reaction_routes.py:post_reaction (registration line 104) | H, or machine on the message's line | yes | see Set 2 |
 | 90 | DELETE | `/api/messages/{message_id}/reactions/{emoji}` | partyline/reaction_routes.py:delete_reaction (registration line 108) | H, or machine on the message's line | yes | see Set 2 |
-| 91 | POST | `/api/leases` | partyline/resource_leases.py:post_lease (registration line 217) | process (`attachment_id` required) | yes | see Set 2 |
-| 92 | GET | `/api/leases` | partyline/resource_leases.py:list_leases (registration line 236) | any authenticated caller | yes | see Set 2 |
-| 93 | DELETE | `/api/leases/{name}` | partyline/resource_leases.py:delete_lease (registration line 241) | holding process | yes | see Set 2 |
+| 91 | POST | `/api/leases` | partyline/resource_leases.py:post_lease (registration line 255) | process (`attachment_id` required) | yes | see Set 2 |
+| 92 | GET | `/api/leases` | partyline/resource_leases.py:list_leases (registration line 274) | any authenticated caller | yes | see Set 2 |
+| 93 | DELETE | `/api/leases/{name}` | partyline/resource_leases.py:delete_lease (registration line 279) | holding process | yes | see Set 2 |
 | 94 | GET | `/api/resources` | partyline/resource_routes.py:resources (registration line 16) | any authenticated caller | yes | see Set 2 |
 | 95 | GET | `/api/settings/resources` | partyline/resource_routes.py:get_resource_settings (registration line 22) | H only | no | resource settings are person-only |
 | 96 | PUT | `/api/settings/resources` | partyline/resource_routes.py:put_resource_settings (registration line 35) | H only | no | resource settings are person-only |
@@ -388,6 +388,10 @@ These routes extend the fixed inventory above; they are separate from `/api/leas
 | POST | `/api/conversations/{conv_id}/resources` | Captain with `assign`, or person | captain op `resources`: `list`, `declare`, `remove`; optional `name` |
 | POST | `/api/task/resources/{name}/acquire` | Current live task implementer or reviewer, self only | tool `acquire_resource(name, note?)`; nonblocking held/queued result |
 | POST | `/api/task/resources/{name}/release` | Current live task implementer or reviewer, self only | tool `release_resource(name)`; releases held lease or cancels wait |
+
+The `/api/leases` family also has a read-only holder check for a project's own job wrapper
+(`GET /api/leases/{name}/holder`, any authenticated caller, **excluded** from MCP; see
+[Shared-resource leases](../hierarchy.md#shared-resource-leases)).
 
 `process_overview` also includes each line's declared resources with holder,
 grant timestamp, note and FIFO queue. See the

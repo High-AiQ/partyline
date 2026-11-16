@@ -788,6 +788,38 @@ and a captain's wake carries a host summary (cores, free memory, load) at
 most once every ten minutes. Leases are taken and released by processes; a
 person is refused.
 
+A queued process need not poll. When a lease is released, expires, or its
+holder exits or detaches, the server promotes the next waiter by the same queue
+rules and wakes it with a private notice naming the lease and its TTL
+(`lease «godot» is now granted to you (exclusive, ttl 900s)…`). Expiry is lazy:
+every read or write of leases promotes expired ones, and the server's existing
+resource loop (event-driven, no timer of its own) also wakes at the earliest
+expiry that has a waiter behind it. A queued place does not time out; it ends
+on grant, release, or the process's exit. When a task is approved or done, the
+server releases every lease its implementer and reviewer hold, including
+captain-declared resources, and says so in the report text or a note on the task
+line — nobody has to message the task to release, so a release never counts as
+new work. A process holding a granted, unexpired lease is not idle for the
+stall and idle checks; a queue place is.
+
+### Holder check for job wrappers
+
+Leases stay advisory unless the job itself checks. `GET /api/leases/<name>/holder`
+answers for the calling process, or for another with `?attachment=<id>`:
+`{"held": true|false, "state": "held"|"waiting"|"none", "mode", "expires_at"}`.
+A waiter and a stranger both read `held: false`. A project's wrapper runs the
+check before starting an exclusive job and refuses to start without it:
+
+```sh
+#!/bin/sh
+# usage: with-lease NAME COMMAND...  (refuses to run unless this process holds NAME)
+name=$1; shift
+curl -fsS -H "Authorization: Bearer $PARTYLINE_TOKEN" \
+  "$PARTYLINE_API/api/leases/$name/holder" | jq -e .held >/dev/null \
+  || { echo "lease $name is not held by this process" >&2; exit 1; }
+exec "$@"
+```
+
 ## Declared gates
 
 A line can declare the commands every hand-off must pass:
