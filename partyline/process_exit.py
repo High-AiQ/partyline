@@ -106,7 +106,7 @@ def exit_notice(name: str, evidence: ProcessExit) -> str:
                 if evidence.peak_bytes is not None else ", recorded peak not sampled")
         return (f"{name} stopped: confirmed out-of-memory kill in its process tree "
                 f"(limit {evidence.limit_bytes / 1024**2:.0f} MiB{peak}; "
-                f"exit code {evidence.code}).")
+                f"exit code {evidence.code}{signal_clause(evidence)}).")
     if evidence.reason == "unverified":
         return f"{name} refused to start: its memory limit could not be verified"
     return f"{name} exited (code {evidence.code}{signal_clause(evidence)})"

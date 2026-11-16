@@ -123,6 +123,12 @@ class SoloLineTest(unittest.IsolatedAsyncioTestCase):
                    if "nobody live on this line" in m["body"]]
         self.assertEqual(len(notices), 1)
 
+    async def test_a_human_bare_domain_on_a_multi_process_line_posts_no_notice(self):
+        self.attach("grok-att", "grok")
+        await self.say("The docs are at @example.com, see the page")
+        self.assertFalse(any("nobody live on this line" in m["body"]
+                             for m in self.db.list_messages("line")))
+
     async def test_a_reachable_related_process_is_a_known_mention(self):
         create_child_conversation(self.db, "line", "child", "Child")
         self.db.add_attachment("worker-att", "child", "worker", "fake", ["fake"],

@@ -18,8 +18,8 @@ def actor(explicit=None):
 _stop_intents: dict[str, str] = {}
 
 
-def direct_stop(att_id, source):
-    caller = actor()
+def direct_stop(att_id, source, caller=None):
+    caller = actor(caller)
     # The exit that follows was sent by partyline, not by anything outside it.
     _stop_intents[att_id] = f"{source} (requested by {caller})"
     logger.info("attachment stop requested attachment=%s source=%s caller=%s",

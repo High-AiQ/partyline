@@ -20,7 +20,9 @@ def live_jobs(runtime, att_id):
     snapshot = process_snapshot()
     if snapshot is None:
         from fastapi import HTTPException
-        raise HTTPException(409, 'Cannot inspect live jobs; retry after process inspection recovers')
+        raise HTTPException(409, 'Cannot inspect live jobs; retry after process inspection recovers. '
+                                 'This failure is not waived by live_jobs="transfer": that acknowledgment '
+                                 'applies only once the jobs have been inspected.')
     excluded = _cli_processes(snapshot[0], pid, adapter)
     found = members(adapter, snapshot) - excluded
     configured = commands(adapter)

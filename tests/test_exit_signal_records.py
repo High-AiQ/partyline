@@ -27,6 +27,12 @@ class SignalNameTest(unittest.TestCase):
         plain = ProcessExit(code=3, limit_bytes=1024)
         self.assertEqual(process_exit.exit_notice("reviewer", plain), "reviewer exited (code 3)")
 
+    def test_the_oom_notice_names_the_signal_and_sender_too(self):
+        evidence = ProcessExit(code=-9, reason="oom", limit_bytes=1024**3, peak_bytes=1024**3,
+                               result="oom-kill", signal="SIGKILL", sent_by="external")
+        notice = process_exit.exit_notice("reviewer", evidence)
+        self.assertIn("exit code -9, SIGKILL sent by external).", notice)
+
     def test_unknown_peak_reads_not_sampled_in_the_oom_notice(self):
         evidence = ProcessExit(code=-9, reason="oom", limit_bytes=1024**3, result="oom-kill")
         self.assertIn("recorded peak not sampled", process_exit.exit_notice("reviewer", evidence))
