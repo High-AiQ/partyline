@@ -28,7 +28,9 @@ from .resource_leases import (
 
 
 def holds_lease(db, holder_attachment: str) -> bool:
-    """Whether the process holds a granted, unexpired lease (a queued place is not one)."""
+    """Whether the process holds a granted, unexpired lease (a queued place is not one).
+    Expired holders are promoted past first, so their successor reads as held."""
+    promote_all(db)
     return bool(db._exec(
         "SELECT 1 FROM resource_leases WHERE holder_attachment=? AND waiting=0 "
         "AND expires_at>? LIMIT 1", (holder_attachment, time.time())).fetchone())

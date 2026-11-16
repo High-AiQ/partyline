@@ -289,6 +289,21 @@ class LeaseWakeTest(unittest.IsolatedAsyncioTestCase):
             self.assertGreaterEqual(lock.__enter__.call_count, 1)
             self.assertEqual(lock.__enter__.call_count, lock.__exit__.call_count)
 
+    async def test_an_unrelated_request_promotes_every_names_expired_queue(self):
+        self.take("a", ttl_s=900)
+        self.take("b")
+        self.clock.now += 901
+        self.assertTrue(self.take("c", name="other")["granted"])
+        self.assertTrue(self.holds("b"))  # promoted by a request for a different name
+
+    async def test_the_idle_read_sees_an_expired_holders_successor(self):
+        self.take("a", ttl_s=900)
+        self.take("b")
+        self.assertFalse(holds_any_lease(self.db, "b"))
+        self.clock.now += 901
+        self.assertTrue(holds_any_lease(self.db, "b"))
+        self.assertFalse(holds_any_lease(self.db, "a"))
+
     async def test_listing_reconciles_an_expired_holder_before_reading(self):
         from partyline.resource_leases import active_lease_report
 

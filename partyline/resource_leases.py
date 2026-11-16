@@ -24,7 +24,6 @@ from .lease_queue import (
     _rows,
     _serialized,
     promote_all,
-    promote_free,
 )
 
 LEASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
@@ -78,12 +77,10 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
     if len(purpose) > PURPOSE_MAX:
         raise LeaseError(f"purpose must be at most {PURPOSE_MAX} characters")
     now = time.time()
-    _purge_expired(db)
+    # Expired holders go and every name's queue is promoted by the same rules
+    # release and exit use, so a shared request never jumps an earlier exclusive.
+    promote_all(db)
     rows, held, waiters = _rows(db, name)
-    if promote_free(db, name, now):
-        # The slot freed: promoted by queue order, the same rules every release,
-        # expiry and exit uses. A shared request never jumps an earlier exclusive.
-        rows, held, waiters = _rows(db, name)
     mine = next((row for row in rows
                  if row["holder_attachment"] == holder_attachment), None)
     others = [row for row in held if row["holder_attachment"] != holder_attachment]
