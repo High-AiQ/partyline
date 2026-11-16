@@ -13,6 +13,7 @@ PROPERTY = 90
 # Hand-written lines for tools whose first sentence is not enough to choose them by.
 SHORT = {
     "create_task": "START work: full=scoped tests/review; express=no tests/review; "
+                   "full/express never run e2e or take its lease; "
                    "suite=per-repo ordered batches, all suites and one combined end-to-end run.",
     "set_task_goal": "CHANGE the direction of an existing active task (conv_id = task line id).",
     "reopen_task": "CONTINUE an approved or done task with a new goal (conv_id = task line id).",

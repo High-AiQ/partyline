@@ -54,7 +54,8 @@ async def record_exit(runtime, att, evidence):
         budget_bytes = cap_bytes(current, settings(db))
         requested = suggested_memory_limit(budget_bytes, memory_ceiling())
         if evidence.reason == "oom":
-            peak = format_memory_bytes(evidence.peak_bytes)
+            peak = ("not sampled" if evidence.peak_bytes is None
+                    else format_memory_bytes(evidence.peak_bytes))
             # The kill happened at the scope's backstop; a request raises the budget.
             backstop = format_memory_bytes(evidence.limit_bytes)
             budget = format_memory_bytes(budget_bytes)

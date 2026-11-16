@@ -2,6 +2,11 @@
 
 ORCHESTRATOR = (
     "## Orchestrator captain pack\n"
+    "End-to-end lane: full and express tasks never run the end-to-end lane, never take a lease meant "
+    "for the suite, and never re-point shared dev infrastructure. They write e2e specs and the suite "
+    "runs them. Only after a suite attributes a failure may a reopened task run that failing spec, "
+    "under the lease. "
+    "Waits: before any wait longer than about 10 minutes, post a one-line status to your line. "
     'When a reviewer reports an environment gap, prefer setup or test commands the implementer '
     'already reported in its gates; use captain(op="review_env", args=...) to resolve it. '
 

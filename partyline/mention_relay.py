@@ -33,7 +33,7 @@ from __future__ import annotations
 from .contracts import MessageEvent, MessageResponse
 from .hierarchy import ancestors, descendants, lead_attachment, tree_live_name_conflict
 from .line_depth import live_workers
-from .mentions import known_mention_names
+from .mentions import domain_shaped, known_mention_names
 from .message_visibility import is_reaction_notice
 from .task_ack_limit import RULE, withheld_ack
 from .task_mention_guard import notify_cross_task, split_cross_task
@@ -226,6 +226,7 @@ async def hint_root_captain(
     stripped = {name.rstrip(".-_") for name in unresolved}
     known = known_mention_names(runtime.db, conv_id, stripped)
     unresolved = {name for name in unresolved if name.rstrip(".-_") not in known}
+    unresolved = {name for name in unresolved if not domain_shaped(name)}
     if not unresolved:
         return set()
     handles = ", ".join(f"@{name}" for name in sorted(unresolved))

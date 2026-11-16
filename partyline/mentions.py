@@ -13,6 +13,17 @@ import unicodedata
 from .hierarchy import ancestors, descendants, tree_live_name_conflict
 
 MENTION_RE = re.compile(r"(?<![A-Za-z0-9_])@(!?)([A-Za-z0-9][A-Za-z0-9_.-]*)")
+# A dot then a letters-only label at the end: ``example.com``, ``docs.dev``.
+_DOMAIN_TAIL_RE = re.compile(r"\.[A-Za-z]{2,}$")
+
+
+def domain_shaped(name: str) -> bool:
+    """Whether a token after ``@`` reads as an email or web domain, not a handle.
+
+    Only a name no member or handle on the line answers to may be dropped as
+    prose; callers check the line first, so a real dotted handle still rings.
+    """
+    return bool(_DOMAIN_TAIL_RE.search(name.rstrip(".-_").lower()))
 
 
 def _normalized(body: str) -> str:

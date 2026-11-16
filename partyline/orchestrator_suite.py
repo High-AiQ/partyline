@@ -28,7 +28,8 @@ SUITE = (
     'attribution is best-effort, including unknown ownership. Do not push or open the PR. '
     'After a pass the captain pushes and opens the PR from the integration branch; after failures '
     'the captain reopens responsible tasks or creates fixes, then starts another suite run or '
-    'reopens this suite line with new SHAs. ')
+    'reopens this suite line with new SHAs. During long runs, post short progress beats to your line '
+    '(N/M suites done, failures so far), not only at the end. ')
 
 
 def resolve_batch(db, root_id, repository, batch):

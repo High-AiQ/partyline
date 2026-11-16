@@ -14,6 +14,10 @@ class ProcessExit(BaseModel):
     result: str | None = None
     startup: bool = False
     last_output: str | None = None
+    # Set when the exit came from a signal (negative code or 128+N): its name, and
+    # who sent it — partyline's own stop, or "external".
+    signal: str | None = None
+    sent_by: str | None = None
 
 
 class MemoryIncident(ProcessExit):
