@@ -292,9 +292,9 @@ MIGRATIONS.append("""CREATE TABLE IF NOT EXISTS storage_cleanup_decisions(
 )""")
 MIGRATIONS.extend(RETIRE_MANAGER_TREE)  # after EXTENSIONS: it drops their old triggers
 MIGRATIONS.extend(REVIEW_ENVIRONMENTS + TOOL_TELEMETRY + TURN_USAGE + REVIEWER_PROGRESS + HELPER_UPDATES)
-# Suite inputs survive restarts; older light rows use the full scoped-review mode.
 MIGRATIONS += [
     "UPDATE task_reviews SET mode='full' WHERE mode='light'",
     "ALTER TABLE task_reviews ADD COLUMN suite_repository TEXT",
     "ALTER TABLE task_reviews ADD COLUMN suite_batch TEXT NOT NULL DEFAULT '[]'",
 ]
+MIGRATIONS.append("ALTER TABLE task_reviews ADD COLUMN suite_repositories TEXT NOT NULL DEFAULT '[]'")

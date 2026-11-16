@@ -131,7 +131,8 @@ class ExpressTest(TaskFixture):
         names = {tool['name'] for tool in tool_list({'actions': ['deliver', 'request_review']})}
         self.assertEqual(names, {'deliver', 'request_review'})
         schema = next(tool for tool in tool_list({'actions': ['deliver']}))['inputSchema']
-        self.assertEqual(set(schema['properties']), {'what', 'where'})
+        self.assertEqual(set(schema['properties']), {'what', 'where', 'repositories'})
+        self.assertEqual(set(schema['required']), {'what', 'where'})
         create = next(tool for tool in tool_list({'actions': ['create_task']}))['inputSchema']
         self.assertEqual(create['properties']['mode']['default'], 'full')
 

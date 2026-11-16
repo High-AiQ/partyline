@@ -22,7 +22,7 @@ from .orchestrator_revive import (
     brief_reviewer, reviewer_is_live, revive_reviewer, staffed_by_preset, task_lock)
 from .orchestrator_repin import repin, review_entries, verdict_matches
 from .orchestrator_handles import pick_tag
-from .orchestrator_suite import resolve_batch, save_batch, suite_brief
+from .orchestrator_suite import resolve_repositories, save_repositories, suite_brief, suite_goal
 from .memory_live_raise import check_task_memory
 from .orchestrator_staff import ensure_reviewer, restart, spawn
 from .orchestrator_store import (
@@ -45,7 +45,7 @@ async def _create_task(runtime, actor, root_id, body):
     from .preset_roles import require_named_role
     require_named_role(db, body.implementer, 'implementer')
     check_task_memory(db, actor, body.memory_limit)
-    suite = resolve_batch(db, root_id, body.repository, body.batch) if body.mode == 'suite' else None
+    suite = resolve_repositories(db, root_id, body) if body.mode == 'suite' else None
     if body.mode in ('express', 'suite'):
         if body.review not in (None, 'none'):
             raise HTTPException(422, f"a {body.mode} task has no review: omit review or pass 'none'")
@@ -58,10 +58,12 @@ async def _create_task(runtime, actor, root_id, body):
         (root_id, body.name.strip())).fetchone()
     pending = task(db, existing_line['id']) if existing_line else None
     if existing_line:
-        if (not pending or pending['goal'] != body.goal.strip()
+        expected_goal = suite_goal(body.goal, pending) if suite and pending else body.goal.strip()
+        if (not pending or pending['goal'] not in (body.goal.strip(), expected_goal)
                 or pending['implementer_preset'] != body.implementer or pending['policy'] != policy
                 or pending['mode'] != body.mode
-                or (suite and (pending['suite_repository'], pending['suite_batch']) != suite)):
+                or (suite and [{key: item[key] for key in ('repository', 'batch')}
+                               for item in pending['suite_repositories']] != suite)):
             raise HTTPException(409, f"line {existing_line['id']} already uses this task name; "
                                 'inspect it or choose a different name for new work')
         att = db.get_attachment(pending['implementer_id'])
@@ -84,7 +86,9 @@ async def _create_task(runtime, actor, root_id, body):
                 (conv_id, root_id, ident, body.implementer, policy, pick_tag(db, conv_id), time.time(),
                  body.mode))
             if suite:
-                save_batch(db, conv_id, *suite)
+                save_repositories(db, conv_id, suite)
+                from .goal import set_goal
+                set_goal(db, conv_id, suite_goal(body.goal, task(db, conv_id)))
 
         try:
             await create_child(runtime, actor, root_id,

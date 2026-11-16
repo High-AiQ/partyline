@@ -186,8 +186,9 @@ async def blocked(runtime, actor, conv_id, body):
         raise HTTPException(409, 'only an implementing task can be blocked')
     runtime.db._exec("UPDATE task_reviews SET status='blocked',findings=?,stall_stage=0,blocked_at=?,"
                      "wait_reason='',wait_until=NULL,overridden_by=NULL,"
-                     "report_id=CASE WHEN stall_stage=3 THEN NULL ELSE report_id END WHERE conv_id=?",
-                     (body.reason, time.time(), conv_id))
+                     "report_id=CASE WHEN stall_stage=3 OR findings<>? THEN NULL ELSE report_id END "
+                     "WHERE conv_id=?",
+                     (body.reason, time.time(), body.reason, conv_id))
     row = task(runtime.db, conv_id)
     await report(runtime, row)
     await flag(runtime, row, body.reason)

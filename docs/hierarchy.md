@@ -1524,30 +1524,54 @@ shield (full), bolt (express) or 🧪 (suite). Legacy `light` API inputs and sto
   may say so, or the captain decides. Behavior is unchanged: policy `none`, no reviewer,
   `deliver(what, where)` ends the task with a text report; `request_review` is refused.
   Merging its commits through the task acceptance workflow is unsupported.
-- **suite** tests an accepted batch together, without a reviewer. Pass `repository` and
-  `batch=[task_line_id_or_tag, explicit_sha, ...]` in cherry-pick order. Task references
+- **suite** tests accepted batches together on one line, without a reviewer. Pass
+  `repositories=[{"repository": path, "batch": [task_line_id_or_tag, explicit_sha, ...]}, ...]`.
+  The single `repository` and `batch` form still works; mixing forms or repeating a
+  repository is refused. Each batch is in cherry-pick order. Task references
   resolve to their accepted SHAs for that repository; foreign or unaccepted tasks are
-  refused. The resolved batch is stored and repeated in the runner's pack across restarts.
+  refused. A task that touched both repositories contributes its accepted SHA to each.
+  Resolved batches and worktree paths are repeated in the runner's pack across restarts;
+  the goal also lists all selected worktrees.
   Use a suite run **before every batch PR**; never ask task sublines to run full suites.
 
 The flow is **tasks accepted → suite on the merged batch → reopen failures or create fixes →
 suite again → PR**. The suite implementer creates an integration branch from current main
-in its worktree and cherry-picks commits in order. Report conflicts that cannot be resolved
-trivially; version conflicts keep the batch numbers the captain supplies in the goal.
+in each repository's worktree and cherry-picks that repository's commits in order. Report
+conflicts that cannot be resolved trivially; version conflicts keep the batch numbers the
+captain supplies in the goal.
 Run every suite named by the repository's `AGENTS.md`. For partyline that means the capped
 full suite, ≥90% coverage, full frontend verify and build, `node --test partyline_chrome/*.test.js`
 and every e2e suite (`tests/ui/`). Keep frontend builds sequential with backend tests.
+For a backend and a frontend repo, use one suite, one combined end-to-end run:
+
+```python
+create_task(name="integration", goal="Run both repositories' suites and combined end-to-end tests",
+            implementer="builder", mode="suite", repositories=[
+                {"repository": "/work/backend", "batch": ["backend-task", "shared-task"]},
+                {"repository": "/work/frontend", "batch": ["frontend-task", "shared-task"]},
+            ])
+```
+
+Serve all selected integration trees together for the combined end-to-end run.
 
 End with `deliver(what, where)`: integration branch and SHA, pass/fail for each suite, and
 each failure mapped to tasks whose changed files the failing test touches. Call attribution
 best-effort and identify unknown ownership. Delivery records the integration tip and keeps
-it reachable. A suite runner **never pushes or opens the PR**. After a pass the captain
+it reachable in every selected repository. Optionally pass
+`repositories=[{"repository": path, "sha": integration_sha}, ...]` to `deliver` to verify all
+integration tips. Review state, accept and retirement cover every repository.
+A suite runner **never pushes or opens the PR**. After a pass the captain
 pushes and creates the PR from the integration branch.
 
 On failure reopen the responsible task with `reopen_task`, or create a new task. Then create
 a new suite run, or `reopen_task(suite_id, goal, batch=[new SHAs or task IDs/tags], repository=...)`;
-repository is optional when unchanged. Without a new batch a reopen reuses its recorded
-SHAs. `blocked`, `waiting` and `resume_work` remain available in all modes.
+repository is optional for a single-repository suite. For several repositories, pass
+`repositories=[{"repository": path, "batch": [...]}, ...]` to replace all batches, or
+`repository` with `batch` to update one while retaining the others. Without batch inputs a
+reopen keeps every repository and its recorded SHAs for a targeted rerun.
+`blocked(reason)` requires a non-empty reason (missing, empty or whitespace-only reasons
+return 422), and the captain's report includes it. `waiting` and `resume_work` remain
+available in all modes.
 
 ## Captain handover
 

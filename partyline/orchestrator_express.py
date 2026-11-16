@@ -24,7 +24,9 @@ async def deliver(runtime, actor, conv_id, body):
             return task(db, conv_id, visibility=True)
         if row['mode'] == 'suite':
             from .orchestrator_suite import record_integration
-            await asyncio.to_thread(record_integration, db, row)
+            await asyncio.to_thread(record_integration, db, row, body.repositories)
+        elif body.repositories is not None:
+            raise HTTPException(422, 'repositories are for suite delivery')
         await asyncio.to_thread(resume, db, conv_id)
         db._exec("UPDATE task_reviews SET what=?,location=?,findings='',status='done',settled_at=?,"
                  'reopen_noticed=0,round=CASE WHEN round=0 THEN 1 ELSE round END WHERE conv_id=?',

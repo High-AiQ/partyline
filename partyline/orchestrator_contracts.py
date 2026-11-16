@@ -14,6 +14,12 @@ class CaptainStyleIn(BaseModel):
     default_review_policy: str = Field(default='captain', min_length=1, max_length=120)
 
 
+class SuiteRepositoryIn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    repository: str = Field(min_length=1, max_length=4096)
+    batch: list[str] = Field(min_length=1, max_length=128)
+
+
 class TaskIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
     name: str = Field(min_length=1, max_length=120, pattern=r'\S')
@@ -31,6 +37,7 @@ class TaskIn(BaseModel):
     batch: list[str] = Field(default_factory=list, max_length=128,
                             description='Suite only: task line IDs/tags (accepted SHAs) and/or explicit '
                                         'commit SHAs, in cherry-pick order, in repository.')
+    repositories: list[SuiteRepositoryIn] | None = Field(default=None, min_length=1, max_length=8)
 
     memory_limit: str | None = Field(default=None, pattern=r'^[1-9][0-9]{0,5}[KMG]$')
     write_set: list[str] = Field(
@@ -41,10 +48,16 @@ class TaskIn(BaseModel):
 
     @model_validator(mode='after')
     def suite_inputs(self):
-        if self.mode == 'suite' and (not self.repository or not self.batch):
-            raise ValueError('suite tasks require repository and a non-empty ordered batch')
-        if self.mode != 'suite' and (self.repository or self.batch):
-            raise ValueError('repository and batch are for suite tasks')
+        if self.repositories is not None:
+            if {'repository', 'batch'} & self.model_fields_set:
+                raise ValueError('pass repositories or repository and batch, not both')
+            names = [item.repository for item in self.repositories]
+            if len(set(names)) != len(names):
+                raise ValueError('each repository may appear once')
+        if self.mode == 'suite' and not (self.repositories or (self.repository and self.batch)):
+            raise ValueError('suite tasks require repositories or repository and a non-empty ordered batch')
+        if self.mode != 'suite' and (self.repositories or self.repository or self.batch):
+            raise ValueError('repositories, repository and batch are for suite tasks')
         return self
 
 class RepositoryShaIn(BaseModel):
@@ -82,6 +95,14 @@ class DeliverIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
     what: str = Field(min_length=1, max_length=1000)
     where: str = Field(min_length=1, max_length=500)
+    repositories: list[RepositoryShaIn] | None = Field(default=None, min_length=1, max_length=8)
+
+    @model_validator(mode='after')
+    def unique_repositories(self):
+        names = [item.repository for item in self.repositories or []]
+        if len(set(names)) != len(names):
+            raise ValueError('each repository may appear once')
+        return self
 
 
 class BlockedIn(BaseModel):
@@ -110,11 +131,28 @@ class ReopenIn(BaseModel):
 class SuiteReopenIn(ReopenIn):
     repository: str | None = Field(default=None, min_length=1, max_length=4096)
     batch: list[str] | None = Field(default=None, min_length=1, max_length=128)
+    repositories: list[SuiteRepositoryIn] | None = Field(default=None, min_length=1, max_length=8)
+
+    @model_validator(mode='after')
+    def one_form(self):
+        if self.repositories is not None:
+            if {'repository', 'batch'} & self.model_fields_set:
+                raise ValueError('pass repositories or repository and batch, not both')
+            names = [item.repository for item in self.repositories]
+            if len(set(names)) != len(names):
+                raise ValueError('each repository may appear once')
+        return self
 
 
 class SuiteCommit(BaseModel):
     sha: str
     task: str | None = None
+
+
+class SuiteRepository(BaseModel):
+    repository: str
+    batch: list[SuiteCommit]
+    path: str | None = None
 
 
 class VerdictIn(BaseModel):
@@ -151,6 +189,7 @@ class TaskReview(BaseModel):
     mode: TaskMode = 'full'
     suite_repository: str | None = None
     suite_batch: list[SuiteCommit] = Field(default_factory=list)
+    suite_repositories: list[SuiteRepository] = Field(default_factory=list)
     reviewer_id: str | None = None
     status: Literal['implementing', 'idle', 'in_review', 'approved', 'done', 'blocked']
     round: int
@@ -194,6 +233,7 @@ class TaskStatus(BaseModel):
     mode: TaskMode = 'full'
     suite_repository: str | None = None
     suite_batch: list[SuiteCommit] = Field(default_factory=list)
+    suite_repositories: list[SuiteRepository] = Field(default_factory=list)
     status: Literal['implementing', 'idle', 'in_review', 'approved', 'done', 'blocked']
     round: int
     sha: str | None = None

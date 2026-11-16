@@ -23,6 +23,14 @@ def _parsed(row, db=None, visibility=False):
     record = dict(row)
     record['mode'] = 'full' if record.get('mode') == 'light' else record.get('mode', 'full')
     record['suite_batch'] = json.loads(record.get('suite_batch') or '[]')
+    record['suite_repositories'] = json.loads(record.get('suite_repositories') or '[]')
+    if not record['suite_repositories'] and record.get('suite_repository'):
+        record['suite_repositories'] = [
+            {'repository': record['suite_repository'], 'batch': record['suite_batch']}]
+    spaces = ({item['repository']: item['path'] for item in workspaces(db, record['conv_id'])}
+              if db and record['suite_repositories'] else {})
+    for item in record['suite_repositories']:
+        item['path'] = spaces.get(item['repository'])
     conv = db.get_conversation(record['conv_id']) if db else None
     record['goal'] = (conv or {}).get('goal', '')
     record['creation_error'] = None

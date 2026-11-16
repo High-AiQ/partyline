@@ -19,6 +19,9 @@ async def set_task_goal(runtime, actor, conv_id, goal):
     if row['status'] in ('approved', 'done'):
         raise HTTPException(409, 'use reopen_task(conv_id, goal) for an approved or done task')
     goal = goal.strip()
+    if row['mode'] == 'suite':
+        from .orchestrator_suite import suite_goal
+        goal = suite_goal(goal, row)
     conv = set_goal(db, conv_id, goal)
     for ident in (row['implementer_id'], row['reviewer_id']):
         att = db.get_attachment(ident) if ident else None
