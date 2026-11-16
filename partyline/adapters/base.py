@@ -22,6 +22,7 @@ if sys.platform != "win32":
     import termios
 
 from partyline import process_memory, process_exit, docker_shim_env, op_timing
+from partyline.attachment_stop_audit import pop_stop_intent
 from partyline.adapters.events import AdapterEvents
 from partyline.adapters.timed_callbacks import TimedCallbacks
 from partyline.adapters import activation, fence, mcp_hooks, pty_io, startup_prompt
@@ -183,6 +184,7 @@ class Adapter(TimedCallbacks, AdapterEvents, JsonlPasteReceipts, activation.Acti
             self._startup_delivery.set()
 
     async def stop(self):
+        self._stop_intent = pop_stop_intent(self.att.get("id"))
         self._stopping = True
         self.abort_startup_prompt()
         self._mark_not_ready()

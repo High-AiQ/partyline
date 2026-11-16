@@ -27,7 +27,7 @@ def direct_stop(att_id, source, caller=None):
 
 
 def pop_stop_intent(att_id):
-    """Who asked partyline to stop this attachment, consumed by its exit; None if nobody did."""
+    """Take the stop request for this attachment, once; the adapter's stop() binds it to its activation."""
     return _stop_intents.pop(att_id, None)
 
 

@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from partyline import process_exit
-from partyline.attachment_stop_audit import direct_stop, pop_stop_intent
 from partyline.memory_contracts import ProcessExit
 
 
@@ -57,25 +56,12 @@ class SignalSenderTest(unittest.IsolatedAsyncioTestCase):
         adapter.post.assert_awaited_once_with(
             "system", "system", "reviewer exited (code 143, SIGTERM sent by external)")
 
-    async def test_a_stop_partyline_made_is_recorded_with_its_source_once(self):
-        adapter = self.adapter()
-        direct_stop("rev", "line_process_routes.detach_attachment")
-
-        await self.report(adapter, -15)
-
-        adapter.post.assert_awaited_once()
-        notice = adapter.post.await_args.args[2]
-        self.assertIn("SIGTERM sent by partyline: line_process_routes.detach_attachment", notice)
-        self.assertIsNone(pop_stop_intent("rev"))  # consumed by its exit
-
-    async def test_a_stopping_adapter_posts_nothing_and_consumes_its_intent(self):
+    async def test_a_stopping_adapter_posts_nothing(self):
         adapter = self.adapter(stopping=True)
-        direct_stop("rev", "restart.shutdown")
 
         await self.report(adapter, -15)
 
         adapter.post.assert_not_awaited()
-        self.assertIsNone(pop_stop_intent("rev"))
 
     async def test_a_clean_exit_names_no_signal(self):
         adapter = self.adapter()

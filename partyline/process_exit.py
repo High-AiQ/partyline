@@ -7,7 +7,6 @@ import signal as signals
 import subprocess
 import uuid
 
-from .attachment_stop_audit import pop_stop_intent
 from .memory_contracts import ProcessExit
 from .process_memory import parse_size
 
@@ -115,7 +114,8 @@ def exit_notice(name: str, evidence: ProcessExit) -> str:
 async def report_exit(adapter, code: int) -> None:
     scope = getattr(adapter, "memory_scope", None)
     recorded = False
-    intent = pop_stop_intent(adapter.att.get("id"))
+    # This activation's own stop request, bound by its stop(); never another activation's.
+    intent = getattr(adapter, "_stop_intent", None)
     try:
         evidence = await asyncio.to_thread(inspect_exit, scope, code, adapter.memory_limit)
         evidence.signal = exit_signal(code)

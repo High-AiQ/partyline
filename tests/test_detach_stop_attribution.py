@@ -7,22 +7,15 @@ from partyline import process_exit
 from partyline.db import Db
 from partyline.line_process_routes import close_attachment
 from partyline.runtime import ChatRuntime
+from tests.test_adapter_base import Recorder
 
 
-class StopAdapter:
-    """Stops the way a real adapter does: flag stopping, then the group exits from SIGTERM."""
-
-    def __init__(self, att, status):
-        self.att = att
-        self.status = status
-        self.memory_scope = None
-        self.memory_limit = "4G"
-        self._stopping = False
+class StopAdapter(Recorder):
+    """A real adapter: its base stop() binds the request, then the group exits from SIGTERM."""
 
     async def stop(self):
-        self._stopping = True
+        await super().stop()
         await process_exit.report_exit(self, -15)
-        await self.status("detached")
 
 
 class DetachStopAttributionTest(unittest.IsolatedAsyncioTestCase):
@@ -36,8 +29,9 @@ class DetachStopAttributionTest(unittest.IsolatedAsyncioTestCase):
         self.db.add_attachment("worker-att", "line", "worker", "raw", ["sh"],
                                self.directory.name, "owner", counts_toward_total=True)
         self.db.set_attachment_status("worker-att", "running", "owner")
-        adapter = StopAdapter({"id": "worker-att", "name": "worker", "runtime_owner": "owner"},
-                              self.runtime.status_callback("worker-att", "line", "owner"))
+        adapter = StopAdapter(["cat"], id="worker-att", name="worker", runtime_owner="owner")
+        adapter.memory_limit = "4G"
+        adapter.on_status = self.runtime.status_callback("worker-att", "line", "owner")
         self.runtime.live["worker-att"] = adapter
 
     async def test_the_production_close_route_records_its_stop_as_partyline_sent(self):
