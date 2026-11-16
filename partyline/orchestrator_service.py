@@ -20,7 +20,7 @@ from .orchestrator_notices import handed_to, report, spawn_refused, tell
 from .orchestrator_sha_check import flag
 from .orchestrator_revive import (
     brief_reviewer, reviewer_is_live, revive_reviewer, staffed_by_preset, task_lock)
-from .orchestrator_repin import repin, review_entries, verdict_matches
+from .orchestrator_repin import pairs, repin, review_entries, verdict_matches
 from .orchestrator_handles import pick_tag
 from .orchestrator_suite import resolve_repositories, save_repositories, suite_brief, suite_goal
 from .memory_live_raise import check_task_memory
@@ -191,10 +191,12 @@ async def request_review(runtime, actor, conv_id, body):
         db._exec(
             'UPDATE task_reviews SET sha=?,review_worktree=?,repositories=?,what=?,location=?, '
             "findings='',overridden_by=NULL,reviewer_env_gap=0, "
-            'review_hold_sha=NULL,round=CASE WHEN round=0 THEN 1 ELSE round END,reviewer_restarts=0 '
+            'review_hold_sha=CASE WHEN ? THEN NULL ELSE review_hold_sha END, '
+            'round=CASE WHEN round=0 THEN 1 ELSE round END,reviewer_restarts=0 '
             'WHERE conv_id=?',
-            (checkouts[0]['sha'], checkouts[0]['path'], json.dumps(checkouts),
-             body.what, body.where, conv_id))
+            (checkouts[0]['sha'], checkouts[0]['path'], json.dumps(checkouts), body.what, body.where,
+             bool(row.get('review_hold_sha') and pairs(checkouts) != pairs(row['repositories'])),
+             conv_id))
         row = task(db, conv_id)
         if row['policy'] not in ('none', 'captain'):
             try:

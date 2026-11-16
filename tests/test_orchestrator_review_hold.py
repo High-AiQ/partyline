@@ -86,6 +86,20 @@ class ReviewHoldTest(TaskFixture):
         self.assertEqual(delivered['sha'], new_sha)
         self.assertIsNone(delivered['review_hold_sha'])
 
+    async def test_same_sha_redelivery_after_changes_keeps_hold(self):
+        row, sha, reviewer = await self.in_review()
+        await message_task(self.runtime, self.captain, self.conv_id, MessageTaskIn(text='Rework'))
+        await review_verdict(self.runtime, reviewer, self.conv_id,
+                             VerdictIn(verdict='changes', sha=sha, findings='please rework'))
+        redelivered = await request_review(self.runtime, self.worker, self.conv_id,
+                                           ReviewRequestIn(sha=sha, what='feature', where='code'))
+        self.assertEqual(redelivered['sha'], row['sha'])
+        self.assertEqual(redelivered['review_hold_sha'], sha)
+        with self.assertRaises(HTTPException) as caught:
+            await review_verdict(self.runtime, reviewer, self.conv_id,
+                                 VerdictIn(verdict='approve', sha=sha, findings='looks good'))
+        self.assertEqual(caught.exception.status_code, 409)
+
     async def test_opt_out_and_outside_review_do_not_hold(self):
         await self.create()
         outside = await message_task(self.runtime, self.captain, self.conv_id,
