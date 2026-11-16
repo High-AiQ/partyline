@@ -76,7 +76,10 @@ _DESCRIBE = {
                    'For suite mode, omit batch inputs to keep all repositories; pass repositories '
                    '(per-repo ordered batches) to replace them, or batch with repository to update one.',
     'nudge_reviewer': 'Ask your reviewer to continue, once per round, with fixed text and no arguments.',
-    'message_task': 'Message an existing task participant privately; it does not change the goal.',
+    'message_task': ('Message a task participant privately; while the task is in review, messages to '
+                     'the implementer hold approval of the current SHA by default. Set hold_review=false '
+                     'for an informational message. Release with captain(op="review_hold", '
+                     'args={conv_id, hold: false}) or clear it by re-delivering.'),
 }
 
 

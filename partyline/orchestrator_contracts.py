@@ -213,6 +213,7 @@ class TaskReview(BaseModel):
     overridden_by: str | None = None
     goal: str = ''
     creation_error: str | None = None
+    review_hold: str | None = None
 
 
 class TaskStatus(BaseModel):
@@ -244,6 +245,7 @@ class TaskStatus(BaseModel):
     overridden_by: str | None = None
     creation_error: str | None = None
     goal_chars: int | None = None
+    review_hold: str | None = None
 
 
 class NudgeReviewerIn(BaseModel):
@@ -254,6 +256,14 @@ class MessageTaskIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
     text: str = Field(min_length=1, max_length=4000, pattern=r'\S')
     to: Literal['implementer', 'reviewer'] = 'implementer'
+    hold_review: bool = Field(default=True, description='While the task is in review, hold approval '
+                              'of its current SHA after messaging the implementer. Set false for '
+                              'informational messages.')
+
+
+class ReviewHoldIn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    hold: bool
 
 
 class ShareRefIn(BaseModel):

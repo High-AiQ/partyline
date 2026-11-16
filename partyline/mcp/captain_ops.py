@@ -99,6 +99,9 @@ def execute(client, op, args, state):
         query = {"include_retired": "true" if args.get("include_retired") else "false",
                  **{key: args[key] for key in ("limit", "offset") if key in args}}
         return client.request("GET", _path(conv, "process-overview") + "?" + urlencode(query))
+    if op == "review_hold":
+        conv = _target(client, state, conv, ("assign",))
+        return client.request("POST", _path(conv, "task/review-hold"), {"hold": args["hold"]})
     if op == "write_set_requests":
         conv = _target(client, state, conv, ("read",))
         pending = client.request("GET", _path(conv, "write-set/request"))

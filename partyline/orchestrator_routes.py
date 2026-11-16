@@ -8,8 +8,8 @@ from .machine_scope import deny_unless
 from .orchestrator_contracts import (
     BlockedIn, EnvGapIn, CaptainStyleIn, DeliverIn, MessageTaskIn, NudgeReviewerIn, ReopenIn, ResumeIn,
     ReviewRequestIn, ShareRefIn,
-    ShareRefOut, SuiteReopenIn, TaskIn, TaskReview, TaskStatus, VerdictIn, WaitingIn)
-from .orchestrator_handles import message_task, task_line
+    ReviewHoldIn, ShareRefOut, SuiteReopenIn, TaskIn, TaskReview, TaskStatus, VerdictIn, WaitingIn)
+from .orchestrator_handles import message_task, review_hold, task_line
 from .orchestrator_stall import blocked, resume_work
 from .orchestrator_wait import waiting as declare_wait
 from .orchestrator_reopen import reopen_task
@@ -93,6 +93,11 @@ def orchestrator_router(runtime):
     async def message(request: Request, conv_id: str, body: MessageTaskIn):
         actor = request_principal(request)
         return await message_task(runtime, actor, task_line(db, actor, conv_id), body)
+
+    @router.post('/api/conversations/{conv_id}/task/review-hold', response_model=TaskStatus)
+    async def hold_review(request: Request, conv_id: str, body: ReviewHoldIn):
+        actor = request_principal(request)
+        return await review_hold(runtime, actor, task_line(db, actor, conv_id), body)
 
     @router.post('/api/conversations/{conv_id}/task/nudge-reviewer', response_model=TaskStatus)
     async def nudge(request: Request, conv_id: str, body: NudgeReviewerIn | None = None):

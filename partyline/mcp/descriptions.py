@@ -26,6 +26,8 @@ SHORT = {
     "render_check": "Ask which renders need a closer look (needs consent).",
     "acquire_resource": "Take an advisory lease before a job needing a declared resource; release when done.",
     "review_verdict": "Give the verdict on the requested review: approve or changes, with findings.",
+    "message_task": ("Privately message a task worker; implementer messages hold review by default. "
+                     "Set hold_review=false for FYI messages."),
     "request_review": "Hand a full task to review: sha, what, where. Refused on express or suite tasks.",
     "blocked": "Tell the root captain you are blocked, with the reason.",
     "env_gap": "Report a review test environment gap to the root captain.",

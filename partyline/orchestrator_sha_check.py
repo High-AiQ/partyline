@@ -187,7 +187,9 @@ def report_text(db, row) -> str:
     repos = row["repositories"]
     where = (' ' + '; '.join(f"{item['repository']} {item['sha']}" for item in repos)
              if len(repos) > 1 else '')
-    head = (f"Task {row['conv_id']}: {status}; round {row['round']}; "
+    hold = (f"review held: captain changes after {row['review_hold_sha'][:7]}; "
+            if row.get('review_hold_sha') else '')
+    head = (f"Task {row['conv_id']}: {status}; {hold}round {row['round']}; "
             f"SHA {row['sha']}{where}; review {row['review_worktree']}; ")
     missing = flagged(db, row)
     warning = ('⚠ unverified SHAs (not a commit in this task\'s worktrees or their clones): '

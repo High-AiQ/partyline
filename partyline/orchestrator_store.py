@@ -34,6 +34,9 @@ def _parsed(row, db=None, visibility=False):
     conv = db.get_conversation(record['conv_id']) if db else None
     record['goal'] = (conv or {}).get('goal', '')
     record['creation_error'] = None
+    held_sha = record.get('review_hold_sha')
+    record['review_hold'] = (f"review held: captain changes after {held_sha[:7]}"
+                             if held_sha else None)
     record['implementer_handle'] = _handle(db, record.get('implementer_id'))
     record['reviewer_handle'] = _handle(db, record.get('reviewer_id'))
     try:

@@ -5,6 +5,7 @@ from . import captain_ops, tools_tasks
 
 _ACTION = {
     "review_env": "assign", "resources": "assign", "staffing": "assign",
+    "review_hold": "assign",
     "attach_worker": "attach", "detach_worker": "close",
     "create_child": "create_child", "new_chapter": "chapter",
     "appoint_lead": "appoint_lead", "retire_child": "assign",
@@ -80,6 +81,7 @@ def tool_list(state: dict) -> list[dict]:
         if op == "review_env":
             continue  # only through captain(op, args)
         descriptions = {
+            "review_hold": "Release a captain message hold on a task review with hold=false.",
             "create_child": "Create a child line; its captain requires Can manage a line checked.",
             "new_chapter": "Start a fresh line that continues your own line (same parent, folder, topic, "
                 "goal, notes and captain style; nothing moves or is deleted). A person appoints its captain.",

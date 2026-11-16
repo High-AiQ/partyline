@@ -1504,7 +1504,13 @@ It delivers a fixed request to continue and submit `review_verdict` or `env_gap`
 at most once per round. Text arguments are rejected: reviewer independence means
 the implementer can prompt progress but cannot steer the verdict. A dead reviewer
 returns 409 directing the implementer to the root captain's `restart_reviewer`.
-Root captains and people retain `message_task` for free-text messages.
+Root captains and people retain `message_task` for free-text messages. While a full task is
+`in_review`, a message to its implementer sets a review hold on the current SHA by default;
+the reviewer is privately told to wait for a new delivery. `message_task(..., hold_review=false)`
+sends an informational message without setting the hold. The hold clears when the implementer
+requests review at a new SHA, or the root captain releases it with
+`captain(op="review_hold", args={conv_id, hold: false})`. An approval while held returns 409;
+a request-changes verdict remains available.
 
 ## Task modes: full, express and suite
 

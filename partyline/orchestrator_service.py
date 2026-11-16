@@ -191,7 +191,8 @@ async def request_review(runtime, actor, conv_id, body):
         db._exec(
             'UPDATE task_reviews SET sha=?,review_worktree=?,repositories=?,what=?,location=?, '
             "findings='',overridden_by=NULL,reviewer_env_gap=0, "
-            'round=CASE WHEN round=0 THEN 1 ELSE round END,reviewer_restarts=0 WHERE conv_id=?',
+            'review_hold_sha=NULL,round=CASE WHEN round=0 THEN 1 ELSE round END,reviewer_restarts=0 '
+            'WHERE conv_id=?',
             (checkouts[0]['sha'], checkouts[0]['path'], json.dumps(checkouts),
              body.what, body.where, conv_id))
         row = task(db, conv_id)
@@ -230,6 +231,9 @@ async def _review_verdict(runtime, actor, conv_id, body):
         raise HTTPException(409, f"stale or missing review SHA; review current SHA {row['sha']} "
                             'and name all current repository SHAs in the verdict')
     approved = body.verdict == 'approve'
+    if approved and row.get('review_hold_sha'):
+        raise HTTPException(409, f"review held: captain changes after {row['review_hold_sha'][:7]}; "
+                            'hold approval until the implementer re-delivers or the captain releases it')
     changed = db._exec(
         'UPDATE task_reviews SET status=?,findings=?,previous_findings=CASE WHEN ? THEN previous_findings '
         'ELSE ? END,round=round+?,reviewer_restarts=0,'

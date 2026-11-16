@@ -369,6 +369,7 @@ from `/api/capabilities`. Every HTTP handler independently authorizes the caller
 | `waiting(reason, seconds?)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/waiting` |
 | `request_review(sha?, what, where)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/request-review` |
 | `review_verdict(verdict, findings, override?)` | Exact assigned reviewer; root captain with `override=true` or for captain policy | POST `/api/conversations/{task}/review-verdict` |
+| `review_hold(conv_id, hold=false)` | Root captain | POST `/api/conversations/{task}/task/review-hold`; releases a message-created review hold |
 
 For each task workspace, `tasks` reports the repository, worktree path, branch, mirror and
 host tips, accepted SHA when present, and at most five truncated subjects with the full count
