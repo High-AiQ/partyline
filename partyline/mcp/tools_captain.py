@@ -35,8 +35,10 @@ def permitted(state):
 
 DOORS = {
     "captain": "captain(op, args) runs any captain or task operation that is not listed on its own "
-               "(restart_implementer, restart_reviewer, set_goal, share_ref, retirement_preview, "
-               "retire_child, process_overview, docs_read, ...). op is the operation name and args "
+               "(restart_implementer, restart_reviewer, set_goal, share_ref, review_hold, "
+               "retirement_preview, retire_child, process_overview, docs_read, ...). To release a "
+               "review hold, call captain(op=\"review_hold\", args={conv_id, hold: false}). "
+               "op is the operation name and args "
                "an object with that operation's arguments; the listed ops are in the captain "
                "tool's description, and guide(topic=<op>) gives one op's schema.",
     "extras": "extras(op, args) runs a specialist tool that is not listed (Blender, render_check, "
