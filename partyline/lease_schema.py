@@ -27,4 +27,10 @@ MIGRATIONS = [
     # 5.4: why the lease is held, so a captain can tell a timing run from a
     # habit in the staffing line. Free text the holder chooses, ≤80 chars.
     "ALTER TABLE resource_leases ADD COLUMN purpose TEXT NOT NULL DEFAULT ''",
+    # A waiter promoted by a release, expiry or exit may not be polling: the
+    # flag is its pending wake, claimed once when the notice is delivered.
+    "ALTER TABLE resource_leases ADD COLUMN wake_pending INTEGER NOT NULL DEFAULT 0",
+    # 1 = promoted, notice not yet stored; 2 = notice stored (wake_notice_id),
+    # delivery pending. Delivery retries the one stored notice, never a second.
+    "ALTER TABLE resource_leases ADD COLUMN wake_notice_id INTEGER",
 ]

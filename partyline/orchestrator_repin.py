@@ -72,7 +72,7 @@ async def repin(runtime, row, body, entries):
     new = '; '.join(f"{x['repository']} {x['sha']}" for x in checkouts)
     db._exec('INSERT INTO task_review_repins VALUES(?,?,?,?)', (conv_id, old, new, time.time()))
     db._exec('UPDATE task_reviews SET sha=?,repositories=?,review_worktree=?,what=?,location=?, '
-             'repin_required=1,report_id=NULL,reviewer_restarts=0 WHERE conv_id=?',
+             'review_hold_sha=NULL,repin_required=1,report_id=NULL,reviewer_restarts=0 WHERE conv_id=?',
              (checkouts[0]['sha'], json.dumps(checkouts), checkouts[0]['path'],
               body.what, body.where, conv_id))
     from .orchestrator_store import task

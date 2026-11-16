@@ -58,9 +58,12 @@ class MaintenanceEventsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_resource_grants_follow_mutations(self):
         runtime, events = self.fixture()
-        with patch.object(line_resource_routes, 'maintain', new_callable=AsyncMock) as maintain:
+        with patch.object(line_resource_routes, 'maintain', new_callable=AsyncMock) as maintain, \
+                patch.object(line_resource_routes, 'sweep_leases', new_callable=AsyncMock), \
+                patch.object(line_resource_routes, 'next_expiry_delay', return_value=None):
             await self.assert_reacts(line_resource_routes.run, maintain, runtime, events)
         self.assertIn('line_resource_claims', runtime.db.events.subscribe.call_args.args)
+        self.assertIn('resource_leases', runtime.db.events.subscribe.call_args.args)
 
     async def test_handover_completion_follows_mutations(self):
         runtime, events = self.fixture()

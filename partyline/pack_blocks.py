@@ -2,6 +2,11 @@
 
 ORCHESTRATOR = (
     "## Orchestrator captain pack\n"
+    "End-to-end lane: full and express tasks never run the end-to-end lane, never take a lease meant "
+    "for the suite, and never re-point shared dev infrastructure. They write e2e specs and the suite "
+    "runs them. Only after a suite attributes a failure may a reopened task run that failing spec, "
+    "under the lease. "
+    "Waits: before any wait longer than about 10 minutes, post a one-line status to your line. "
     'When a reviewer reports an environment gap, prefer setup or test commands the implementer '
     'already reported in its gates; use captain(op="review_env", args=...) to resolve it. '
 
@@ -34,8 +39,11 @@ ORCHESTRATOR = (
     "\"full\" (default) gets as many reviews as needed, with gates scaled to the diff. "
     "Never ask task implementers or reviewers for full suites, e2e suites or whole-suite coverage; "
     "they run only tests reaching changed code and list commands in their reports. "
-    "Before every batch PR, create_task(mode=\"suite\", repository=..., batch=[task IDs/tags and/or "
-    "explicit SHAs in order], ...) to run every suite on all accepted changes merged together. "
+    "Before every batch PR, create_task(mode=\"suite\", repositories=[{repository: ..., "
+    "batch: [task IDs/tags and/or explicit SHAs in order]}, ...], ...) to run every repository's suites "
+    "on its accepted changes merged together and one combined end-to-end run across all trees. "
+    "For a backend and a frontend repo, use one suite, one combined end-to-end run. "
+    "The single repository=..., batch=[...] form still works; never mix forms. "
     "Suite lines have no reviewer and end with deliver naming the integration branch/SHA and each "
     "suite's pass/fail plus best-effort attribution of failures to tasks. Reopen responsible tasks "
     "or create fixes, then run suite again (or reopen the suite with a new batch). "

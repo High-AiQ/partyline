@@ -8,7 +8,8 @@ from .mention_relay import LIVE, live_manager
 from .orchestrator_notices import tell
 from .orchestrator_revive import task_lock
 from .orchestrator_staff import restart
-from .orchestrator_suite import resolve_batch, save_batch, suite_brief
+from .orchestrator_suite import (
+    resolve_batch, resolve_repositories, save_repositories, suite_brief, suite_goal)
 from .orchestrator_store import EXPRESS_BRIEF, require_root, task
 
 
@@ -25,9 +26,21 @@ async def reopen_task(runtime, actor, conv_id, body):
     goal = body.goal.strip()
     batch = getattr(body, 'batch', None)
     repository = getattr(body, 'repository', None)
-    if row['mode'] != 'suite' and (batch is not None or repository is not None):
-        raise HTTPException(422, 'batch and repository are for suite tasks')
-    suite = resolve_batch(db, row['root_id'], repository or row['suite_repository'], batch) if batch else None
+    repositories = getattr(body, 'repositories', None)
+    if row['mode'] != 'suite' and (batch is not None or repository is not None or repositories is not None):
+        raise HTTPException(422, 'repositories, batch and repository are for suite tasks')
+    suite = resolve_repositories(db, row['root_id'], body) if repositories else None
+    if batch:
+        if len(row['suite_repositories']) > 1 and not repository:
+            raise HTTPException(
+                422, 'a multi-repository suite requires repository with batch, or repositories')
+        name, commits = resolve_batch(db, row['root_id'], repository or row['suite_repository'], batch)
+        suite = ([{'repository': name, 'batch': commits}] if len(row['suite_repositories']) == 1 else
+                 [dict(item, batch=commits) if item['repository'] == name else item
+                  for item in row['suite_repositories']])
+        if not any(item['repository'] == name for item in suite):
+            raise HTTPException(
+                422, 'reopen repository must belong to this suite; use repositories to replace it')
     if repository and not batch:
         raise HTTPException(422, 'repository requires a new batch')
     async with task_lock(runtime, conv_id):
@@ -46,8 +59,8 @@ async def reopen_task(runtime, actor, conv_id, body):
                 409, 'only an approved or done task can be reopened; a blocked or implementing task '
                 'takes new direction through resume_work(conv_id, note) or message_task')
         if suite:
-            save_batch(db, conv_id, *suite)
-        set_goal(db, conv_id, goal)
+            save_repositories(db, conv_id, suite)
+        set_goal(db, conv_id, suite_goal(goal, task(db, conv_id)) if row['mode'] == 'suite' else goal)
         att = db.get_attachment(row['implementer_id'])
         if att and att['status'] not in LIVE:
             await restart(runtime, att, 'implementer', row['implementer_preset'])

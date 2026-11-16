@@ -8,6 +8,7 @@ from .storage_cleanup_schema import MIGRATIONS as STORAGE_CLEANUP
 from .turn_usage_schema import MIGRATIONS as TURN_USAGE
 from .reviewer_progress_schema import MIGRATIONS as REVIEWER_PROGRESS
 from .db_schema_helper_updates import HELPER_UPDATES
+from .review_hold_schema import MIGRATIONS as REVIEW_HOLD
 MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
@@ -290,11 +291,10 @@ MIGRATIONS.append("""CREATE TABLE IF NOT EXISTS storage_cleanup_decisions(
     path TEXT PRIMARY KEY,
     evidence TEXT NOT NULL
 )""")
-MIGRATIONS.extend(RETIRE_MANAGER_TREE)  # after EXTENSIONS: it drops their old triggers
-MIGRATIONS.extend(REVIEW_ENVIRONMENTS + TOOL_TELEMETRY + TURN_USAGE + REVIEWER_PROGRESS + HELPER_UPDATES)
-# Suite inputs survive restarts; older light rows use the full scoped-review mode.
-MIGRATIONS += [
-    "UPDATE task_reviews SET mode='full' WHERE mode='light'",
+MIGRATIONS.extend(RETIRE_MANAGER_TREE + REVIEW_ENVIRONMENTS + TOOL_TELEMETRY + TURN_USAGE
+                  + REVIEWER_PROGRESS + HELPER_UPDATES + REVIEW_HOLD)  # after EXTENSIONS: drops old triggers
+MIGRATIONS += ["UPDATE task_reviews SET mode='full' WHERE mode='light'",
     "ALTER TABLE task_reviews ADD COLUMN suite_repository TEXT",
     "ALTER TABLE task_reviews ADD COLUMN suite_batch TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE task_reviews ADD COLUMN suite_repositories TEXT NOT NULL DEFAULT '[]'",
 ]

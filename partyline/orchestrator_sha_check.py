@@ -168,17 +168,28 @@ def report_text(db, row) -> str:
     behind that marker rather than stored over the cap and refused.
     """
     status = "stalled" if row["stall_stage"] == 3 else row["status"]
+    if row['status'] == 'blocked':
+        mode = f"{row['mode']} " if row.get('mode') in ('express', 'suite') else ''
+        text = f"Task {row['conv_id']}: {mode}{status}; Reason: {row['findings']}"
+        missing = flagged(db, row)
+        if missing:
+            text += '\n⚠ unverified SHAs (not a commit in this task\'s worktrees or their clones): '
+            text += ', '.join(missing)
+        return clip(text, reports.MAX_BODY, TRUNCATED)
     if row.get("mode") == "express":
         return clip(f"Task {row['conv_id']}: express {status}; {row['what'] or ''} — "
                     f"{row['location'] or ''}\n{row['findings'] or ''}".rstrip(),
                     reports.MAX_BODY, TRUNCATED)
     if row.get("mode") == "suite":
-        return clip(f"Task {row['conv_id']}: suite {status}; SHA {row['sha']}; "
-                    f"{row['what']} — {row['location']}", reports.MAX_BODY, TRUNCATED)
+        commits = '; '.join(f"{item['repository']} {item['sha']}" for item in row['repositories'])
+        return clip(f"Task {row['conv_id']}: suite {status}; SHA {row['sha']}; {commits}; "
+                    f"{row['findings']}\n{row['what']} — {row['location']}", reports.MAX_BODY, TRUNCATED)
     repos = row["repositories"]
     where = (' ' + '; '.join(f"{item['repository']} {item['sha']}" for item in repos)
              if len(repos) > 1 else '')
-    head = (f"Task {row['conv_id']}: {status}; round {row['round']}; "
+    hold = (f"review held: captain changes after {row['review_hold_sha'][:7]}; "
+            if row.get('review_hold_sha') else '')
+    head = (f"Task {row['conv_id']}: {status}; {hold}round {row['round']}; "
             f"SHA {row['sha']}{where}; review {row['review_worktree']}; ")
     missing = flagged(db, row)
     warning = ('⚠ unverified SHAs (not a commit in this task\'s worktrees or their clones): '

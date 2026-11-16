@@ -21,7 +21,7 @@ from difflib import get_close_matches
 
 from .hierarchy import ancestors, lead_attachment, tree_conversation_ids
 from .mention_relay import LIVE, is_foreign, speaker_attachment, task_root_captain
-from .mentions import known_mention_names
+from .mentions import domain_shaped, known_mention_names
 from .orchestrator_store import attachment_task
 
 # The collector of the message being settled. A relay copy is routed inside it
@@ -131,6 +131,8 @@ def unknown_handles(db, conv_id: str, names: set[str]) -> set[str]:
     # punctuation; a name is unknown only if neither spelling is known.
     known = known_mention_names(db, conv_id, {name.rstrip(".-_") for name in names})
     names = {name for name in names if name.rstrip(".-_") not in known}
+    # An unknown domain such as @example.com is prose, not a failed hand-off.
+    names = {name for name in names if not domain_shaped(name)}
     return {name for name in names
             if not (name.rstrip(".-_") != name and name.rstrip(".-_") in names)}
 

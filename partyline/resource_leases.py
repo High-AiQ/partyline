@@ -5,8 +5,9 @@ a sentence in its topic; nothing told a captain another line held the slot,
 so coordination waited on a person (finding 2.10). A lease names the
 capability instead: an exclusive lease waits behind any holder, shared
 leases coexist with each other but not with an exclusive one, everything
-expires at its TTL, and a process's leases die with its process. Callers
-poll — there is no blocking request to hold open.
+expires at its TTL, and a process's leases die with its process. There is
+no blocking request to hold open: a queued caller may poll, but the server
+also promotes and wakes it (`lease_lifecycle`) when the slot frees.
 """
 
 from __future__ import annotations
@@ -17,10 +18,16 @@ import time
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
+from .lease_queue import (
+    MAX_TTL_S,
+    _purge_expired,
+    _rows,
+    _serialized,
+    promote_all,
+)
 
 LEASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 MODES = ("exclusive", "shared")
-MAX_TTL_S = 4 * 3600
 DEFAULT_TTL_S = 900
 PURPOSE_MAX = 80
 
@@ -29,32 +36,23 @@ class LeaseError(ValueError):
     """A malformed lease request; the route answers 422 with the message."""
 
 
-def _purge_expired(db) -> None:
-    db._exec("DELETE FROM resource_leases WHERE expires_at<=?", (time.time(),))
-
-
-def _promote(db, row: dict, now: float) -> None:
-    """Turn one waiter into the holder, granting exactly the TTL it asked for,
-    capped at the module maximum — queue time must not inflate the lease."""
-    ttl = min(row.get("ttl_s") or MAX_TTL_S, MAX_TTL_S)
-    _upsert(db, {**row, "waiting": 0, "expires_at": now + ttl})
-
-
 def _upsert(db, row: dict) -> None:
     """Insert or refresh one lease row. ``created_at`` is write-once: for a
     waiter it is the queue place, and renewing must never move it."""
     db._exec(
         "INSERT INTO resource_leases(name,holder_attachment,holder_handle,holder_line,"
-        "mode,waiting,created_at,expires_at,purpose) VALUES(?,?,?,?,?,?,?,?,?) "
+        "mode,waiting,created_at,expires_at,purpose,wake_pending,ttl_s) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(name,holder_attachment) DO UPDATE SET holder_handle=excluded."
         "holder_handle, holder_line=excluded.holder_line, mode=excluded.mode, "
         "waiting=excluded.waiting, expires_at=excluded.expires_at, "
-        "purpose=excluded.purpose",
+        "purpose=excluded.purpose, wake_pending=excluded.wake_pending, ttl_s=excluded.ttl_s",
         (row["name"], row["holder_attachment"], row["holder_handle"], row["holder_line"],
          row["mode"], row["waiting"], row["created_at"], row["expires_at"],
-         row.get("purpose", "")))
+         row.get("purpose", ""), row.get("wake_pending", 0), row.get("ttl_s") or DEFAULT_TTL_S))
 
 
+@_serialized
 def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: str,
                   name: str, mode: str, ttl_s: int, purpose: str = "") -> dict:
     """Take, renew, or queue for one lease; the caller polls, never blocks.
@@ -79,29 +77,10 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
     if len(purpose) > PURPOSE_MAX:
         raise LeaseError(f"purpose must be at most {PURPOSE_MAX} characters")
     now = time.time()
-    _purge_expired(db)
-    rows = [dict(row) for row in db._exec(
-        "SELECT * FROM resource_leases WHERE name=?", (name,)).fetchall()]
-    held = [row for row in rows if not row["waiting"]]
-    waiters = sorted((row for row in rows if row["waiting"]),
-                     key=lambda row: row["created_at"])
-    if not held and waiters:
-        # The slot is free: promote by queue order — the earliest waiter, then
-        # the leading contiguous run of shared waiters, stopping at the first
-        # exclusive one so it keeps its place.
-        promoted = [waiters[0]]
-        if promoted[0]["mode"] == "shared":
-            for row in waiters[1:]:
-                if row["mode"] != "shared":
-                    break
-                promoted.append(row)
-        for row in promoted:
-            _promote(db, row, now)
-        rows = [dict(row) for row in db._exec(
-            "SELECT * FROM resource_leases WHERE name=?", (name,)).fetchall()]
-        held = [row for row in rows if not row["waiting"]]
-        waiters = sorted((row for row in rows if row["waiting"]),
-                         key=lambda row: row["created_at"])
+    # Expired holders go and every name's queue is promoted by the same rules
+    # release and exit use, so a shared request never jumps an earlier exclusive.
+    promote_all(db)
+    rows, held, waiters = _rows(db, name)
     mine = next((row for row in rows
                  if row["holder_attachment"] == holder_attachment), None)
     others = [row for row in held if row["holder_attachment"] != holder_attachment]
@@ -139,20 +118,24 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
             "queue_position": 0, "expires_at": now + ttl_s}
 
 
+@_serialized
 def release_lease(db, holder_attachment: str, name: str) -> bool:
     """Release one lease held by the caller; False when it holds no such lease."""
     _purge_expired(db)
     cursor = db._exec(
         "DELETE FROM resource_leases WHERE holder_attachment=? AND name=?",
         (holder_attachment, (name or "").strip()))
+    promote_all(db)
     return bool(cursor.rowcount)
 
 
+@_serialized
 def release_attachment_leases(db, holder_attachment: str) -> int:
     """Drop every lease a process holds; it exited or detached, the slot is free."""
     _purge_expired(db)
     cursor = db._exec(
         "DELETE FROM resource_leases WHERE holder_attachment=?", (holder_attachment,))
+    promote_all(db)
     return cursor.rowcount
 
 
@@ -164,12 +147,13 @@ def _line_name(db, line_id: str) -> str:
 
 
 def active_lease_report(db) -> list[dict]:
-    """Every held lease with its waiters, for the listing and the staffing line."""
-    _purge_expired(db)
+    """Every held lease with its waiters, for the listing and the staffing line.
+    Expired holders are promoted past before reading, so a successor reads as held."""
+    promote_all(db)
     held: dict[str, dict] = {}
     queued: dict[str, int] = {}
     for row in db._exec(
-            "SELECT * FROM resource_leases WHERE expires_at>? ORDER BY created_at",
+            "SELECT * FROM resource_leases WHERE waiting=1 OR expires_at>? ORDER BY created_at",
             (time.time(),)).fetchall():
         row = dict(row)
         if row["waiting"]:
@@ -214,6 +198,9 @@ def describe_leases(db) -> str:
 
 
 def register_lease_routes(app, runtime) -> None:
+    from .lease_lifecycle import register_holder_route  # imports this module at load time
+    register_holder_route(app, runtime)
+
     @app.post("/api/leases")
     async def post_lease(request: Request, body: dict):
         principal = request_principal(request)

@@ -8,7 +8,7 @@ speaker gets everything it hit as one private, waking notice
 
 from .mention_fallbacks import route_fallbacks
 from .mention_relay import hint_root_captain, is_foreign, relay_mentions
-from .mentions import known_mention_names, mentioned_names, quoted_names
+from .mentions import domain_shaped, known_mention_names, mentioned_names, quoted_names
 from .unreached import explain, people, slips, unknown_handles, unreached_for
 
 
@@ -102,6 +102,8 @@ async def _settle(runtime, conv_id, message, names, unreachable, delivered, queu
     ):
         mentioned = mentioned_names(message["body"])
         unrecognized = mentioned - known_mention_names(db, conv_id, mentioned)
+        # A bare domain in a human's prose names no process; it is not a missed mention.
+        unrecognized = {name for name in unrecognized if not domain_shaped(name)}
         if unrecognized:
             handles = ", ".join(f"@{name}" for name in sorted(unrecognized))
             await runtime.post_message(

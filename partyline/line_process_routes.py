@@ -17,7 +17,7 @@ from .line_process_contracts import CloseProcessesResponse
 from .machine_scope import deny_unless
 from .resource_leases import release_attachment_leases
 from .attachment_tmp import reap_tmp_dir
-from .attachment_stop_audit import actor
+from .attachment_stop_audit import actor, direct_stop
 from .self_detach import asked_self_detach as asked_self_detach, own
 
 LIVE = ("starting", "running")
@@ -118,6 +118,8 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hin
         if adapter:
             from .tmp_owners import record
             await asyncio.to_thread(record, att_id, adapter)
+            # Partyline sends this stop: its exit is attributed to this source and caller.
+            direct_stop(att_id, source, caller)
             try:
                 await asyncio.wait_for(adapter.stop(), timeout=DETACH_STOP_TIMEOUT)
             except (Exception, asyncio.CancelledError) as exc:

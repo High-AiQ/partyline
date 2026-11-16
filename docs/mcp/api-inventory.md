@@ -119,9 +119,9 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 88 | POST | `/api/attachments/{att_id}/signal` | partyline/process_signal.py:signal_descendant (registration line 80) | owning process or line captain | yes | see Set 2 |
 | 89 | POST | `/api/messages/{message_id}/reactions` | partyline/reaction_routes.py:post_reaction (registration line 104) | H, or machine on the message's line | yes | see Set 2 |
 | 90 | DELETE | `/api/messages/{message_id}/reactions/{emoji}` | partyline/reaction_routes.py:delete_reaction (registration line 108) | H, or machine on the message's line | yes | see Set 2 |
-| 91 | POST | `/api/leases` | partyline/resource_leases.py:post_lease (registration line 217) | process (`attachment_id` required) | yes | see Set 2 |
-| 92 | GET | `/api/leases` | partyline/resource_leases.py:list_leases (registration line 236) | any authenticated caller | yes | see Set 2 |
-| 93 | DELETE | `/api/leases/{name}` | partyline/resource_leases.py:delete_lease (registration line 241) | holding process | yes | see Set 2 |
+| 91 | POST | `/api/leases` | partyline/resource_leases.py:post_lease (registration line 207) | process (`attachment_id` required) | yes | see Set 2 |
+| 92 | GET | `/api/leases` | partyline/resource_leases.py:list_leases (registration line 226) | any authenticated caller | yes | see Set 2 |
+| 93 | DELETE | `/api/leases/{name}` | partyline/resource_leases.py:delete_lease (registration line 231) | holding process | yes | see Set 2 |
 | 94 | GET | `/api/resources` | partyline/resource_routes.py:resources (registration line 16) | any authenticated caller | yes | see Set 2 |
 | 95 | GET | `/api/settings/resources` | partyline/resource_routes.py:get_resource_settings (registration line 22) | H only | no | resource settings are person-only |
 | 96 | PUT | `/api/settings/resources` | partyline/resource_routes.py:put_resource_settings (registration line 35) | H only | no | resource settings are person-only |
@@ -363,9 +363,10 @@ These entries extend both inventory sets above. Registration handlers are in
 | POST | `/api/conversations/{conv_id}/waiting` | `waiting` | exact task implementer | yes | tool: `waiting`; declares a long wait (`reason`, `seconds` 60–3600) that defers the stall reminder and the stall report |
 | POST | `/api/conversations/{conv_id}/request-review` | `review` | exact task implementer | yes | tool: `request_review`; `sha` or `repositories: [{repository, sha}]` (1–8, not both) |
 | POST | `/api/conversations/{conv_id}/deliver` | `deliver` | exact implementer of an express task | yes | tool: `deliver`; `what`, `where`, no SHA; posts the terminal report and marks the task done (409 on a full task); `request_review` on an express task is refused with 409 |
-| POST | `/api/conversations/{conv_id}/review-verdict` | `verdict` | exact task reviewer, or root captain with `override=true` (staffed reviews) or under captain policy | yes | tool: `review_verdict`; override supersedes the reviewer (told once), records `overridden_by`, refused with 409 when no review is open or the task is settled |
+| POST | `/api/conversations/{conv_id}/review-verdict` | `verdict` | exact task reviewer, or root captain with `override=true` (staffed reviews) or under captain policy | yes | tool: `review_verdict`; override supersedes the reviewer (told once), records `overridden_by`, refused with 409 when no review is open, the task is settled, or approval is held |
 | POST | `/api/conversations/{conv_id}/task/reopen` | `reopen` | H, or root captain | yes | tool: `reopen_task`; returns an approved/done task to implementing (409 otherwise) |
-| POST | `/api/conversations/{conv_id}/task/message` | `message` | H, or root captain | yes | tool: `message_task`; private wake-up message to the task's live implementer or reviewer (409 otherwise) |
+| POST | `/api/conversations/{conv_id}/task/message` | `message` | H, or root captain | yes | tool: `message_task`; private wake-up message to the task's live implementer or reviewer (409 otherwise); implementer messages hold an open review by default (`hold_review=false` opts out) |
+| POST | `/api/conversations/{conv_id}/task/review-hold` | `hold_review` | H, or root captain | yes | captain op: `review_hold`; `hold=false` releases an open review hold |
 | POST | `/api/conversations/{conv_id}/task/share-ref` | `share_ref` | H, or root captain | yes | captain op: `share_ref`; publish `refs/partyline/shared/<name>` in a live task's mirror, then privately notify its implementer |
 | POST | `/api/conversations/{conv_id}/task/resume` | `resume` | implementer, H, or root captain | yes | tool: `resume_work`; clears a blocked task; the root/person form requires `note` and wakes the implementer with it (409 unless blocked) |
 | POST | `/api/conversations/{conv_id}/task/implementer` | `implementer` | H, or root captain | yes | tool: `restart_implementer`; relaunches a detached implementer of an implementing, idle or blocked task (409 if running) |
@@ -388,6 +389,10 @@ These routes extend the fixed inventory above; they are separate from `/api/leas
 | POST | `/api/conversations/{conv_id}/resources` | Captain with `assign`, or person | captain op `resources`: `list`, `declare`, `remove`; optional `name` |
 | POST | `/api/task/resources/{name}/acquire` | Current live task implementer or reviewer, self only | tool `acquire_resource(name, note?)`; nonblocking held/queued result |
 | POST | `/api/task/resources/{name}/release` | Current live task implementer or reviewer, self only | tool `release_resource(name)`; releases held lease or cancels wait |
+
+The `/api/leases` family also has a read-only holder check for a project's own job wrapper
+(`GET /api/leases/{name}/holder`, any authenticated caller, **excluded** from MCP; see
+[Shared-resource leases](../hierarchy.md#shared-resource-leases)).
 
 `process_overview` also includes each line's declared resources with holder,
 grant timestamp, note and FIFO queue. See the

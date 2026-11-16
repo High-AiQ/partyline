@@ -48,28 +48,42 @@ _DESCRIBE = {
                     'mode is full (default: review as needed, only affected tests), express '
                     '(no review or tests, when a person says so or the captain decides), or suite '
                     '(no reviewer: run every suite on the merged batch before every batch PR). '
-                    'Suite requires repository and batch: task line IDs/tags resolving to accepted '
-                    'SHAs and/or explicit SHAs in cherry-pick order. The runner creates an integration '
-                    'branch from current main, cherry-picks, and ends with deliver naming the branch '
-                    'and SHA, each suite pass/fail, and best-effort failure attribution to tasks. '
+                    'Suite requires repositories=[{repository, batch}, ...], or the legacy repository '
+                    'and batch form; never mix forms or repeat repositories. Batches contain task line '
+                    'IDs/tags resolving to accepted SHAs for that repository and/or explicit SHAs in '
+                    'cherry-pick order. One runner creates an integration branch from current main in '
+                    'each repository worktree, cherry-picks each batch, runs every repository\'s suites '
+                    'and one combined end-to-end run across all trees. It ends with deliver naming '
+                    'per-repo SHAs in repositories, each suite pass/fail, and best-effort '
+                    'failure attribution. '
                     'It never pushes or opens a PR; the captain does both after a pass. Full tasks '
                     'never run full suites, e2e suites or whole-suite coverage; list scoped tests run. '
+                    'Full and express tasks never run the end-to-end lane, never take a lease meant for '
+                    'the suite, and never re-point shared dev infrastructure: they write e2e specs and the '
+                    'suite runs them. Only after a suite attributes a failure may a reopened task run that '
+                    'failing spec, under the lease. '
                     'Express and suite end with deliver; omit review or pass none. Mode is fixed. '
                     'Retry with the same name and assignment to recover the existing task; '
                     'conflicting names are refused. '
                     'A creation_error means the task exists but staffing or notification needs attention.'),
     'deliver': ('END an express or suite task: report results as text (what, where). Posts the report '
                 'to the root captain and marks the task done. Suite reports name branch/SHA, pass/fail per '
-                'suite and best-effort failure attribution. Neither mode has a reviewer.'),
+                'suite and best-effort failure attribution; optionally pass '
+                'repositories=[{repository, sha}, ...] '
+                'to verify every integration tip. Neither mode has a reviewer.'),
     'request_review': ('Hand a full task to review (sha, what, where). '
                        'Refused (409) on an express or suite task.'),
     'set_task_goal': ('CHANGE the direction of an EXISTING active task. conv_id is the task line id (from '
                       'create_task or tasks), never your root id. Does not start work or create anything; '
                       'refused for approved or done tasks (use reopen_task).'),
     'reopen_task': 'CONTINUE an approved or done EXISTING task with a new goal; conv_id is the task line id. '
-                   'For suite mode, pass batch (new ordered task IDs/tags or SHAs) and optional repository.',
+                   'For suite mode, omit batch inputs to keep all repositories; pass repositories '
+                   '(per-repo ordered batches) to replace them, or batch with repository to update one.',
     'nudge_reviewer': 'Ask your reviewer to continue, once per round, with fixed text and no arguments.',
-    'message_task': 'Message an existing task participant privately; it does not change the goal.',
+    'message_task': ('Message a task participant privately; while the task is in review, messages to '
+                     'the implementer hold approval of the current SHA by default. Set hold_review=false '
+                     'for an informational message. Release with captain(op="review_hold", '
+                     'args={conv_id, hold: false}) or clear it by re-delivering.'),
 }
 
 

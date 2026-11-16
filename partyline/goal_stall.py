@@ -6,6 +6,7 @@ import asyncio
 
 from . import captain_idle
 from .hierarchy import ancestors, parent_id_of, subtree_conversation_ids
+from .lease_lifecycle import holds_any_lease
 from .mention_relay import LIVE, lead_attachment, live_manager, post_private
 
 QUIET_NOTICE_SECONDS = 10
@@ -86,6 +87,7 @@ class GoalStallGuard:
                 or row["id"] in self.runtime.returns.askers
                 or self.presence.is_working(row["id"])
                 or self.presence.queue.held_count(row["id"])
+                or holds_any_lease(self.runtime.db, row["id"])
             )
             for line in lines
             for row in self.runtime.db.list_attachments(line)

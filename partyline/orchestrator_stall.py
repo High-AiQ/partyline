@@ -18,6 +18,7 @@ from fastapi import HTTPException
 
 from .contracts import ConversationsChangedEvent, MessageEvent, MessageResponse
 from .orchestrator_notices import handed_to, notify_root, peer, report
+from .lease_lifecycle import holds_any_lease
 from .orchestrator_sha_check import flag
 from .orchestrator_reopen import unreopened
 from .orchestrator_handles import message_task
@@ -125,6 +126,9 @@ async def settle(runtime, att, review=None):
         # A declared wait: the implementer is working, not stuck. No reminder,
         # no escalation — the line already says that it is waiting.
         return
+    if holds_any_lease(db, att['id']):
+        # A granted lease means a long exclusive job is the work; a queue place does not.
+        return
     if working(runtime, att['id']):
         # A tool call in flight keeps the harness turn open, so the implementer
         # is busy and a hand-off is not due yet.
@@ -182,8 +186,9 @@ async def blocked(runtime, actor, conv_id, body):
         raise HTTPException(409, 'only an implementing task can be blocked')
     runtime.db._exec("UPDATE task_reviews SET status='blocked',findings=?,stall_stage=0,blocked_at=?,"
                      "wait_reason='',wait_until=NULL,overridden_by=NULL,"
-                     "report_id=CASE WHEN stall_stage=3 THEN NULL ELSE report_id END WHERE conv_id=?",
-                     (body.reason, time.time(), conv_id))
+                     "report_id=CASE WHEN stall_stage=3 OR findings<>? THEN NULL ELSE report_id END "
+                     "WHERE conv_id=?",
+                     (body.reason, time.time(), body.reason, conv_id))
     row = task(runtime.db, conv_id)
     await report(runtime, row)
     await flag(runtime, row, body.reason)

@@ -5,6 +5,7 @@ from . import captain_ops, tools_tasks
 
 _ACTION = {
     "review_env": "assign", "resources": "assign", "staffing": "assign",
+    "review_hold": "assign",
     "attach_worker": "attach", "detach_worker": "close",
     "create_child": "create_child", "new_chapter": "chapter",
     "appoint_lead": "appoint_lead", "retire_child": "assign",
@@ -34,8 +35,10 @@ def permitted(state):
 
 DOORS = {
     "captain": "captain(op, args) runs any captain or task operation that is not listed on its own "
-               "(restart_implementer, restart_reviewer, set_goal, share_ref, retirement_preview, "
-               "retire_child, process_overview, docs_read, ...). op is the operation name and args "
+               "(restart_implementer, restart_reviewer, set_goal, share_ref, review_hold, "
+               "retirement_preview, retire_child, process_overview, docs_read, ...). To release a "
+               "review hold, call captain(op=\"review_hold\", args={conv_id, hold: false}). "
+               "op is the operation name and args "
                "an object with that operation's arguments; the listed ops are in the captain "
                "tool's description, and guide(topic=<op>) gives one op's schema.",
     "extras": "extras(op, args) runs a specialist tool that is not listed (Blender, render_check, "
@@ -80,6 +83,7 @@ def tool_list(state: dict) -> list[dict]:
         if op == "review_env":
             continue  # only through captain(op, args)
         descriptions = {
+            "review_hold": "Release a captain message hold on a task review with hold=false.",
             "create_child": "Create a child line; its captain requires Can manage a line checked.",
             "new_chapter": "Start a fresh line that continues your own line (same parent, folder, topic, "
                 "goal, notes and captain style; nothing moves or is deleted). A person appoints its captain.",
