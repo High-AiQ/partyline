@@ -42,10 +42,9 @@ def confirm(db, conv, att_id, ident, now=None, *, jobs=(), live_jobs=None, old_g
                 return dict(row), None
             if row['state'] != 'accepted':
                 raise HTTPException(409, 'Only an accepted handover may be completed')
-            from .handover_jobs import jobs_text
+            from .handover_jobs import completion_hint, jobs_text
             if jobs and live_jobs != 'transfer':
-                raise HTTPException(409, jobs_text(jobs) +
-                    '\nFinish or kill each job, or explicitly acknowledge with live_jobs="transfer".')
+                raise HTTPException(409, completion_hint(ident) + jobs_text(jobs))
             column = 'from_done' if att_id == row['from_attachment_id'] else 'to_done'
             db.conn.execute(f'UPDATE captain_handovers SET {column}=1 WHERE id=?', (ident,))
             if old_gone and column == 'to_done':  # an old captain that left cannot confirm

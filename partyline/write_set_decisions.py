@@ -19,6 +19,7 @@ from .approval_bubble import broadcast_approval_change
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 from .mention_relay import post_private
+from .request_outcomes import not_pending_text, record as record_outcome
 from .system_notice import post_system_notice
 from .hierarchy import ancestors
 from .write_set_requests import (
@@ -69,7 +70,7 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
             return
         await post_private(
             runtime, target["conv_id"], "system", "system", text,
-            audience=target["id"], actor=actor,
+            audience=target["id"], actor=actor, route_first=True,
         )
 
     @app.get("/api/conversations/{conv_id}/write-set/request",
@@ -79,16 +80,17 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
         deny_unless(runtime.db, principal, conv_id, "read")
         return pending_model(runtime.db, conv_id)
 
-    def _pending_request(conv_id: str, request_id: str) -> WriteSetGrantRequest:
+    def _pending_request(conv_id: str, request_id: str, principal) -> WriteSetGrantRequest:
         current = pending_model(runtime.db, conv_id).request
         if current is None or current.id != request_id:
-            raise HTTPException(404, "that write-set request is no longer pending")
+            raise HTTPException(404, not_pending_text(
+                runtime.db, "write-set", "write-set request", request_id, principal, conv_id))
         return current
 
     def _take_for_decision(request: Request, conv_id: str, request_id: str):
         """A person, or an ancestor captain deciding inside its own grants (5.9)."""
         principal = request_principal(request)
-        current = _pending_request(conv_id, request_id)
+        current = _pending_request(conv_id, request_id, principal)
         if not is_human(principal):
             for path in current.paths:
                 candidate = current.model_copy(update={"path": path})
@@ -101,7 +103,7 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
         principal = request_principal(request)
         if not is_human(principal):
             raise HTTPException(403, "only a person may decide a write-set request")
-        return _pending_request(conv_id, request_id)
+        return _pending_request(conv_id, request_id, principal)
 
     @app.post("/api/conversations/{conv_id}/write-set/request/{request_id}/approve")
     async def approve(request: Request, conv_id: str, request_id: str, body: ApproveIn | None = None):
@@ -125,6 +127,8 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                 "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
                 (conv_id, request_id))
             runtime.db.conn.commit()
+        record_outcome(runtime.db, "write-set", request_id, conv_id, "granted", actor=who,
+                       detail=", ".join(current.paths))
         _resumed, failed = await resume_granted_scopes(
             runtime, conv_id, current.paths, resume, resume_line_attachments)
         await _clear_wait_reason(runtime.db, conv_id)
@@ -137,8 +141,8 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
         if failed:
             text += (f" — could not resume @{', @'.join(failed)}; "
                      "re-attach them by hand")
-        await announce(conv_id, text)
         await ring_requester(current, text, actor=principal)
+        await announce(conv_id, text)
         return {"granted": [{"path": row["path"], "granted_at": row["granted_at"]}
                             for row in grants]}
 
@@ -152,11 +156,13 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                 "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
                 (conv_id, request_id))
             runtime.db.conn.commit()
+        record_outcome(runtime.db, "write-set", request_id, conv_id, "declined",
+                       actor=principal.name)
         listed_paths = ", ".join(f"`{path}`" for path in current.paths)
         text = f"☏ write-set request for {listed_paths} declined by @{principal.name}"
+        await ring_requester(current, text, actor=principal)
         await announce(conv_id, text)
         await _clear_wait_reason(runtime.db, conv_id)
-        await ring_requester(current, text, actor=principal)
         return PendingWriteSetGrant(request=None)
 
     @app.post("/api/conversations/{conv_id}/write-set/request/{request_id}/deny")
@@ -168,12 +174,15 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                 "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
                 (conv_id, request_id))
             runtime.db.conn.commit()
+        record_outcome(runtime.db, "write-set", request_id, conv_id, "denied",
+                       actor=principal.name, detail=body.reason)
         listed_paths = ", ".join(f"`{path}`" for path in current.paths)
         text = (f"☏ write-set request for {listed_paths} declined by "
                 f"@{principal.name}: {body.reason}")
+        # The requester hears the reason first: a failed broadcast must not lose it.
+        await ring_requester(current, text, actor=principal)
         await announce(conv_id, text)
         await _clear_wait_reason(runtime.db, conv_id)
-        await ring_requester(current, text, actor=principal)
         return {"ok": True}
 
     @app.post("/api/conversations/{conv_id}/write-set/request/{request_id}/withdraw")
@@ -182,7 +191,8 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
         principal = request_principal(request)
         current = pending_model(runtime.db, conv_id).request
         if current is None or current.id != request_id:
-            raise HTTPException(404, "that write-set request is no longer pending")
+            raise HTTPException(404, not_pending_text(
+                runtime.db, "write-set", "write-set request", request_id, principal, conv_id))
         if (not principal.attachment_id
                 or principal.attachment_id != current.requester_attachment_id):
             raise HTTPException(
@@ -192,6 +202,8 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                 "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
                 (conv_id, request_id))
             runtime.db.conn.commit()
+        record_outcome(runtime.db, "write-set", request_id, conv_id, "withdrawn",
+                       actor=principal.name)
         listed_paths = ", ".join(f"`{path}`" for path in current.paths)
         await announce(conv_id, f"☏ write-set request for {listed_paths} "
                                 f"withdrawn by @{principal.name}")

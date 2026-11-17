@@ -166,6 +166,18 @@ class WorkflowTest(TaskFixture):
         self.assertEqual(self.row()['status'], 'implementing')
         self.assertEqual(len(self.db.list_attachments(self.conv_id)), 1)
 
+    async def test_blocked_report_wake_names_a_line_and_a_resolvable_report(self):
+        await self.create()
+        row = await blocked(self.runtime, self.worker, self.conv_id, BlockedIn(reason='need creds'))
+        record = reports.get_for_parent(self.db, 'root', row['report_id'])
+        wakes = [message['body'] for message in self.db.list_messages('root')
+                 if message.get('audience_attachment_id') == 'captain'
+                 and 'needs attention: report' in message['body']]
+        self.assertEqual(wakes, [
+            f"@captain {reports.report_pointer(record['id'], 'root')}"])
+        self.assertIn(f"GET /api/conversations/root/reports/{record['id']}", wakes[0])
+        self.assertEqual(record['child_conv_id'], self.conv_id)
+
     async def test_report_delivery_retries_without_duplicate_or_ack_rewake(self):
         await self.create('none')
         self.commit()

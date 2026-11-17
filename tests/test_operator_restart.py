@@ -69,7 +69,9 @@ class OperatorRestartTest(unittest.TestCase):
         token = operator_restart.issue(self.db.path, ident)
         self.assertEqual(self.client.delete(f'/api/restart-request/{ident}',
                                           headers=self.human).status_code, 200)
-        self.assertEqual(self.approve(ident, token).status_code, 404)
+        late = self.approve(ident, token)
+        self.assertEqual(late.status_code, 404)
+        self.assertIn("it was declined by @", late.json()["detail"])
         self.assertFalse(operator_restart.consume(self.db, ident, token))
 
     def test_issuing_does_not_create_missing_databases_or_accept_bad_ids(self):

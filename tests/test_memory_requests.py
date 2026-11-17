@@ -171,6 +171,33 @@ class MemoryRequestTest(unittest.TestCase):
                                attachment_id="captain", is_lead=True)
         self.assertEqual(self.client.delete(f"/api/memory-requests/{pending['id']}").status_code, 200)
         self.assertIsNone(self.client.get("/api/conversations/line/memory-request").json()["request"])
+        late = self.client.delete(f"/api/memory-requests/{pending['id']}")
+        self.assertEqual(late.status_code, 404)
+        self.assertIn("it was declined by @captain", late.json()["detail"])
+
+    def test_an_unrelated_worker_is_not_told_who_declined_a_memory_request(self):
+        self.assertEqual(self.file("7G").status_code, 200)
+        old = self.client.get("/api/conversations/line/memory-request").json()["request"]["id"]
+        self.actor = self.captain()
+        self.assertEqual(self.client.delete(f"/api/memory-requests/{old}").status_code, 200)
+        self.db.create_conversation("elsewhere", "Elsewhere", captain_mode="orchestrator")
+        self.db.add_attachment("else", "elsewhere", "else", "fake", ["fake"], self.temp.name)
+        self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='else'")
+        self.actor = Principal(kind="machine", name="else", conv_id="elsewhere",
+                               attachment_id="else", is_lead=True)
+        late = self.client.delete(f"/api/memory-requests/{old}")
+        self.assertEqual(late.status_code, 404)
+        self.assertEqual(late.json()["detail"], "that memory request is no longer pending")
+
+    def test_a_request_replaced_after_its_worker_left_says_it_expired(self):
+        self.assertEqual(self.file("7G").status_code, 200)
+        old = self.client.get("/api/conversations/line/memory-request").json()["request"]["id"]
+        self.db._exec("UPDATE memory_limit_requests SET expired_at=1 WHERE id=?", (old,))
+        self.assertEqual(self.file("6G").status_code, 200)
+        late = self.client.delete(f"/api/memory-requests/{old}")
+        self.assertEqual(late.status_code, 404)
+        self.assertIn("it was expired", late.json()["detail"])
+        self.assertIn("detached or its line retired", late.json()["detail"])
 
     def test_requester_cannot_approve_own_request_and_host_ceiling_is_refused(self):
         self.assertEqual(self.file("9G").status_code, 400)

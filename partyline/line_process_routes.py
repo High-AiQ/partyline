@@ -120,8 +120,10 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hin
             await asyncio.to_thread(record, att_id, adapter)
             # Partyline sends this stop: its exit is attributed to this source and caller.
             direct_stop(att_id, source, caller)
+            from .orchestrator_revive import ordered_detach
             try:
-                await asyncio.wait_for(adapter.stop(), timeout=DETACH_STOP_TIMEOUT)
+                with ordered_detach(runtime, att_id):
+                    await asyncio.wait_for(adapter.stop(), timeout=DETACH_STOP_TIMEOUT)
             except (Exception, asyncio.CancelledError) as exc:
                 stop_error = exc
         if stop_error is not None and not await _stop_confirmed(adapter, stop_error):

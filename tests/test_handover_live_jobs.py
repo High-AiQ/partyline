@@ -99,14 +99,15 @@ class LiveJobsTest(unittest.TestCase):
 
     def test_http_guard_transfer_notice_and_retained_read_write(self):
         proc = self.spawn()
-        # The test process stands in for the old CLI; its real sleep child is
-        # the job. Restrict the snapshot to that pair to exclude test tooling.
+        # The test process stands in for the CLI. Fake an owned job reparented
+        # outside its runtime tree, retaining real cwd/fd inspection.
         self.runtime.live['old'] = SimpleNamespace(proc=SimpleNamespace(pid=os.getpid()))
-        snapshot = ({os.getpid(): 1, proc.pid: os.getpid()}, {proc.pid: 1})
+        snapshot = ({os.getpid(): 1, proc.pid: 1}, {proc.pid: 1})
         app = FastAPI()
         app.include_router(hierarchy_router(self.runtime))
         actor = SimpleNamespace(kind='machine', conv_id='line', attachment_id='old')
         with patch('partyline.handover_jobs.process_snapshot', return_value=snapshot), \
+             patch('partyline.handover_jobs.owned', return_value={proc.pid}), \
              patch('partyline.captain_handover.request_principal', return_value=actor), \
              patch('partyline.captain_handover_completion._try_detach', new_callable=AsyncMock), \
              TestClient(app) as client:
@@ -179,7 +180,8 @@ class LiveJobsTest(unittest.TestCase):
         proc = self.spawn()
         self.runtime.live['old'] = SimpleNamespace(proc=SimpleNamespace(pid=os.getpid()))
         with patch('partyline.handover_jobs.process_snapshot',
-                   return_value=({proc.pid: os.getpid()}, {proc.pid: 1})):
+                   return_value=({proc.pid: 1}, {proc.pid: 1})), \
+             patch('partyline.handover_jobs.owned', return_value={proc.pid}):
             with self.assertRaises(HTTPException) as caught:
                 from partyline.handover_jobs import live_jobs
                 jobs = live_jobs(self.runtime, 'old')
@@ -187,15 +189,6 @@ class LiveJobsTest(unittest.TestCase):
             self.assertEqual(caught.exception.status_code, 409)
         row = self.db._exec('SELECT * FROM captain_handovers').fetchone()
         self.assertEqual((row['state'], row['from_done'], row['to_done']), ('accepted', 1, 0))
-
-    def test_scope_and_fence_launchers_and_cli_are_not_jobs(self):
-        from partyline.handover_jobs import _cli_processes
-        parents = {2: 1, 3: 2, 4: 3, 5: 4}
-        arguments = {1: ['bwrap'], 2: ['bwrap'], 3: ['node', '/bin/codex.js'],
-                     4: ['/vendor/codex'], 5: ['sleep', '30']}
-        with patch('partyline.handover_jobs.argv', side_effect=arguments.get):
-            self.assertEqual(_cli_processes(parents, 1,
-                SimpleNamespace(att={'command': ['codex']})), {1, 2, 3, 4})
 
     def test_tracked_transfer_waits_even_without_a_live_cwd_or_fd(self):
         from partyline.tmp_retention import remember
@@ -229,9 +222,3 @@ class LiveJobsTest(unittest.TestCase):
         self.assertEqual(self.file.read_text(), 'preserved')
         manifest = base_dir() / '.pending-reaps/old.json'
         self.assertEqual(json.loads(manifest.read_text())['conv_id'], 'line')
-
-    def test_another_cli_started_by_the_cli_remains_a_job(self):
-        from partyline.handover_jobs import _cli_processes
-        with patch('partyline.handover_jobs.argv', side_effect=lambda pid: ['codex']):
-            self.assertEqual(_cli_processes({2: 1}, 1,
-                SimpleNamespace(att={'command': ['codex']})), {1})

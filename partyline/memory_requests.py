@@ -18,6 +18,7 @@ from .resume_continuation import resume_with_backlog
 from .mention_relay import post_private
 from .process_memory import parse_size
 from .restart_capabilities import adapter_can_resume
+from .request_outcomes import not_pending_text, record as record_outcome
 from .resource_budget import cap_bytes, memory_ceiling, settings
 from .system_notice import post_system_notice
 
@@ -129,6 +130,10 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
             raise HTTPException(422, "requested limit must be positive")
         if _pending(db, att["conv_id"]):
             raise HTTPException(409, "a memory request is already pending on this line")
+        for stale in db._exec("SELECT id FROM memory_limit_requests WHERE conv_id=? "
+                              "AND expired_at IS NOT NULL", (att["conv_id"],)).fetchall():
+            record_outcome(db, "memory", stale["id"], att["conv_id"], "expired",
+                           detail="its worker was detached or its line retired")
         with db.lock, db.conn:
             db.conn.execute("DELETE FROM memory_limit_requests WHERE conv_id=? "
                             "AND expired_at IS NOT NULL", (att["conv_id"],))
@@ -160,7 +165,8 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
         actor = request_principal(request)
         row = db._exec("SELECT * FROM memory_limit_requests WHERE id=?", (request_id,)).fetchone()
         if row is None:
-            raise HTTPException(404, "memory request is no longer pending")
+            raise HTTPException(404, not_pending_text(
+                db, "memory", "memory request", request_id, actor))
         current = dict(row)
         if approving and current["expired_at"] is not None:
             raise HTTPException(
@@ -203,6 +209,8 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
                 return {"request": _pending(db, current["conv_id"]), "resume_failed": True}
         with db.lock, db.conn:
             db.conn.execute("DELETE FROM memory_limit_requests WHERE id=?", (request_id,))
+        record_outcome(db, "memory", request_id, current["conv_id"], "approved",
+                       actor=actor.name, detail=f"cap {limit}")
         text = (f"☏ memory request for @{att['name']} approved by @{actor.name}; "
                 f"new cap {limit} is active "
                 f"({'applied to the running process, no restart' if live else 'process restarted'})")
@@ -220,6 +228,7 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
         att = db.get_attachment(current["attachment_id"])
         with db.lock, db.conn:
             db.conn.execute("DELETE FROM memory_limit_requests WHERE id=?", (request_id,))
+        record_outcome(db, "memory", request_id, current["conv_id"], "declined", actor=actor.name)
         await announce(current["conv_id"],
                        f"☏ memory request for @{att['name'] if att else current['attachment_id']} "
                        f"declined by @{actor.name}")

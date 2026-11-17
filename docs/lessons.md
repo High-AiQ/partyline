@@ -1,5 +1,21 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-17 — Attachment descendants are part of handover runtime
+
+The false assumption was that every descendant other than a narrowly recognized CLI launcher was
+an independently actionable background job. An adapter's server, wrapper, daemon and transient tools
+can stay alive until detach, so requiring their completion before detach creates a circular wait.
+Transfer the entire attachment tree by ancestry, regardless of executable names. Inspect only owned
+jobs outside that tree for decisions, ignore zombies and vanished/unreadable commands, and include
+state and birth time in the server's inventory. Bound notices at whole entries and preserve their
+completion instructions through MCP. Fake process tables in `tests/test_handover_runtime_jobs.py`
+cover the tree, inventory, repeated-notice and guide contracts.
+Missing batch-listing facts are not evidence of exit: fall back to per-PID command inspection and
+retain actionable jobs with unavailable state/birth time. A runtime helper that daemonizes outside
+the attachment tree remains an owned job requiring acknowledgment, since ancestry cannot distinguish
+it from a detached background job. Bound file details per entry so a long path list cannot hide the
+job's PID, command, state and birth time.
+
 ## 2026-11-17 — Browser fixtures must follow intentional protocol changes
 
 The false assumptions were that an empty line could accept human sends, that opening a line made

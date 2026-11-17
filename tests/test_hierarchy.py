@@ -1,6 +1,7 @@
 """Line hierarchy, scoped machine tokens, reports, and revocation."""
 
 import asyncio
+import re
 import tempfile
 import threading
 import unittest
@@ -18,6 +19,7 @@ from partyline.reports import wake_message
 from partyline.machine_scope import deny_unless_attachment
 from partyline.hierarchy_routes import hierarchy_router
 from partyline.media import MediaStore
+from partyline.mcp import tools_captain
 from partyline.message_routes import message_router
 from partyline.media_routes import media_router
 from partyline.runtime import ChatRuntime
@@ -965,9 +967,27 @@ class HierarchyApiTest(unittest.TestCase):
         )
         self.assertEqual(third.status_code, 201)
         self.assertEqual(len(deliveries), 2)
-        pointer = wake_message("astra", third.json()["id"])
+        pointer = wake_message("astra", third.json()["id"], "parent")
         self.assertEqual(deliveries[-1][-1]["body"], pointer)
         self.assertNotIn("new blocker", pointer)
+        wake = deliveries[-1][-1]["body"]
+        report_id = int(re.search(r"needs attention: report (\d+)", wake).group(1))
+        self.assertIn(f"GET /api/conversations/parent/reports/{report_id}", wake)
+        direct = self.client.get(f"/api/conversations/parent/reports/{report_id}", headers=self.lead)
+        self.assertEqual(direct.status_code, 200, direct.text)
+
+        def request(method, path, payload=None):
+            response = self.client.request(method, path, json=payload, headers=self.lead)
+            self.assertEqual(response.status_code, 200, response.text)
+            return response.json()
+
+        tool_client = SimpleNamespace(home="parent", request=request)
+        state = {"kind": "machine", "role": "lead", "is_lead": True,
+                 "actions": ["read_reports"]}
+        found = tools_captain.call(tool_client, "captain", {
+            "op": "reports", "args": {"operation": "get", "report_id": report_id}}, state)
+        self.assertEqual(found["id"], report_id)
+        self.assertEqual(found["child_conv_id"], child["id"])
 
     def test_notify_wake_ignores_mentions_in_report_text_and_child_name(self):
         child = self.client.post(
@@ -1009,7 +1029,7 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(len(lead_deliveries), 1)
         self.assertEqual(len(sib_deliveries), 0)
         wake = lead_deliveries[0][-1]["body"]
-        self.assertEqual(wake, wake_message("astra", posted.json()["id"]))
+        self.assertEqual(wake, wake_message("astra", posted.json()["id"], "parent"))
         self.assertNotIn("@all", wake)
         self.assertNotIn("@grok", wake)
         listed = self.client.get(

@@ -35,7 +35,8 @@ def delivery_hooks(runtime, conv_id: str, att_id: str):
             runtime.db.clear_queued_delivery_ids(att_id, message_ids)
             if not deliverable_ids:
                 return True
-            messages = drop_settled(runtime.db, att, runtime.db.messages_by_ids(conv_id, deliverable_ids))
+            messages = drop_settled(
+                runtime.db, att, runtime.db.messages_by_ids(conv_id, deliverable_ids), runtime)
             if messages and await live.deliver(messages) is False:
                 # A queue flush is still an unproved paste. Keep suppression
                 # until its transcript receipt, including after the hello turn.

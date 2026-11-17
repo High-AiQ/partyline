@@ -22,7 +22,9 @@ async def stop_attachments(runtime, conv_id):
             raise
         try:
             direct_stop(att['id'], source)
-            await adapter.stop()
+            from .orchestrator_revive import ordered_detach
+            with ordered_detach(runtime, att['id']):
+                await adapter.stop()
         except Exception:
             # Preserve the existing bulk-stop status semantics.
             await runtime.db.set_attachment_status_async(att['id'], 'exited',

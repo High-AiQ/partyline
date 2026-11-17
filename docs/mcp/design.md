@@ -278,8 +278,13 @@ The lifecycle paths that make a token stop resolving are listed in the table abo
 ## 8. Errors
 
 Tool errors return as results with `isError: true`. `ApiError` and `ValueError` messages are returned
-as written, so the server's refusal text reaches the caller. `KeyError`, `TypeError`, and `OSError`
-return "invalid tool arguments or local file". A deeply nested JSON value that exceeds Python's parser
+as written, so the server's refusal text reaches the caller. A timeout, refused or reset connection, or
+truncated reply is named as such (`partyline/mcp/failures.py`): after a write it says the action may
+already have been applied and to check state before retrying (for a decision or grant, read the request
+or task), and after a read it says retrying is safe. The text never carries exception text, the
+credential or caller JSON. A failed capability read says the tool did not run; `guide` then falls back to
+the last capabilities it read. `KeyError`, `TypeError`, and a local-file `OSError` return "invalid tool
+arguments or local file". A deeply nested JSON value that exceeds Python's parser
 recursion limit returns a structured JSON-RPC parse error and the helper continues reading input.
 Any other exception returns "Partyline MCP operation failed" and logs the traceback through the Python
 logger. A request with an ID and an unknown method gets JSON-RPC `-32601`.

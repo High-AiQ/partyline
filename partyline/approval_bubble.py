@@ -64,7 +64,7 @@ async def bubble_approval(runtime, conv_id: str, *, kind: str, requester: str,
     captain_name = decider_name or (captain["name"] if captain else "")
     ring = f" @{captain_name}" if captain_name and not human_only else ""
     decline_part = f"; decline: {decline}" if decline else ""
-    action = ("a person decides" if human_only else
+    action = (f"a person decides (request: {approve})" if human_only else
               f"(approve: {approve}{decline_part})")
     body = (f"⚑ approval pending on «{line['name'] if line else conv_id}»: {kind} "
             f"from @{requester} — {_clip(detail)} "

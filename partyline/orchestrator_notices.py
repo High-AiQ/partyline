@@ -6,7 +6,7 @@ import time
 from . import reports
 from .mention_relay import LIVE, live_manager, post_private
 from .orchestrator_sha_check import clip, report_text
-from .orchestrator_store import task
+from .orchestrator_store import attachment_task, task
 
 
 async def tell(runtime, ident, text, source=None):
@@ -75,7 +75,7 @@ async def wake_root(runtime, row, record, wake):
         if captain is None:
             reports.release_wake_claim(db, record['id'], claim)
             return
-        await tell(runtime, captain['id'], f"needs attention: report {record['id']}")
+        await tell(runtime, captain['id'], reports.report_pointer(record['id'], row['root_id']))
     except Exception:
         reports.release_wake_claim(db, record['id'], claim)
         raise
@@ -88,6 +88,30 @@ async def notify_root(runtime, row, text):
     record, wake = reports.add(runtime.db, row['root_id'], row['conv_id'], 'task server',
                                body, notify=True)
     await wake_root(runtime, row, record, wake)
+
+
+async def worker_lost(runtime, att_id, value):
+    """Tell the parent captain when an undelivered task worker disappears."""
+    db = runtime.db
+    row = attachment_task(db, att_id)
+    att = db.get_attachment(att_id)
+    if not row or not att or att['status'] != value:
+        return  # a stale activation cannot report over its live replacement
+    implementer = row['implementer_id'] == att_id
+    reviewer = row['reviewer_id'] == att_id and row['policy'] not in ('none', 'captain')
+    if implementer and row['status'] not in ('implementing', 'idle'):
+        return  # request_review, blocked or a terminal result was already delivered
+    if not implementer and not (reviewer and row['status'] == 'in_review'):
+        return
+    role = 'implementer' if implementer else 'reviewer'
+    line = db.get_conversation(row['conv_id']) or {}
+    text = (f"task «{line.get('name') or row['conv_id']}» ({row['conv_id']}): {role} "
+            f"@{att['name']} {value} before delivering; restart_{role} to resume.")
+    captain = live_manager(runtime, row['root_id'])
+    if captain:
+        await tell(runtime, captain['id'], text)
+    else:
+        await runtime.post_message(row['root_id'], 'system', 'system', text)
 
 
 async def spawn_refused(runtime, row, detail, *, implementer=False):

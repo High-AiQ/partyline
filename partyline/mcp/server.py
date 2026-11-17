@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import sys
@@ -12,6 +13,7 @@ from .. import __version__
 from .client import ApiError, PartylineClient
 from .render import render
 from . import catalog
+from .failures import LOCAL_FAILURE, network_failure, tool_failure_message
 from .telemetry import ScreenMedia, Telemetry, record
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,7 @@ class MCPServer:
         self.telemetry = Telemetry(client)
         self.screen_media = ScreenMedia()
         self._state_signature = None
+        self._last_state = None
         self._revoked = False
         self._dynamic_screen_tools = None
         self._capability_version = None
@@ -53,7 +56,8 @@ class MCPServer:
     def _state(self):
         if self._revoked:
             raise ApiError("attachment credential is no longer valid")
-        return self.client.capabilities()
+        self._last_state = self.client.capabilities()
+        return self._last_state
 
     @staticmethod
     def _signature(state):
@@ -176,8 +180,16 @@ class MCPServer:
         name, args = params.get("name"), params.get("arguments", {})
         if not isinstance(name, str) or not isinstance(args, dict):
             return {"content": [{"type": "text", "text": "invalid tool arguments"}], "isError": True}
+        reached = False
         try:
-            state = self._state()  # Each call checks the live attachment capability.
+            try:
+                state = self._state()  # Each call checks the live attachment capability.
+            except (OSError, http.client.HTTPException) as exc:
+                # The guide's index and tool text are local: a slow server must not hide them.
+                if name != "guide" or self._last_state is None or network_failure(exc) is None:
+                    raise
+                state = self._last_state
+            reached = True
             signature = self._signature(state)
             self._dynamic_screen_tools = bool(state.get("dynamic_screen_tools"))
             if self._dynamic_screen_tools:
@@ -196,16 +208,12 @@ class MCPServer:
                 return {"content": result}
             text = render(value, self.client.connection["api"].rstrip("/"))
             return {"content": [{"type": "text", "text": text}]}
-        except (ApiError, ValueError, KeyError, TypeError, OSError) as exc:
+        except (ApiError, ValueError, KeyError, TypeError, OSError, http.client.HTTPException) as exc:
             self._revoked = self._revoked or (
                 isinstance(exc, ApiError) and "HTTP 401" in str(exc))
-            creating = name == "create_task" or (name == "captain" and args.get("op") == "create_task")
-            if creating and isinstance(exc, OSError):
-                message = ("create_task connection failed; the task may already exist. "
-                           "Retry create_task with the same name and assignment, or inspect tasks().")
-            else:
-                message = (str(exc) if isinstance(exc, (ApiError, ValueError))
-                           else "invalid tool arguments or local file")
+            message = tool_failure_message(exc, name, args, reached=reached)
+            if message is None:
+                message = str(exc) if isinstance(exc, (ApiError, ValueError)) else LOCAL_FAILURE
             return {
                 "content": [{"type": "text", "text": message}], "isError": True}
         except Exception:

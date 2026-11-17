@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from partyline import reports
 from partyline.auth_guard import Principal
 from partyline.orchestrator_contracts import ReviewRequestIn, VerdictIn
+from partyline.line_process_routes import detach_attachment
 from partyline.orchestrator_revive import _pending, on_status, restart_reviewer, reviewer_exited
 from partyline.review_worktrees import list_review_worktrees
 from partyline.orchestrator_service import request_review, review_verdict
@@ -41,6 +42,17 @@ class ReviewerRevivalTest(TaskFixture):
     def briefs(self, ident):
         return [m for m in self.db.list_messages(self.conv_id)
                 if m['audience_attachment_id'] == ident and 'Review round' in m['body']]
+
+    async def status_event(self, ident, value):
+        self.db._exec("UPDATE attachments SET status=? WHERE id=?", (value, ident))
+        self.runtime.live.pop(ident, None)
+        on_status(self.runtime, ident, value)
+        await asyncio.gather(*list(_pending))
+
+    def loss_notices(self, conv_id):
+        return [message['body'] for message in self.db.list_messages('root')
+                if message.get('audience_attachment_id') == 'captain'
+                and conv_id in message['body'] and 'before delivering' in message['body']]
 
     async def test_round_two_keeps_the_reviewer_folder_and_session_and_drops_round_one_files(self):
         first = await self.in_review()
@@ -151,18 +163,70 @@ class ReviewerRevivalTest(TaskFixture):
                              VerdictIn(verdict='changes', findings='again'))
         self.assertEqual(self.row()['reviewer_restarts'], 0)
 
+    async def test_an_undelivered_opencode_implementer_detach_or_exit_tells_the_parent(self):
+        for value in ('detached', 'exited'):
+            with self.subTest(value=value):
+                row = await self.create()
+                ident = row['implementer_id']
+                worker = self.db.get_attachment(ident)
+                self.db._exec("UPDATE attachments SET adapter='opencode-v2' WHERE id=?", (ident,))
+                await self.status_event(ident, value)
+                notices = self.loss_notices(self.conv_id)
+                self.assertEqual(len(notices), 1)
+                line_name = self.db.get_conversation(self.conv_id)['name']
+                self.assertIn(f"task «{line_name}» ({self.conv_id})", notices[0])
+                self.assertIn(f"implementer @{worker['name']} {value}", notices[0])
+                self.assertIn('restart_implementer to resume', notices[0])
+
+    async def test_a_captain_ordered_detach_is_quiet_through_the_real_transaction(self):
+        for bulk in (False, True):
+            with self.subTest(bulk=bulk):
+                row = await self.create()
+                ident = row['implementer_id']
+                adapter = self.runtime.live[ident]
+
+                async def stop(ident=ident, adapter=adapter):
+                    self.db.set_attachment_status(ident, 'detached', adapter.att['runtime_owner'])
+                    on_status(self.runtime, ident, 'detached')
+
+                adapter.stop = stop
+                if bulk:
+                    await self.runtime.stop_attachments(self.conv_id)
+                else:
+                    await detach_attachment(self.runtime, ident, survivors=False)
+                await asyncio.gather(*list(_pending))
+                self.assertEqual(self.loss_notices(self.conv_id), [])
+
+    async def test_an_implementer_detach_after_delivery_is_quiet(self):
+        row = await self.in_review()
+        await self.status_event(row['implementer_id'], 'detached')
+        self.assertEqual(self.loss_notices(self.conv_id), [])
+
+    async def test_a_reviewer_detach_during_review_tells_the_parent(self):
+        row = await self.in_review()
+        ident = row['reviewer_id']
+        reviewer = self.db.get_attachment(ident)
+        await self.status_event(ident, 'detached')
+        notices = self.loss_notices(self.conv_id)
+        self.assertEqual(len(notices), 1)
+        self.assertIn(f"reviewer @{reviewer['name']} detached", notices[0])
+        self.assertIn('restart_reviewer to resume', notices[0])
+
     async def test_only_an_exit_of_an_in_review_reviewer_triggers_recovery(self):
         await self.create()
         implementer = self.row()['implementer_id']
-        on_status(self.runtime, implementer, 'exited')  # not a reviewer
+        on_status(self.runtime, implementer, 'exited')  # stale: its row is still running
+        await asyncio.gather(*list(_pending))
         await self.in_review_after_create()
         ident = self.row()['reviewer_id']
-        on_status(self.runtime, ident, 'detached')  # a deliberate detach is not a death
+        on_status(self.runtime, ident, 'detached')  # stale: its row is still running
+        await asyncio.gather(*list(_pending))
         self.assertFalse(_pending)
         self.stop_reviewer()
         on_status(self.runtime, ident, 'exited')
         await asyncio.gather(*list(_pending))
         self.assertEqual(self.db.get_attachment(ident)['status'], 'running')
+        self.assertEqual(self.loss_notices(self.conv_id), [])  # the first automatic retry is quiet
 
     async def in_review_after_create(self):
         return await self.request(self.commit_file('one.txt'))

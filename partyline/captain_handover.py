@@ -177,7 +177,7 @@ def state_text(db, att_id, runtime=None):
     if not row or (row['state'] == 'offered' and row['offered_at'] + OFFER_TTL_SECONDS <= time.time()):
         return ''
     from .handover_job_cache import state_jobs
-    jobs = state_jobs(runtime, row['from_attachment_id']) if runtime else ''
+    jobs = state_jobs(runtime, row['from_attachment_id'], row['id'], att_id) if runtime else ''
     if row['state'] == 'accepted':
         remaining = []
         if not row['from_done']:
@@ -185,9 +185,10 @@ def state_text(db, att_id, runtime=None):
         if not row['to_done']:
             remaining.append('new captain')
         role = "you are handing off" if row['from_attachment_id'] == att_id else "you are the receiver"
+        from .handover_jobs import completion_hint
         return (f"Captain handover {row['id']}: accepted; {role}; "
                 f"awaiting {', '.join(remaining)}. "
-                "Both participants call extras(op=\"complete_handover\", args={\"handover_id\": id})." + jobs)
+                + completion_hint(row['id']) + jobs)
     return (f"Captain handover {row['id']}: offered; "
             f"{'you are handing off' if row['from_attachment_id'] == att_id else 'you are the receiver'}."
             + jobs)

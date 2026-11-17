@@ -263,8 +263,9 @@ class RestartRequestTest(unittest.TestCase):
         declined = self.client.delete(f"/api/restart-request/{request_id}", headers=self.human)
         self.assertEqual(declined.status_code, 200)
         self.assertIn("restart declined by @person", self.db.list_messages("line")[-1]["body"])
-        self.assertEqual(self.client.delete(f"/api/restart-request/{request_id}",
-                                            headers=self.human).status_code, 404)
+        again = self.client.delete(f"/api/restart-request/{request_id}", headers=self.human)
+        self.assertEqual(again.status_code, 404)
+        self.assertIn("it was declined by @person", again.json()["detail"])
 
     def test_the_unit_is_read_from_the_cgroup(self):
         self.assertIsInstance(service_unit(), (str, type(None)))

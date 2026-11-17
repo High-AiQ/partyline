@@ -268,7 +268,7 @@ def hierarchy_router(runtime) -> APIRouter:
                         runtime,
                         parent,
                         principal,
-                        wake_message(lead["name"], row["id"]),
+                        wake_message(lead["name"], row["id"], parent),
                     )
                 except Exception:
                     # Hand the wake back before surfacing the failure: a claim

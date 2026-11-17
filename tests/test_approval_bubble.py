@@ -7,6 +7,7 @@ and ring the root's captain; the staffing wake line counts what is still
 pending across the subtree.
 """
 
+import asyncio
 import os
 import subprocess
 import tempfile
@@ -17,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from partyline import auth_store, auth_tokens, deployment
-from partyline.approval_bubble import register_approval_routes
+from partyline.approval_bubble import bubble_approval, register_approval_routes
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.memory_requests import register_memory_request_routes
@@ -102,9 +103,10 @@ class ApprovalBubbleTest(unittest.TestCase):
     def delivered_bubbles(self):
         return [m for m in self.recorder.delivered if "⚑ approval pending" in m["body"]]
 
-    def file_write_set(self):
+    def file_write_set(self, path=None):
         response = self.client.post("/api/conversations/grand/write-set",
-                                    json={"path": os.path.join(self.repo, "extra")}, headers=self.dig)
+                                    json={"path": path or os.path.join(self.repo, "extra")},
+                                    headers=self.dig)
         self.file_write_set_request_id = response.json()["id"]
         return response
 
@@ -133,6 +135,20 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.assertIn("decline: POST /api/conversations/grand/write-set/request/", body)
         self.assertIn("@terra", body)  # the root captain is named
         self.assertEqual(len(self.delivered_bubbles()), 1)  # and its process was rung
+
+    def test_refiling_unchanged_scope_does_not_bubble_a_second_full_notice(self):
+        first = self.file_write_set()
+        request_id = first.json()["id"]
+        self.assertEqual(self.file_write_set().status_code, 200)
+        self.assertEqual(len(self.bubbles()), 1)
+        self.assertEqual(len(self.delivered_bubbles()), 1)
+        other = os.path.join(self.repo, "other")
+        os.makedirs(other)
+        expanded = self.file_write_set(other)
+        self.assertEqual(expanded.status_code, 200, expanded.text)
+        self.assertEqual(expanded.json()["id"], request_id)
+        self.assertEqual(len(self.bubbles()), 2)
+        self.assertEqual(len(self.delivered_bubbles()), 2)
 
     def test_a_memory_request_on_a_grandchild_bubbles_to_the_root(self):
         made = self.file_memory()
@@ -168,6 +184,30 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.assertEqual(self.bubbles(), [])
         self.assertIn("asks to grant write-set scope",
                       " ".join(m["body"] for m in self.db.list_messages("root")))
+
+    def test_a_human_only_bubble_has_a_request_ref_and_disappears_on_decision(self):
+        self.db._exec(
+            "INSERT INTO conversation_write_grant_requests"
+            "(conv_id,id,path,requester,created_at,human_only) "
+            "VALUES('grand','human-request','/work','dig',1,1)")
+        asyncio.run(bubble_approval(
+            self.runtime, "grand", kind="write-set", requester="dig", detail="grant scope",
+            approve="POST /api/conversations/grand/write-set/request/human-request/approve",
+            human_only=True))
+        bubble = self.bubbles()[0]
+        self.assertIn(
+            "a person decides (request: POST /api/conversations/grand/"
+            "write-set/request/human-request/approve)", bubble["body"])
+        att = self.db.get_attachment("rootcap")
+        self.db._exec("UPDATE attachments SET last_seen=? WHERE id='rootcap'", (bubble["id"] - 1,))
+        asyncio.run(self.runtime.deliver_pending("root", att, self.recorder))
+        self.assertEqual(len(self.delivered_bubbles()), 1)
+        self.recorder.delivered.clear()
+        self.db._exec("UPDATE attachments SET last_seen=? WHERE id='rootcap'", (bubble["id"] - 1,))
+        self.db._exec("DELETE FROM conversation_write_grant_requests WHERE id='human-request'")
+        att = self.db.get_attachment("rootcap")
+        asyncio.run(self.runtime.deliver_pending("root", att, self.recorder))
+        self.assertEqual(self.delivered_bubbles(), [])
 
     def test_without_a_root_captain_the_notice_still_posts_unaddressed(self):
         self.db._exec("DELETE FROM attachments WHERE id='rootcap'")
@@ -258,6 +298,19 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.assertEqual(
             self.client.get("/api/conversations/root/approvals",
                             headers=self.human).json()["approvals"], [])
+
+    def test_normal_delivery_drops_a_bubble_whose_request_was_decided(self):
+        self.file_write_set()
+        bubble = self.bubbles()[0]
+        request_id = self.file_write_set_request_id
+        declined = self.client.delete(
+            f"/api/conversations/grand/write-set/request/{request_id}", headers=self.human)
+        self.assertEqual(declined.status_code, 200, declined.text)
+        self.db._exec("UPDATE attachments SET last_seen=? WHERE id='rootcap'", (bubble["id"] - 1,))
+        self.recorder.delivered.clear()
+        att = self.db.get_attachment("rootcap")
+        asyncio.run(self.runtime.deliver_pending("root", att, self.recorder))
+        self.assertEqual(self.delivered_bubbles(), [])
 
     def test_the_staffing_line_counts_pending_across_the_subtree_and_drops_on_decision(self):
         self.assertNotIn("approvals pending",

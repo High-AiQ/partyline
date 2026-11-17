@@ -39,9 +39,18 @@ MAX_BODY = 2000
 NOTIFY_CLAIM_SECONDS = 30.0
 
 
-def wake_message(lead_name: str, report_id: int) -> str:
+def report_pointer(report_id: int, parent_conv_id: str) -> str:
+    """Name the parent-scoped lookups that actually resolve this report."""
+    return (f"needs attention: report {report_id}; fetch with "
+            f"reports(operation=\"get\", report_id={report_id}) or GET "
+            f"/api/conversations/{parent_conv_id}/reports/{report_id}")
+
+
+def wake_message(lead_name: str, report_id: int, parent_conv_id: str = "") -> str:
     """Fixed pointer to the inbox row. Never interpolates report text or names."""
-    return f"@{lead_name} needs attention: report {report_id}"
+    pointer = report_pointer(report_id, parent_conv_id) if parent_conv_id else (
+        f"needs attention: report {report_id}")
+    return f"@{lead_name} {pointer}"
 
 
 def response_model(row: dict) -> dict:

@@ -13,7 +13,17 @@ import re
 
 from .memory_sampler_state import warning_still_crosses
 
-REPORT_WAKE_RE = re.compile(r"(?:@\S+ )?needs attention: report (\d+)")
+REPORT_WAKE_RE = re.compile(
+    r"(?:@\S+ )?needs attention: report (\d+)(?: from line \S+|; fetch with .*)?")
+APPROVAL_APPROVE_RE = (
+    ("write-set", re.compile(
+        r"⚑ (?:approval pending|write-set decision needed).*"
+        r"\((?:approve|request): POST /api/conversations/([^/\s]+)/write-set/request/([^/\s]+)/approve")),
+    ("memory", re.compile(
+        r"⚑ approval pending.*\((?:approve|request): POST /api/memory-requests/([^/\s]+)/approve")),
+    ("restart", re.compile(
+        r"⚑ approval pending.*\((?:approve|request): POST /api/restart-request/([^/\s]+)/approve")),
+)
 
 
 def tag_memory_notice(db, message_id: int, attachment_id: str, cap: int) -> None:
@@ -43,16 +53,52 @@ def _report_ids(messages: list[dict]) -> dict[int, int]:
     return found
 
 
+def _approval_ids(messages: list[dict]) -> dict[int, tuple]:
+    """Message id -> (kind, line id, request id), for approval bubbles."""
+    found = {}
+    for message in messages:
+        if message.get("sender_type") == "human":
+            continue
+        body = str(message.get("body") or "")
+        for kind, pattern in APPROVAL_APPROVE_RE:
+            match = pattern.search(body.strip())
+            if match:
+                parts = match.groups()
+                found[message["id"]] = ((kind, *parts) if kind == "write-set"
+                                        else (kind, "", *parts))
+                break
+    return found
+
+
+def _approval_live(runtime, ref: tuple) -> bool:
+    kind, conv_id, request_id = ref
+    if kind == "write-set":
+        return runtime.db._exec(
+            "SELECT 1 FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
+            (conv_id, request_id)).fetchone() is not None
+    if kind == "memory":
+        return runtime.db._exec(
+            "SELECT 1 FROM memory_limit_requests WHERE id=? AND expired_at IS NULL",
+            (request_id,)).fetchone() is not None
+    request = getattr(runtime, "restart_request", None)
+    return request is not None and request.id == request_id
+
+
 def drop_resolved(runtime, att: dict, messages: list[dict], *, keep=frozenset()) -> list[dict]:
     """Return ``messages`` without notices that no longer describe a live problem."""
     reports = _report_ids(messages)
+    approvals = _approval_ids(messages)
     newest = {}
-    for message_id, report in reports.items():
-        newest[report] = max(newest.get(report, 0), message_id)
+    for message_id, ref in (*reports.items(), *approvals.items()):
+        newest[ref] = max(newest.get(ref, 0), message_id)
     kept = []
     for message in messages:
         mid = message["id"]
-        if mid in keep:
+        if mid in approvals:
+            # A decided request must not replay even from an explicitly held batch.
+            if _approval_live(runtime, approvals[mid]) and newest[approvals[mid]] == mid:
+                kept.append(message)
+        elif mid in keep:
             kept.append(message)
         elif mid in reports:
             row = runtime.db._exec(
