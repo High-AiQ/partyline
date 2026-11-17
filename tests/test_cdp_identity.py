@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from partyline.screen_elements import ElementsHub
 from partyline.screen_element_actions import ElementAction, element_action
 from partyline.screen_failure_snapshot import attach, failed
-from partyline_helper.cdp_recipes import STATE
+from partyline_helper.cdp_recipes import DISPATCH, STATE
 from partyline_helper.cdp_identity import TargetChanged
 from partyline_helper.cdp_transport import CDPError, DocumentChanged, ExtensionRefused, PageUnavailable
 from tests.cdp_fakes import Fixture
@@ -94,8 +94,8 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
                 await checkpoint()
                 self.assertEqual("completed", (await self.invoke())["status"])
 
-    async def test_movement_disconnection_and_frame_document_change_refuse_even_with_force(self):
-        for change in ({"bounds": [1, 0, 101, 40]}, {"connected": False},
+    async def test_disconnection_and_frame_document_change_refuse_even_with_force(self):
+        for change in ({"connected": False},
                        {"document_identity": "new document"}):
             with self.subTest(change=change):
                 self.f.socket.states[2] = dict(tag="A", hit=True)
@@ -104,6 +104,8 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
                 result = await self.f.chrome.action(self.f.access, dict(action="invoke", force=True,
                     element_id=self.elements.snapshots["g"].nodes[self.ident].helper))
                 self.assertEqual(("failed", "target_changed"), (result["status"], result["reason"]))
+                detail = "connected=false" if "connected" in change else "document identity"
+                self.assertIn(detail, result["error"])
         self.assertFalse(any(m["method"].startswith("Input.") for m in self.f.socket.calls))
 
     async def test_replacement_with_same_name_never_dispatches_to_the_new_node(self):
@@ -124,8 +126,8 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
                 async def reject(raw, send=send):
                     nonlocal gone
                     message = json.loads(raw)
-                    if message["method"] == "DOM.getBoxModel":
-                        gone = True  # collected after hit testing, before the final proof
+                    if message["method"] == "DOM.focus":
+                        gone = True  # collected after focus, before the dispatch proof
                     if (gone and message["method"] == "DOM.resolveNode"
                             and message["params"]["backendNodeId"] == 2):
                         self.f.socket.calls.append(message)
@@ -177,46 +179,113 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
             if message["method"] == "DOM.focus":
                 self.f.socket.states[2]["bounds"] = [50, 0, 150, 40]
         self.f.socket.hook = move
-        self.assertEqual("target_changed", (await self.invoke())["reason"])
+        self.assertEqual("completed", (await self.invoke())["status"])
+        self.assert_mouse_point(100, 20)
+
+    def assert_mouse_point(self, x, y):
+        events = [m["params"] for m in self.f.socket.calls if m["method"] == "Input.dispatchMouseEvent"]
+        self.assertTrue(events)
+        self.assertTrue(all((m["x"], m["y"]) == (x, y) for m in events[-2:]))
+
+    async def test_fractional_jitter_and_large_movement_keep_identity_token(self):
+        for bounds in ([0.49, 0.1, 100.49, 40.1], [50, 10, 150, 50]):
+            with self.subTest(bounds=bounds):
+                await self.read()
+                token = self.elements.snapshots["g"].nodes[self.ident].cached["action_token"]
+                self.f.socket.states[2]["bounds"] = bounds
+                result = await self.f.read()
+                self.assertEqual(token, result["elements"][1]["action_token"])
+                self.assertEqual("completed", (await self.invoke())["status"])
+                self.assert_mouse_point((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)
+
+    async def test_frame_offset_point_comes_from_proven_backends_live_cdp_box(self):
+        self.f.socket.frame_offsets[2] = (200, 120)
+        await self.read()
+        def move(message):
+            if message["method"] == "DOM.focus":
+                self.f.socket.states[2]["bounds"] = [50, 10, 150, 50]
+        self.f.socket.hook = move
+        self.assertEqual("completed", (await self.invoke())["status"])
+        self.assert_mouse_point(300, 150)  # frame-local hit-test centre is only (100, 30)
+        methods = [m["method"] for m in self.f.socket.calls]
+        dispatch = methods.index("Input.dispatchMouseEvent")
+        self.assertEqual("DOM.getBoxModel", methods[dispatch - 1])
+        self.assertEqual({"backendNodeId": 2}, self.f.socket.calls[dispatch - 1]["params"])
+
+    async def test_viewport_transformed_cdp_quad_is_used_without_local_point_or_extra_scaling(self):
+        await self.read()
+        # Protocol output already incorporates frame/viewport transforms; it can be a non-axis-aligned quad.
+        self.f.socket.box_quads[2] = [220, 140, 320, 160, 300, 200, 200, 180]
+        self.assertEqual("completed", (await self.invoke())["status"])
+        self.assert_mouse_point(260, 170)
+
+    async def test_unsafe_movement_at_dispatch_refuses_with_specific_reason_and_rounded_bounds(self):
+        for reason in ("element is covered", "outside viewport", "element is no longer visible"):
+            with self.subTest(reason=reason):
+                self.f.socket.hook = None
+                self.f.socket.states[2] = dict(tag="A", hit=True)
+                await self.read()
+                def cover(message, reason=reason):
+                    if (message["method"] == "Runtime.callFunctionOn"
+                            and message["params"]["functionDeclaration"] == DISPATCH):
+                        self.f.socket.states[2].update(hit=False, reason=reason,
+                                                      bounds=[50.1, 0.2, 150.1, 40.2])
+                self.f.socket.hook = cover
+                result = await self.invoke()
+                self.assertEqual("failed", result["status"])
+                self.assertIn(reason, result["error"])
+                self.assertIn("bounds [0, 0, 100, 40] → [50, 0, 150, 40]", result["error"])
         self.assertFalse(any(m["method"].startswith("Input.") for m in self.f.socket.calls))
 
-    async def test_helper_recapture_cannot_replace_the_servers_original_bounds_proof(self):
+    async def test_coordinate_input_after_element_action_keeps_its_explicit_point(self):
+        await self.read()
+        self.assertEqual("completed", (await self.invoke())["status"])
+        page = self.f.chrome.pages[self.f.access]["a"]
+        self.assertIsNone(page.action_proof)
+        await page.call("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": 250, "y": 80})
+        self.assertEqual({"type": "mouseMoved", "x": 250, "y": 80}, self.f.socket.calls[-1]["params"])
+
+    async def test_helper_recapture_accepts_same_nodes_new_bounds(self):
         await self.read()
         self.f.socket.states[2]["bounds"] = [50, 0, 150, 40]
         await self.f.read()  # helper cache advanced, but the server still holds the original capture
-        self.assertEqual("target_changed", (await self.invoke())["reason"])
-        self.assertFalse(any(m["method"].startswith("Input.") for m in self.f.socket.calls))
+        self.assertEqual("completed", (await self.invoke())["status"])
+        self.assert_mouse_point(100, 20)
 
-    async def test_recapture_while_waiting_for_window_lock_refuses_changed_proof(self):
+    async def test_recapture_while_waiting_for_window_lock_refuses_changed_document(self):
         await self.read()
         locked = self.elements.locked
         @asynccontextmanager
         async def changed(grant_id):
             async with locked(grant_id):
-                self.f.socket.states[2]["bounds"] = [50, 0, 150, 40]
+                self.f.socket.states[2]["document_identity"] = "new document"
                 result = await self.f.read()
                 tree = self.elements.snapshots["g"]
                 tree.nodes[self.ident].cached["action_token"] = result["elements"][1]["action_token"]
                 yield
         self.elements.locked = changed
-        self.assertEqual("target_changed", (await self.invoke())["reason"])
+        result = await self.invoke()
+        self.assertEqual("target_changed", result["reason"])
+        self.assertIn("document identity token changed", result["error"])
         self.assertFalse(any(m["method"].startswith("Input.") for m in self.f.socket.calls))
 
-    async def test_related_mutation_that_moves_target_refuses(self):
+    async def test_related_mutation_that_moves_same_target_uses_live_point(self):
         for backend in (1, 2, 4):
             with self.subTest(backend=backend):
                 self.f.socket.states[2].pop("bounds", None)
                 await self.read()
                 self.f.socket.event("DOM.attributeModified", nodeId=backend, name="class", value="changed")
                 self.f.socket.states[2]["bounds"] = [50, 0, 150, 40]
-                self.assertEqual("target_changed", (await self.invoke())["reason"])
-        self.assertFalse(any(m["method"].startswith("Input.") for m in self.f.socket.calls))
+                self.assertEqual("completed", (await self.invoke())["status"])
+                self.assert_mouse_point(100, 20)
 
     async def test_document_epoch_change_and_lost_cdp_never_fall_back_to_uia(self):
         await self.read()
         page = self.f.chrome.pages[self.f.access]["a"]
         page.epoch += 1
-        self.assertEqual("target_changed", (await self.invoke())["reason"])
+        result = await self.invoke()
+        self.assertEqual("target_changed", result["reason"])
+        self.assertIn("page epoch 0 → 1", result["error"])
         self.outer.elements.snapshots.clear()
         self.f.access.snapshot = AsyncMock()
         await self.f.browser.disconnect()
@@ -246,14 +315,15 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("picture took too long", result["screenshot"]["error"])
         self.outer.elements.read.assert_not_awaited()
 
-    async def test_identity_is_checked_again_after_hit_test_and_box_lookup(self):
+    async def test_movement_at_dispatch_observation_uses_live_point(self):
         await self.read()
         def move(message):
-            if message["method"] == "DOM.getBoxModel":
+            if (message["method"] == "Runtime.callFunctionOn"
+                    and message["params"]["functionDeclaration"] == DISPATCH):
                 self.f.socket.states[2]["bounds"] = [50, 0, 150, 40]
         self.f.socket.hook = move
-        self.assertEqual("target_changed", (await self.invoke())["reason"])
-        self.assertFalse(any(m["method"].startswith("Input.") for m in self.f.socket.calls))
+        self.assertEqual("completed", (await self.invoke())["status"])
+        self.assert_mouse_point(100, 20)
 
     async def test_old_helper_keeps_its_counter_barrier(self):
         original = self.exchange
@@ -285,21 +355,25 @@ class StateIdentityRecipe(unittest.TestCase):
     def test_same_document_is_stable_and_adoption_changes_the_live_proof(self):
         script = r"""
 const crypto=require('node:crypto').webcrypto;
-const document=()=>({activeElement:null});
+const innerWidth=800,innerHeight=600;
+const document=()=>({activeElement:null,elementFromPoint:()=>e,
+  defaultView:{getComputedStyle:()=>({visibility:'visible',display:'block'})}});
 const e={ownerDocument:document(),tagName:'BUTTON',isConnected:true,tabIndex:0,
-  getBoundingClientRect:()=>({left:1,top:2,right:11,bottom:12}),
+  getBoundingClientRect:()=>({left:1,top:2,right:11,bottom:12,x:1,y:2,width:10,height:10}),
   closest:()=>null,matches:()=>false,getAttribute:()=>null,getRootNode(){return this.ownerDocument;}};
 const state=RECIPE;
-const first=state.call(e), same=state.call(e);
+const first=state.call(e), same=state.call(e), dispatch=(DISPATCH_RECIPE).call(e);
 e.ownerDocument=document();
 const adopted=state.call(e);
 e.isConnected=false;
-console.log(JSON.stringify({first,same,adopted,detached:state.call(e)}));
-""".replace("RECIPE", STATE)
+console.log(JSON.stringify({first,same,adopted,dispatch,detached:state.call(e)}));
+""".replace("DISPATCH_RECIPE", DISPATCH).replace("RECIPE", STATE)
         output = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True)
         result = json.loads(output.stdout)
         self.assertEqual(result["first"]["document_identity"], result["same"]["document_identity"])
         self.assertNotEqual(result["first"]["document_identity"], result["adopted"]["document_identity"])
         self.assertEqual([1, 2, 11, 12], result["first"]["bounds"])
+        self.assertEqual((True, 6, 7), tuple(result["dispatch"][key] for key in ("hit", "x", "y")))
+        self.assertEqual(result["first"]["document_identity"], result["dispatch"]["document_identity"])
         self.assertTrue(result["adopted"]["connected"])
         self.assertFalse(result["detached"]["connected"])

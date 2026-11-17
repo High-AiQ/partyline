@@ -3,34 +3,65 @@ import hashlib
 
 from .cdp_transport import CDPError
 
-TARGET_CHANGED = ("target changed or moved since it was read; read it again, or use "
+TARGET_CHANGED = ("read it again, or use "
                   "screen_window_snapshot + screen_window_click")
 
 
 class TargetChanged(CDPError):
-    def __init__(self):
-        super().__init__(TARGET_CHANGED)
+    def __init__(self, detail="backend node or action token unavailable"):
+        super().__init__(f"target changed: {detail}; {TARGET_CHANGED}")
 
 
 def identity(page, state):
-    return (page.epoch, state.get("document_identity"), tuple(state.get("bounds") or ()))
+    return (page.epoch, state.get("document_identity"),
+            tuple(round(value) for value in state.get("bounds") or ()))
 
 
 def token(ident, proof):
-    return hashlib.blake2b(repr((ident, proof)).encode(), digest_size=16).hexdigest()
+    return hashlib.blake2b(repr((ident, proof[:2])).encode(), digest_size=16).hexdigest()
 
 
 def prove(page, node, state):
-    """Resolution uses the original backend id; disconnected/replaced documents never pass."""
+    """Prove the original backend node and document, allowing layout movement.
+
+    Bounds (rounded CSS pixels) are observations, not identity. Mouse dispatch takes
+    a live hit test from this same node, then its CDP box supplies a main-frame
+    viewport point (DOM bounds are frame-relative). Moved nodes pass but covered,
+    hidden and offscreen nodes refuse. No cached coordinate authorizes input.
+    """
     proof = node.get("action_identity")
-    if (not proof or not proof[1] or len(proof[2]) != 4 or state.get("connected") is not True
-            or identity(page, state) != proof):
-        raise TargetChanged()
+    if not proof or not proof[1] or len(proof[2]) != 4:
+        raise TargetChanged("read identity unavailable")
+    changed = []
+    if page.epoch != proof[0]:
+        changed.append(f"page epoch {proof[0]} → {page.epoch}")
+    if state.get("document_identity") != proof[1]:
+        changed.append("document identity changed")
+    if state.get("connected") is not True:
+        changed.append("connected=false")
+    if changed:
+        bounds = identity(page, state)[2]
+        if bounds != proof[2]:
+            changed.append(f"bounds {list(proof[2])} → {list(bounds)}")
+        raise TargetChanged(", ".join(changed))
 
 
-async def reprove(page, node):
-    from .cdp_recipes import STATE
-    prove(page, node, await page.function(node["backendDOMNodeId"], STATE, proof=True))
+async def reprove(page, node, mouse=False):
+    from .cdp_recipes import DISPATCH, STATE
+    state = await page.function(node["backendDOMNodeId"], DISPATCH if mouse else STATE, proof=True)
+    prove(page, node, state)
+    if mouse:
+        if not state.get("hit"):
+            detail = state.get("reason") or "element is covered or outside the viewport"
+            bounds = identity(page, state)[2]
+            if bounds != node["action_identity"][2]:
+                detail += f"; bounds {list(node['action_identity'][2])} → {list(bounds)}"
+            raise CDPError(detail)
+        # DOM rectangles/hit tests use the node's own frame. CDP box coordinates
+        # include frame offsets and viewport transforms required by mouse input.
+        box = await page.call("DOM.getBoxModel", {"backendNodeId": node["backendDOMNodeId"]})
+        quad = box["model"]["content"]
+        return {"x": sum(quad[::2]) / 4, "y": sum(quad[1::2]) / 4}
 
 
 def failure(page, exc, error):

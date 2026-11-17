@@ -45,6 +45,9 @@ STATE = r"""function() {
 HIT = r"""function() {
  if(!this.getBoundingClientRect) return {hit:false,reason:'not an element'};
  const e=this, r=e.getBoundingClientRect();
+ const style=e.ownerDocument.defaultView.getComputedStyle(e);
+ if(r.width<=0||r.height<=0||['hidden','collapse'].includes(style.visibility)||style.display==='none')
+   return {hit:false,reason:'element is no longer visible'};
  return (()=>{const x=r.x+r.width/2,y=r.y+r.height/2;
      const composedContains=(ancestor,node)=>{for(let n=node,i=0;n&&i<512;i++){if(n===ancestor)return true;
        n=n.assignedSlot||n.parentNode||(n.host||null);}return false;};
@@ -54,17 +57,20 @@ HIT = r"""function() {
      for(let i=0;n&&n.shadowRoot&&i<32;i++){const inner=n.shadowRoot.elementFromPoint(x,y);
        if(!inner||inner===n)break;n=inner;}
      if(!n)return {hit:false,reason:'outside viewport'};
-     if(n===e||composedContains(e,n))return {hit:true};
+     if(n===e||composedContains(e,n))return {hit:true,x,y};
      // A hit on a component host that owns the target counts: either the target lives in the
      // host's shadow tree (open or closed; open roots resolve to the host when the component
      // listens there), or the target is slotted into the host. A real click lands on that host.
      let root=e.getRootNode();
-     for(let i=0;root&&root.host&&i<32;i++){if(root.host===n)return {hit:true};
+     for(let i=0;root&&root.host&&i<32;i++){if(root.host===n)return {hit:true,x,y};
        root=root.host.getRootNode();}
-     if((n.tagName==='SLOT'||n.shadowRoot)&&composedContains(n,e))return {hit:true};
-     const name=(n.getAttribute('aria-label')||n.getAttribute('title')||'').trim().slice(0,120);
-     return {hit:false,reason:'covered by '+n.tagName+(name?' "'+name+'"':'')};})();
+     if((n.tagName==='SLOT'||n.shadowRoot)&&composedContains(n,e))return {hit:true,x,y};
+     return {hit:false,reason:'element is covered'};})();
 }"""
+# Identity, visibility and hit test share one frame-local renderer observation.
+# Mouse dispatch obtains main-frame coordinates separately through the CDP box model.
+DISPATCH = "function() {return {...(" + STATE + ").call(this),...(" + HIT + ").call(this)};}"
+
 SELECT_PLAN = r"""function(value) {
  if(this.tagName!=='SELECT') return {error:'select requires a SELECT'};
  const options=Array.from(this.options);

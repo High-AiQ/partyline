@@ -202,7 +202,7 @@ class CDPTests(IsolatedAsyncioTestCase):
         ident = next(i["id"] for i in (await page.snapshot())["elements"] if i["control_type"] == "Hyperlink")
         result = await self.f.chrome.action(self.f.access, dict(action="invoke", element_id=ident))
         self.assertEqual(result["status"], "failed")
-        self.assertEqual(result["error"], 'covered by DIV "overlay"')
+        self.assertEqual(result["error"], "element is covered")
         self.assertFalse(any(m["method"] == "Input.dispatchMouseEvent" for m in self.f.socket.calls))
 
     async def test_open_shadow_ax_button_is_invokable_with_trusted_mouse_input(self):

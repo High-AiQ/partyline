@@ -26,6 +26,7 @@ class Page(Dialogs, Recovery):
         self.recovery_ready = False
         self.operation_epoch = None
         self.action_proof = None
+        self.action_point = None
         self.quiet = Quiet()
         self.browser.listeners.add(self.event)
 
@@ -37,14 +38,19 @@ class Page(Dialogs, Recovery):
         if healthy and self.page_state != "alive":
             raise PageUnavailable(self.page_state)
         if document and self.operation_epoch is not None and self.operation_epoch != self.epoch:
-            raise DocumentChanged("Page document changed during input; read it again before acting")
+            raise DocumentChanged(f"Page document changed: page epoch {self.operation_epoch} → {self.epoch}; "
+                                  "read it again before acting")
 
     async def call(self, method, params=None):
         self.dialog_guard()
         if method.startswith("Input.") or method == "DOM.setFileInputFiles":
             if not self.dispatched and self.action_proof is not None:
-                await reprove(self, self.action_proof)
+                self.action_point = await reprove(self, self.action_proof,
+                                                 mouse=method == "Input.dispatchMouseEvent")
                 self.guard()
+            if (method == "Input.dispatchMouseEvent" and self.action_proof is not None
+                    and self.action_point is not None):
+                params = {**params, **self.action_point}
             self.dispatched = True
         try:
             return await self.browser.call(method, params, self.session, self.dialog_guard)
@@ -101,7 +107,7 @@ class Page(Dialogs, Recovery):
         except CDPError as exc:
             if proof and type(exc) is CDPError:
                 self.guard()  # revocation or document loss must retain its own refusal
-                raise TargetChanged() from exc
+                raise TargetChanged("backend node no longer resolves") from exc
             raise
         obj = resolved["object"]["objectId"]
         try:

@@ -112,8 +112,15 @@ class ElementAction(BaseModel):
 STALE = ("unknown element id: not in the current snapshot (the page changed or it was never read); "
          "find it again, or pass then to see the page after a click")
 REFRESH_FAILED = "could not refresh the window; read it again before acting"
-TARGET_CHANGING = ("target keeps changing; read it again when it settles, or use "
+TARGET_CHANGING = ("read it again when it settles, or use "
                    "screen_window_snapshot + screen_window_click")
+
+
+def changing(elements, grant_id, detail=None):
+    tree = elements.snapshots.get(grant_id)
+    detail = detail or getattr(tree, "action_busy", "window change event during capture")
+    return {"status": "failed", "reason": "target_changed",
+            "error": f"target keeps changing: {detail}; {TARGET_CHANGING}"}
 
 
 DIFF = ("diff", "removed", "lines", "more", "next_offset", "note", "partial", "changed", "update_helper",
@@ -180,7 +187,7 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
                 target, busy = await hub.elements.action_target(principal, grant, body.element_id)
         if target is None:
             if busy:
-                return {"status": "failed", "reason": "target_changed", "error": TARGET_CHANGING}
+                return changing(hub.elements, grant["id"])
             return {"status": "failed", "error": REFRESH_FAILED}
         token = action_token(hub.elements, grant["id"], body.element_id)
         async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window
@@ -198,7 +205,9 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
                 return {"status": "failed", "error": getattr(tree, "recovery_hint", None) or STALE}
             if body.action not in ("reload", "dialog") and (message["element_id"] != target or
                     token != action_token(hub.elements, grant["id"], body.element_id)):
-                return {"status": "failed", "reason": "target_changed", "error": TARGET_CHANGING}
+                detail = ("backend mapping changed" if message["element_id"] != target else
+                          "document identity token changed")
+                return changing(hub.elements, grant["id"], detail + " while waiting for window lock")
             if token:
                 message["action_token"] = token
             hub.window_grants.spend(grant)

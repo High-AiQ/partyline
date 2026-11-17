@@ -5,7 +5,7 @@ from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, patch
 
 from partyline_helper.cdp_dom_nodes import DETAIL, candidate, interactive_nodes
-from partyline_helper.cdp_recipes import HIT, STATE, normalize
+from partyline_helper.cdp_recipes import DISPATCH, HIT, STATE, normalize
 from tests.cdp_fakes import Fixture
 from tests.test_cdp_hidden_files import dom
 
@@ -187,7 +187,7 @@ class Popup(IsolatedAsyncioTestCase):
         self.assertEqual(result['status'], 'completed')
         recipes = [m['params']['functionDeclaration'] for m in f.socket.calls
                    if m['method'] == 'Runtime.callFunctionOn']
-        self.assertIn(HIT, recipes)
+        self.assertIn(DISPATCH, recipes)
         after = await f.read()
         option = next(n for n in after['elements'] if n['name'] == 'First')
         self.assertTrue({'invoke', 'select'} <= set(option['actions']))

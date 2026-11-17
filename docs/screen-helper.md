@@ -1379,21 +1379,39 @@ Continuation parts send `tolerate_events`, so the helper no longer refuses them 
 the final judgement covers the whole capture. No polling or sleeps are added: each judgement is one
 status exchange after a capture.
 
-**Busy CDP pages (helper 1.7.2).** DOM mutations anywhere still advance the window counter, but a CDP
+**Busy CDP pages (live-point dispatch in helper 1.8.4).** DOM mutations anywhere still advance the window counter, but a CDP
 read advertises `action_identity_supported`. The server returns that capture immediately, reporting any
 capture race, and delegates element-action stability to a live proof in the helper. The proof resolves
-the original backend node, requires it to remain connected in the same page/frame document epoch, and
-compares its viewport bounds with those recorded during the read. A per-document identity also catches
-subframe navigation or adoption into another document. A token binds the server's action to that exact
-identity and position even if another read has since advanced the helper cache. The helper checks again before the
-first input command, after focus, scrolling, hit testing or file preparation. Events at the target, its
-ancestors or descendants can pass only when this identity and position are re-proved. Unrelated churn
-does not require another tree read. A moved or replaced target refuses, including one with the same
-name, and CDP action failures never dispatch through UIA. If automatic scrolling moved the target,
-read it again at its new position before invoking; an explicit `scroll_into_view` still scrolls it.
+the original backend node and requires it to remain connected in the same page epoch and document.
+A per-document identity catches subframe navigation or adoption into another document. Bounds are
+observations rounded to whole CSS pixels, not node identity: fractional jitter and larger layout moves
+both pass when the backend node, document and epoch still match. The action token binds that identity,
+so recapturing a moved node cannot invalidate it merely by changing its position.
+
+Immediately before the first input command the helper proves identity again, after focus, scrolling or
+file preparation. For mouse input, one renderer observation also checks visibility and hit-tests the
+node's live centre in its own frame. Immediately afterward, `DOM.getBoxModel` on that proven backend
+node supplies the dispatch point in main-frame viewport coordinates, including frame offsets and
+viewport transforms. The frame-local `getBoundingClientRect()` centre cannot be sent directly to
+`Input.dispatchMouseEvent`. The CDP content quad's centre is used for both press and release.
+A covered, hidden, zero-size or
+offscreen centre refuses with that specific reason. This allows movement safely because input uses the
+proven node's own live point, never the coordinates stored during the read. Events at the target,
+ancestors or descendants do not require another tree read when identity can be proved. Replaced or
+disconnected nodes still refuse, including replacements with the same name; CDP action failures never
+dispatch through UIA. Hidden file inputs retain their separate non-pointer upload path.
+
+Legacy event sources report ancestry but not which property changed. Ancestor churn could represent
+inert/disabled state or structure, so narrowing that barrier to ignore style/focus events is unsound.
+Those helpers retain the conservative related-subtree barrier; its refusal names the target, ancestor
+or descendant subtree that had events, or explains that sources could not be placed. CDP helpers with
+identity support bypass this barrier.
 
 A target that cannot pass stability (including a removed node that no longer resolves) answers with
-`reason: target_changed`, separately from an unreadable window. Its error advises a fresh read or the
+`reason: target_changed`, separately from an unreadable window. The error names page epoch changes,
+document identity changes, `connected=false`, or an unresolvable backend node. Refused mouse actions
+also report changed bounds as rounded old → new coordinates. No extra page text is included.
+Its error advises a fresh read or the
 point path, `screen_window_snapshot` plus
 `screen_window_click`. Its failure picture skips the fresh-marks tree walk and has a two-second total
 budget; other failure pictures retain their existing budget. The proof establishes identity as of the

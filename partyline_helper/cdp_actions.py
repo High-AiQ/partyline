@@ -13,9 +13,10 @@ KEYS = {"enter": ("Enter", 13), "tab": ("Tab", 9), "escape": ("Escape", 27)}
 
 async def act(page, message):
     node = page.nodes.get(message.get("element_id"))
-    if (not node or not node.get("backendDOMNodeId")
-            or message.get("action_token", node.get("action_token")) != node.get("action_token")):
-        raise TargetChanged()
+    if not node or not node.get("backendDOMNodeId"):
+        raise TargetChanged("backend node unavailable")
+    if message.get("action_token", node.get("action_token")) != node.get("action_token"):
+        raise TargetChanged("document identity token changed")
     backend = node["backendDOMNodeId"]
     state = await page.function(backend, STATE, proof=True)
     prove(page, node, state)
@@ -43,13 +44,8 @@ async def act(page, message):
                 raise CDPError("select requires an option name or value")
             extra = await select_option(page, backend, message["value"])
         elif action in ("invoke", "toggle", "select"):
-            hit = await page.function(backend, HIT)
-            if not hit.get("hit"):
-                raise CDPError(hit.get("reason") or hit.get("hit_reason")
-                               or "element is covered or outside the viewport")
-            box = await page.call("DOM.getBoxModel", {"backendNodeId": backend})
-            quad = box["model"]["content"]
-            point = {"x": sum(quad[::2]) / 4, "y": sum(quad[1::2]) / 4, "button": "left", "clickCount": 1}
+            # Page.call proves identity and obtains the hit-tested live point at dispatch.
+            point = {"button": "left", "clickCount": 1}
             for kind in ("mousePressed", "mouseReleased"):
                 page.guard()
                 released = kind == "mouseReleased"

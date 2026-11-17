@@ -1,5 +1,20 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-17 — Layout coordinates are not backend node identity
+
+The false assumption was that unchanged backend identity also required unchanged raw bounding-box
+floats. Fractional layout noise and legitimate movement after focus or scroll then refused a safe
+node. Prove the backend node, epoch, document and connection; at mouse dispatch obtain visibility,
+hit test and the live point. DOM rectangles use frame-local coordinates, whereas mouse input needs
+main-frame viewport coordinates: take the dispatch point from the proven backend node's CDP box
+immediately after the identity/hit proof, including frame/viewport transforms. Never authorize a click
+using the read's stale coordinates.
+Tokens bind identity without position, so another capture cannot turn movement into a false refusal.
+Legacy ancestry events lack property detail and still need conservative barriers with source/subtree
+diagnostics. Fake regressions in `tests/test_cdp_identity.py` cover movement, jitter, unsafe points,
+replacement, disconnection, document loss and offset/transformed frame coordinates; recipe fakes
+cover visibility and hit testing.
+
 ## 2026-11-17 — Attachment descendants are part of handover runtime
 
 The false assumption was that every descendant other than a narrowly recognized CLI launcher was
@@ -32,7 +47,7 @@ could race Waiter listener cleanup and produce a misleading `KeyError` during th
 The false assumption was that a live page must stop producing DOM mutations before an element action
 can proceed. A continuously changing unrelated subtree defeated every whole-window barrier and then
 held the failure answer behind another tree walk. CDP actions now re-prove the original backend node,
-connection, document identity and bounds immediately before input; reads retain their churn metadata.
+connection and document identity immediately before input; reads retain their churn metadata.
 `tests/test_cdp_identity.py` covers unrelated churn, related changes, movement, replacement, document
 changes and the bounded, unmarked failure picture with fake time. Reload reattachment errors also use
 the existing actionable extension-refusal explanation, covered by `tests/test_extension_fallback.py`.
