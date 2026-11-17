@@ -17,6 +17,7 @@ import { ReactionResponseSchema } from "./reaction-contracts";
 import { PinsChangedEventSchema } from "./pin-contracts";
 import { ResourceSnapshotSchema } from "./resource-contracts";
 import { ScreenShareSchema } from "./screen-contracts";
+import { ChromeApprovalEventSchema } from "./chrome-approval-event";
 import { IndicatorSchema, ScreenDeviceSchema } from "./screen-device-contracts";
 
 export const HelloEventSchema = z.object({
@@ -254,6 +255,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ScreenShareEventSchema,
   ScreenDevicesChangedEventSchema,
   ScreenSnapshotEventSchema,
+  ChromeApprovalEventSchema,
   PinsChangedEventSchema,
   AsrPresetsChangedEventSchema,
 ]);

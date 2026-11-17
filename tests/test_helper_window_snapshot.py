@@ -9,6 +9,7 @@ from PIL import Image
 
 from partyline_helper import __version__
 from partyline_helper.client import Session
+from partyline_helper.window_gone import closed_text
 from partyline_helper.window_grab import GrabError, WindowGrab
 from partyline_helper.uia_gate import DispatchGate
 from partyline_helper.window_shares import WINDOWS_VERSION, WindowShares
@@ -17,6 +18,8 @@ from partyline_helper.window_snapshot import MINIMIZED, SNAPSHOT_VERSION, prepar
 from tests.screen_helper_fakes import FakeDesktop, FakeSocket, FakeTerminal
 
 GRANT = {"hwnd": 10, "pid": 42, "title": "Editor", "process": "editor.exe"}
+
+CLOSED = closed_text()
 
 
 class FakeBackend:
@@ -150,7 +153,7 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
         results = iter([None, "window closed"])
         self.access.check.side_effect = lambda grant: next(results)
         reply, binaries = await self.ask()
-        self.assertEqual((False, "window closed"), (reply["ok"], reply["error"]))
+        self.assertEqual((False, CLOSED), (reply["ok"], reply["error"]))
         self.assertTrue(binaries.empty())
 
     async def test_an_all_black_window_says_so(self):
@@ -166,7 +169,7 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_window_that_closed_revokes_its_grant_and_is_reported(self):
         self.access.check.return_value = "window closed"
         reply, _ = await self.ask()
-        self.assertEqual((False, "window closed"), (reply["ok"], reply["error"]))
+        self.assertEqual((False, CLOSED), (reply["ok"], reply["error"]))
         self.access.revoke.assert_called_once_with("window closed")
         self.assertEqual([], self.backend.calls)
 
@@ -223,7 +226,7 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_hello_announces_screenshots_and_the_helper_patch_version(self):
         self.assertEqual(5, WINDOWS_VERSION)
         self.assertEqual(2, SNAPSHOT_VERSION)
-        self.assertEqual("1.7.2", __version__)
+        self.assertEqual("1.8.0", __version__)
 
 
 class WindowGrabTests(unittest.TestCase):

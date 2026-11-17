@@ -26,16 +26,17 @@ async def dispatch(shares, message):
     if message["type"] in ("snapshot_window", "look_window"):
         shares.spawn(shares.snapshots.handle(entry, message))
     elif not entry:
+        gone = shares.ended.get(message.get("grant_id"), "consent revoked")
         shares.session.window_access_audit.append(message.get("line", ""), message.get("agent", ""),
             label(message), message.get("process", ""), message.get("title", ""), "denied: grant unavailable")
         if message["type"] in ("snapshot_window", "look_window"):
             await shares.session.send("window_snapshot", request_id=message["request_id"],
-                                      ok=False, error="consent revoked")
+                                      ok=False, error=gone)
         else:
             kind = ("window_elements" if message["type"] == "read_window_elements"
                     else "window_element_result")
-            error = ("consent revoked; use the Open dialog path instead"
-                     if message.get("action") == "set_files" else "consent revoked")
+            error = (f"{gone}; use the Open dialog path instead"
+                     if message.get("action") == "set_files" and gone == "consent revoked" else gone)
             await shares.session.send(kind, request_id=message["request_id"],
                                       elements_unavailable=error, status="failed", error=error)
     elif message["type"] in ("window_click", "window_point"):

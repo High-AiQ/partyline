@@ -11,5 +11,7 @@ class ChromeState(BaseModel):
 
 
 async def receive(hub, device, message):
+    if message.get("type") == "chrome_approval":  # which grants wait on the Allow prompt, not the tray state
+        return await hub.window_grants.approvals.receive(device, message)
     device["chrome"] = ChromeState.model_validate(message).model_dump()
     await hub._device_event(device, True)

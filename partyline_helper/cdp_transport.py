@@ -14,6 +14,9 @@ from websockets.exceptions import WebSocketException
 RETRY_SECONDS = 60  # One Allow prompt attempt per helper per interval; driven only by requests.
 INSTRUCTION = ("Extension not installed/connected; remote debugging fallback. "
                "Enable remote debugging in Chrome at chrome://inspect/#remote-debugging")
+SETUP = ("remote debugging counts only when it is turned on with the chrome://inspect/#remote-debugging "
+         "toggle in your normal Chrome; a Chrome started with --remote-debugging-port or a separate profile "
+         "is not used")
 
 
 REFUSAL_CODES = frozenset({
@@ -112,6 +115,8 @@ class BrowserConnection:
             detail = "Chrome connection dropped; reconnecting needs Chrome's Allow prompt"
         elif self.state == "refused":
             detail = "Chrome approval refused; share a window or use reload to retry Chrome's Allow prompt"
+        elif self.state == "not_enabled":
+            return f"{self.detail}; {SETUP}"
         else:
             return self.detail
         remaining = max(0, math.ceil(self.next_attempt - self.clock()))

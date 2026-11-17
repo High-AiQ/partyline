@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from partyline_helper.client import Session
+from partyline_helper.window_gone import closed_text
 from partyline_helper.window_shares import WindowShares
 from partyline_helper.window_target_picker import select_target
 from tests.screen_helper_fakes import FakeDesktop, FakeSocket, FakeTerminal
@@ -17,6 +18,8 @@ from tests.screen_helper_fakes import FakeDesktop, FakeSocket, FakeTerminal
 PROCESS = {"attachment_id": "a", "name": "agent", "preset": "Codex"}
 TARGET = {"line_id": "alpha", "line_name": "Alpha"}
 WINDOW = {"hwnd": 10, "pid": 42, "title": "Editor", "process": "editor.exe"}
+
+CLOSED = closed_text()
 
 
 class FakeOutline:
@@ -140,11 +143,43 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.manager.grants)
         await self.manager.dispatch({"type": "read_window_elements", "request_id": "old", "grant_id": ident})
         response = await self.socket.next("window_elements")
-        self.assertEqual("consent revoked", response["elements_unavailable"])
+        self.assertEqual(CLOSED, response["elements_unavailable"])
         await self.manager.close()
         revoked = await self.socket.next("window_revoked")
         self.assertEqual(ident, revoked["grant_id"])
         self.assertEqual("window closed", revoked["reason"])
+
+    async def test_a_closed_window_is_named_in_every_later_reply_but_a_revoked_one_is_not(self):
+        await self.manager.choose()
+        ident = next(iter(self.manager.grants))
+        self.manager.grants[ident]["access"].revoke("window closed")
+        requests = ({"type": "read_window_elements"}, {"type": "window_element_action", "action": "toggle"},
+                    {"type": "snapshot_window"}, {"type": "window_click"})
+        for number, request in enumerate(requests):
+            with self.subTest(request=request["type"]):
+                await self.manager.dispatch({**request, "request_id": f"c{number}", "grant_id": ident})
+        for kind, field in (("window_elements", "elements_unavailable"), ("window_element_result", "error"),
+                            ("window_snapshot", "error"), ("window_element_result", "error")):
+            self.assertEqual(CLOSED, (await self.socket.next(kind))[field])
+        self.manager.request = AsyncMock(side_effect=[self.targets, {"ok": True, "target": TARGET}])
+        await self.manager.choose()
+        other = next(iter(self.manager.grants))
+        await self.manager.receive({"type": "revoke_window", "grant_id": other})  # the person ended it
+        await self.manager.dispatch({"type": "read_window_elements", "request_id": "r", "grant_id": other})
+        revoked = await self.socket.next("window_elements")
+        self.assertEqual("consent revoked", revoked["elements_unavailable"])
+        await self.manager.dispatch({"type": "window_element_action", "request_id": "r2", "grant_id": other,
+                                     "action": "set_files"})
+        self.assertEqual("consent revoked; use the Open dialog path instead",
+                         (await self.socket.next("window_element_result"))["error"])
+
+    async def test_ended_grants_are_remembered_only_up_to_a_bound(self):
+        from partyline_helper.window_gone import KEEP, remember
+        ended = {}
+        for number in range(KEEP + 5):
+            remember(ended, f"g{number}", "chrome.exe")
+        self.assertEqual((KEEP, "g5"), (len(ended), next(iter(ended))))
+        self.assertIn("Chrome may have restarted", ended["g6"])
 
     async def test_tray_stop_of_one_grant_closes_its_outline(self):
         await self.manager.choose()

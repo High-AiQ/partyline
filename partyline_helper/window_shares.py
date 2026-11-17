@@ -22,6 +22,7 @@ from .point_consent import clear
 from .window_click import PointClicks
 from .window_snapshot import WindowSnapshots
 from .window_look import LOOK_VERSION
+from .window_gone import CLOSED, remember
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class WindowShares:
         self.event_factory = event_factory
         self.outline_factory = outline_factory
         self.grants, self.waiters, self.tasks = {}, {}, set()
+        self.ended = {}  # grant id -> why a window that closed can no longer be used (bounded)
         self.chrome = Chrome(self)
         self.standing_calls, self.event_timers = set(), {}
         self.picking, self.generation, self.standing_toast = False, 0, False
@@ -103,6 +105,7 @@ class WindowShares:
 
     def changed(self):
         self._changes.notify()
+        self.chrome.approval.announce()  # a grant joining a pending Allow prompt waits on it too
         labels = {ident: (f"{entry['title']} → «{entry['target']['line_name']}» (and its sublines)"
                           + shot(entry))
                   for ident, entry in self.grants.items()}
@@ -171,6 +174,9 @@ class WindowShares:
     def revoke(self, ident, notify=True, *, reason="revoked by the person"):
         entry = self.grants.pop(ident, None)
         if entry:
+            if reason == CLOSED:
+                remember(self.ended, ident, (getattr(entry["access"], "ended", None) or ("", ""))[1]
+                         or (entry["access"].grant or {}).get("process", ""))
             timer = self.event_timers.pop(ident, None)
             if timer:
                 timer.cancel()

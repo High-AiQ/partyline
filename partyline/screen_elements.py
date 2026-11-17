@@ -12,6 +12,7 @@ from .screen_audit import record_standing_window_access  # noqa: F401
 from .screen_element_actions import ElementAction, element_action  # noqa: F401
 from .screen_eval import ScreenEval, audit_call, screen_eval  # noqa: F401
 from .screen_grants import require_window, resolve_window
+from .screen_closed_windows import ended_answer
 from .screen_tree import OUT_BYTES, Snapshot
 from .screen_element_state import ElementState, compare
 from .screen_event_scope import busy_note
@@ -58,14 +59,10 @@ class ElementsHub(ElementState):
                 helper(response.get("timing", {}))
             try:
                 require_window(self.hub, principal, grant["id"])
-            except HTTPException:
+            except HTTPException as ended:
                 if kind in ("read_window_elements", "snapshot_window", "look_window"):
                     raise
-                status = response.get("status", "unknown")
-                note = ("The action was performed; the grant has since ended." if status == "completed" else
-                        "The grant has since ended; the action outcome is " + status +
-                        ". Do not retry automatically.")
-                return {"status": status, "grant_ended": True, "note": note}
+                return ended_answer(response.get("status", "unknown"), ended.detail)
             return response
         finally:
             self.waiters.pop(ident, None)

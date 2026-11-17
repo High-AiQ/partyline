@@ -6,6 +6,7 @@ from websockets.exceptions import ConnectionClosed
 
 from .uia_action_worker import ActionWorker, audit
 from .timing import Timing
+from .window_gone import explain
 
 
 READ_TIMEOUT = 33  # seconds; START_LIMIT + BUDGET + KILL_SLACK must stay below it
@@ -79,7 +80,7 @@ class WindowTask:
                 check(self.session.window, message)
             except ValueError as exc:
                 await self.session.send("window_element_result", request_id=message["request_id"],
-                                        status="failed", error=str(exc))
+                                        status="failed", error=explain(self.session.window, str(exc)))
                 return
             chrome = getattr(self.session, "chrome", None)
             result = await chrome.action(self.session.window, message) if chrome else None
@@ -94,6 +95,8 @@ class WindowTask:
                              result.get("status", "failed"), message.get("line"))
                 audited = True
             result.setdefault("timing", {}).update(timing.values)
+            if "error" in result:
+                result["error"] = explain(self.session.window, result["error"])
             await self.session.send("window_element_result", request_id=message["request_id"], **result)
         except ConnectionClosed:
             pass
@@ -149,6 +152,8 @@ class WindowTask:
             except (ValueError, KeyError, TypeError, RuntimeError, OSError):
                 result = {"elements_unavailable": "window read failed"}
             result.setdefault("timing", {}).update(timing.values)
+            if "elements_unavailable" in result:
+                result["elements_unavailable"] = explain(self.session.window, result["elements_unavailable"])
             from .screen_access_audit import audit_window
             try:
                 audit_window(self.session, "uia_read", (message or {}).get("agent", ""),

@@ -23,6 +23,7 @@ from .point_landing import evidence, landing_session
 from .point_feedback import Feedback
 from .uia_window_list import HARD_FLOOR
 from .uia_window_identity import live
+from .window_gone import explain
 
 from .point_refusals import (  # re-exported for existing point callers
     AUDIT, BUDGET, FLOOR, GONE, HIDDEN, LATE, PARTLY, POINT_VERSION as POINT_VERSION,
@@ -62,7 +63,7 @@ class PointClicks:
         except PageDialog as exc:
             result = exc.result(status="failed")
         except (Refused, PointRefused, CDPError, StaleMark) as exc:
-            result = {"status": "failed", "error": str(exc),
+            result = {"status": "failed", "error": explain(access, str(exc)),
                       **({"reason": code} if (code := reason_code(str(exc))) else {})}
         except Exception as exc:  # noqa: BLE001 - whatever fails, the caller gets an answer, not a timeout
             print(f"Point {operation} failed: {exc!r}", flush=True)

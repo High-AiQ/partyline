@@ -13,6 +13,7 @@ from partyline.point_geometry import GeometryError, clean
 from .window_grab import GrabError, WindowGrab
 from .landing_thumb import marked
 from .timing import Timing
+from .window_gone import explain
 from .window_fit import budget, fitted
 from .window_marks import boxes, clean_inputs, draw, listed
 
@@ -65,7 +66,9 @@ class WindowSnapshots:
                 await self.take(entry, message, request_id)
         except GrabError as exc:
             self.audit(entry, message, "failed")
-            await self.reply(request_id, ok=False, error=str(exc))
+            error = (explain(entry["access"], str(exc)) if entry else  # no grant: it closed, or was revoked
+                     self.shares.ended.get(message.get("grant_id")) or str(exc))
+            await self.reply(request_id, ok=False, error=error)
         except Exception as exc:  # noqa: BLE001 - whatever fails, the caller gets an answer, not a timeout
             print(f"Window screenshot failed: {exc!r}", flush=True)
             self.audit(entry, message, "failed")

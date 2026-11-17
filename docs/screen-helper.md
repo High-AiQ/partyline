@@ -487,6 +487,17 @@ once a Windows box is available and tune `MAX_ELEMENTS`, `BUDGET` and `KILL_SLAC
 `partyline_helper/uia_snapshot.py` and `uia_process.py` if needed.
 
 Errors, denied consent, closed windows and unsupported platforms return an unavailable reason.
+A share that ended because its **window closed** (for example Chrome restarted) answers every later read,
+action, screenshot and click with *the shared window closed (Chrome may have restarted); share the window
+again* (without the Chrome hint for another program). A real revocation, by the person or by
+switching access off, keeps *consent revoked*. The internal reason stays `window closed`
+(the `window_revoked` message and the server's wire value); the helper only translates it where a reply is built
+and remembers the last 64 closed grants so a request that arrives after the entry is gone still learns why.
+The server remembers the same (the last 64, per line and owner), so `screen_elements` and the action routes for a
+window that closed answer with that wording instead of the generic "no window is shared"; any other ending on the
+line, or another line's caller, keeps the generic refusal.
+An action already in flight when the window closes keeps its outcome and do-not-retry note and adds the closed-window
+wording (`error`); a revocation during the action keeps the generic grant-ended note.
 macOS AX and Linux AT-SPI are planned. The Windows-only helper dependency `comtypes`
 supplies the typed UI Automation COM interfaces; it is not installed on other platforms.
 
@@ -1653,6 +1664,25 @@ so slow approval does not block a read or require sharing again.
 The helper keeps one browser connection until it disconnects or exits. It never starts
 Chrome, changes its command line, or copies a profile. Denying or
 closing the prompt leaves UIA available. Share again to retry a refused connection.
+
+**Which Chrome counts.** Only the **normal Chrome profile with the `chrome://inspect/#remote-debugging`
+toggle on** is used: the toggle makes Chrome write `DevToolsActivePort` in the default profile folder, and that
+file is the only thing the helper reads. A Chrome started with `--remote-debugging-port=<n>`, or one running a
+separate profile or `--user-data-dir`, does not write it there and is never used. When discovery finds
+nothing, the reason (tray detail, `source_reason`, reload error) says so: turn the toggle on in your normal
+Chrome, and a Chrome started with `--remote-debugging-port` or a separate profile is not used.
+
+**The Allow prompt is shown to the person.** While a shared Chrome window waits on Chrome's Allow prompt, the
+helper sends `chrome_approval {grant_ids}` (the grants waiting, an empty list when none). It covers both the
+default remote-debugging transport and a grant the extension handed to remote debugging; the extension
+connecting is not an Allow prompt. The server keeps a per-device set, crosses it with that device's Chrome
+window grants, and pushes `chrome_approval {conv_id, notices:[{grant_id,title,device_name}]}` to the sockets of
+the line that owns the share. Each push carries the line's whole list (every computer's pending prompt), empty
+when none; a grant that joins a prompt already pending is reported when it activates. It clears when the prompt is answered or refused, the grant ends
+(including a closed window) or the computer disconnects. A tab opened mid-prompt gets the current notice at once, and the
+frontend forgets it on reconnect, so a missed clear cannot stick. The chat view shows a non-modal
+status banner, *Chrome is waiting for you to click Allow in the shared window (title)*, with no timer
+or polling. Helpers older than 1.8.0 do not report it; reads still carry the awaiting-approval reason.
 
 The tray and server device snapshot report `not_enabled` (with the setting instruction),
 `awaiting_approval`, `connected`, `disconnected`, or `refused`. `screen_elements` includes `source: cdp|uia`

@@ -11,6 +11,7 @@ from .cdp_page import Page
 from .cdp_page_dialogs import PageDialog, visible as dialog_visible
 from .cdp_recovery import HINT, read as read_page
 from .cdp_transport import CDPError, INSTRUCTION
+from .chrome_approval import Approval
 from .chrome_fallback import Fallback
 from .chrome_operations import audit, chrome_label, operation, preferred, status
 
@@ -18,12 +19,10 @@ from .chrome_operations import audit, chrome_label, operation, preferred, status
 class Chrome:
     def __init__(self, shares, connection=None, bounds=frame, dialogs=dialog_pointer):
         self.shares, self.session, self.bounds = shares, shares.session, bounds
-        self.auto_transport = connection is None
-        self.browser = connection or preferred(self.report)
+        self.auto_transport, self.browser = connection is None, connection or preferred(self.report)
         self.pages, self.reasons, self.selected, self.sources = {}, {}, {}, {}
-        self.connecting, self.dialogs = None, dialogs
-        self.transport_lock = asyncio.Lock()
-        self.fallback = Fallback(self)
+        self.connecting, self.dialogs, self.transport_lock = None, dialogs, asyncio.Lock()
+        self.fallback, self.approval = Fallback(self), Approval(self)
 
     def report(self, state, detail):
         label = chrome_label(self.browser, state)
@@ -47,6 +46,7 @@ class Chrome:
         with contextlib.suppress(ConnectionClosed, OSError):
             await self.session.send("chrome_state", state=state, detail=detail,
                                     transport=self.browser.transport)
+            await self.approval.publish()  # a state change may start or answer an Allow prompt
 
     def invalidate(self, access):
         for page in self.pages.get(access, {}).values():
