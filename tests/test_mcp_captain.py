@@ -2,7 +2,7 @@ import io
 import json
 import unittest
 
-from partyline.mcp.client import ApiError
+from partyline.mcp.client import ApiError, PartylineClient
 from partyline.mcp.server import MCPServer
 from partyline.mcp import tools_captain
 from partyline.mcp.captain_schemas import validate as validate_captain_args
@@ -306,6 +306,23 @@ class CaptainToolTests(unittest.TestCase):
         self.assertIn("force_discard=true", path)
         self.assertIn("preview_token=abc", path)
         self.assertIn("clear_goal=true", path)
+
+    def test_retire_child_preserves_a_409_detail_through_mcp(self):
+        client = Client()
+        detail = ("retirement failed for line child during worktree removal or registration: "
+                  "Read-only file system; remaining lines retained")
+        request = client.request
+
+        def failing_delete(method, path, payload=None):
+            if method == "DELETE":
+                raise PartylineClient._error(409, json.dumps({"detail": detail}).encode())
+            return request(method, path, payload)
+
+        client.request = failing_delete
+        with self.assertRaises(ApiError) as caught:
+            tools_captain.call(client, "retire_child", {
+                "conv_id": "child", "force_discard": True, "preview_token": "abc"}, client.state)
+        self.assertEqual(str(caught.exception), f"Partyline HTTP 409: {detail}")
 
     def test_retirement_tool_descriptions_explain_discard_and_recovery(self):
         tools = {tool["name"]: tool for tool in tools_captain.tool_list(Client().state)}

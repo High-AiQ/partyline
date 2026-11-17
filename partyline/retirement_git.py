@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from .git_fence import mirror_branch_ref
 from .line_worktree import _git
 from .retirement_nested import file_kind, nested_evidence
+from .retirement_errors import git_reason, operation_reason, safe_text
 from .retirement_worktree import check_line
 from .worktree_lifecycle import _base_ref, _default_branch
 from .worktree_paths import branch_name, managed_root
@@ -30,9 +31,9 @@ def git(cwd, *args):
     try:
         done = _git(*args, cwd=cwd)
     except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
-        raise HTTPException(409, "cannot inspect retirement Git state") from exc
+        raise HTTPException(409, git_reason(exc=exc)) from exc
     if done.returncode:
-        raise HTTPException(409, "cannot inspect retirement Git state")
+        raise HTTPException(409, git_reason(done))
     return done.stdout
 
 
@@ -40,7 +41,7 @@ def _try_git(cwd, *args):
     try:
         return _git(*args, cwd=cwd)
     except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
-        raise HTTPException(409, "cannot inspect retirement Git state") from exc
+        raise HTTPException(409, git_reason(exc=exc)) from exc
 
 
 def _paths(cwd, *args):
@@ -207,10 +208,14 @@ def snapshot(state, audit_id):
                "GIT_COMMITTER_NAME": "Partyline", "GIT_COMMITTER_EMAIL": "partyline@local"}
 
         def run(*args, input=None, failure="retirement recovery snapshot failed; worktree retained"):
-            done = subprocess.run(["git", *args], cwd=cwd, env=env,
-                                  input=input, capture_output=True, text=True, timeout=30)
+            try:
+                done = subprocess.run(["git", *args], cwd=cwd, env=env,
+                                      input=input, capture_output=True, text=True, timeout=30)
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise HTTPException(409, f"{failure}: {operation_reason(exc)}") from exc
             if done.returncode:
-                raise HTTPException(409, failure)
+                detail = safe_text(done.stderr)
+                raise HTTPException(409, failure + (f": {detail}" if detail else ""))
             return done.stdout.rstrip('\n')
 
         if os.path.isfile(state["index_path"]):

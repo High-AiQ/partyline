@@ -93,6 +93,19 @@ class AgentConnectionTests(unittest.TestCase):
         self.assertEqual(error.getvalue(),
                          "Partyline request failed: HTTP 403: this credential cannot act on that line\n")
 
+    def test_retire_409_detail_reaches_the_agent_client_caller(self):
+        detail = ("retirement failed for line child during worktree removal or registration: "
+                  "Read-only file system; remaining lines retained")
+        refused = HTTPError("", 409, "redacted reason", {},
+                            io.BytesIO(json.dumps({"detail": detail}).encode()))
+        error = io.StringIO()
+        with patch("partyline.agent_client.api_request", side_effect=refused):
+            with contextlib.redirect_stderr(error):
+                code = main(["--connection", str(self.path), "request", "DELETE",
+                             "/api/conversations/child?force_discard=true"])
+        self.assertEqual(code, 1)
+        self.assertEqual(error.getvalue(), f"Partyline request failed: HTTP 409: {detail}\n")
+
     def test_request_uses_header(self):
         connection = load_connection(str(self.path))
         with patch("partyline.agent_client.build_opener") as opener:

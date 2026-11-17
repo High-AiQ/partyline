@@ -7,6 +7,7 @@ import tempfile
 from fastapi import HTTPException
 
 from .line_worktree import _git, rev
+from .nested_repositories import nested_repositories
 from .retirement_nested import linked_owner
 from .storage_removal import remove_contents
 from .worktree_paths import branch_name, managed_root
@@ -49,6 +50,22 @@ def check_line(db, conv):
     for item in workspaces(db, conv.get("id") or ""):
         if item["path"] != cwd:
             refuse_orphan(item["repository"], item["path"], item["branch"], conv.get("id"))
+
+
+def registration_blockers(db, conv, state):
+    """A repository-bearing container without durable rows cannot be retired safely."""
+    cwd = conv.get("cwd") or ""
+    if state or not managed_root(cwd) or not os.path.isdir(cwd):
+        return []
+    from .task_workspaces import workspaces
+    if workspaces(db, conv.get("id") or ""):
+        return []
+    nested = nested_repositories(cwd)
+    if not nested:
+        return []
+    return [{"code": "workspace_registration_missing",
+             "message": f"managed workspace {cwd} has repositories {', '.join(nested)} but no "
+                        "task_workspaces registration; restore its registration before retirement"}]
 
 
 def remove_directory(path, root, *, excluded=()):

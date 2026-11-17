@@ -20,6 +20,16 @@ before generating picks; otherwise the runner receives empty picks or merges nee
 `tests/test_suite_batch.py` covers merges, rebases and a local default ahead of its remote ref,
 and cherry-picks the resulting task-only batch onto the default branch.
 
+## 2026-11-17 — A null outer repository is not a retirement failure reason
+
+The false assumption was that a forced-retirement catch-all could hide arbitrary exceptions without
+making the operation unactionable. A plain multi-repository task container and an empty merged orphan
+legitimately preview as `git: null`; an OS failure while removing that container then became a bare
+409 with no line, step or reason. Keep the failing line and operation in the execution context,
+return bounded OS/Git diagnostics with credentials redacted, and name missing workspace registrations
+as preview and retire blockers. Regressions cover clean plain/nested task retirement, read-only removal,
+archive exceptions, stable preview tokens and detail propagation through MCP and `agent_client`.
+
 ## 2026-11-17 — Layout coordinates are not backend node identity
 
 The false assumption was that unchanged backend identity also required unchanged raw bounding-box

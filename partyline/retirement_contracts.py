@@ -16,6 +16,7 @@ class RetirementPreview(BaseModel):
     preview_token: str
     lines: list[dict]
     required_flags: list[str] = Field(default_factory=list)
+    blockers: list[dict] = Field(default_factory=list)
     implications: str
 
 

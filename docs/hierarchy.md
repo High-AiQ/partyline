@@ -267,7 +267,13 @@ Its `required_flags` names every flag this plan needs — `force_discard` always
 `include_children`, `stop_processes` and `clear_goal` when the plan holds child lines, live
 processes or an uncleared goal — so one response answers what to pass. A guarded refusal
 returns the same list beside its `blockers`, and a forced refusal names every missing flag
-in one `detail`; a caller never learns one flag per round trip.
+in one `detail`; a caller never learns one flag per round trip. Preview `blockers` also names
+real blocks that no flag waives, such as a repository-bearing task container whose
+`task_workspaces` registration is missing; retire refuses the same block before changing anything.
+`git: null` means the managed container has no repository of its own (a plain folder of per-repository
+worktrees), or an empty outer checkout is a merged orphan eligible for removal; it is not itself an
+error. Repeated previews intentionally return the same token while every byte of their principal-bound
+evidence is unchanged. Any filesystem, attachment, auxiliary or goal change makes a new token instead.
 A tracked path that Git stores as a blob is the line's own content: a committed symlink such
 as `CLAUDE.md -> AGENTS.md` is accepted, even where the checkout holds a directory in its
 place. Untracked directories (including embedded repositories), submodule gitlinks and
@@ -330,8 +336,11 @@ Explicit stopping may interrupt mid-turn work, but an unconfirmed stop refuses d
 State is checked after snapshots and process stops. During execution this server refuses new
 Partyline writes, staffing, acceptance and child creation on selected lines. These guards
 serialize forced retirement requests, not arbitrary host filesystem writers. A failure returns completed
-and pending IDs plus recovery refs. Completed lines cannot be rolled back; a failure after
-worktree removal can require restoration from its recovery ref. Remaining lines stay intact.
+and pending IDs plus recovery refs. Its `detail` names the failed line and step (recovery capture,
+state check, process stop, worktree removal/registration, auxiliary prune, temporary-directory cleanup,
+goal clear or archive), followed by the safe OS reason or trimmed Git stderr with credentials redacted.
+Completed lines cannot be rolled back; a failure after worktree removal can require restoration from
+its recovery ref. Remaining lines stay intact.
 
 Uploads/messages remain intact. As in ordinary archive, forced retirement removes line temporary
 directories, runs the legacy temporary sweep once, and prunes clean auxiliary review/scratch
