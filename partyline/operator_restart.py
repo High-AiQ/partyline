@@ -14,6 +14,8 @@ from pathlib import Path
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .request_outcomes import not_pending_text
+
 TTL = 60
 
 
@@ -64,5 +66,6 @@ def register(app, runtime, approve):
             raise HTTPException(403, "invalid, expired, or consumed operator approval")
         current = runtime.restart_request
         if current is None or current.id != body.request_id:
-            raise HTTPException(404, "that restart request is no longer pending")
+            raise HTTPException(404, not_pending_text(
+                runtime.db, "restart", "restart request", body.request_id))
         return await approve(current, "local-operator", None)

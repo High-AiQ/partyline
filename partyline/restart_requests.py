@@ -30,6 +30,7 @@ from . import deployment, operator_restart
 from .machine_scope import deny_unless, is_human
 from .mention_relay import post_private
 from .reattach import RestartPlanError, create_restart_plan
+from .request_outcomes import not_pending_text, record as record_outcome
 from .system_notice import post_system_notice
 
 logger = logging.getLogger(__name__)
@@ -166,7 +167,8 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
             raise HTTPException(403, "only a person may decide a restart")
         current = runtime.restart_request
         if current is None or current.id != request_id:
-            raise HTTPException(404, "that restart request is no longer pending")
+            raise HTTPException(404, not_pending_text(
+                runtime.db, "restart", "restart request", request_id))
         return current
 
     @app.post("/api/restart-request/{request_id}/approve", response_model=PendingRestart)
@@ -188,6 +190,8 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
             if exc.status_code != 409:  # 409 = nothing live to resume: still restart
                 raise HTTPException(exc.status_code, exc.detail) from exc
         runtime.restart_request = None
+        record_outcome(runtime.db, "restart", current.id, current.conversation_id, "approved",
+                       actor=who)
         text = (f"☏ restart approved by @{who} — partyline is restarting; every live "
                 "process is resumed with its context when it is back")
         await announce(current.conversation_id, text)
@@ -208,6 +212,8 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
         current = _take(request, request_id)
         principal = request_principal(request)
         runtime.restart_request = None
+        record_outcome(runtime.db, "restart", current.id, current.conversation_id, "declined",
+                       actor=principal.name)
         text = f"☏ restart declined by @{principal.name}"
         await announce(current.conversation_id, text)
         await ring_requester(current, text, actor=principal)

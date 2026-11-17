@@ -902,6 +902,91 @@ class WriteSetRequestTest(unittest.TestCase):
             self.db._exec("SELECT COUNT(*) AS n FROM conversation_write_grant_requests"
                           ).fetchone()["n"], 0)
 
+    def test_a_late_decision_is_told_how_the_request_ended(self):
+        self._seed_subtree()
+        self.file_on_kid()
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        url = f"/api/conversations/kid/write-set/request/{request_id}"
+        self.client.post(f"{url}/deny", json={"reason": "the budget is spent"}, headers=self.human)
+        for action in ("deny", "approve", "withdraw"):
+            late = self.client.post(f"{url}/{action}", json={"reason": "again"}, headers=self.human)
+            self.assertEqual(late.status_code, 404, action)
+            detail = late.json()["detail"]
+            self.assertIn("no longer pending", detail)
+            self.assertIn("denied by @person: the budget is spent", detail)
+        unknown = self.client.post("/api/conversations/kid/write-set/request/nope/deny",
+                                   json={"reason": "x"}, headers=self.human)
+        self.assertIn("no outcome is recorded", unknown.json()["detail"])
+
+    def test_the_deny_reason_reaches_the_requester_privately(self):
+        self._seed_subtree()
+        self.file_on_kid()
+        row = self.db._exec("SELECT id, requester_attachment_id "
+                            "FROM conversation_write_grant_requests").fetchone()
+        self.client.post(f"/api/conversations/kid/write-set/request/{row['id']}/deny",
+                         json={"reason": "the budget is spent"}, headers=self.human)
+        private = [m["body"] for m in self.db.list_messages("kid")
+                   if m["audience_attachment_id"] == row["requester_attachment_id"]]
+        self.assertTrue(any("the budget is spent" in body for body in private), private)
+
+    def test_an_unrelated_worker_is_not_told_how_a_request_ended(self):
+        self._seed_subtree()
+        self.file_on_kid()
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        self.client.post(f"/api/conversations/kid/write-set/request/{request_id}/deny",
+                         json={"reason": "classified reason"}, headers=self.human)
+        self.db.create_conversation("elsewhere", "Elsewhere", captain_mode="orchestrator")
+        self.db.add_attachment("else-worker", "elsewhere", "other", "fake", ["fake"], "/tmp")
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='else-worker'")
+        outsider = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "else-worker")}
+        for conv in ("elsewhere", "kid"):  # the wrong line, and the right line it cannot read
+            for action in ("withdraw", "deny", "approve"):
+                with self.subTest(conv=conv, action=action):
+                    late = self.client.post(
+                        f"/api/conversations/{conv}/write-set/request/{request_id}/{action}",
+                        json={"reason": "x"}, headers=outsider)
+                    self.assertIn(late.status_code, (403, 404))
+                    self.assertNotIn("classified reason", late.text)
+                    self.assertNotIn("person", late.text)
+        # A reader of the line, asking through another line's URL, is bound to that URL.
+        wrong = self.client.post(
+            f"/api/conversations/line/write-set/request/{request_id}/withdraw",
+            headers=self.human)
+        self.assertEqual(wrong.json()["detail"], "that write-set request is no longer pending")
+
+    def test_the_requester_is_woken_before_the_browser_fan_out(self):
+        self._seed_subtree()
+        self.file_on_kid()
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        order = []
+
+        async def broadcast(conv_id, event):
+            order.append("broadcast")
+
+        async def route(conv_id, message, **kwargs):
+            order.append("route")
+
+        self.runtime.broadcast = broadcast
+        self.runtime.route_mentions = route
+        self.client.post(f"/api/conversations/kid/write-set/request/{request_id}/deny",
+                         json={"reason": "the budget is spent"}, headers=self.human)
+        self.assertEqual(order[:2], ["route", "broadcast"], order)
+
+    def test_a_withdrawn_or_granted_request_says_so(self):
+        self._seed_subtree()
+        self.file_on_kid()
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        url = f"/api/conversations/kid/write-set/request/{request_id}"
+        self.db.set_attachment_status("kid-worker", "running", None)
+        self.client.post(f"{url}/withdraw", headers=self.kid_worker)
+        late = self.client.post(f"{url}/approve", headers=self.human)
+        self.assertIn("it was withdrawn by @", late.json()["detail"])
+
     def test_the_requester_can_withdraw_but_a_stranger_cannot(self):
         self._seed_subtree()
         self.file_on_kid()

@@ -6,12 +6,16 @@ A binary response (an image from `/api/media/<id>/thumb`, say) is saved to
 """
 
 import argparse
+import errno
 import hashlib
+import http.client
 import json
 import mimetypes
 import os
 import re
 from pathlib import Path
+import socket
+import ssl
 import stat
 import sys
 from typing import TypedDict
@@ -126,6 +130,52 @@ def api_request(connection: Connection, method: str, path: str,
 
 TEXT_TYPES = ("application/json",)
 
+NETWORK_ERRNOS = frozenset(getattr(errno, name) for name in (
+    "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH", "ENETDOWN", "EHOSTDOWN") if hasattr(errno, name))
+LOCAL_FILE_ERRORS = (FileNotFoundError, PermissionError, IsADirectoryError, NotADirectoryError)
+FAILURE_TEXT = {
+    "timeout": "timed out waiting for the Partyline server to answer; it may be slow or busy",
+    "refused": "the Partyline server refused the connection; it is down or the address is wrong",
+    "reset": "the connection to Partyline was reset or closed before a full reply",
+    "network": "the network path to Partyline failed",
+}
+
+
+def classify_failure(exc: BaseException) -> str:
+    """`timeout`, `refused`, `reset`, `network`, or `local` (bad file, path or input).
+
+    Looks only at the exception's type, never its text: that text can hold a
+    credential or the caller's JSON.
+    """
+    if isinstance(exc, URLError) and not isinstance(exc, HTTPError):
+        inner = exc.reason
+        if isinstance(inner, BaseException):
+            return classify_failure(inner)
+        return "timeout" if "timed out" in str(inner) else "network"
+    if isinstance(exc, TimeoutError):  # socket.timeout is the same class
+        return "timeout"
+    if isinstance(exc, ConnectionRefusedError):
+        return "refused"
+    if isinstance(exc, (ConnectionError, http.client.HTTPException)):
+        return "reset"
+    if isinstance(exc, (socket.gaierror, socket.herror, ssl.SSLError)):
+        return "network"
+    if (isinstance(exc, OSError) and not isinstance(exc, LOCAL_FILE_ERRORS)
+            and exc.errno in NETWORK_ERRNOS):
+        return "network"
+    return "local"
+
+
+def failure_text(kind: str, *, changes_state: bool) -> str:
+    """What happened, and whether the server may already have acted on the request."""
+    text = FAILURE_TEXT[kind]
+    if kind == "refused":
+        return text + "; nothing was sent, so retrying is safe once it is reachable"
+    if changes_state:
+        return (text + ". The action may already have been applied: check current state "
+                "(for a decision or grant, read the request or task) before retrying")
+    return text + "; this read changed nothing, so retrying is safe"
+
 
 def is_text(content_type: str, output: bytes) -> bool:
     """JSON and text/* print; anything else, or bytes that are not UTF-8, is binary."""
@@ -160,16 +210,20 @@ def main(argv=None) -> int:
     request.add_argument("--json-file", help="JSON body file, or - for stdin")
     request.add_argument("--output", help="write bytes here (binary default: media-<id>-<variant>.<ext>)")
     args = parser.parse_args(argv)
+    stage = "connection file"
     try:
         connection = load_connection(args.connection)
         if args.command == "context":
             print(json.dumps({key: value for key, value in connection.items() if key != "token"}))
             return 0
         body = None
+        stage = "request input"
         if args.json_file:
             raw = sys.stdin.read() if args.json_file == "-" else Path(args.json_file).read_text()
             body = with_client_key(args.method, args.path, json.dumps(json.loads(raw)).encode())
+        stage = "request"
         output, content_type = api_request(connection, args.method, args.path, body)
+        stage = "output"
         if args.output:
             Path(args.output).write_bytes(output)
         elif is_text(content_type, output):
@@ -184,10 +238,16 @@ def main(argv=None) -> int:
         # The server's reason is the one thing a caller can act on: a 409 with
         # no detail sent a captain improvising instead of renaming a handle.
         print(f"Partyline request failed: HTTP {exc.code}: {_detail(exc)}", file=sys.stderr)
-    except (OSError, ValueError, URLError):
-        # Exception text may contain credentials or caller-supplied JSON.
-        print("Partyline connection/request failed; check the connection file and API availability",
-              file=sys.stderr)
+    except (OSError, ValueError, URLError, http.client.HTTPException) as exc:
+        # Exception text may contain credentials or caller-supplied JSON: say
+        # only what kind of failure it was, never its message.
+        kind = classify_failure(exc) if stage == "request" else "local"
+        if kind == "local":
+            print(f"Partyline request not sent or not saved: bad local {stage} "
+                  "(check the connection file, --json-file and --output paths)", file=sys.stderr)
+        else:
+            print("Partyline request failed: "
+                  + failure_text(kind, changes_state=args.method != "GET"), file=sys.stderr)
     return 1
 
 

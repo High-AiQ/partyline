@@ -138,6 +138,9 @@ class PartylineClient:
                     raise ApiError(f"response exceeds the {limit}-byte MCP limit")
                 chunks.append(chunk)
             return b"".join(chunks)
+        except (OSError, http.client.HTTPException) as exc:
+            exc.partyline_method = method  # a failed read is safe to repeat; a write may have landed
+            raise
         finally:
             with self._active_lock:
                 self._active_connections.discard(connection)
@@ -256,9 +259,11 @@ class PartylineClient:
             from .image_dimensions import image_dimensions
             return {**image_dimensions(target), "path": str(target), "bytes": total,
                     "content_type": response.getheader("Content-Type") or "application/octet-stream"}
-        except Exception:
+        except Exception as exc:
             if created:
                 target.unlink(missing_ok=True)
+            if isinstance(exc, (OSError, http.client.HTTPException)):
+                exc.partyline_method = "GET"
             raise
         finally:
             conn.close()

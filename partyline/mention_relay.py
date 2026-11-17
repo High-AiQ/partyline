@@ -153,9 +153,11 @@ def reaches_a_process(db, speaker: dict, names: set[str]) -> bool:
 
 async def post_private(
     runtime, line_id, sender, sender_type, body, *, audience, source=None, actor=None, route=True,
-    private=False,
+    private=False, route_first=False,
 ):
     """Post a message one process on ``line_id`` is shown, then route it there.
+
+    ``route_first`` wakes the addressee before the browser fan-out.
 
     ``source`` is ``(attachment id or None, line id)`` of where it was said.
     Routing is forced because the return path posts these as system notices.
@@ -180,9 +182,11 @@ async def post_private(
     # raises something new. Browsers already see the reaction itself on the
     # message, so the fan-out skips the copy while forced routing still wakes
     # the addressed process.
+    if route and route_first:
+        await runtime.route_mentions(line_id, copy, force=True)
     if not (private or is_reaction_notice(copy)):
         await runtime.broadcast(line_id, MessageEvent(message=MessageResponse.model_validate(copy)))
-    if route:
+    if route and not route_first:
         await runtime.route_mentions(line_id, copy, force=True)
     return copy
 
