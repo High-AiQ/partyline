@@ -146,6 +146,91 @@ class AcceptedMirrorTipTest(SafetyFixture, unittest.TestCase):
         self.assertEqual(next(v for k, v in refs.items() if k.endswith("/mirror")), accepted)
 
 
+class SuiteIntegrationRetirementTest(SafetyFixture, unittest.TestCase):
+    def suite_branch(self, child, *, host_ref):
+        ident = child["id"]
+        branch = "integration/suite-retirement"
+        self.db._exec(
+            "INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,policy,tag,"
+            "created_at,mode) VALUES(?,?,?,?,?,?,?,?)",
+            (ident, "root", f"impl-{ident}", "fixture", "none", ident, 1, "suite"))
+        cwd = child["cwd"]
+        self.db._exec(
+            "INSERT INTO task_workspaces(conv_id,repository,path,branch,base_sha) "
+            "VALUES(?,?,?,?,?)",
+            (ident, self.repo, cwd, branch, _git("rev-parse", "HEAD", cwd=cwd).stdout.strip()))
+        _git("checkout", "--detach", "-q", cwd=cwd)
+        _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
+             "--allow-empty", "-m", "suite integration", cwd=cwd)
+        tip = _git("rev-parse", "HEAD", cwd=cwd).stdout.strip()
+        _git("symbolic-ref", "HEAD", f"refs/heads/{branch}", cwd=cwd)
+        gitdir = git_fence._worktree_gitdir(cwd)
+        old_root = git_fence.FENCE_ROOT
+        self.addCleanup(setattr, git_fence, "FENCE_ROOT", old_root)
+        git_fence.FENCE_ROOT = os.path.join(self.directory.name, "fence")
+        mirror = git_fence._mirror_dir(git_fence.common_gitdir(gitdir), ident)
+        git_fence._write_mirror_text(mirror, f"refs/heads/{branch}", tip + "\n")
+        if host_ref:
+            _git("update-ref", f"refs/heads/{branch}", tip, cwd=self.repo)
+        return branch, tip
+
+    def test_mirror_only_integration_head_previews_and_retires_with_recovery_ref(self):
+        child = self.child()
+        _branch, tip = self.suite_branch(child, host_ref=False)
+
+        preview = self.preview(child)
+
+        self.assertEqual(preview.status_code, 200, preview.text)
+        response = self.force(child)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(os.path.exists(child["cwd"]))
+        refs = response.json()["recovery_refs"][child["id"]]
+        recovery_tips = [_git("rev-parse", ref, cwd=self.repo).stdout.strip() for ref in refs]
+        self.assertIn(tip, recovery_tips)
+
+    def test_host_visible_integration_branch_retires_and_preserves_tip(self):
+        child = self.child()
+        _branch, tip = self.suite_branch(child, host_ref=True)
+
+        preview = self.preview(child)
+
+        self.assertEqual(preview.status_code, 200, preview.text)
+        response = self.force(child)
+        self.assertEqual(response.status_code, 200, response.text)
+        refs = response.json()["recovery_refs"][child["id"]]
+        recovery_tips = [_git("rev-parse", ref, cwd=self.repo).stdout.strip() for ref in refs]
+        self.assertIn(tip, recovery_tips)
+
+    def test_full_task_on_foreign_branch_is_still_refused(self):
+        child = self.child()
+        branch = "integration/foreign"
+        cwd = child["cwd"]
+        _git("checkout", "--detach", "-q", cwd=cwd)
+        _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
+             "--allow-empty", "-m", "foreign", cwd=cwd)
+        tip = _git("rev-parse", "HEAD", cwd=cwd).stdout.strip()
+        _git("update-ref", f"refs/heads/{branch}", tip, cwd=self.repo)
+        _git("symbolic-ref", "HEAD", f"refs/heads/{branch}", cwd=cwd)
+
+        response = self.preview(child)
+
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("not on its assigned line branch", response.text)
+
+    def test_suite_on_assigned_line_branch_still_retires(self):
+        child = self.child()
+        _branch, tip = self.suite_branch(child, host_ref=False)
+        _git("checkout", "-q", f"line/{child['name']}", cwd=child["cwd"])
+
+        response = self.force(child)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(os.path.exists(child["cwd"]))
+        refs = response.json()["recovery_refs"][child["id"]]
+        recovery_tips = [_git("rev-parse", ref, cwd=self.repo).stdout.strip() for ref in refs]
+        self.assertIn(tip, recovery_tips)
+
+
 class TrackedSymlinkTest(SafetyFixture, unittest.TestCase):
     def tracked_link(self, child):
         cwd = child["cwd"]

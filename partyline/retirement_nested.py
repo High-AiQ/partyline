@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from .git_fence import mirror_branch_ref, mirror_store
 from .line_worktree import rev
+from .worktree_paths import branch_name
 
 
 def file_kind(mode):
@@ -51,7 +52,7 @@ def surviving_owner(full, retiring):
     return owner if owner and not inside(owner, retiring) else None
 
 
-def nested_evidence(cwd, path, conv_id=None):
+def nested_evidence(cwd, path, conv_id=None, recorded_branch=None):
     """Accept attached worktrees matching their durable host or private mirror tip.
 
     Commits live in the owner's shared object store and survive removing the
@@ -77,9 +78,11 @@ def nested_evidence(cwd, path, conv_id=None):
         refuse("no branch preserving HEAD in owning repository")
     name = branch.removeprefix("refs/heads/")
     head = rev(full, "rev-parse", "--verify", "HEAD")
-    if not head:
-        refuse("no branch preserving HEAD in owning repository")
     mirror_tip = mirror_branch_ref(full, conv_id, name) if conv_id else None
+    if recorded_branch and name not in (recorded_branch, branch_name(cwd)):
+        refuse("worktree is not on its recorded suite branch")
+    if not head and not mirror_tip:
+        refuse("no branch preserving HEAD in owning repository")
     store = mirror_store(os.path.dirname(owner), conv_id) if mirror_tip else None
     env = os.environ.copy()
     if mirror_tip:
@@ -119,13 +122,13 @@ def nested_evidence(cwd, path, conv_id=None):
     if untracked.stdout:
         refuse("uncommitted edits beyond the mirror tip (dirty)" if mirror_tip else "dirty")
     if mirror_tip:
-        # This command deliberately uses the owner's refs and objects, never
-        # the private mirror: only a surviving local branch proves durability.
+        # Check the owner's refs and objects, never the private mirror. A public
+        # branch or Partyline's task anchor proves the integration tip survives.
         branches = rev(owner, "for-each-ref", f"--contains={mirror_tip}",
-                       "--format=%(refname)", "refs/heads/")
+                       "--format=%(refname)", "refs/heads/", "refs/partyline/tasks/")
         if not branches:
             refuse("mirror tip not in the owning repository")
     elif not head or rev(owner, "rev-parse", "--verify", branch) != head:
         refuse("no branch preserving HEAD in owning repository")
-    row = [path, "nested-worktree", head, name]
+    row = [path, "nested-worktree", head or mirror_tip, name]
     return row + [mirror_tip] if mirror_tip else row

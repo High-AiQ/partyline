@@ -36,6 +36,13 @@ def git(cwd, *args):
     return done.stdout
 
 
+def _try_git(cwd, *args):
+    try:
+        return _git(*args, cwd=cwd)
+    except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
+        raise HTTPException(409, "cannot inspect retirement Git state") from exc
+
+
 def _paths(cwd, *args):
     return [p for p in git(cwd, *args).split('\0') if p]
 
@@ -60,7 +67,8 @@ def _tracked_blob(path, modes):
     return mode if mode in BLOB_MODES else None
 
 
-def file_evidence(cwd, paths, *, ignored=False, tracked=None, conv_id=None):
+def file_evidence(cwd, paths, *, ignored=False, tracked=None, conv_id=None,
+                  suite_branches=None):
     """Hash small dirty files; large files use lstat identity and timestamps.
 
     A path Git tracks as a blob is accepted whatever the checkout holds at it: a
@@ -99,7 +107,9 @@ def file_evidence(cwd, paths, *, ignored=False, tracked=None, conv_id=None):
                 with open(full, 'rb') as stream:
                     row.append(hashlib.sha256(stream.read(HASH_BYTES + 1)).hexdigest())
                 hashed += info.st_size
-        elif stat.S_ISDIR(info.st_mode) and (nested := nested_evidence(cwd, path, conv_id)):
+        elif stat.S_ISDIR(info.st_mode) and (nested := nested_evidence(
+                cwd, path, conv_id, (suite_branches or {}).get(
+                    os.path.realpath(os.path.join(cwd, path))))):
             row = nested
         elif (mode := _tracked_blob(path, tracked)):
             row.extend(["tracked", mode])
@@ -121,31 +131,65 @@ def inspect_git(db, conv):
     from .retirement_orphan import empty_merged
     if empty_merged(root, cwd, conv_id=conv["id"]):
         return None
-    branch = branch_name(cwd)
-    actual = git(cwd, "symbolic-ref", "-q", "HEAD").strip() if git(
-        cwd, "rev-parse", "--abbrev-ref", "HEAD").strip() != "HEAD" else None
-    if actual and actual != f"refs/heads/{branch}":
+    assigned = branch_name(cwd)
+    from .orchestrator_store import task
+    task_row = task(db, conv["id"])
+    suite_branch = None
+    suite_branches = {}
+    if task_row and task_row.get("mode") == "suite":
+        from .task_workspaces import workspaces
+        suite_workspaces = workspaces(db, conv["id"])
+        suite_branches = {os.path.realpath(item["path"]): item["branch"]
+                          for item in suite_workspaces}
+        suite_branch = suite_branches.get(os.path.realpath(cwd))
+    symbolic = _try_git(cwd, "symbolic-ref", "-q", "HEAD")
+    actual_ref = symbolic.stdout.strip() if symbolic.returncode == 0 else None
+    actual = actual_ref.removeprefix("refs/heads/") if actual_ref else None
+    if actual and actual not in {assigned, suite_branch}:
         raise HTTPException(409, "worktree is not on its assigned line branch")
-    head = git(cwd, "rev-parse", "HEAD").strip()
-    result = _git("rev-parse", "--verify", f"refs/heads/{branch}", cwd=root)
-    host_tip = result.stdout.strip() if result.returncode == 0 else None
-    mirror_tip = mirror_branch_ref(cwd, conv["id"], branch)
-    tips = list(dict.fromkeys(t for t in (head, host_tip, mirror_tip) if t))
+    branch = actual or assigned
+    head_result = _try_git(cwd, "rev-parse", "--verify", "HEAD")
+    head = head_result.stdout.strip() if head_result.returncode == 0 else None
+    branch_names = list(dict.fromkeys((branch, suite_branch, assigned)))
+    branch_tips = {}
+    mirror_tips = {}
+    for name in branch_names:
+        if not name:
+            continue
+        result = _try_git(root, "rev-parse", "--verify", f"refs/heads/{name}")
+        if result.returncode == 0:
+            branch_tips[name] = result.stdout.strip()
+        tip = mirror_branch_ref(cwd, conv["id"], name)
+        if tip:
+            mirror_tips[name] = tip
+    host_tip = branch_tips.get(branch)
+    mirror_tip = mirror_tips.get(branch)
+    extra_tips = [(f"{kind}-{name}", tip) for kind, tips_by_kind in
+                  (("host", branch_tips), ("mirror", mirror_tips))
+                  for name, tip in tips_by_kind.items() if name != branch]
+    tips = list(dict.fromkeys(t for t in (head, *branch_tips.values(),
+                                           *mirror_tips.values()) if t))
+    if not head and not tips:
+        raise HTTPException(409, "cannot inspect retirement Git state")
     parent = db.get_conversation(conv.get("parent_id")) or {}
     bases = [b for b in (_base_ref(parent.get("cwd")), _default_branch(root)) if b]
     commits = git(cwd, "log", "--format=%H %s", "-101", *tips, "--not", *bases).splitlines()
-    tracked = set(_paths(cwd, "diff", "--name-only", "-z", "HEAD"))
-    tracked.update(_paths(cwd, "diff", "--cached", "--name-only", "-z"))
+    diff_base = head or tips[0]
+    tracked = set(_paths(cwd, "diff", "--name-only", "-z", diff_base))
+    tracked.update(_paths(cwd, "diff", "--cached", "--name-only", "-z", diff_base))
     untracked = _paths(cwd, "ls-files", "--others", "--exclude-standard", "-z")
     ignored = _paths(cwd, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
     modes = tracked_modes(cwd)
-    files, size = file_evidence(cwd, tracked | set(untracked), tracked=modes, conv_id=conv["id"])
+    files, size = file_evidence(cwd, tracked | set(untracked), tracked=modes,
+                                conv_id=conv["id"], suite_branches=suite_branches)
     ignored_files, ignored_size = file_evidence(
-        cwd, set(ignored), ignored=True, tracked=modes, conv_id=conv["id"])
+        cwd, set(ignored), ignored=True, tracked=modes, conv_id=conv["id"],
+        suite_branches=suite_branches)
     index_path = git(cwd, "rev-parse", "--path-format=absolute", "--git-path", "index").strip()
     index, _ = file_evidence(os.path.dirname(index_path), [os.path.basename(index_path)])
-    return {"cwd": cwd, "root": root, "branch": branch, "head": head,
+    return {"cwd": cwd, "root": root, "branch": branch, "head": head or tips[0],
             "branch_tip": host_tip, "mirror_tip": mirror_tip,
+            "extra_tips": extra_tips,
             "unmerged_commits": commits[:DISPLAY], "commits_truncated": len(commits) > DISPLAY,
             "tracked": sorted(tracked), "untracked": untracked, "ignored": ignored,
             "files": files, "bytes": size, "index": index, "index_path": index_path,
@@ -190,6 +234,8 @@ def snapshot(state, audit_id):
             if tip:
                 ref = f"{prefix}/{name}"
                 refs[ref] = tip
+        for name, tip in state.get("extra_tips", []):
+            refs[f"{prefix}/extra-{hashlib.sha256(name.encode()).hexdigest()[:12]}"] = tip
         commands = "start\n" + "".join(f"create {ref} {tip}\n" for ref, tip in refs.items())
         run("update-ref", "--stdin", input=commands + "prepare\ncommit\n")
     return refs

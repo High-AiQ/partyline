@@ -149,6 +149,12 @@ no `--force` (a dirty one stays and is named), then the task folder; the branche
 clean worktree registered to another clone is not a "nested repository" to the P0 guard; an
 independent clone (a `.git` directory) still keeps the folder.
 
+Suite delivery records each worktree's integration branch in `task_workspaces`. Retirement
+accepts that recorded branch while the suite worktree is still checked out on it, and reads
+its host or private mirror tip even when the host sees an unborn branch. Recovery refs retain
+the integration commits before the worktree is removed. Ordinary full and express tasks still
+must be checked out on their assigned `line/<slug>` branch.
+
 A parent line whose directory is not a repository gets one initialized (one empty root
 commit) before its first child is placed, so a project started in a blank directory still
 gives every child its own worktree. A file attached to a message that is relayed to a
