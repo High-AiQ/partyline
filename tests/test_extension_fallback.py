@@ -30,6 +30,14 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
             await self.f.chrome.connecting
         return await self.f.read()
 
+    async def detach_attached_page(self, refusal):
+        result = await self.f.read()
+        self.assertEqual((result["source"], result["transport"]), ("cdp", "extension"))
+        page = self.f.chrome.pages[self.f.access][self.f.chrome.selected[self.f.access]]
+        page.page_state = "detached"
+        self.peer.refuse = {int(page.target): refusal}
+        return page
+
     async def test_other_extension_frame_moves_only_this_grant_to_remote_debugging(self):
         self.peer.refuse = {1: "other_extension_frame"}
         await self.f.browser.ensure()
@@ -51,6 +59,92 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
         self.peer.refuse = {1: "debugger_already_attached"}
         result = await self.read_after_prompt()
         self.assertEqual((result["source"], result["transport"]), ("cdp", "remote_debugging"))
+
+    async def test_detached_page_refusal_moves_the_grant_and_reads_the_same_tab_remotely(self):
+        page = await self.detach_attached_page("other_extension_frame")
+        self.f.access.grant["target_id"] = page.target
+        result = await self.f.read()
+        self.assertIsNone(result)
+        self.assertIn(self.f.access, self.f.chrome.fallback.grants)
+        self.assertTrue(self.peer.revoked)
+        self.assertIn("Approve the remote debugging connection", self.f.chrome.reasons[self.f.access])
+        await self.f.chrome.connecting
+        result = await self.f.read()
+        self.assertEqual((result["source"], result["transport"]), ("cdp", "remote_debugging"))
+        self.assertEqual(self.f.chrome.selected[self.f.access], "a")
+        self.assertEqual(self.remote_attaches(), ["a"])
+
+    async def test_detached_page_debugger_refusal_also_moves_to_remote_debugging(self):
+        page = await self.detach_attached_page("debugger_already_attached")
+        self.f.access.grant["target_id"] = page.target
+        self.assertIsNone(await self.f.read())
+        await self.f.chrome.connecting
+        result = await self.f.read()
+        self.assertEqual((result["source"], result["transport"]), ("cdp", "remote_debugging"))
+
+    async def test_detached_page_reload_moves_the_grant_and_reports_pending_approval(self):
+        page = await self.detach_attached_page("other_extension_frame")
+        self.f.access.grant["target_id"] = page.target
+        result = await self.f.chrome.action(self.f.access, dict(action="reload", element_id="page"))
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("Approve the remote debugging connection", result["error"])
+        self.assertNotIn("other_extension_frame", result["error"])
+        self.assertIn(self.f.access, self.f.chrome.fallback.grants)
+        self.assertTrue(self.peer.revoked)
+        await self.f.chrome.connecting
+        result = await self.f.read()
+        self.assertEqual((result["source"], result["transport"]), ("cdp", "remote_debugging"))
+        self.assertEqual(self.f.chrome.selected[self.f.access], "a")
+
+    async def test_reload_already_dispatched_reports_unconfirmed_and_does_not_ask_to_reload_again(self):
+        result = await self.f.read()
+        self.assertEqual((result["source"], result["transport"]), ("cdp", "extension"))
+        page = self.f.chrome.pages[self.f.access][self.f.chrome.selected[self.f.access]]
+        page.quiet.wait = AsyncMock(return_value="quiet")
+        call = self.f.browser.call
+
+        async def refuse_reattach_after_reload(method, *args, **kwargs):
+            result = await call(method, *args, **kwargs)
+            if method == "Page.reload":
+                self.peer.refuse[int(page.target)] = "other_extension_frame"
+            return result
+
+        self.f.browser.call = refuse_reattach_after_reload
+        result = await self.f.chrome.action(self.f.access, dict(action="reload", element_id="page"))
+        self.assertEqual(result["status"], "unconfirmed")
+        self.assertIn("Approve the remote debugging connection", result["error"])
+        self.assertIn("read again after Chrome allows", result["error"])
+        self.assertNotIn("call reload again", result["error"])
+        self.assertEqual(sum(m["method"] == "Page.reload" for m in self.peer.calls), 1)
+        self.assertIn(self.f.access, self.f.chrome.fallback.grants)
+
+    async def test_detached_page_with_remote_debugging_off_stays_on_uia_with_actionable_reason(self):
+        await self.detach_attached_page("other_extension_frame")
+        self.discoverable = False
+        self.assertIsNone(await self.f.read())
+        reason = self.f.chrome.reasons[self.f.access]
+        self.assertIn("another extension's frame is in it", reason)
+        self.assertIn("chrome://inspect/#remote-debugging", reason)
+        self.assertTrue(reason.endswith("; using UIA"))
+        self.assertNotIn(self.f.access, self.f.chrome.fallback.grants)
+        self.assertEqual(self.f.chrome.sources[self.f.access], "uia")
+
+    async def test_detached_page_reload_with_remote_debugging_off_returns_actionable_reason(self):
+        await self.detach_attached_page("other_extension_frame")
+        self.discoverable = False
+        result = await self.f.chrome.action(self.f.access, dict(action="reload", element_id="page"))
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("another extension's frame is in it", result["error"])
+        self.assertIn("chrome://inspect/#remote-debugging", result["error"])
+        self.assertNotIn("other_extension_frame", result["error"])
+        self.assertNotIn(self.f.access, self.f.chrome.fallback.grants)
+
+    async def test_detached_page_with_other_refusal_does_not_fall_back(self):
+        await self.detach_attached_page("domain_refused")
+        self.assertIsNone(await self.f.read())
+        self.assertEqual(self.f.chrome.fallback.grants, set())
+        self.assertIsNone(self.f.chrome.fallback.remote)
+        self.assertEqual(self.f.chrome.sources[self.f.access], "uia")
 
     async def test_without_remote_debugging_the_reason_says_what_to_do(self):
         self.discoverable = False

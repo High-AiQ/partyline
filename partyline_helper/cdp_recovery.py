@@ -1,7 +1,12 @@
 """Renderer health survives session loss; recovery stays inside the original revocable grant."""
-from .cdp_transport import CDPError, PageUnavailable
+from .cdp_transport import CDPError, ExtensionRefused, PageUnavailable
 
 HINT = 'Chrome page unavailable; use screen_element_action(element_id="page", action="reload")'
+APPROVAL = "Approve the remote debugging connection in Chrome"
+
+
+class FallbackPending(CDPError):
+    """The refused extension grant moved to remote debugging and needs Chrome approval."""
 
 
 class Recovery:
@@ -101,6 +106,14 @@ async def reattach(chrome, access, page):
         page.guard(document=False, healthy=False)
     try:
         fresh = await chrome.attach(access, target, pages, guard)
+    except ExtensionRefused as exc:
+        if await chrome.fallback.take(access, exc):
+            chrome.start(access)
+            next_step = ("read again after Chrome allows the connection" if page.dispatched
+                         else "call reload again after Chrome allows the connection")
+            message = f"{APPROVAL}; {next_step}"
+            raise FallbackPending(message) from exc
+        raise
     except BaseException:
         if pages.get(target) is not page:
             page.stop()
@@ -141,6 +154,20 @@ async def read(chrome, access, options, message):
             if page.page_state == "alive":
                 chrome.sources[access] = "cdp"
                 return await page.snapshot(options)
+        except FallbackPending:
+            access.forget()
+            chrome.sources[access] = "uia"
+            chrome.reasons[access] = f"{APPROVAL}; using UIA meanwhile"
+            return None
+        except ExtensionRefused as exc:
+            if reason := chrome.fallback.reason(exc):
+                access.forget()
+                chrome.sources[access] = "uia"
+                chrome.reasons[access] = reason + "; using UIA"
+                return None
+            page.guard(document=False, healthy=False)
+            if page.page_state == "alive":
+                raise
         except CDPError:
             page.guard(document=False, healthy=False)
             if page.page_state == "alive":
