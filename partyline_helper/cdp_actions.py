@@ -6,16 +6,20 @@ from .cdp_dom_nodes import DETAIL
 from .cdp_input import key
 from .cdp_select import select_option
 from .cdp_transport import CDPError, DocumentChanged
+from .cdp_identity import TargetChanged, prove
 
 KEYS = {"enter": ("Enter", 13), "tab": ("Tab", 9), "escape": ("Escape", 27)}
 
 
 async def act(page, message):
     node = page.nodes.get(message.get("element_id"))
-    if not node or not node.get("backendDOMNodeId"):
-        raise CDPError("stale or virtual CDP element; read it again")
+    if (not node or not node.get("backendDOMNodeId")
+            or message.get("action_token", node.get("action_token")) != node.get("action_token")):
+        raise TargetChanged()
     backend = node["backendDOMNodeId"]
-    state = await page.function(backend, STATE)
+    state = await page.function(backend, STATE, proof=True)
+    prove(page, node, state)
+    page.action_proof = node
     action = message["action"]
     if node.get("dom_discovered") and (await page.function(backend, DETAIL)).get("hidden"):
         raise CDPError("element is no longer visible")

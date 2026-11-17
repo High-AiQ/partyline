@@ -1366,6 +1366,27 @@ Continuation parts send `tolerate_events`, so the helper no longer refuses them 
 the final judgement covers the whole capture. No polling or sleeps are added: each judgement is one
 status exchange after a capture.
 
+**Busy CDP pages (helper 1.7.2).** DOM mutations anywhere still advance the window counter, but a CDP
+read advertises `action_identity_supported`. The server returns that capture immediately, reporting any
+capture race, and delegates element-action stability to a live proof in the helper. The proof resolves
+the original backend node, requires it to remain connected in the same page/frame document epoch, and
+compares its viewport bounds with those recorded during the read. A per-document identity also catches
+subframe navigation or adoption into another document. A token binds the server's action to that exact
+identity and position even if another read has since advanced the helper cache. The helper checks again before the
+first input command, after focus, scrolling, hit testing or file preparation. Events at the target, its
+ancestors or descendants can pass only when this identity and position are re-proved. Unrelated churn
+does not require another tree read. A moved or replaced target refuses, including one with the same
+name, and CDP action failures never dispatch through UIA. If automatic scrolling moved the target,
+read it again at its new position before invoking; an explicit `scroll_into_view` still scrolls it.
+
+A target that cannot pass stability (including a removed node that no longer resolves) answers with
+`reason: target_changed`, separately from an unreadable window. Its error advises a fresh read or the
+point path, `screen_window_snapshot` plus
+`screen_window_click`. Its failure picture skips the fresh-marks tree walk and has a two-second total
+budget; other failure pictures retain their existing budget. The proof establishes identity as of the
+last observation before input, not a promise that page code will never change afterward. Older helpers
+retain the event-counter barrier.
+
 `uia_events.PROPERTIES` includes IsEnabled (30010), Value (30045), Toggle (30086), SelectionItem
 (30079), ExpandCollapse (30070), Name (30005), AriaRole (30101), AriaProperties (30102) and
 LegacyIAccessible State (30096). Persistent property and structure registration uses
@@ -1524,16 +1545,19 @@ text (it can name a URL). The helper reports it as `Chrome extension refused <CD
 | `debugger_detached` | Chrome detached the debugger (the tab closed or navigated away). Reload the page and read again. |
 
 **Remote-debugging fallback, per grant.** Only a grant whose tab Chrome refuses with `other_extension_frame`
-or `debugger_already_attached` changes transport; every other grant keeps the extension. A disconnected or
-reconnecting extension is never a reason (see below). The helper
-tells the extension to drop that grant, and, when Chrome's remote debugging is enabled
+or `debugger_already_attached` changes transport; every other grant keeps the extension. This also applies
+when a previously attached page loses its debugger and a read or reload must reattach it. A disconnected or
+reconnecting extension is never a reason (see below). The helper tells the extension to drop that grant,
+and, when Chrome's remote debugging is enabled
 (`DevToolsActivePort` exists), reads continue over remote debugging after Chrome's normal Allow prompt
 (UIA answers meanwhile; the read reports `transport: remote_debugging`). The tray's Chrome row keeps
 describing the extension. A grant for one picked tab is bound once, when it first maps over remote
 debugging, to the one remote target in its window with the same URL and title; from then on only that
 target is the grant's tab (navigating it keeps the grant). If no tab or several match, or the bound tab
 closes, the grant selects nothing and says *pick a tab again*; it never re-matches by content. When remote debugging is off the grant stays on UIA with the actionable
-`source_reason`. Read replies carry `transport` and, off the extension, a short `fallback_reason` (the
+`source_reason`. While Allow is pending, reads use UIA and reload reports the approval-pending reason;
+if remote debugging is off, both report the actionable reason to enable it or disable the injecting extension.
+Read replies carry `transport` and, off the extension, a short `fallback_reason` (the
 refusal code, or `extension_not_installed`). A refused grant tries the extension again on the next read after
 its remote tab navigates or reloads, keeping the remote connection open until the extension serves the page;
 a repeated refusal moves it back with no second Allow prompt. When no grant needs remote debugging any more

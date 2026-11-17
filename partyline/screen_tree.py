@@ -16,7 +16,7 @@ LINE_NAME = 240  # characters of a name shown on a line
 LINE_VALUE = 80
 STATE_FIELDS = ("enabled", "value", "toggle", "selected", "expand_state", "name", "aria_properties",
                 "source", "provider_identity", "disabled_provenance", "readonly", "inert", "viewport_bounds",
-                "hidden")
+                "hidden", "action_token")
 
 
 def clean(value, limit=NAME_FIELD):
@@ -73,6 +73,7 @@ class Snapshot:
         self.counts = None
         self.scope, self.scoped = None, False
         self.sources = False  # the helper can say which elements events came from
+        self.action_identity = False  # CDP re-proves backend identity and bounds at input dispatch
         self.moved = False  # events arrived while the parts were read
         self.busy = frozenset()  # outermost elements still changing when the capture ended
         self.prior_helpers = {}

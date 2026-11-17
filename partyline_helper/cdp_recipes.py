@@ -2,6 +2,9 @@
 STATE = r"""function() {
  if(!this.getBoundingClientRect) return {};
  const e=this, r=e.getBoundingClientRect();
+ const documents=globalThis.__partylineDocuments??=new WeakMap();
+ if(!documents.has(e.ownerDocument))
+   documents.set(e.ownerDocument,crypto.getRandomValues(new Uint32Array(4)).join('-'));
  const aria=e.closest('[aria-disabled="true"]');
  const inert=e.closest('[inert]');
  const disabled=e.matches(':disabled');
@@ -17,7 +20,8 @@ STATE = r"""function() {
  const focusable=e.tabIndex>=0||(!disabled&&e.matches(
    'button,input:not([type="hidden"]),select,textarea,a[href],area[href],summary,iframe,audio[controls],video[controls]'))
    ||e.isContentEditable===true;
- return {popup, expanded, haspopup, focusable, tabindex:e.getAttribute?.('tabindex'),
+ return {connected:e.isConnected, document_identity:documents.get(e.ownerDocument),
+   popup, expanded, haspopup, focusable, tabindex:e.getAttribute?.('tabindex'),
    role:e.getAttribute?.('role'),
    aria_label:e.getAttribute?.('aria-label')?.slice(0,240),
    title:e.getAttribute?.('title')?.slice(0,240),
