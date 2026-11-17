@@ -9,7 +9,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.uishot import seed_room, ui_session  # noqa: E402
 
-PRESETS = {"default": "asr", "presets": [{"name": "asr", "kind": "command", "available": True}]}
+PRESETS = {"default": "asr", "presets": [{
+    "name": "asr", "kind": "command", "source": "config", "editable": False,
+    "overrides_config": False, "is_default": True, "can_be_default": True,
+    "available": True, "reason": None, "model": None, "fields": {"argv": ["asr"]},
+    "key_env": None, "key_set": False,
+}]}
 DENY_MIC = """() => {
   navigator.mediaDevices.getUserMedia = () =>
     Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
@@ -22,10 +27,16 @@ class ComposerIconsTest(unittest.TestCase):
         with ui_session(["Phone line"], viewport={"width": 375, "height": 812}) as ui:
             page = ui.page
             page.add_style_tag(content="#fenceUnavailable { display: none !important; }")
-            page.route("**/api/transcribe/presets", lambda route: route.fulfill(json=PRESETS))
             page.get_by_text("Phone line").first.click()
             page.locator("#input").wait_for(state="visible")
             seed_room(page)
+            page.evaluate(
+                """settings => window.partyline.wire.socket.onmessage(
+                    new MessageEvent('message', {
+                      data: JSON.stringify({type: 'asr_presets_changed', settings})
+                    }))""",
+                PRESETS,
+            )
             self.assertEqual(page.locator("[data-composer-controls]").count(), 0)
             page.evaluate(DENY_MIC)
             # On a phone the hands-free toggle lives in the composer's one menu.

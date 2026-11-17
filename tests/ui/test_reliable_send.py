@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.uishot import ui_session  # noqa: E402
+from scripts.uishot import seed_room, ui_session  # noqa: E402
 
 
 class ReliableSendTest(unittest.TestCase):
@@ -15,6 +15,7 @@ class ReliableSendTest(unittest.TestCase):
             page = ui.page
             page.locator(".conv-row .conv").first.click()
             page.locator("#input").wait_for(state="visible")
+            seed_room(page)
             page.wait_for_timeout(500)
 
             page.evaluate(
@@ -23,6 +24,15 @@ class ReliableSendTest(unittest.TestCase):
                   if (!socket) throw new Error('no socket');
                   socket.send = () => undefined;
                 }"""
+            )
+            conversation_id = page.evaluate("() => window.partyline.room.conversation.id")
+            page.route(
+                "**/api/conversations/*/messages",
+                lambda route: route.fulfill(status=201, json={
+                    "id": 4, "conv_id": conversation_id, "sender": "screenshot",
+                    "sender_type": "human", "body": "survived the nap",
+                    "created_at": 1700000001, "files": [],
+                }),
             )
             page.locator("#input").fill("survived the nap")
             page.locator("#send").click()
@@ -34,6 +44,7 @@ class ReliableSendTest(unittest.TestCase):
             page = ui.page
             page.locator(".conv-row .conv").first.click()
             page.locator("#input").wait_for(state="visible")
+            seed_room(page)
             page.wait_for_timeout(500)
 
             def fail_post(route):

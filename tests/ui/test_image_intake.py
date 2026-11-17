@@ -36,7 +36,7 @@ class ImageIntakeTest(unittest.TestCase):
                 }))
                 """
             )
-            page.get_by_text("dropped.png", exact=True).wait_for(state="visible")
+            page.locator(".previews").get_by_text("dropped.png", exact=True).wait_for(state="visible")
             page.locator(".drop-hint").wait_for(state="detached")
 
             prevented = page.evaluate(
@@ -52,7 +52,7 @@ class ImageIntakeTest(unittest.TestCase):
                 """
             )
             self.assertTrue(prevented)
-            page.get_by_text("pasted.webp", exact=True).wait_for(state="visible")
+            page.locator(".previews").get_by_text("pasted.webp", exact=True).wait_for(state="visible")
 
             ordinary_paste_prevented = page.evaluate(
                 """

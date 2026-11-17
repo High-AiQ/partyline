@@ -19,15 +19,24 @@ class ScreenPickerTest(unittest.TestCase):
             # The browser harness runs nested in the development fence, where
             # its preflight warning can cover the controls under test.
             page.add_style_tag(content="#fenceUnavailable { display: none !important; }")
-            page.route("**/api/screen/devices?*", lambda route: route.fulfill(json={"devices": [{
-                "id": "d", "name": "Desk", "os": "test", "online": True,
-                "monitors": [{"id": 1, "x": -1600, "y": 0, "width": 1600,
-                              "height": 900, "scale": 1, "primary": True}],
-            }]}))
             page.route("**/api/screen/preview?*", lambda route: route.fulfill(json={
                 "out_width": 320, "out_height": 180, "mime": "image/png", "data": preview,
             }))
-            page.get_by_role("button", name="Computers / Share screen").click()
+            page.evaluate(
+                """() => window.partyline.wire.socket.onmessage(
+                    new MessageEvent('message', {data: JSON.stringify({
+                      type: 'screen_snapshot', indicators: [], share: null,
+                      devices: [{
+                        id: 'd', name: 'Desk', os: 'test', online: true,
+                        monitors: [{id: 1, x: -1600, y: 0, width: 1600,
+                                    height: 900, scale: 1, primary: true}],
+                      }],
+                    })}))"""
+            )
+            page.get_by_role(
+                "button", name="Screen: share screen + record voice (Show me), or share screen only"
+            ).click()
+            page.get_by_role("menuitem", name="Share screen only").click()
             page.get_by_role("button", name="Desk (online)").click()
             page.get_by_role("button", name="1 (1600 × 900)").click()
             image = page.get_by_alt_text("Monitor preview")
