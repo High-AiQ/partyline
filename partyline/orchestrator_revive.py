@@ -8,6 +8,7 @@ There is no polling, timer or watchdog.
 import asyncio
 import logging
 import time
+from contextlib import contextmanager
 
 from fastapi import HTTPException
 
@@ -33,6 +34,19 @@ def task_lock(runtime, conv_id):
 
 def staffed_by_preset(row):
     return bool(row) and row['policy'] not in ('none', 'captain')
+
+
+@contextmanager
+def ordered_detach(runtime, att_id):
+    """Suppress undelivered-worker alerts for Partyline's own detach transaction."""
+    marks = getattr(runtime, 'ordered_task_detaches', None)
+    if marks is None:
+        runtime.ordered_task_detaches = marks = set()
+    marks.add(att_id)
+    try:
+        yield
+    finally:
+        marks.discard(att_id)
 
 
 def reviewer_is_live(db, row):
@@ -164,23 +178,30 @@ async def reviewer_exited(runtime, att_id):
         from .mention_relay import live_manager
         captain = live_manager(runtime, row['root_id'])
         if captain is not None:
-            await tell(runtime, captain['id'], f"needs attention: report {record['id']}")
+            await tell(runtime, captain['id'], reports.report_pointer(record['id'], row['root_id']))
 
 
 def on_status(runtime, att_id, value):
     """Called from the status callback; schedules recovery without blocking the exit path."""
     db = getattr(runtime, 'db', None)
-    if value != 'exited' or getattr(runtime, 'stopping', False):
+    if value not in ('exited', 'detached') or getattr(runtime, 'stopping', False):
         return  # a shutdown's exits are reattached by the restart plan, not retried here
     if not hasattr(db, '_exec') or not attachment_task(db, att_id):
         return
-    job = asyncio.get_running_loop().create_task(_guarded(runtime, att_id))
+    ordered = att_id in getattr(runtime, 'ordered_task_detaches', set())
+    job = asyncio.get_running_loop().create_task(_guarded(runtime, att_id, value, ordered))
     _pending.add(job)
     job.add_done_callback(_pending.discard)
 
 
-async def _guarded(runtime, att_id):
+async def _guarded(runtime, att_id, value, ordered=False):
     try:
-        await reviewer_exited(runtime, att_id)
+        row = attachment_task(runtime.db, att_id)
+        retrying_reviewer = bool(row and value == 'exited' and row['reviewer_id'] == att_id)
+        if not ordered and not retrying_reviewer:
+            from .orchestrator_notices import worker_lost
+            await worker_lost(runtime, att_id, value)
+        if value == 'exited':
+            await reviewer_exited(runtime, att_id)
     except Exception:
-        logger.exception('reviewer recovery failed for %s', att_id)
+        logger.exception('task worker recovery failed for %s', att_id)

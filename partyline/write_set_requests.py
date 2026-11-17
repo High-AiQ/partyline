@@ -234,6 +234,7 @@ async def file_write_set_request(
     if pending:
         old_paths = json.loads(pending.get("paths") or "[]") or [pending["path"]]
         paths = list(dict.fromkeys([*old_paths, *paths]))
+    unchanged = pending is not None and paths == old_paths
     decider = eligible_captain(db, conv_id, paths, effective_requester_id)
     human_only = decider is None
     all_paths = paths
@@ -280,11 +281,12 @@ async def file_write_set_request(
         f"{decider_text}; {waiting}",
         actor=principal,
     )
-    await bubble_approval(runtime, conv_id, kind="write-set", requester=principal.name,
-        detail=f"grant write scope for {listed}{warning}",
-        approve=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/approve",
-        decline=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/deny",
-        actor=principal, human_only=human_only,
-        decider_name=request.decider_name,
-        decider_conv_id=decider["conv_id"] if decider else "")
+    if not unchanged:
+        await bubble_approval(runtime, conv_id, kind="write-set", requester=principal.name,
+            detail=f"grant write scope for {listed}{warning}",
+            approve=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/approve",
+            decline=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/deny",
+            actor=principal, human_only=human_only,
+            decider_name=request.decider_name,
+            decider_conv_id=decider["conv_id"] if decider else "")
     return request

@@ -137,7 +137,7 @@ class ChatRuntime(DeliveryCreditMixin):
                 self.db, conv_id, att["last_seen"], att["name"], att["id"]
             )
             ours = self._live_uncredited(att["id"], runtime_owner)
-            pending = drop_settled(self.db, att, [m for m in pending if m["id"] not in (ours or ())])
+            pending = drop_settled(self.db, att, [m for m in pending if m["id"] not in (ours or ())], self)
             if not pending:
                 return not bool(ours)
             pasted = await adapter.deliver(pending)

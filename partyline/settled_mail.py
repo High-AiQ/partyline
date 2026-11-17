@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 
 from .orchestrator_store import task
-from .resolved_notices import drop_acknowledged_reports
+from .resolved_notices import drop_acknowledged_reports, drop_resolved
 
 SETTLED = ('approved', 'done')
 # Restart and revival notes are filed when a worker comes back, so they can postdate settling:
@@ -56,15 +56,15 @@ def is_stale(row: dict, att_id: str, message: dict) -> bool:
     return settled_at is None or (message.get('created_at') or 0) <= settled_at
 
 
-def drop_settled(db, att: dict, messages: list[dict], *, keep=frozenset()) -> list[dict]:
-    """``messages`` without the notices a settled task's workers should no longer receive."""
+def drop_settled(db, att: dict, messages: list[dict], runtime=None, *, keep=frozenset()) -> list[dict]:
+    """Drop settled task mail and, with a runtime, every other resolved notice."""
     if not messages:
         return messages
     messages = drop_acknowledged_reports(db, messages, keep=keep)
     row = task(db, att['conv_id'])
-    if row is None or (row['status'] not in SETTLED and not row.get('consumed_through')):
-        return messages
-    return [m for m in messages if m['id'] in keep or not is_stale(row, att['id'], m)]
+    if row is not None and (row['status'] in SETTLED or row.get('consumed_through')):
+        messages = [m for m in messages if m['id'] in keep or not is_stale(row, att['id'], m)]
+    return drop_resolved(runtime, att, messages, keep=keep) if runtime is not None else messages
 
 
 def settled_worker(db, att: dict) -> bool:

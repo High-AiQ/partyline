@@ -33,7 +33,8 @@ class RereviewTest(TaskFixture):
             second = await self.request(sha)
             self.assertNotEqual(second['report_id'], first_id)
             wake.assert_awaited_once_with(
-                self.runtime, 'captain', f"needs attention: report {second['report_id']}")
+                self.runtime, 'captain',
+                reports.report_pointer(second['report_id'], 'root'))
             record = reports.get(self.db, second['report_id'])
             self.assertIsNotNone(record['notified_at'])
             self.assertIn('round 2', record['body'])
@@ -67,7 +68,8 @@ class RereviewTest(TaskFixture):
                                             VerdictIn(verdict='approve', findings='verified'))
             self.assertNotEqual(approved['report_id'], first_id)
             wake.assert_awaited_once_with(
-                self.runtime, 'captain', f"needs attention: report {approved['report_id']}")
+                self.runtime, 'captain',
+                reports.report_pointer(approved['report_id'], 'root'))
             await self.request(second['sha'])
             wake.assert_awaited_once()
         self.assertIsNotNone(reports.get(self.db, approved['report_id'])['notified_at'])

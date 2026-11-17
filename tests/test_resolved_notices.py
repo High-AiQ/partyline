@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 from partyline import reports
 from partyline.db import Db
@@ -75,6 +76,58 @@ class ResolvedNoticesTest(unittest.TestCase):
         new = self.private("root", f"@lead needs attention: report {row['id']}", "cap")
         self.assertEqual(self.backlog_ids(), [new])
         self.assertNotIn(old, self.backlog_ids())
+
+    def approval_notice(self, kind, request_id="r1"):
+        paths = {
+            "write-set": f"/api/conversations/kid/write-set/request/{request_id}/approve",
+            "memory": f"/api/memory-requests/{request_id}/approve",
+            "restart": f"/api/restart-request/{request_id}/approve",
+        }
+        return self.private(
+            "root", f"⚑ approval pending on «Kid»: {kind} from @wk — details "
+                    f"(approve: POST {paths[kind]}) @lead", "cap")
+
+    def test_decided_approval_is_dropped_even_from_forced_replay(self):
+        for kind in ("write-set", "memory", "restart"):
+            with self.subTest(kind=kind):
+                if kind == "write-set":
+                    self.db._exec(
+                        "INSERT INTO conversation_write_grant_requests"
+                        "(conv_id,id,path,requester,created_at) VALUES('kid','r1','/work','wk',1)")
+                elif kind == "memory":
+                    self.db._exec(
+                        "INSERT INTO memory_limit_requests(id,attachment_id,conv_id,requester,"
+                        "requested_limit,reason,created_at) VALUES('r1','wk','kid','wk','5G','test',1)")
+                else:
+                    self.runtime.restart_request = SimpleNamespace(id="r1")
+                mid = self.approval_notice(kind)
+                self.assertIn(mid, self.backlog_ids())
+                if kind == "write-set":
+                    self.db._exec("DELETE FROM conversation_write_grant_requests WHERE id='r1'")
+                elif kind == "memory":
+                    self.db._exec("DELETE FROM memory_limit_requests WHERE id='r1'")
+                else:
+                    self.runtime.restart_request = None
+                forced = addressed_backlog(self.runtime, self.db.get_attachment("cap"),
+                                           include_message_ids=(mid,))
+                self.assertNotIn(mid, [message["id"] for message in forced])
+
+    def test_only_the_newest_copy_of_a_pending_approval_replays(self):
+        self.db._exec(
+            "INSERT INTO conversation_write_grant_requests"
+            "(conv_id,id,path,requester,created_at) VALUES('kid','r1','/work','wk',1)")
+        old = self.approval_notice("write-set")
+        new = self.approval_notice("write-set")
+        self.assertEqual(self.backlog_ids(), [new])
+        self.assertNotIn(old, self.backlog_ids())
+
+    def test_expired_memory_approval_is_resolved(self):
+        self.db._exec(
+            "INSERT INTO memory_limit_requests(id,attachment_id,conv_id,requester,"
+            "requested_limit,reason,created_at,expired_at) "
+            "VALUES('r1','wk','kid','wk','5G','test',1,2)")
+        mid = self.approval_notice("memory")
+        self.assertNotIn(mid, self.backlog_ids())
 
     def test_delivered_then_answered_question_is_dropped(self):
         answered = self.db.add_message("root", "boris", "agent", "@lead which branch?")
