@@ -160,7 +160,8 @@ class WireStateTest(unittest.TestCase):
                 "() => window.partyline.wire.socket.dispatchEvent(new MessageEvent('message',"
                 " {data: JSON.stringify({type: 'shutdown'})}))")
 
-            page.locator("#wireDown.stopped").wait_for(state="visible", timeout=5000)
+            page.locator("#wireDown").wait_for(state="visible", timeout=5000)
+            self.assertTrue(page.evaluate("() => window.partyline.wire.stopped"))
             self.assertIn("waiting for a restart", page.locator("#wireDown").inner_text())
 
             # The harness server is still alive, standing in for a completed

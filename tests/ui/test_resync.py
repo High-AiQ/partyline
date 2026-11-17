@@ -16,6 +16,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -24,6 +25,11 @@ from scripts.uishot import ui_session  # noqa: E402
 # Exactly the line-detail fetch: `/lead` and other conversation sub-resources
 # also live under /api/conversations/ and must not be counted as detail reads.
 DETAIL_FETCH = re.compile(r"/api/conversations/[0-9a-f-]{36}$")
+
+
+def is_detail(response):
+    return response.request.method == "GET" and bool(DETAIL_FETCH.fullmatch(urlparse(response.url).path))
+
 
 LINES = ["alpha line", "beta line"]
 
@@ -43,9 +49,7 @@ DROP_SOCKET = "() => { window.partyline.wire.socket.close(); }"
 
 def open_first_line(ui):
     page = ui.page
-    with page.expect_response(
-        lambda response: "/api/conversations/" in response.url and response.request.method == "GET"
-    ):
+    with page.expect_response(is_detail):
         page.locator(".conv-row .conv").first.click()
     page.wait_for_selector("#composer")
     page.wait_for_function("() => window.partyline.wire.ready")
@@ -77,27 +81,30 @@ class ResyncTest(unittest.TestCase):
     def test_the_first_handshake_does_not_refetch(self):
         """The control, and the reason this is not simply "fetch on every hello".
 
-        `room.open()` has just fetched when the first hello arrives. Re-fetching
-        there would double every line change, and — worse — would make the test
-        above pass without a reconnect ever being distinguished from a connect,
+        `room.open()` fetches a fast snapshot, then enriches attachment Git
+        metadata separately. Repeating either on hello would double every line
+        change, and — worse — would make the test above pass without a reconnect
+        ever being distinguished from a connect,
         which is the entire behaviour under test.
         """
         with ui_session(LINES, handle="operator") as ui:
             page = ui.page
-            page.evaluate("() => { window.__detailFetches = 0; }")
-            page.on(
-                "response",
-                lambda response: page.evaluate("() => { window.__detailFetches++; }")
-                if DETAIL_FETCH.search(response.url.split("?", 1)[0])
-                and response.request.method == "GET"
-                else None,
-            )
+            detail_fetches = []
+
+            def remember_detail(response):
+                if is_detail(response):
+                    detail_fetches.append(urlparse(response.url).query)
+
+            # Never re-enter Playwright's sync API from a response callback:
+            # nested page.evaluate can re-enter Waiter listener cleanup.
+            page.on("response", remember_detail)
 
             open_first_line(ui)
             page.wait_for_timeout(1000)
 
-            # Exactly the one fetch `open()` performs, with no handshake echo.
-            self.assertEqual(page.evaluate("() => window.__detailFetches"), 1)
+            page.remove_listener("response", remember_detail)
+            # Exactly one primary snapshot and one Git enrichment, no hello echo.
+            self.assertCountEqual(detail_fetches, ["include_git=false", ""])
 
     def test_a_restart_request_filed_during_an_outage_shows_its_banner_on_reconnect(self):
         """The banner is event-carried state, exactly like attachment status.
@@ -139,25 +146,29 @@ class ResyncTest(unittest.TestCase):
             page.wait_for_function("() => window.partyline.wire.ready === false", timeout=5000)
 
             # Said while this tab was deaf, through a channel it is not watching.
-            page.request.post(
+            spoken = page.request.put(
                 f"{ui.base_url}/api/conversations/{conversation_id}/topic",
                 data={"topic": "spoken during the outage"},
                 headers=ui.auth_headers,
             )
+            self.assertTrue(spoken.ok, spoken.text())
+
+            detail = page.request.get(
+                f"{ui.base_url}/api/conversations/{conversation_id}", headers=ui.auth_headers
+            ).json()
+            self.assertTrue(any("spoken during the outage" in m["body"] for m in detail["messages"]))
+            expected_ids = [message["id"] for message in detail["messages"]]
 
             page.wait_for_function("() => window.partyline.wire.ready === true", timeout=15000)
 
             # Assert the property rather than a notice's wording: after catching
             # up, the tab must hold every message the server has.
             page.wait_for_function(
-                """() => fetch(`/api/conversations/${window.partyline.room.conversation.id}`, {
-                       headers: {Authorization: `Bearer ${localStorage.getItem('partyline_access_token')}`}
-                     })
-                     .then(r => r.json())
-                     .then(d => {
-                       const here = new Set(window.partyline.room.messages.map(m => m.id));
-                       return d.messages.every(m => here.has(m.id));
-                     })""",
+                """ids => {
+                  const here = new Set(window.partyline.room.messages.map(m => m.id));
+                  return ids.every(id => here.has(id));
+                }""",
+                arg=expected_ids,
                 timeout=8000,
             )
 
