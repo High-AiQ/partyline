@@ -1493,7 +1493,7 @@ for the reason in plain words. It uses `chrome.action` only, which needs no extr
 | --- | --- | --- |
 | `…` | grey | Connecting to the native host; **reconnecting** after the host went away (the title names why, for example *the helper bridge stopped*); or the extension is **ready and the helper is away** (not started yet, quit, restarting or updating). Nothing to do: the extension reconnects by itself and the helper attaches by itself when it starts. Start the helper if it stays grey. |
 | `✓` | green | Connected: the helper greeted the extension (`Partyline: connected to helper <version>`). The tray's **Chrome** row reads *extension connected*. |
-| `!` | red | Not connected; the title says why. *Native host not found*: Chrome has no registration for the helper's host, so reinstall or restart the helper. *Access forbidden*: the extension id does not match; load the extension from the helper's own folder. *Native host has exited* (shown only after every automatic retry below failed): the native host process kept ending, so make sure the helper is running and click the button. *Paused for a helper update*: a manual install or uninstall asked the host to release its files; click the button to reconnect. |
+| `!` | red | Not connected; the title says why. *Native host not found*: Chrome has no registration for the helper's host, so reinstall or restart the helper. *Access forbidden*: the extension id does not match; load the extension from the helper's own folder. *Native host has exited* (shown only after every automatic retry below failed): the native host process kept ending, so make sure the helper is running and click the button. The red *click this button* text appears only when every automatic attempt is spent. While a manual install or uninstall has the host released (*paused while the helper updates*), the badge is grey and the extension reconnects by itself (see below). |
 
 Click the button to retry; the badge turns grey straight away and then green or red. A click while
 no helper is attached, or on a port that never greeted, replaces the native port instead of doing
@@ -1528,9 +1528,17 @@ while attempts remain and turns red only when they are spent; *host not found* a
 at once (the schedule still runs quietly in case an installer is replacing the registration). The
 alarms are why the extension needs the `alarms` permission. Chrome's 30 s minimum alarm delay applies
 only to a packed extension; the extension is loaded unpacked, so the short steps run as listed. Only an
-installer that must replace the host's files (a manual install or uninstall) sends `Partyline.suspend`
-with `release`, which makes the extension close the port; that one case shows red *paused* and needs a
-click (or Chrome restart).
+installer that must replace the host's files (a manual install or uninstall, never an automatic update,
+which passes `/AUTOUPDATE=1` and does not send it) sends `Partyline.suspend` with `release`, which makes the
+extension close the port. The extension must not reconnect then: Chrome would start the host executable
+again while the installer needs it. It shows grey *paused while the helper updates; it reconnects by itself
+in about a minute, or click to reconnect now* and arms one `chrome.alarms` alarm 60 s later (a tab switch or
+a restarted worker leaves that attempt to the alarm; a click or a browser start connects at once). If that
+attempt finds no host, the schedule above continues (1 s, 5 s, 30 s, 2 min, 5 min), and only when it is spent
+does the badge turn red and ask for a click. A host respawned early (a click during the install) is
+released again by the next `suspend-chrome`, and an upgrade installs into a new per-version folder, so an
+early host runs from the old folder and cannot lock the new files; only a same-version reinstall or an
+uninstall can collide, and the installer then reports the locked file.
 
 **Extension refusal codes.** A refused extension command returns one fixed code, never Chrome's own
 text (it can name a URL). The helper reports it as `Chrome extension refused <CDP method>:
@@ -1638,7 +1646,8 @@ the endpoint and PID files to name the same live native-host process. It never t
 host's startup lock, so discovery cannot reject a concurrently starting Chrome host, and a
 crashed host's stale file cannot reopen remote-debugging approval on every operation. Authentication accepts one unchunked
 frame of at most 1 KiB. Automatic native-port reconnect follows the bounded schedule above; a failed decode and an
-explicit installer suspension clean up locally and wait for a click.
+explicit installer suspension clean up locally; a failed decode waits for a click, and an installer
+suspension reconnects after the delayed attempt above.
 An automatic extension reload starts a fresh worker and reconnects without a gesture.
 The toolbar can also connect again without restarting Chrome.
 
@@ -1818,7 +1827,8 @@ and any difference. Upload sanitized evidence to the line; keep host/account det
    extension after that tab navigates, and Chrome's automation infobar disappears once nothing needs remote
    debugging. Run the manual installer over a
    running helper (it asks the host to release its files): the badge shows *paused for a helper
-   update* and the button reconnects. On a page that hosts another extension's frame, expect
+   update* in grey and, with no click, goes green about a minute later once the install is done (a click
+   reconnects at once). On a page that hosts another extension's frame, expect
    `other_extension_frame` and, with remote debugging on, a read over `remote_debugging`. Open the service worker console and
    confirm `[Partyline]` lines for each step and no page content. Rename the native host
    registration to see *native host not found*, and load the extension from another folder to see

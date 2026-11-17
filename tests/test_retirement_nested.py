@@ -69,6 +69,41 @@ class NestedWorktreeTest(SafetyFixture, unittest.TestCase):
         self.assertFalse(full.exists())
         self.assertEqual(_git("rev-parse", "main", cwd=owner).stdout.strip(), tip)
 
+    def test_suite_nested_mirror_only_branch_retires_with_anchored_tip(self):
+        child, owner, full = self.nested()
+        ident = child["id"]
+        branch = "integration/suite-nested"
+        base_sha = _git("rev-parse", "HEAD", cwd=full).stdout.strip()
+        _git("checkout", "--detach", "-q", cwd=full)
+        _git("commit", "-qm", "nested integration", "--allow-empty", cwd=full)
+        tip = _git("rev-parse", "HEAD", cwd=full).stdout.strip()
+        _git("symbolic-ref", "HEAD", f"refs/heads/{branch}", cwd=full)
+        _git("update-ref", f"refs/partyline/tasks/{branch}", tip, cwd=owner)
+        self.db._exec(
+            "INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,policy,tag,"
+            "created_at,mode) VALUES(?,?,?,?,?,?,?,?)",
+            (ident, "root", f"impl-{ident}", "fixture", "none", ident, 1, "suite"))
+        self.db._exec(
+            "INSERT INTO task_workspaces(conv_id,repository,path,branch,base_sha) "
+            "VALUES(?,?,?,?,?)", (ident, str(owner), str(full), branch, base_sha))
+        gitdir = git_fence._worktree_gitdir(str(full))
+        fence_root = patch("partyline.git_fence.FENCE_ROOT", str(Path(self.directory.name, "fence")))
+        fence_root.start()
+        self.addCleanup(fence_root.stop)
+        mirror = git_fence._mirror_dir(git_fence.common_gitdir(gitdir), ident)
+        git_fence._write_mirror_text(mirror, "HEAD", f"ref: refs/heads/{branch}\n")
+        git_fence._write_mirror_text(mirror, f"refs/heads/{branch}", tip + "\n")
+
+        preview = self.preview(child)
+
+        self.assertEqual(preview.status_code, 200, preview.text)
+        response = self.force(child)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(full.exists())
+        self.assertEqual(_git("rev-parse", f"refs/partyline/tasks/{branch}", cwd=owner)
+                         .stdout.strip(), tip)
+        _git("cat-file", "-e", tip, cwd=owner)
+
     def test_mirror_tip_ancestor_of_owner_branch_accepted(self):
         child, owner, _, _ = self.mirrored()
         _git("commit", "-qm", "later owner commit", "--allow-empty", cwd=owner)

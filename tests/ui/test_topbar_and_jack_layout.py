@@ -56,10 +56,11 @@ class TopBarAndJackLayoutTest(unittest.TestCase):
         with ui_session(["alpha line"], handle="greg") as ui:
             page = ui.page
             _open_seeded_line(ui)
+            page.add_style_tag(content="#fenceUnavailable { display: none !important; }")
             selectors = [
                 '.column-toggle[aria-controls="rail"]',
                 '.column-toggle[aria-controls="board"]',
-                ".task-toggle",
+                ".theme-toggle",
                 ".account .handle",
                 ".account .logout",
             ]
@@ -92,7 +93,7 @@ class TopBarAndJackLayoutTest(unittest.TestCase):
                 self.assertEqual(toggle.get_attribute("aria-expanded"), "false")
                 self.assert_contrast(toggle)
 
-            disabled = page.locator(".task-toggle")
+            disabled = page.locator(".theme-toggle")
             disabled.evaluate("el => { el.disabled = true; }")
             disabled.hover()
             page.wait_for_timeout(200)

@@ -37,4 +37,5 @@ def pause_for_install(host=running_pid, wait=wait_pid, run=asyncio.run):
         stopped = False
     if not stopped:
         raise RuntimeError("Disable Partyline Chrome at chrome://extensions before updating or uninstalling.")
-    return "Chrome native host paused; click its toolbar button after updating to reconnect."
+    return ("Chrome native host paused; the extension reconnects by itself about a minute from now "
+            "(its toolbar button reconnects at once).")

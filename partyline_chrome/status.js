@@ -41,7 +41,7 @@ const STATES = {
   reconnecting: reason => ['…', 'neutral', `Partyline: reconnecting to the helper (${reason}); no click needed, or click to retry now`],
   waiting: () => ['…', 'neutral', 'Partyline: ready, waiting for Partyline Helper to attach (it connects by itself when it starts)'],
   connected: version => ['✓', 'connected', `Partyline: connected to helper ${version || ''}`.trim()],
-  paused: () => ['!', 'error', 'Partyline: paused for a helper update. Click this button to reconnect'],
+  updating: () => ['…', 'neutral', 'Partyline: paused while the helper updates; it reconnects by itself in about a minute, or click to reconnect now'],
   error: reason => ['!', 'error', `Partyline: ${reason}`],
 };
 

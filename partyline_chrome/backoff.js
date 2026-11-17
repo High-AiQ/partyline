@@ -4,8 +4,11 @@
 // a disconnect (immediately, then after 1 s, 5 s, 30 s, 2 min and 5 min), by one alarm at a time, and
 // every success (a hello) or toolbar click ends it. After the last step it stops: only a click, a browser
 // start or a tab activation (at most once every MIN_GAP seconds) tries again. Nothing runs on an interval.
+// An installer's release of the host's files (`released`) is also a transport failure: one alarm, RELEASE_DELAY
+// seconds later, makes the first attempt (late enough for a normal install), then the steps above follow.
 export const DELAYS = [0, 1, 5, 30, 120, 300]; // seconds before the next attempt, by failures so far
 export const MIN_GAP = 30;
+export const RELEASE_DELAY = 60; // seconds before the first attempt after an installer released the host
 export const ALARM = 'partyline-reconnect';
 const KEY = 'reconnect';
 
@@ -26,8 +29,8 @@ export class Backoff {
 
   save() {
     try {
-      Promise.resolve(this.api.storage?.session?.set({ [KEY]: { failures: this.failures, last: this.last } })).catch(() => {});
-    } catch { /* in memory only */ }
+      return Promise.resolve(this.api.storage?.session?.set({ [KEY]: { failures: this.failures, last: this.last } })).catch(() => {});
+    } catch { return Promise.resolve(); /* in memory only */ }
   }
 
   async reset() {
@@ -39,6 +42,17 @@ export class Backoff {
 
   async cancel() {
     try { await this.api.alarms?.clear(ALARM); } catch { /* no alarms */ }
+  }
+
+  // The installer asked the host to release its files: reconnecting now would respawn the host mid-install. The
+  // schedule starts at step 1 (so a worker restarted meanwhile leaves the attempt to the alarm, never connects at
+  // once) and its first attempt is RELEASE_DELAY seconds away. Persisted before the port closes.
+  async released() {
+    await this.ready;
+    this.failures = 1;
+    this.last = this.now();
+    await this.save();
+    await this.schedule(RELEASE_DELAY);
   }
 
   // An attempt starts now.

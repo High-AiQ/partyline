@@ -183,13 +183,14 @@ SETTLE_ANIMATIONS = """
 
 @contextlib.contextmanager
 def ui_session(lines=(), *, out_dir="/var/tmp/partyline-ui", headless=True, viewport=None,
-               handle="screenshot", freeze_animations=False, is_mobile=False, has_touch=False):
+               handle="screenshot", freeze_animations=False, is_mobile=False, has_touch=False,
+               server_module="partyline.server"):
     """Start a throwaway partyline, open it in a browser, yield a UiSession.
 
     `lines` are conversation names to create before the page loads, so the UI
     has something to render. `handle` names the throwaway account registered
     for the browser session.
-    The server process and temporary database are torn down on exit.
+    `server_module` can bootstrap test doubles; the server and DB die on exit.
     """
     from playwright.sync_api import sync_playwright
 
@@ -204,7 +205,7 @@ def ui_session(lines=(), *, out_dir="/var/tmp/partyline-ui", headless=True, view
 
     env = dict(os.environ, PARTYLINE_DB=db_path, PARTYLINE_PORT=str(port),
                PARTYLINE_HOST="127.0.0.1", PARTYLINE_SESSIONS_ROOT=db_path + ".sessions")
-    server = subprocess.Popen([sys.executable, "-m", "partyline.server"], cwd=REPO_ROOT,
+    server = subprocess.Popen([sys.executable, "-m", server_module], cwd=REPO_ROOT,
                               env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               preexec_fn=_die_with_parent)
     try:
@@ -262,7 +263,6 @@ def _await_server(base_url: str, server: subprocess.Popen):
             time.sleep(0.1)
     server.kill()
     raise RuntimeError(f"server did not come up within {STARTUP_TIMEOUT}s")
-
 
 # -- the standard state set ------------------------------------------------
 LINES = ["alpha line", "beta line", "gamma line", "delta line", "epsilon line",

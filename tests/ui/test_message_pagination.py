@@ -7,17 +7,18 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.uishot import ui_session  # noqa: E402
+from scripts.ui_process import attach_idle_process, process_ui_session  # noqa: E402
 
 
 class MessagePaginationTest(unittest.TestCase):
     def test_first_paint_is_bounded_and_scrolling_up_preserves_the_reader(self):
-        with ui_session(["long line"], handle="operator") as ui:
+        with process_ui_session(["long line"], handle="operator") as ui:
             page = ui.page
             conversations = page.request.get(
                 f"{ui.base_url}/api/conversations", headers=ui.auth_headers
             ).json()
             conversation_id = conversations[0]["id"]
+            attach_idle_process(ui, conversation_id)
             for number in range(1, 46):
                 response = page.request.put(
                     f"{ui.base_url}/api/conversations/{conversation_id}/topic",
@@ -64,15 +65,16 @@ class MessagePaginationTest(unittest.TestCase):
             self.assertTrue(any("before_id=" in url and "limit=20" in url for url in page_urls))
 
             page.eval_on_selector("#feed", "feed => { feed.scrollTop = 0; }")
-            page.wait_for_function("() => document.querySelectorAll('#feed .msg').length === 45")
+            # The live process contributes its join notice before the 45 topics.
+            page.wait_for_function("() => document.querySelectorAll('#feed .msg').length === 46")
             page.wait_for_timeout(100)
-            self.assertEqual(page.locator("#feed .msg").count(), 45)
+            self.assertEqual(page.locator("#feed .msg").count(), 46)
 
             # A live append must not yank someone reading history, while a
             # reader who returns to the bottom keeps the original follow mode.
             reading_top = page.eval_on_selector("#feed", "feed => feed.scrollTop")
-            page.evaluate("() => window.partyline.room.say('live while reading')")
-            page.wait_for_function("() => document.querySelectorAll('#feed .msg').length === 46")
+            self.assertTrue(page.evaluate("() => window.partyline.room.say('live while reading')"))
+            page.wait_for_function("() => document.querySelectorAll('#feed .msg').length === 47")
             self.assertAlmostEqual(
                 reading_top,
                 page.eval_on_selector("#feed", "feed => feed.scrollTop"),
@@ -80,8 +82,8 @@ class MessagePaginationTest(unittest.TestCase):
             )
 
             page.eval_on_selector("#feed", "feed => { feed.scrollTop = feed.scrollHeight; }")
-            page.evaluate("() => window.partyline.room.say('live while following')")
-            page.wait_for_function("() => document.querySelectorAll('#feed .msg').length === 47")
+            self.assertTrue(page.evaluate("() => window.partyline.room.say('live while following')"))
+            page.wait_for_function("() => document.querySelectorAll('#feed .msg').length === 48")
             bottom_gap = page.eval_on_selector(
                 "#feed", "feed => feed.scrollHeight - feed.scrollTop - feed.clientHeight"
             )

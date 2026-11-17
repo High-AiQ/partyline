@@ -1,5 +1,16 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-17 — Browser fixtures must follow intentional protocol changes
+
+The false assumptions were that an empty line could accept human sends, that opening a line made
+only one detail request, and that a styling class remained on the outage banner. Browser tests now
+attach a real idle PTY before sending, distinguish the fast snapshot from Git enrichment, and assert
+the visible shutdown notice plus wire state. Process-control fixtures replace preflight and disable
+the write fence only in their throwaway server, so nested namespace restrictions do not decide UI
+results. The six wire/message UI modules cover these properties. Response observers collect data in
+Python instead of calling Playwright synchronously from inside its own response dispatch; re-entry
+could race Waiter listener cleanup and produce a misleading `KeyError` during the resync control.
+
 ## 2026-11-17 — Whole-page quiet does not prove whether one CDP target is safe
 
 The false assumption was that a live page must stop producing DOM mutations before an element action

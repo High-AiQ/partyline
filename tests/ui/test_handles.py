@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.uishot import ui_session  # noqa: E402
+from scripts.ui_process import attach_idle_process, process_ui_session  # noqa: E402
 
 
 def open_line(page):
@@ -70,15 +71,18 @@ class AuthenticatedHandleTest(unittest.TestCase):
                 second.close()
 
     def test_handle_change_reconnects_every_tab_under_the_new_name(self):
-        with ui_session(["alpha line"], handle="first") as ui:
+        with process_ui_session(["alpha line"], handle="first") as ui:
             first = ui.page
             open_line(first)
+            conversation_id = first.evaluate("() => window.partyline.room.conversation.id")
+            attach_idle_process(ui, conversation_id)
             second = first.context.new_page()
             refreshes = []
             try:
                 second.goto(ui.base_url)
                 open_line(second)
                 for page in (first, second):
+                    page.evaluate("() => { window.__wireBeforeRename = window.partyline.wire.socket; }")
                     page.on("request", lambda request: (
                         refreshes.append(request.url)
                         if request.url.endswith("/api/auth/refresh") else None))
@@ -89,9 +93,10 @@ class AuthenticatedHandleTest(unittest.TestCase):
                 for page in (first, second):
                     page.wait_for_function(
                         "() => window.partyline.session.handle === 'renamed'"
-                        " && window.partyline.wire.ready")
+                        " && window.partyline.wire.ready"
+                        " && window.partyline.wire.socket !== window.__wireBeforeRename")
 
-                second.evaluate("() => window.partyline.room.say('after rename')")
+                self.assertTrue(second.evaluate("() => window.partyline.room.say('after rename')"))
                 first.wait_for_function(
                     "() => window.partyline.room.messages.some("
                     "message => message.body === 'after rename' && message.sender === 'renamed')")
