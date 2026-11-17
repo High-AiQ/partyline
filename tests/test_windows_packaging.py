@@ -78,16 +78,28 @@ class InstallerScriptTests(unittest.TestCase):
         self.assertRegex(code, r"Exec\(Exe, 'stop'")
         self.assertIn("and (Code = 0)", code)  # a failed stop is not ignored ...
         prepare = code[code.index("function PrepareToInstall"):]
-        self.assertRegex(prepare, r"if not HelperStopped then\n\s+Result := '")  # ... it aborts the install
+        # ... it aborts the install
+        self.assertRegex(prepare, r"if not \(HelperStopped and ChromeHostReleased\) then\n\s+Result := '")
         uninstall = code[code.index("function InitializeUninstall"):]
         self.assertIn("Result := HelperStopped;", uninstall)  # ... and the uninstall
         self.assertIn("CloseApplications=no", ISS)
 
     def test_an_upgrade_from_a_helper_without_the_chrome_host_never_asks_it_to_pause_chrome(self):
-        code = ISS[ISS.index("function HelperStopped"):ISS.index("function PrepareToInstall")]
+        code = ISS[ISS.index("function ChromeHostReleased"):ISS.index("function PrepareToInstall")]
         suspend = code[code.index("RegKeyExists"):code.index("'suspend-chrome'")]
         self.assertIn("Software\\Google\\Chrome\\NativeMessagingHosts\\" + HOST, suspend)
-        self.assertLess(code.index("'stop'"), code.index("RegKeyExists"))  # the stop is always required
+        self.assertIn("AUTOUPDATE", code)  # an automatic update never asks the host to release anything
+        # the stop is always required, and short-circuits before the Chrome host is asked
+        self.assertIn("HelperStopped and ChromeHostReleased", ISS)
+
+    def test_the_chrome_host_is_released_only_once_removal_starts_never_before_the_confirmation_box(self):
+        # The extension reconnects by itself 60 s after a release: a release made while the uninstall
+        # confirmation is still open would end with the host running again while files are deleted.
+        code = ISS[ISS.index("function InitializeUninstall"):]
+        initialize = code[:code.index("end;")]
+        self.assertNotIn("ChromeHostReleased", initialize)
+        step = code[code.index("procedure CurUninstallStepChanged"):]
+        self.assertRegex(step, r"CurUninstallStep = usUninstall then\n\s+if not ChromeHostReleased")
 
     def test_it_has_a_start_menu_entry_and_an_uninstaller(self):
         self.assertIn("{autoprograms}", section("Icons"))

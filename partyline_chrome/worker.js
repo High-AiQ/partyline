@@ -1,5 +1,5 @@
 import { Relay } from './relay.js';
-import { Backoff, ALARM, RELEASE_DELAY } from './backoff.js';
+import { Backoff, ALARM, HELLO_ALARM, RELEASE_DELAY } from './backoff.js';
 import { Status, explain, brief, recoverable } from './status.js';
 import { Decoder, packets } from './wire.js';
 
@@ -37,20 +37,38 @@ async function open(resetBudget = false, why = 'startup', force = false) {
   log.info(`${why}: connecting to the native host`);
   status.set('connecting');
   await backoff.began();
-  const connection = chrome.runtime.connectNative('io.partyline.chrome');
-  const self = { connection, greeted: false, disconnect };
+  let connection;
+  try {
+    connection = chrome.runtime.connectNative('io.partyline.chrome');
+  } catch (error) { // Chrome refused to open the port at all: still a failed attempt, never a stuck "connecting"
+    log.warn(`could not open the native port: ${error?.message || error}`);
+    void lost(String(error?.message || error));
+    return;
+  }
+  const self = { connection, greeted: false, disconnect, silent };
   current = self;
+  void backoff.awaitingHello();
   const decoder = new Decoder();
   let ended = false;
+  let busy = false; // the host said an older host still holds the helper bridge
   let hellos = Promise.resolve();
   function closed(remote = false, error = '') {
     if (ended) return;
     ended = true;
+    void backoff.helloSettled();
     if (current === self) current = null;
     closing = relay.attachments.reset().catch(() => {});
     if (!remote) return;
     log.warn(`native host disconnected${error ? `: ${error}` : ''}`);
-    void lost(error || 'Native host has exited.');
+    void lost(busy ? 'An older native host is still running.' : error || 'Native host has exited.');
+  }
+  // The port opened but no greeting came: end it like any other transport failure.
+  function silent() {
+    if (ended || self.greeted) return;
+    log.warn('the native host never greeted; reconnecting');
+    closed();
+    connection.disconnect();
+    void lost('Native host did not answer.');
   }
   function disconnect() {
     closed(); // Chrome does not emit onDisconnect on the port calling disconnect().
@@ -59,6 +77,7 @@ async function open(resetBudget = false, why = 'startup', force = false) {
   async function hello(message) {
     if (ended) return; // a hello queued behind a closed port must not repaint or reset the new one
     self.greeted = true;
+    void backoff.helloSettled();
     // A new hello starts a new helper session: nothing attached before it (an update, a lock, a
     // reconnect) may collide with the grants that follow. The revoke gates run synchronously here.
     const dropped = relay.attachments.reset().catch(() => {});
@@ -87,6 +106,8 @@ async function open(resetBudget = false, why = 'startup', force = false) {
       const message = decoder.accept(packet);
       if (message?.method === 'Partyline.hello') {
         hellos = hellos.then(() => hello(message)).catch(disconnect);
+      } else if (message?.method === 'Partyline.busy') {
+        busy = true; // the host exits right after: Chrome's disconnect carries on through lost()
       } else if (message?.method === 'Partyline.suspend') {
         // The helper is away. The port stays up, so the next helper that attaches is greeted with no click;
         // only an installer that must free the host's files asks for `release`: the port closes and the
@@ -139,7 +160,10 @@ chrome.action.onClicked.addListener(() => {
   if (!current) status.set('connecting'); // the click is visible before the connect resolves
   void connect(true, 'toolbar click', true);
 });
-chrome.alarms?.onAlarm.addListener(alarm => { if (alarm.name === ALARM) void connect(false, 'retry alarm'); });
+chrome.alarms?.onAlarm.addListener(alarm => {
+  if (alarm.name === ALARM) void connect(false, 'retry alarm');
+  else if (alarm.name === HELLO_ALARM && current) current.silent();
+});
 chrome.tabs?.onActivated?.addListener(async () => {
   if (!current && await backoff.mayRetry()) void connect(false, 'tab activation');
 });

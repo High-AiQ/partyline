@@ -33,7 +33,7 @@ export function fixture() {
 // chrome.alarms and chrome.storage.session: alarms never fire by themselves; the test fires them.
 export function alarms() {
   const pending = new Map(), listeners = event(), session = {};
-  return { pending, onAlarm: listeners,
+  return { pending, onAlarm: listeners, reconnects: () => (pending.has('partyline-reconnect') ? 1 : 0),
     create: async (name, info) => { pending.set(name, info); },
     clear: async name => pending.delete(name),
     get: async name => pending.get(name),

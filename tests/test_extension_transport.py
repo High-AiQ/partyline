@@ -55,6 +55,34 @@ class ExtensionTests(unittest.IsolatedAsyncioTestCase):
                          (('chrome_state',), 'disconnected', 'extension'))
         self.assertEqual(chrome_operations.current(self.f.chrome)['transport'], 'extension')
 
+    async def test_a_grant_on_cdp_falls_to_uia_in_an_outage_and_returns_to_cdp_without_a_new_share(self):
+        from tests.extension_fakes import ExtensionPeer
+        message = dict(agent="agent", line_id="line")
+        now = [100.0]
+        self.f.browser.clock = lambda: now[0]
+        first = await self.f.read()
+        self.assertEqual((first["source"], first["transport"]), ("cdp", "extension"))
+        self.peer.close()  # the session changed: the host's Chrome side is gone, not yet respawned
+        await self.f.browser.reader
+        stale = ExtensionPeer(self.f)  # a stale host: it accepts the helper, then its Chrome side is gone
+        stale.close()
+        stale.write = lambda raw: None
+        self.f.browser.opener = AsyncMock(return_value=(stale.reader, stale))
+        now[0] += 10  # past the short gap between attempts
+        self.f.browser.waited = True  # the brief per-outage wait has already been spent (no real time here)
+        self.assertIsNone(await self.f.chrome.read(self.f.access, {}, message))  # None: UIA serves it
+        self.assertIn("Partyline Chrome is reconnecting", self.f.chrome.reasons[self.f.access])
+        self.assertEqual(self.f.browser.state, "refused")  # no Allow prompt exists here: this must not stick
+        # The extension returns (a new host answers); the same grant is read again with no new share.
+        fresh = ExtensionPeer(self.f)
+        self.f.browser.opener = AsyncMock(return_value=(fresh.reader, fresh))
+        now[0] += 10
+        grant = self.f.access.grant
+        after = await self.f.chrome.read(self.f.access, {}, message)
+        self.assertEqual((after["source"], after["transport"]), ("cdp", "extension"))
+        self.assertIs(self.f.access.grant, grant)
+        self.assertEqual(self.f.session.status.chrome, "Chrome: extension connected")
+
     async def test_flat_sessions_large_ax_trees_and_crash_event_relay(self):
         await self.f.read()
         events = []

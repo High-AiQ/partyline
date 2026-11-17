@@ -67,24 +67,44 @@ Type: filesandordirs; Name: "{app}"
 FinishedLabel=Partyline Helper is installed (once paired it shows a round icon in the system tray).%n%nNext, in Partyline open "Computers / Share screen", choose "Pair a computer", then click "Pair with installed helper".
 
 [Code]
+// The helper's own executable: the registered one wins, so a rollback restores the right registration even when
+// Setup's previous-data entry names a failed version.
+function HelperExe: String;
+var
+  RegisteredExe: String;
+begin
+  Result := GetPreviousData('HelperExe', ExpandConstant('{app}\{#AppExe}'));
+  if RegQueryStringValue(HKCU, 'Software\Partyline\Helper', 'Executable', RegisteredExe) then
+    if FileExists(RegisteredExe) then
+      Result := RegisteredExe;
+end;
+
 // The helper's own `stop` command (exit 0 = nothing runs any more). Replacing or deleting files under a helper
 // that would not stop leaves a broken install, so a failure is reported and the caller aborts.
 function HelperStopped: Boolean;
 var
-  Exe, RegisteredExe: String;
+  Exe: String;
   Code: Integer;
 begin
-  Exe := GetPreviousData('HelperExe', ExpandConstant('{app}\{#AppExe}'));
-  // Rollback restores this registration even when Setup's previous-data entry names a failed version.
-  if RegQueryStringValue(HKCU, 'Software\Partyline\Helper', 'Executable', RegisteredExe) then
-    if FileExists(RegisteredExe) then
-      Exe := RegisteredExe;
+  Exe := HelperExe;
   Result := True;
   if FileExists(Exe) then
     Result := Exec(Exe, 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
-  // Only a helper that registered the Chrome native host (1.5.0 or later) has one to pause; an older helper does
-  // not know `suspend-chrome`, and its refusal must not block the upgrade.
-  if Result and (ExpandConstant('{param:AUTOUPDATE|0}') <> '1') and FileExists(Exe)
+end;
+
+// Ask Chrome's native host to release its files. The extension reconnects by itself about a minute after this
+// (60 s), so it must be asked only when the files are about to be replaced or deleted, never before a dialog
+// the person may leave open. Only a helper that registered the Chrome host (1.5.0 or later) has one to pause;
+// an older helper does not know `suspend-chrome`, and its refusal must not block anything. An automatic
+// update never asks: it installs into a new version folder and the host keeps its old one.
+function ChromeHostReleased: Boolean;
+var
+  Exe: String;
+  Code: Integer;
+begin
+  Exe := HelperExe;
+  Result := True;
+  if (ExpandConstant('{param:AUTOUPDATE|0}') <> '1') and FileExists(Exe)
      and RegKeyExists(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\io.partyline.chrome') then
     Result := Exec(Exe, 'suspend-chrome', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
 end;
@@ -93,7 +113,7 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
-  if not HelperStopped then
+  if not (HelperStopped and ChromeHostReleased) then
     Result := 'Partyline Helper is still running and could not be stopped. Quit it from its tray icon (or end ' +
               'PartylineHelper.exe in Task Manager), disable Partyline Chrome at chrome://extensions, then run this installer again.';
 end;
@@ -104,6 +124,15 @@ begin
   if not Result then
     MsgBox('Partyline Helper is still running and could not be stopped. Quit it from its tray icon (or end ' +
            'PartylineHelper.exe in Task Manager), disable Partyline Chrome at chrome://extensions, then uninstall again.', mbError, MB_OK);
+end;
+
+// The uninstall confirmation may stay open for minutes: release the Chrome host only once removal starts.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    if not ChromeHostReleased then
+      MsgBox('Partyline Chrome''s native host could not be released. If some files remain, close Chrome and ' +
+             'delete the Partyline Helper folder.', mbInformation, MB_OK);
 end;
 
 // A silent install (CI, scripted upgrade) does not open dialogs unless asked with /START=1.

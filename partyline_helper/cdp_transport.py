@@ -82,6 +82,7 @@ def discover(root=None):
 
 class BrowserConnection:
     transport = "remote_debugging"
+    gap = RETRY_SECONDS  # seconds before another attempt after one started
 
     def __init__(self, changed=lambda state, detail: None, discovery=discover, connector=connect,
                  timeout=asyncio.timeout, clock=time.monotonic):
@@ -135,7 +136,7 @@ class BrowserConnection:
                 self.report("not_enabled", INSTRUCTION)
                 return False
             self.retry_requested = False
-            self.next_attempt = self.clock() + RETRY_SECONDS
+            self.next_attempt = self.clock() + self.gap
             self.report("awaiting_approval", "Approve the remote debugging connection in Chrome")
             try:
                 socket = await self.connector(endpoint, open_timeout=None, max_size=16 * 1024 * 1024)

@@ -6,10 +6,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from partyline.file_events import file_events
 from partyline_helper import chrome_operations, native_host
+from partyline_helper.cdp_transport import CDPError
 from partyline_helper.extension_transport import ExtensionTransport
 from tests.cdp_fakes import Fixture
 from tests.test_late_native_host import Extension
@@ -124,6 +125,40 @@ class UpdateSequenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_host_that_dies_without_a_word_leaves_the_same_outcome(self):
         await self.update_sequence(orderly=False)
 
+    async def test_a_new_helper_session_reattaches_to_a_host_and_extension_that_stayed_up(self):
+        # The helper's server link drops (a session change, sleep) and its next session starts: the host and
+        # Chrome's port are untouched, so the extension must be greeted again with no click and no new host.
+        extension, host = await self.start_host()
+        self.addCleanup(extension.stdin.close)
+        self.addCleanup(extension.close)  # a failing test must not leave the host blocked on Chrome's pipe
+        await extension.until(lambda: len(extension.hellos) == 1)
+        first = await self.new_helper()
+        self.assertTrue(await first.browser.ensure())
+        await extension.until(lambda: len(extension.hellos) == 2)
+        await asyncio.wait_for(first.chrome.close(), 5)
+        second = await self.new_helper()
+        self.assertTrue(await asyncio.wait_for(second.browser.ensure(), 5))
+        await asyncio.wait_for(extension.until(
+            lambda: [h["helper_connected"] for h in extension.hellos] == [False, True, True]), 5)
+        self.assertEqual(second.browser.state, "connected")
+        self.assertEqual(len(self.hosts), 1)  # the same host and Chrome port served both sessions
+        extension.close()
+        await asyncio.wait_for(host, 5)
+        extension.stdin.close()
+
+    async def test_a_host_still_up_after_a_refused_attempt_is_reached_by_the_next_read(self):
+        extension, host = await self.start_host()
+        self.addCleanup(extension.stdin.close)
+        self.addCleanup(extension.close)
+        await extension.until(lambda: len(extension.hellos) == 1)
+        f = await self.new_helper()
+        f.chrome.browser.state = "refused"  # a failed attempt left this behind; the endpoint never changes
+        self.assertTrue(await f.chrome.browser.ensure())
+        self.assertEqual(f.chrome.browser.state, "connected")
+        extension.close()
+        await asyncio.wait_for(host, 5)
+        extension.stdin.close()
+
     async def test_an_extension_never_seen_keeps_remote_debugging_as_the_default(self):
         self.remote.stop()
         self.addCleanup(self.remote.start)
@@ -154,6 +189,86 @@ class AwaitExtensionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await chrome_operations.await_extension(
             browser, self.watcher(lambda: None), Deadline))
         self.assertTrue(browser.waited)
+
+    async def test_a_failed_attempt_never_blocks_the_next_one_for_good_and_a_new_host_resets_the_gap(self):
+        now = [100.0]
+        browser = ExtensionTransport(discovery=lambda: {"port": 1, "token": "t"})
+        browser.clock = lambda: now[0]
+        browser.connector = AsyncMock(side_effect=CDPError("Chrome extension not connected"))
+        self.assertFalse(await browser.ensure())  # the host was dying: connect failed
+        self.assertEqual(browser.state, "refused")
+        self.assertFalse(browser.can_attempt())  # a short gap protects reads from a stale host
+        now[0] += 10
+        self.assertTrue(browser.can_attempt())  # ...and never for good, with no file event or retry request
+        self.assertFalse(await browser.ensure())
+        self.assertEqual(browser.state, "refused")
+        browser.new_host()  # a host rewrote its endpoint
+        self.assertEqual((browser.state, browser.can_attempt()), ("not_enabled", True))
+
+    async def test_a_read_after_a_refused_attempt_reconnects_without_any_event(self):
+        # The stale-peer outage seen after a session change: a refused attempt used to stick until the
+        # endpoint file changed, so a host that stayed up was never tried again.
+        now = [100.0]
+        browser = ExtensionTransport(discovery=lambda: {"port": 1, "token": "t"})
+        browser.clock = lambda: now[0]
+        browser.state = "refused"
+        browser.next_attempt = 0
+        socket = AsyncMock()
+        socket.__aiter__.return_value = []
+        browser.connector = AsyncMock(return_value=socket)
+        browser.call = AsyncMock(return_value={})
+        self.assertTrue(await browser.ensure())
+        self.assertEqual(browser.state, "connected")
+
+    async def test_a_stopped_endpoint_watch_is_armed_again_by_the_next_operation(self):
+        started = []
+
+        async def watch(chrome, events=None):
+            started.append(chrome)
+        chrome = type("Chrome", (), {"extension_watch": None})()
+        chrome_operations.keep_watching(chrome)  # no watch was ever started here: nothing to restart
+        self.assertIsNone(chrome.extension_watch)
+        with patch.object(chrome_operations, "watch_extension", watch):
+            chrome.extension_watch = asyncio.ensure_future(watch(chrome))
+            await chrome.extension_watch  # it stopped (an OS notification error)
+            first = chrome.extension_watch
+            chrome_operations.keep_watching(chrome)
+            self.assertIsNot(chrome.extension_watch, first)
+            await chrome.extension_watch
+            self.assertEqual(len(started), 2)
+            running = asyncio.ensure_future(asyncio.Event().wait())
+            chrome.extension_watch = running
+            chrome_operations.keep_watching(chrome)  # one still running is left alone
+            self.assertIs(chrome.extension_watch, running)
+            running.cancel()
+
+    async def test_a_failing_window_watch_does_not_take_the_endpoint_watch_with_it(self):
+        started, stopped = asyncio.Event(), []
+
+        async def endpoint_watch(chrome):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                stopped.append(True)
+                raise
+
+        async def failing():
+            await started.wait()
+            raise OSError("desktop switch")
+        chrome = type("Chrome", (), {"extension_watch": None})()
+        shares = type("Shares", (), {"chrome": chrome, "watch": staticmethod(failing)})()
+        with patch.object(chrome_operations, "watch_extension", endpoint_watch), patch("builtins.print"):
+            task = asyncio.ensure_future(chrome_operations.watch_windows(shares))
+            for _ in range(20):
+                await asyncio.sleep(0)
+            self.assertFalse(task.done())  # the window watch failed; the session's watches are still up
+            self.assertFalse(chrome.extension_watch.done())
+            self.assertEqual(stopped, [])
+            task.cancel()  # the session ends
+            await asyncio.gather(task, return_exceptions=True)
+            self.assertEqual(stopped, [True])
+            self.assertIsNone(chrome.extension_watch)
 
     async def test_the_deadline_ends_the_wait_and_a_second_read_of_the_outage_does_not_wait(self):
         browser = ExtensionTransport(discovery=lambda: None)

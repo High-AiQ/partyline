@@ -275,3 +275,73 @@ class NativeHostTests(unittest.IsolatedAsyncioTestCase):
             starting.reset_mock()
             await native_host.run(io.BytesIO(), io.BytesIO(), wait=wait)
             starting.assert_not_called()
+
+
+class StaleHostTests(unittest.IsolatedAsyncioTestCase):
+    """A host must not outlive Chrome, and a host that cannot start must say why."""
+
+    async def run_host(self, lock_held, parent=None, receive=None, wait=None):
+        wait = wait or Mock(return_value=False)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(native_host, "config_path", return_value=Path(directory) / "helper.json"), \
+                patch.object(native_host, "InstanceLock") as locking, \
+                patch.object(native_host, "running_pid", return_value=123), \
+                patch.object(native_host.asyncio, "start_server", AsyncMock()) as starting, \
+                patch.object(native_host.Bridge, "receive", receive or AsyncMock()):
+            server = starting.return_value
+            server.sockets = [Mock(getsockname=lambda: ("", 1234))]
+            server.close = server.close_clients = Mock()
+            server.wait_closed = AsyncMock()
+            locking.return_value.acquire.side_effect = [False, False] if lock_held else [True]
+            output = io.BytesIO()
+            kwargs = {"parent": parent} if parent else {}
+            await native_host.run(io.BytesIO(), output, wait=wait, **kwargs)
+            return output.getvalue(), starting
+
+    async def test_a_host_that_cannot_take_the_lock_tells_chrome_an_older_host_is_running(self):
+        written, starting = await self.run_host(lock_held=True)
+        starting.assert_not_called()
+        self.assertEqual(read_frame(io.BytesIO(written)), {"method": "Partyline.busy", "pid": 123})
+
+    async def test_the_host_ends_when_chrome_exits_even_if_its_pipe_never_closes(self):
+        blocked = asyncio.Event()
+
+        async def never_closes(self, stream):
+            await blocked.wait()
+        gone = AsyncMock()  # Chrome's process-exit wait resolves at once
+        written, starting = await self.run_host(
+            lock_held=False, parent=gone, receive=never_closes)
+        gone.assert_awaited_once()
+        starting.assert_awaited_once()  # the host started, then ended with Chrome
+
+    async def test_the_host_keeps_serving_while_chrome_runs_and_stops_watching_when_the_port_closes(self):
+        watching = asyncio.Event()
+
+        async def never_exits(pid):
+            watching.set()
+            await asyncio.Event().wait()
+        await self.run_host(lock_held=False, parent=never_exits)  # receive returns: Chrome closed the port
+        self.assertTrue(watching.is_set())
+
+    async def test_a_chrome_watch_that_cannot_open_the_process_never_ends_a_healthy_host(self):
+        gate = asyncio.Event()
+        reached = []
+
+        async def receiving(self, stream):
+            reached.append("serving")
+            await gate.wait()  # Chrome's port stays open until the test closes it
+
+        async def refused(pid):
+            raise OSError("access denied")
+
+        async def close_port_later():
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            gate.set()
+        closer = asyncio.ensure_future(close_port_later())
+        with patch("sys.stderr", io.StringIO()) as err:
+            written, starting = await self.run_host(lock_held=False, parent=refused, receive=receiving)
+        await closer
+        self.assertEqual(reached, ["serving"])  # the host kept serving after the watch failed
+        self.assertTrue(gate.is_set())  # and ended only when Chrome's port closed
+        self.assertIn("parent watch stopped (OSError)", err.getvalue())

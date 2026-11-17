@@ -21,6 +21,7 @@ class Chrome:
         self.shares, self.session, self.bounds = shares, shares.session, bounds
         self.auto_transport, self.browser = connection is None, connection or preferred(self.report)
         self.pages, self.reasons, self.selected, self.sources = {}, {}, {}, {}
+        self.extension_watch = None  # chrome_operations.watch_windows owns it
         self.connecting, self.dialogs, self.transport_lock = None, dialogs, asyncio.Lock()
         self.fallback, self.approval = Fallback(self), Approval(self)
 
