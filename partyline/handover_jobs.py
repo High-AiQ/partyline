@@ -1,15 +1,11 @@
 """Live descendant inventory shared by handover briefing and completion."""
-import os
-import sys
-from pathlib import Path
-
 from .attachment_tmp import attachment_tmp_dir
 from .process_memory import process_snapshot
 from .tmp_processes import references
 from .job_details import describe
-from .top_processes import argv, namespace_pid
-from .tmp_owners import members
-from .handover_mcp import commands, matches
+from .top_processes import _descendants, namespace_pid
+from .tmp_owners import members, owned
+from .handover_processes import actionable, listing
 
 
 def live_jobs(runtime, att_id):
@@ -23,62 +19,69 @@ def live_jobs(runtime, att_id):
         raise HTTPException(409, 'Cannot inspect live jobs; retry after process inspection recovers. '
                                  'This failure is not waived by live_jobs="transfer": that acknowledgment '
                                  'applies only once the jobs have been inspected.')
-    excluded = _cli_processes(snapshot[0], pid, adapter)
-    found = members(adapter, snapshot) - excluded
-    configured = commands(adapter)
+    # Every process still under the attached runtime transfers by default.
+    # Only owned jobs that escaped/reparented out of that tree need a decision.
+    runtime_tree = _descendants(snapshot[0], pid)
+    found = (members(adapter, snapshot) | owned(att_id)) - runtime_tree
+    facts = listing() if found else {}
     jobs = []
     for member in sorted(found):
-        if sys.platform.startswith('linux'):
-            try:
-                stat = Path(f'/proc/{member}/stat').read_text()
-                if stat.rsplit(')', 1)[1].split()[0] == 'Z':
-                    continue
-            except FileNotFoundError:
-                continue
-            except OSError:
-                pass
-        if matches(argv(member), configured):
+        fact = facts.get(member, {})
+        if not actionable(fact):
+            continue
+        command, found_cwd, why = describe(member)
+        if (not command or command.strip() in ('?', 'unknown', 'command unknown')
+                or '<defunct>' in command):  # exited or unreadable at the per-PID inspection
             continue
         cwd, files, _ = references(member, attachment_tmp_dir(att_id))
-        command, found_cwd, why = describe(member)
         jobs.append({'pid': namespace_pid(member), 'host_pid': member, 'command': command,
+                     'state': fact.get('state') or 'unavailable',
+                     'started': fact.get('started') or 'unavailable',
                      'cwd': found_cwd or (cwd if cwd != '?' else None), 'files': files,
                      'unknown': why})
     return jobs
 
 
-def jobs_text(jobs):
-    return ('\nLive jobs of the old captain:\n' + '\n'.join(
-        f"pid {job['pid']} (host {job['host_pid']}): {job['command'] or 'command unknown'}; "
-        f"cwd={job['cwd'] or 'unknown'}; tmp files={', '.join(job['files']) or 'none observed'}"
-        + (f"; unknown because {job['unknown']}" if job.get('unknown') else '')
-        for job in jobs)) if jobs else ''
+def completion_hint(ident='id'):
+    return ('Both participants must independently confirm, including the receiver. '
+            'While background jobs remain, each must pass live_jobs="transfer", '
+            'including the receiver even after the old captain has acknowledged them. '
+            'For remaining background jobs, live_jobs allows only "transfer"; omit it after '
+            'finishing or stopping the jobs. The attachment process tree transfers by default. '
+            'Transfer retains files; detach still stops the original process group. '
+            f'Example: extras(op="complete_handover", args={{"handover_id": "{ident}", '
+            '"live_jobs": "transfer"}).')
 
 
-def _cli_processes(parents, pid, adapter):
-    """Exclude the scope/fence launch chain and its CLI, never the CLI's jobs."""
-    excluded = {pid}
-    command = getattr(adapter, 'att', {}).get('command', [])
-    cli = os.path.basename(command[0]) if command else ''
-    current = pid
-    while True:
-        parts = argv(current)
-        name = os.path.basename(parts[0]) if parts else ''
-        launcher = name in ('bwrap', 'systemd-run') or '--verify-exec' in parts
-        children = [child for child, parent in parents.items() if parent == current]
-        if len(children) != 1:
+def _short(value, limit):
+    text = ' '.join(str(value).split())
+    return text if len(text) <= limit else text[:limit - 1] + '…'
+
+
+def _files_text(files):
+    shown = [_short(path, 100) for path in files[:2]]
+    if len(files) > len(shown):
+        shown.append(f'+{len(files) - len(shown)} more files')
+    return ', '.join(shown) or 'none observed'
+
+
+def jobs_text(jobs, limit=1800):
+    """Bound the list at whole entries; never cut the instructions or a job in half."""
+    if not jobs:
+        return ''
+    lines = ['\nLive jobs of the old captain:']
+    for index, job in enumerate(jobs):
+        line = (f"pid {job['pid']} (host {job['host_pid']}): "
+                f"{_short(job['command'] or 'command unknown', 200)}; "
+                f"state={_short(job.get('state', 'unavailable'), 16)}; "
+                f"started={_short(job.get('started', 'unavailable'), 64)}; "
+                f"cwd={_short(job['cwd'] or 'unknown', 120)}; tmp files={_files_text(job['files'])}"
+                + (f"; unknown because {_short(job['unknown'], 120)}" if job.get('unknown') else ''))
+        if sum(len(value) + 1 for value in lines) + len(line) + 40 > limit:
+            lines.append(f'+{len(jobs) - index} more')
             break
-        child = children[0]
-        child_parts = argv(child)
-        child_name = os.path.basename(child_parts[0]) if child_parts else ''
-        # Some installed CLI entrypoints wrap a native binary of the same name.
-        cli_wrapper = cli and child_name == cli and any(
-            os.path.basename(part) == cli + '.js' for part in parts[1:])
-        if not launcher and not cli_wrapper:
-            break
-        excluded.add(child)
-        current = child
-    return excluded
+        lines.append(line)
+    return '\n'.join(lines)
 
 
 def inspect_completion(runtime, att_id):

@@ -76,7 +76,7 @@ class PartylineClient:
                 "Authorization": "Bearer " + self.connection["token"]})
             response = connection.getresponse()
             if response.status < 200 or response.status >= 300:
-                raise self._error(response.status, response.read(4096))
+                raise self._error(response.status, response.read(32 * 1024))
             while line := response.readline(4096):
                 try:
                     version = json.loads(line).get("version")
@@ -125,7 +125,7 @@ class PartylineClient:
             connection.request(method, path, body=body, headers=headers)
             response = connection.getresponse()
             if response.status < 200 or response.status >= 300:
-                detail = response.read(4096)
+                detail = response.read(32 * 1024)
                 raise self._error(response.status, detail)
             length = response.getheader("Content-Length")
             if length and int(length) > limit:
@@ -151,7 +151,19 @@ class PartylineClient:
         except (UnicodeError, ValueError):
             detail = ""
         detail = detail if isinstance(detail, str) else ""
-        detail = " ".join(detail.split())[:300]
+        lines = [" ".join(line.split()) for line in detail.splitlines() if line.strip()]
+        if len(lines) > 1:
+            # The server bounds structured notices at whole entries. Preserve
+            # their instructions and entries instead of cutting mid-word.
+            kept = []
+            for line in lines:
+                if sum(len(item) + 1 for item in kept) + len(line) > 3000:
+                    kept.append(f"+{len(lines) - len(kept)} more lines")
+                    break
+                kept.append(line)
+            detail = "\n".join(kept)
+        else:
+            detail = " ".join(detail.split())[:300]
         return ApiError(f"Partyline HTTP {status}" + (f": {detail}" if detail else ""))
 
     def upload(self, conv_id: str, file_path: str, *, client_key: str,
@@ -229,7 +241,7 @@ class PartylineClient:
                 "Authorization": "Bearer " + self.connection["token"]})
             response = conn.getresponse()
             if response.status < 200 or response.status >= 300:
-                raise self._error(response.status, response.read(4096))
+                raise self._error(response.status, response.read(32 * 1024))
             length = response.getheader("Content-Length")
             if length and int(length) > MAX_DOWNLOAD:
                 raise ApiError(f"download exceeds the {MAX_DOWNLOAD}-byte MCP limit")

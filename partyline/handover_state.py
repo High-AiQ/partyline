@@ -31,8 +31,9 @@ def summary(runtime, current, already=False):
                    + f'Handover completed: {new_name} is the captain and {old_name} '
                    + ('is detached.' if old_state == 'detached' else 'is being detached.'))
     else:
-        message = (f"Handover {current['state']}: waiting for {' and '.join(waiting)} to call "
-                   'extras(op="complete_handover", args={"handover_id": id}).')
+        from .handover_jobs import completion_hint
+        message = (f"Handover {current['state']}: waiting for {' and '.join(waiting)} to confirm. "
+                   + completion_hint(current['id']))
     return {'completed': done, 'old_captain': old_state, 'awaiting': [] if done else waiting,
             'message': message}
 

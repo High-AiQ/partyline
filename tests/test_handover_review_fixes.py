@@ -202,7 +202,7 @@ class ReviewFixesTest(unittest.TestCase):
         reap_pending()
         self.assertFalse(self.path.exists())
 
-    def test_jobs_started_below_an_mcp_server_still_count(self):
+    def test_children_below_an_mcp_server_transfer_with_the_runtime_tree(self):
         from partyline.handover_jobs import live_jobs
         server_args = ['-c', 'import time; time.sleep(30)']
         server = subprocess.Popen([sys.executable, *server_args], cwd=self.tmp.name)
@@ -216,4 +216,4 @@ class ReviewFixesTest(unittest.TestCase):
             att={'command': ['claude'], 'mcp_config': str(config)})
         snapshot = ({server.pid: os.getpid(), job.pid: server.pid}, {})
         with patch('partyline.handover_jobs.process_snapshot', return_value=snapshot):
-            self.assertEqual([item['host_pid'] for item in live_jobs(self.runtime, 'old')], [job.pid])
+            self.assertEqual(live_jobs(self.runtime, 'old'), [])
