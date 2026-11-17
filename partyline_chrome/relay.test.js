@@ -236,3 +236,30 @@ test('replacement page sessions stay alive when recovery closes the old session'
   assert.equal(f.calls.at(-1)[0], 'DOM.enable');
   assert.equal(f.calls.filter(c => c[0] === 'attach').length, 2);
 });
+
+test('JavaScript dialogs relay events and explicit responses, hold attachment until closed, and obey revoke', async () => {
+  const f = setup(), session = await f.attach();
+  const dialog = { type: 'prompt', message: 'Name?', url: 'https://example.test/form', defaultPrompt: 'Draft' };
+  f.api.debugger.onEvent.fire({ tabId: 1 }, 'Page.javascriptDialogOpening', dialog);
+  assert.deepEqual(f.messages.at(-1), { method: 'Page.javascriptDialogOpening', params: dialog, sessionId: session });
+  f.clock.advance(IDLE_LINGER_MS);
+  await Promise.resolve();
+  assert.equal(f.calls.filter(c => c[0] === 'detach').length, 0);
+  for (const params of [{ accept: false }, { accept: true }, { accept: true, promptText: 'New' }]) {
+    await f.command('Page.handleJavaScriptDialog', params, session);
+    assert.deepEqual(f.calls.at(-1), ['Page.handleJavaScriptDialog', { tabId: 1 }, { windowId: 9, ...params }]);
+  }
+  f.api.debugger.onEvent.fire({ tabId: 1 }, 'Page.javascriptDialogClosed', { result: false });
+  assert.equal(f.messages.at(-1).method, 'Page.javascriptDialogClosed');
+  f.clock.advance(IDLE_LINGER_MS);
+  await Promise.resolve();
+  assert.equal(f.calls.filter(c => c[0] === 'detach').length, 1);
+  await f.command('Partyline.resume', { sessionId: session });
+  f.api.debugger.onEvent.fire({ tabId: 1 }, 'Page.javascriptDialogOpening', dialog);
+  await f.command('Partyline.revoke');
+  const calls = f.calls.length, messages = f.messages.length;
+  await assert.rejects(f.command('Page.handleJavaScriptDialog', { accept: true }, session));
+  f.api.debugger.onEvent.fire({ tabId: 1 }, 'Page.javascriptDialogClosed', { result: true });
+  assert.equal(f.calls.length, calls);
+  assert.equal(f.messages.length, messages);
+});

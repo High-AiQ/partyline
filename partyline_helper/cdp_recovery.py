@@ -1,4 +1,5 @@
 """Renderer health survives session loss; recovery stays inside the original revocable grant."""
+from .cdp_page_dialogs import PageDialog
 from .cdp_transport import CDPError, ExtensionRefused, PageUnavailable
 
 HINT = 'Chrome page unavailable; use screen_element_action(element_id="page", action="reload")'
@@ -11,6 +12,7 @@ class FallbackPending(CDPError):
 
 class Recovery:
     def unavailable(self, state):
+        self.page_dialog = None
         self.page_state = state
         self.recovery_ready = False
         self.initialized = False
@@ -154,6 +156,10 @@ async def read(chrome, access, options, message):
             if page.page_state == "alive":
                 chrome.sources[access] = "cdp"
                 return await page.snapshot(options)
+        except PageDialog as exc:
+            page.guard(document=False)
+            chrome.sources[access] = "cdp"
+            return exc.result(**access.event_status())
         except FallbackPending:
             access.forget()
             chrome.sources[access] = "uia"

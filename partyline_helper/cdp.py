@@ -4,13 +4,13 @@ import contextlib
 
 from websockets.exceptions import ConnectionClosed
 
-from .cdp_actions import act, evaluate
+from .cdp_operations import action
 from .cdp_dialogs import dialog_pointer, with_dialog_pointer
 from .cdp_mapping import frame, map_window, title_matches
 from .cdp_page import Page
-from .cdp_recovery import HINT, reload, read as read_page
+from .cdp_page_dialogs import PageDialog, visible as dialog_visible
+from .cdp_recovery import HINT, read as read_page
 from .cdp_transport import CDPError, INSTRUCTION
-from .cdp_identity import failure
 from .chrome_fallback import Fallback
 from .chrome_operations import audit, chrome_label, operation, preferred, status
 
@@ -174,7 +174,7 @@ class Chrome:
                 page.url = target.get("url") or page.url
                 matching.append(page)
             if len(matching) > 1:
-                matching = [p for p in matching if p.page_state == "alive" and await p.visible()]
+                matching = [p for p in matching if await dialog_visible(p)]
             if len(matching) != 1:
                 raise CDPError("Chrome active tab title/visibility ambiguous; using UIA")
             page = matching[0]  # Windows occlusion can hide even the active tab of a covered HWND.
@@ -185,11 +185,13 @@ class Chrome:
                 access.forget()
                 self.selected[access] = page.target
                 self.changed(access)
-            if hasattr(browser, "resume") and page.page_state == "alive":
+            if hasattr(browser, "resume") and page.page_state == "alive" and not page.page_dialog:
                 await browser.resume(page)
-            if not page.initialized and page.page_state == "alive":
+            if not page.initialized and page.page_state == "alive" and not page.page_dialog:
                 try:
                     await page.initialize()
+                except PageDialog:
+                    page.guard(document=False, healthy=False)
                 except CDPError:
                     if page.page_state == "alive":
                         raise
@@ -226,55 +228,7 @@ class Chrome:
 
     @operation
     async def action(self, access, message):
-        self.audit(access, message, "screen_eval" if message.get("type") == "window_eval" else
-                   "screen_element_action")
-        if (message.get("action") not in ("reload", "set_files") and message.get("type") != "window_eval"
-                and self.sources.get(access) == "uia" and message.get("element_id") in access.elements):
-            return None
-        if message.get("action") == "reload" and not self.browser_of(access).socket:
-            if not access.grant or access.gate.revoked.is_set():
-                return {"status": "failed", "source": "cdp", "error": "consent revoked"}
-            self.start(access, retry=True)
-            pending = self.connecting and not self.connecting.done()
-            return {"status": "failed", "source": "cdp", "error": (
-                "Awaiting Chrome approval; call reload again after Chrome allows the connection"
-                if pending else self.browser_of(access).reason())}
-        page = await self.page(access)
-        if message.get("action") == "set_files" and (not page or self.sources.get(access) != "cdp"):
-            return {"status": "failed", "error": "CDP unavailable; use the Open dialog path instead"}
-        if message.get("type") == "window_eval" and not page:
-            return {"status": "failed", "error": "screen_eval needs a mapped Chrome window",
-                    "source": "uia"}
-        # An old CDP id can never dispatch through UIA after a provider switch.
-        if message.get("action") == "reload":
-            if page:
-                page.dispatched = False
-            try:
-                return await reload(self, access, page)
-            except CDPError as exc:
-                return {"status": "unconfirmed" if page and page.dispatched else "failed", "source": "cdp",
-                        "error": self.fallback.reason(exc) or str(exc)}
-        if page and page.page_state != "alive":
-            return {"status": "failed", **self.metadata(access), "error": HINT}
-        if not page:
-            metadata = self.metadata(access)
-            if self.sources.get(access) == "cdp" or metadata:
-                return {"status": "failed", **metadata,
-                        "error": HINT if metadata else "CDP unavailable; read the window again"}
-            return None
-        page.dispatched = False
-        page.operation_epoch = page.epoch
-        try:
-            if message.get("type") == "window_eval":
-                return await evaluate(page, message["expression"])
-            return await act(page, message)
-        except CDPError as exc:
-            error = str(exc)
-            if message.get("action") == "set_files" and (not page.live or "revoked" in error):
-                error += "; use the Open dialog path instead"
-            return failure(page, exc, error)
-        finally:
-            page.operation_epoch, page.action_proof = None, None
+        return await action(self, access, message)
 
     @operation
     async def tabs(self, access):

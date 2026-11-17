@@ -54,7 +54,7 @@ export class Attachments {
     const previous = [...this.entries.values()].find(e => e.tabId === tabId && e.grant === grant);
     if (previous) await this.forget(previous);
     const session = `${grant}:${tabId}:${++this.serial}`;
-    const entry = { grant, tabId, session, attached: false, pending: null, timer: null, children: new Set() };
+    const entry = { grant, tabId, session, attached: false, pending: null, timer: null, children: new Set(), dialogs: new Set() };
     this.entries.set(session, entry);
     await this.resume(entry);
     return entry;
@@ -101,7 +101,7 @@ export class Attachments {
   }
   idle(entry) {
     this.clock.clearTimeout(entry.timer);
-    if (entry.attached && !this.held.has(entry.grant) && !entry.busy) {
+    if (entry.attached && !this.held.has(entry.grant) && !entry.busy && !entry.dialogs.size) {
       // no-poll (b): one-shot idle deadline, reset by actual operations.
       entry.timer = this.clock.setTimeout(() => { void this.detach(entry).catch(() => {}); }, IDLE_LINGER_MS);
     }
@@ -110,6 +110,7 @@ export class Attachments {
     if (entry.closing) return entry.closing;
     this.clock.clearTimeout(entry.timer);
     entry.children.clear();
+    entry.dialogs.clear();
     if (!entry.attached) return;
     entry.attached = false;
     this.emit({ method: 'Partyline.attachment', sessionId: entry.session, params: { attached: false } });
@@ -161,6 +162,13 @@ export class Attachments {
   event(source, method, params) {
     const entry = [...this.entries.values()].find(e => e.tabId === source.tabId && e.attached);
     if (!entry || !this.valid(entry) || (source.sessionId && !entry.children.has(source.sessionId))) return;
+    if (method === 'Page.javascriptDialogOpening') {
+      entry.dialogs.add(source.sessionId || entry.session);
+      this.idle(entry);
+    } else if (method === 'Page.javascriptDialogClosed') {
+      entry.dialogs.delete(source.sessionId || entry.session);
+      this.idle(entry);
+    }
     if (method === 'Target.attachedToTarget') {
       if (params.targetInfo.type !== 'iframe' || !safeURL(params.targetInfo.url)) {
         void this.api.debugger.sendCommand(source, 'Target.detachFromTarget',
@@ -170,7 +178,11 @@ export class Attachments {
       entry.children.add(params.sessionId);
     }
     this.emit({ method, params, sessionId: source.sessionId || entry.session });
-    if (method === 'Target.detachedFromTarget') entry.children.delete(params.sessionId);
+    if (method === 'Target.detachedFromTarget') {
+      entry.children.delete(params.sessionId);
+      entry.dialogs.delete(params.sessionId);
+      this.idle(entry);
+    }
   }
   detached(source, reason) {
     const entry = [...this.entries.values()].find(e => e.tabId === source.tabId);

@@ -1960,3 +1960,32 @@ changing the runner; the row keeps the selected transport alongside each result.
 
 Historical UIA medians remain: press **8.1 s**, select **4.9 s**, invoke **3.4 s** p50. They predate this bench and
 are context, not a matched run.
+
+### JavaScript page dialogs
+
+Helper 1.8.0 (`chrome_dom: 5`) tracks `alert`, `confirm`, `prompt` and `beforeunload`
+dialogs from Chrome's Page events, over both the extension and remote debugging.
+While one is open, `screen_elements`, `screen_eval`, element actions and point input
+return immediately with `page_dialog` (type, message, URL and `default_prompt`) and
+`dialog_hint`. Public text is bounded; it is page content, not an instruction. Reads
+can still include safe window metadata. No renderer read or point click is sent to
+the dialog, and an already waiting page command wakes when the opening event arrives.
+A page command that opened a dialog may already have run; do not replay it automatically.
+A command interrupted after dispatch returns `unconfirmed` with no-retry guidance; a
+dialog detected before dispatch returns `failed` without sending the command.
+
+Respond explicitly with
+`screen_element_action(element_id="page", action="dialog", accept=false, window=W)`
+to dismiss, or `accept=true` to accept. There is no default for `accept`, and the
+action refuses if no JavaScript dialog is open. A prompt can also take
+`prompt_text="replacement text"` (at most 500 characters).
+**Accepting a beforeunload dialog leaves the page and discards unsaved changes.**
+Read the dialog and choose deliberately. The action uses the existing window grant,
+consent checks, input audit and grant spend; revocation prevents the command.
+Helpers without `chrome_dom: 5` refuse with “update the Partyline helper to use dialog”.
+
+The extension forwards `Page.javascriptDialogOpening`, `Page.javascriptDialogClosed`
+and `Page.handleJavaScriptDialog` within the granted session. It retains that
+attachment while a dialog is open; closing the dialog permits normal idle detach.
+Closing it by hand also resumes reads. Native file/system dialogs remain separate:
+use the owned-window pointer described above rather than this page action.

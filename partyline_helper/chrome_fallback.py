@@ -101,6 +101,7 @@ class Fallback:
         grant back without Chrome asking Allow again."""
         pages = self.chrome.pages.get(access, {}).values()
         if (access not in self.grants or not getattr(extension, "socket", None)
+                or any(page.page_dialog for page in pages)
                 or not any(page.navigations for page in pages)):
             return
         self.grants.discard(access)

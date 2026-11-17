@@ -188,7 +188,7 @@ class Session(SessionTransport):
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
                         helper_version=helper_version(), monitors=self.desktop.monitors(),
                         control=CONTROL_VERSION, tools=TOOLS_VERSION, windows=WINDOWS_VERSION,
-                        press=PRESS_VERSION, chrome_dom=4, chrome=current(self.windows.chrome),
+                        press=PRESS_VERSION, chrome_dom=5, chrome=current(self.windows.chrome),
                         window_access=self.window_access_enabled, update_check=True,
                         auto_update=self.updates.enabled, update_recovery=recovery_path().exists())
         show_current(self.windows.chrome)  # a reconnect to the server keeps the live extension state

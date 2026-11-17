@@ -28,6 +28,7 @@ METHOD = re.compile(r"[A-Za-z]{1,40}\.[A-Za-z]{1,60}")
 
 class CDPError(ValueError):
     """A bounded, non-page-derived CDP failure."""
+    in_flight = False
 
 
 class ExtensionRefused(CDPError):
@@ -87,7 +88,7 @@ class BrowserConnection:
         self.state, self.detail = "not_enabled", INSTRUCTION
         self.socket = self.reader = None
         self.pending, self.listeners, self.result_hooks = {}, set(), {}
-        self.labels = {}
+        self.labels, self.sessions = {}, {}
         self.serial = 0
         self.lock = asyncio.Lock()
         self.closed = False
@@ -162,24 +163,38 @@ class BrowserConnection:
         ident = self.serial
         future = asyncio.get_running_loop().create_future()
         self.pending[ident] = future
+        self.sessions[ident] = session
         self.labels[ident] = (params or {}).get("method") if method == "Partyline.dispatch" else method
         if on_result:
             self.result_hooks[ident] = on_result
         message = {"id": ident, "method": method, "params": params or {}}
         if session:
             message["sessionId"] = session
+        sent = False
         try:
             async with self.timeout(10):
                 guard()  # no await between consent check and websocket dispatch
+                sent = True
                 await self.socket.send(json.dumps(message))
                 result = await future
             guard()  # discard a response that arrived after revocation
             return result
+        except CDPError as exc:
+            exc.in_flight = sent
+            raise
         except (OSError, TimeoutError, WebSocketException) as exc:
             raise CDPError("Chrome command interrupted; do not retry actions automatically") from exc
         finally:
             self.pending.pop(ident, None)
             self.labels.pop(ident, None)
+            self.sessions.pop(ident, None)
+
+    def interrupt(self, session, error):
+        """A pushed modal event wakes blocked page calls without waiting for their deadline."""
+        for ident, future in list(self.pending.items()):
+            if (self.sessions.get(ident) == session and not future.done()
+                    and self.labels.get(ident) != "Page.handleJavaScriptDialog"):
+                future.set_exception(error)
 
     async def receive(self):
         try:

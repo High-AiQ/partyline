@@ -255,6 +255,8 @@ class ElementsHub(ElementState):
             return element_id, True  # no server snapshot has established a stable id space yet
         result = await self.read(principal, window=gid, options={"refresh": True})
         tree = self.snapshots.get(gid)
+        if result.get("page_dialog"):
+            raise HTTPException(409, result)
         if result.get("elements_unavailable") or tree is None:
             return None, False
         node = self.node_for(tree, element_id)

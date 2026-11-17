@@ -3285,3 +3285,14 @@ Assuming every window event invalidated a look made a clock or spinner starve ca
 Look generations now change only with a new look. Capture-time events produce a `changing` note,
 while named actions retain source-scoped target checks and point actions retain their geometry and
 input guards. Tests cover unrelated changes, repeated mark actions and a busy continuation.
+
+### A JavaScript modal is page state, not a broken CDP connection
+
+A live renderer can withhold CDP replies while a JavaScript dialog is open. Assuming
+that every missing reply meant transport interruption left reads and input waiting
+for their deadlines and gave no way to dismiss the modal. Track Page dialog events,
+wake pending commands on opening, refuse renderer work while open, and expose an
+explicit consent-guarded dialog response. Keep extension attachments alive until the
+close event. Preserve whether a command was sent, including through cleanup: a dialog
+that interrupts an evaluation is unconfirmed even when no Input command was sent.
+Fake modal tests with withheld replies guard this behavior without real waits.
