@@ -1,6 +1,7 @@
 """Per-user native-host registration and installed unpacked extension assets."""
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -28,6 +29,27 @@ def paths(system, home):
     return root / "chrome-extension", manifest
 
 
+def missing_worker_imports(source):
+    """Return statically imported extension files that are absent from the source folder."""
+    worker = source / "worker.js"
+    if not worker.is_file():
+        return [worker.name]
+    pending, visited, missing = [worker], set(), []
+    while pending:
+        path = pending.pop()
+        if path in visited:
+            continue
+        visited.add(path)
+        for name in re.findall(r"\bimport\s+(?:[^;]*?\s+from\s+)?['\"]\./([^'\"]+\.js)['\"]",
+                               path.read_text(encoding="utf-8")):
+            imported = source / name
+            if not imported.is_file():
+                missing.append(name)
+            elif imported not in visited:
+                pending.append(imported)
+    return sorted(set(missing))
+
+
 def install(system, home, launch, registry=None):
     executable = host_executable(launch, system)
     if executable is None:
@@ -37,6 +59,10 @@ def install(system, home, launch, registry=None):
     source = Path(__file__).with_name("chrome_extension")
     if not source.exists():
         source = Path(__file__).parent.parent / "partyline_chrome"
+    missing = missing_worker_imports(source)
+    if missing:
+        return ["Chrome: extension worker imports missing file(s): " + ", ".join(missing)
+                + "; reinstall the helper package."]
     folder.mkdir(parents=True, exist_ok=True)
     for path in source.iterdir():
         if path.name == "manifest.json" or path.suffix == ".js" and not path.name.endswith(".test.js"):

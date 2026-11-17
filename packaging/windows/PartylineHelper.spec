@@ -4,6 +4,7 @@
 # start, including every consent dialog, and trips antivirus heuristics more often).
 import os
 import sys
+from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
@@ -24,9 +25,10 @@ hidden = (collect_submodules("partyline_helper") + collect_submodules("pynput")
 a = Analysis(
     [os.path.join(ROOT, "packaging", "windows", "entry.py")],
     pathex=[ROOT],
-    datas=[(os.path.join(ROOT, "partyline_chrome", name), "partyline_helper/chrome_extension")
-           for name in ("manifest.json", "worker.js", "relay.js", "attachments.js", "wire.js", "status.js",
-                        "refusal.js")],
+    datas=[(str(path), "partyline_helper/chrome_extension")
+           for path in sorted(Path(ROOT, "partyline_chrome").glob("*.js"))
+           if not path.name.endswith(".test.js")]
+          + [(os.path.join(ROOT, "partyline_chrome", "manifest.json"), "partyline_helper/chrome_extension")],
     hiddenimports=hidden,
     excludes=["pytest"],
 )

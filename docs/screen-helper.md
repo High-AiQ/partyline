@@ -1,5 +1,7 @@
 # Native screen helper
 
+In `chrome://extensions`, “Service worker registration failed / status code 3” means extension files are missing; reinstall or update the helper.
+
 Run this program **on the computer whose desktop you want to share**. It makes an
 outbound connection to Partyline; it needs no inbound firewall rule or browser
 capture extension. Windows 11 is the primary target; macOS and Linux X11 need the

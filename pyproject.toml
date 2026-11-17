@@ -79,6 +79,7 @@ packages = ["partyline", "partyline_helper"]
 [tool.hatch.build.targets.wheel.force-include]
 "partyline_chrome/manifest.json" = "partyline_helper/chrome_extension/manifest.json"
 "partyline_chrome/worker.js" = "partyline_helper/chrome_extension/worker.js"
+"partyline_chrome/backoff.js" = "partyline_helper/chrome_extension/backoff.js"
 "partyline_chrome/relay.js" = "partyline_helper/chrome_extension/relay.js"
 "partyline_chrome/attachments.js" = "partyline_helper/chrome_extension/attachments.js"
 "partyline_chrome/wire.js" = "partyline_helper/chrome_extension/wire.js"
