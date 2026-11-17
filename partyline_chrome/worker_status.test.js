@@ -71,7 +71,7 @@ test('registration and id mismatches are red at once with their reason, and a cl
     await w.click(); // immediate retry: connecting is shown before Chrome answers
     assert.equal(w.ports.length, before + 1);
     assert.equal(w.badge.text, '…');
-    assert.equal(w.alarms.pending.size, 0); // a click ends the schedule
+    assert.equal(w.alarms.reconnects(), 0); // a click ends the schedule
   }
   delete globalThis.chrome;
 });
@@ -98,7 +98,7 @@ test('a host that exits is retried on a bounded schedule: grey while it runs, re
   await w.fire(w.ports.at(-1), p => p.remoteDisconnect(gone)); // the schedule is spent
   assert.deepEqual([w.badge.text, w.badge.color], ['!', '#d93025']);
   assert.match(w.badge.title, /helper bridge stopped/);
-  assert.equal(w.alarms.pending.size, 0);
+  assert.equal(w.alarms.reconnects(), 0);
   const count = w.ports.length;
   await w.fire(w.ports.at(-1), () => {});
   assert.equal(w.ports.length, count); // nothing keeps trying by itself
@@ -120,7 +120,7 @@ test('an unplanned port loss while still starting retries too: a worker that sta
   await w.fire(w.ports[1], () => w.alarms.fire('partyline-reconnect'));
   await w.fire(w.ports[2], p => p.onMessage.fire({ method: 'Partyline.hello', helper_connected: true, helper_version: '1.7.1' }));
   assert.deepEqual([w.badge.text, w.badge.color], ['✓', '#1e8e3e']);
-  assert.equal(w.alarms.pending.size, 0);
+  assert.equal(w.alarms.reconnects(), 0);
   delete globalThis.chrome;
 });
 
@@ -132,7 +132,7 @@ test('a tab activation retries once when the schedule is spent, never while an a
   try {
     for (let i = 0; i < 7; i++) {
       await w.fire(w.ports.at(-1), p => p.remoteDisconnect('Native host has exited.'));
-      if (w.alarms.pending.size) await w.fire(w.ports.at(-1), () => w.alarms.fire('partyline-reconnect'));
+      if (w.alarms.reconnects()) await w.fire(w.ports.at(-1), () => w.alarms.fire('partyline-reconnect'));
     }
     assert.equal(w.badge.text, '!');
     const count = w.ports.length;
@@ -263,7 +263,7 @@ test('automatic update: stop, host exit, new host and helper bring the badge bac
     assert.match(w.badge.title, /waiting for Partyline Helper/);
     await w.fire(w.ports[2], p => p.onMessage.fire({ method: 'Partyline.hello', helper_connected: true, helper_version: '1.7.1' }));
     assert.deepEqual([w.badge.text, w.badge.color], ['✓', '#1e8e3e']);
-    assert.equal(w.alarms.pending.size, 0);
+    assert.equal(w.alarms.reconnects(), 0);
     assert.ok(w.logs.every(([, line]) => !/click/.test(line) || !/toolbar click/.test(line))); // no click happened
     delete globalThis.chrome;
   }

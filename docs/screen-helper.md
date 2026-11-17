@@ -1538,7 +1538,38 @@ attempt finds no host, the schedule above continues (1 s, 5 s, 30 s, 2 min, 5 mi
 does the badge turn red and ask for a click. A host respawned early (a click during the install) is
 released again by the next `suspend-chrome`, and an upgrade installs into a new per-version folder, so an
 early host runs from the old folder and cannot lock the new files; only a same-version reinstall or an
-uninstall can collide, and the installer then reports the locked file.
+uninstall can collide, and the installer then reports the locked file. The uninstaller releases the host only
+once removal starts, after the confirmation box, because the 60 s alarm would otherwise respawn the host while
+that box stays open.
+
+**A session change (Remote Desktop, lock, sleep) and stale peers.** Windows keeps the user's processes
+running when the session moves between the console and a remote session, so the helper, Chrome and the native
+host survive; the helper's local link is a loopback socket plus files in the helper's config folder, none of
+them keyed to a session. What can stay broken afterwards is a *stale peer*, and these paths used to stop the
+reconnect for good:
+- The helper marked its extension link *refused* after one failed attempt (a host that was dying, or one whose
+  Chrome side was gone) and tried again only when the host's endpoint file changed. A host that stayed up never
+  changed it, so every later read stayed on UIA with *Partyline Chrome is reconnecting*. There is no Allow
+  prompt to refuse on this link: a read 10 s after a failed attempt tries again (so a host that accepts but
+  never answers stalls a read at most once per 10 s), and a new host's endpoint file resets that gap.
+- A native host whose Chrome pipe never closed, or whose Chrome was killed, kept `chrome-native.lock`, so every
+  later host exited unseen and the extension's schedule failed until it was spent. The host now also ends when
+  Chrome's process exits (one process-exit wait, not a scan), and a host that cannot take the lock sends
+  `Partyline.busy` before exiting, so the badge names it: grey *reconnecting (an older helper bridge is still
+  running)*, then red *An older Partyline helper bridge is still running… Close Chrome completely (or end
+  PartylineChromeHost in Task Manager)*.
+- A host that started but never greeted left the badge on *connecting* for ever. One alarm 20 s after the port
+  opens ends such a port and continues the schedule: grey *reconnecting (the helper bridge did not answer)*,
+  then red *The helper bridge started but never answered… click this button*.
+- Chrome refusing to open the port at all (`connectNative` throwing) now runs the schedule too.
+- The helper's watch on the host's endpoint file ran inside the window watch's task group, so a failing window
+  watch (a desktop switch) cancelled it for the rest of the server session, and an OS notification error ended it
+  for good. It is now its own task, started again by the next read if it stopped.
+Not recovered by itself: a host whose Chrome is still running, whose pipe stays open and which never answers
+holds `chrome-native.lock`; it is named (see above), and ending `PartylineChromeHost` in Task Manager or closing
+Chrome frees it, after which the extension's schedule or a click connects.
+A grant that was on CDP goes back to CDP, with no new grant, as soon as the link is back: each read connects the
+extension first, and the page is attached again on that read (the source moves from `uia` to `cdp`).
 
 **Extension refusal codes.** A refused extension command returns one fixed code, never Chrome's own
 text (it can name a URL). The helper reports it as `Chrome extension refused <CDP method>:
@@ -1826,8 +1857,8 @@ and any difference. Upload sanitized evidence to the line; keep host/account det
    reconnecting*, never `transport: remote_debugging`. A grant whose page Chrome refused returns to the
    extension after that tab navigates, and Chrome's automation infobar disappears once nothing needs remote
    debugging. Run the manual installer over a
-   running helper (it asks the host to release its files): the badge shows *paused for a helper
-   update* in grey and, with no click, goes green about a minute later once the install is done (a click
+   running helper (it asks the host to release its files): the badge shows *paused while the helper
+   updates* in grey and, with no click, goes green about a minute later once the install is done (a click
    reconnects at once). On a page that hosts another extension's frame, expect
    `other_extension_frame` and, with remote debugging on, a read over `remote_debugging`. Open the service worker console and
    confirm `[Partyline]` lines for each step and no page content. Rename the native host

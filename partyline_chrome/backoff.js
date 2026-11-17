@@ -10,6 +10,10 @@ export const DELAYS = [0, 1, 5, 30, 120, 300]; // seconds before the next attemp
 export const MIN_GAP = 30;
 export const RELEASE_DELAY = 60; // seconds before the first attempt after an installer released the host
 export const ALARM = 'partyline-reconnect';
+// A host that starts but never greets is a failed attempt too: one alarm, HELLO_WAIT seconds after the port
+// opens, ends it so the schedule above continues (otherwise the badge would say "connecting" for ever).
+export const HELLO_ALARM = 'partyline-hello';
+export const HELLO_WAIT = 20;
 const KEY = 'reconnect';
 
 export class Backoff {
@@ -42,6 +46,15 @@ export class Backoff {
 
   async cancel() {
     try { await this.api.alarms?.clear(ALARM); } catch { /* no alarms */ }
+  }
+
+  // A port just opened: expect its greeting. Cleared by the greeting or by the port closing.
+  async awaitingHello() {
+    try { await this.api.alarms?.create(HELLO_ALARM, { when: this.now() + HELLO_WAIT * 1000 }); } catch { /* no alarms */ }
+  }
+
+  async helloSettled() {
+    try { await this.api.alarms?.clear(HELLO_ALARM); } catch { /* no alarms */ }
   }
 
   // The installer asked the host to release its files: reconnecting now would respawn the host mid-install. The

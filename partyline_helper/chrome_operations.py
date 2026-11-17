@@ -1,5 +1,6 @@
 """Operation leases and event-driven native-port discovery."""
 import asyncio
+import contextlib
 import json
 from functools import wraps
 from contextvars import ContextVar
@@ -33,8 +34,7 @@ async def await_extension(browser, events=file_events, deadline=asyncio.timeout,
     try:
         async with deadline(patience), events(endpoint_path()) as watcher:
             while True:
-                if browser.state == "refused":
-                    browser.state = "not_enabled"  # a new host is a new chance, as in watch_extension
+                browser.new_host()  # a new host is a new chance, as in watch_extension
                 if await browser.ensure():
                     break
                 await watcher.wait()
@@ -69,8 +69,7 @@ async def watch_extension(chrome, events=file_events):
                     if discover():
                         browser = await select_extension(chrome)
                         if isinstance(browser, ExtensionTransport):
-                            if browser.state == "refused":
-                                browser.state = "not_enabled"
+                            browser.new_host()
                             await browser.ensure()
                 await watcher.wait()
     except OSError as exc:
@@ -78,10 +77,32 @@ async def watch_extension(chrome, events=file_events):
         print(f"Chrome extension watch stopped ({type(exc).__name__}); reads still look for it", flush=True)
 
 
+def keep_watching(chrome):
+    """The endpoint watch is its own task, so a failing window watch (a desktop switch) cannot cancel it, and
+    a watch that stopped (an OS notification error) is armed again by the next operation, never left dead."""
+    watch = chrome.extension_watch
+    if watch is None or not watch.done():
+        return
+    chrome.extension_watch = asyncio.ensure_future(watch_extension(chrome))
+
+
 async def watch_windows(shares):
-    async with asyncio.TaskGroup() as group:
-        group.create_task(shares.watch())
-        group.create_task(watch_extension(shares.chrome))
+    chrome = shares.chrome
+    chrome.extension_watch = asyncio.ensure_future(watch_extension(chrome))
+    try:
+        try:
+            await shares.watch()
+        except Exception as exc:
+            # A failing window watch (a desktop switch) must not take the endpoint watch with it: report it,
+            # then keep that watch up until the session itself is torn down (a cancel).
+            print(f"Window watch stopped ({type(exc).__name__}); the Chrome watch keeps running", flush=True)
+            await asyncio.Event().wait()
+    finally:
+        watch, chrome.extension_watch = chrome.extension_watch, None
+        if watch:
+            watch.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await watch
 
 
 _ACTIVE = ContextVar("chrome_operation", default=None)
@@ -108,6 +129,7 @@ def operation(function):
     async def leased(self, access, *args, **kwargs):
         if access.grant and access.grant.get("chrome_cancelled"):
             return await function(self, access, *args, **kwargs)
+        keep_watching(self)
         browser = await select_extension(self)
         if isinstance(browser, ExtensionTransport) and not browser.socket and not await browser.ensure():
             if self.auto_transport and not known():

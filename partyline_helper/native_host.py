@@ -6,7 +6,7 @@ import os
 import secrets
 import sys
 
-from partyline.process_events import wait_pid
+from partyline.process_events import process_exited, wait_pid
 from .chrome_identity import ORIGIN
 from .config import config_path, save_config
 from .update_preferences import enabled
@@ -147,13 +147,45 @@ class Bridge:
                 return
 
 
-async def run(stream, output, wait=wait_pid):
+async def serve_until_chrome_exits(bridge, stream, parent=process_exited):
+    """Chrome closing the port ends `receive`; Chrome itself going away (killed, or its session torn down)
+    must end the host too, or a stale host keeps the lock and every later host exits unseen.
+
+    no-poll (b): one process-exit wait on Chrome's pid, never a liveness scan."""
+    receiving = asyncio.ensure_future(bridge.receive(stream))
+    watching = asyncio.ensure_future(parent(bridge.browser_pid)) if bridge.browser_pid else None
+    try:
+        pending = {t for t in (receiving, watching) if t}
+        while receiving in pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            if watching in done and not watching.cancelled() and watching.exception():
+                # Fail open: a watch that cannot open Chrome's process must never end a healthy host.
+                print(f"Chrome parent watch stopped ({type(watching.exception()).__name__}); "
+                      "the host ends with Chrome's port", file=sys.stderr, flush=True)
+                watching = None
+            elif watching in done:
+                break  # Chrome exited
+    finally:
+        for task in (receiving, watching):
+            if task and not task.done():
+                task.cancel()
+        await asyncio.gather(*(t for t in (receiving, watching) if t), return_exceptions=True)
+    if receiving.done() and not receiving.cancelled() and receiving.exception():
+        raise receiving.exception()
+
+
+async def run(stream, output, wait=wait_pid, parent=process_exited):
     lock = InstanceLock("chrome-native")
     if not lock.acquire():
         # no-poll (b): extension reload may overlap the previous host's exit; wait once on its PID.
         previous = running_pid()
         if (not previous or previous == os.getpid() or
                 not await asyncio.to_thread(wait, previous, timeout=5) or not lock.acquire()):
+            # Say why before exiting: Chrome only reports "Native host has exited", and the extension retries
+            # on its schedule while the older host (a stale one never leaves) is the real reason.
+            with contextlib.suppress(OSError, ValueError):
+                output.write(frame({"method": "Partyline.busy", "pid": previous}))
+                output.flush()
             return
     token = secrets.token_hex(32)
     bridge = Bridge(output, token)
@@ -163,7 +195,7 @@ async def run(stream, output, wait=wait_pid):
         save_config({"port": server.sockets[0].getsockname()[1], "token": token,
                      "pid": os.getpid(), "version": __version__}, endpoint_path())
         bridge.native(hello())
-        await bridge.receive(stream)
+        await serve_until_chrome_exits(bridge, stream, parent)
     finally:
         # Close the helper first: wait_closed() (Python 3.12+) waits for every open connection, so a
         # host whose Chrome side ended would otherwise keep the lock and refuse each later host.
@@ -186,7 +218,24 @@ def main(argv=None, stream=None, output=None):
     if sys.platform == "win32":
         from .native_windows import binary_stdio
         binary_stdio()
-    asyncio.run(run(stream or sys.stdin.buffer, output or sys.stdout.buffer))
+    if stream is not None:
+        asyncio.run(run(stream, output or sys.stdout.buffer))
+        return
+    # A read of Chrome's pipe cannot be cancelled: when Chrome is gone but its pipe is still open,
+    # asyncio.run would wait for that read forever and keep the host alive. So the loop ends, then the
+    # process does. A crash is written to stderr first (Chrome only says "Native host has exited").
+    code = 0
+    try:
+        asyncio.new_event_loop().run_until_complete(run(sys.stdin.buffer, output or sys.stdout.buffer))
+    except BaseException:  # pragma: no cover - the real process
+        import traceback
+        code = 1
+        with contextlib.suppress(OSError, ValueError):
+            traceback.print_exc()
+    finally:
+        with contextlib.suppress(OSError, ValueError):
+            sys.stdout.flush()
+        os._exit(code)  # pragma: no cover - the real process
 
 
 if __name__ == "__main__":

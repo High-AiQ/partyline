@@ -10,10 +10,13 @@ from .native_socket import NativeSocket
 
 STALE_HOLDS = frozenset({"tab_owned_by_other_grant", "previous_detach_incomplete"})
 RECONNECTING = "Partyline Chrome is reconnecting; it reconnects by itself, or click its toolbar button"
+GAP = 3  # seconds between the starts of two attempts
+FAILED_GAP = 10  # seconds after a failed attempt (a host that never answers); a new host resets it
 
 
 class ExtensionTransport(BrowserConnection):
     transport = "extension"
+    gap = GAP
 
     def __init__(self, changed=lambda state, detail: None, discovery=discover,
                  opener=asyncio.open_connection):
@@ -27,7 +30,16 @@ class ExtensionTransport(BrowserConnection):
         self.waited = False  # one bounded wait per outage for the extension to return (chrome_operations)
 
     def can_attempt(self):
-        return not self.closed and not self.socket and (self.state != "refused" or self.retry_requested)
+        # There is no Allow prompt to refuse: a failed attempt (a host that was dying, or one whose Chrome
+        # side is gone) never blocks the next one for good. Attempts follow a read or a new host's endpoint
+        # file, never a timer, and a short gap keeps a stale host from stalling every read.
+        return not self.closed and not self.socket and self.clock() >= self.next_attempt
+
+    def new_host(self):
+        """A host (re)wrote its endpoint: whatever failed before says nothing about it."""
+        if self.state == "refused":
+            self.state = "not_enabled"
+        self.next_attempt = 0
 
     def reason(self):
         return self.detail
@@ -37,6 +49,8 @@ class ExtensionTransport(BrowserConnection):
             detail = "Connecting to Partyline Chrome"
         elif state in ("refused", "disconnected", "not_enabled"):
             detail = RECONNECTING  # never remote debugging's wording: this transport only waits for its host
+            if state == "refused":
+                self.next_attempt = max(self.next_attempt, self.clock() + FAILED_GAP)
         elif state == "connected":
             self.waited = False
         super().report(state, detail)

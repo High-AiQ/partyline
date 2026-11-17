@@ -11,6 +11,8 @@ export function recoverable(message) {
 // The recoverable reason in a few words, for the title while the extension reconnects.
 export function brief(message) {
   const text = String(message || '').toLowerCase();
+  if (text.includes('did not answer')) return 'the helper bridge did not answer';
+  if (text.includes('still running')) return 'an older helper bridge is still running';
   if (!text || text.includes('exited')) return 'the helper bridge stopped';
   if (text.includes('disconnected') || text.includes('closed')) return 'the helper bridge closed the connection';
   return `Chrome said: ${message}`;
@@ -25,6 +27,13 @@ export function explain(message) {
   if (text.includes('forbidden')) {
     return 'Chrome refused the native host for this extension (extension id mismatch). '
       + 'Load the extension from the helper\'s own folder';
+  }
+  if (text.includes('did not answer')) {
+    return 'The helper bridge started but never answered. Make sure Partyline Helper is running, then click this button';
+  }
+  if (text.includes('still running')) {
+    return 'An older Partyline helper bridge is still running and blocks the new one. Close Chrome completely '
+      + '(or end PartylineChromeHost in Task Manager), then click this button';
   }
   if (text.includes('has exited') || text.includes('exited')) {
     return 'The helper bridge stopped. Make sure Partyline Helper is running, then click this button';
