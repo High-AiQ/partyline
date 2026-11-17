@@ -27,6 +27,14 @@ class ShutdownCommandTests(unittest.TestCase):
             self.assertIn('paused', native_shutdown.pause_for_install(host, wait, runner))
             runner.assert_called_once_with('work')
             wait.assert_called_once_with(12, timeout=5)
+            self.assertIn('reconnects by itself', native_shutdown.pause_for_install(host, wait, runner))
+            # A host that respawned early (a click, a browser start) is released again by the next run.
+            host.return_value = 34
+            wait.reset_mock()
+            self.assertIn('paused', native_shutdown.pause_for_install(host, wait, runner))
+            wait.assert_called_once_with(34, timeout=5)
+            host.return_value = 12
+            wait.reset_mock()
             wait.return_value = False
             with self.assertRaises(RuntimeError):
                 native_shutdown.pause_for_install(host, wait, runner)

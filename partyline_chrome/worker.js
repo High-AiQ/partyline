@@ -1,5 +1,5 @@
 import { Relay } from './relay.js';
-import { Backoff, ALARM } from './backoff.js';
+import { Backoff, ALARM, RELEASE_DELAY } from './backoff.js';
 import { Status, explain, brief, recoverable } from './status.js';
 import { Decoder, packets } from './wire.js';
 
@@ -89,11 +89,15 @@ async function open(resetBudget = false, why = 'startup', force = false) {
         hellos = hellos.then(() => hello(message)).catch(disconnect);
       } else if (message?.method === 'Partyline.suspend') {
         // The helper is away. The port stays up, so the next helper that attaches is greeted with no click;
-        // only an installer that must free the host's files asks for `release`.
+        // only an installer that must free the host's files asks for `release`: the port closes and the
+        // reconnect schedule starts after a delay (backoff.js).
         if (message.release === true) {
-          log.info('the installer asked the native host to release its files; click the button to reconnect');
+          // Reconnecting at once would make Chrome spawn the host mid-install: wait for one alarm instead.
+          log.info(`the installer asked the native host to release its files; reconnecting in ${RELEASE_DELAY} s`);
+          const armed = backoff.released();
           disconnect();
-          status.set('paused');
+          status.set('updating');
+          void armed;
         } else {
           log.info('the helper is away (paused); keeping the native port for its return');
           relay.attachments.reset().catch(() => {});

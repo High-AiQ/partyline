@@ -23,9 +23,9 @@ test('each badge state sets text, colour and a plain-words title', () => {
   status.set('connected', '1.6.2');
   assert.deepEqual([a.calls.text, a.calls.color], ['✓', COLORS.connected]);
   assert.equal(a.calls.title, 'Partyline: connected to helper 1.6.2');
-  status.set('paused');
-  assert.deepEqual([a.calls.text, a.calls.color], ['!', COLORS.error]);
-  assert.match(a.calls.title, /Click this button/);
+  status.set('updating');
+  assert.deepEqual([a.calls.text, a.calls.color], ['…', COLORS.neutral]); // not an error: it reconnects by itself
+  assert.match(a.calls.title, /reconnects by itself.*click to reconnect now/);
   status.set('error', explain('Specified native messaging host not found.'));
   assert.deepEqual([a.calls.text, a.calls.color], ['!', COLORS.error]);
   a.calls.title = '';

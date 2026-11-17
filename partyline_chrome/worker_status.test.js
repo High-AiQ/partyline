@@ -148,11 +148,12 @@ test('a tab activation retries once when the schedule is spent, never while an a
   delete globalThis.chrome;
 });
 
-test('an installer release shows paused; clicking a connected button refreshes it; a silent stale port is replaced', async () => {
+test('an installer release shows updating; clicking a connected button refreshes it; a silent stale port is replaced', async () => {
   const w = await boot('badge-suspend');
   await w.fire(w.ports[0], p => p.onMessage.fire({ method: 'Partyline.suspend', release: true }));
   assert.equal(w.ports[0].disconnected, true);
-  assert.match(w.badge.title, /paused for a helper update/);
+  assert.match(w.badge.title, /reconnects by itself/);
+  assert.equal(w.badge.color, '#9aa0a6');
   await w.click();
   assert.equal(w.ports.length, 2);
   await w.fire(w.ports[1], p => p.onMessage.fire({ method: 'Partyline.hello', helper_connected: true, helper_version: '1.6.2' }));
