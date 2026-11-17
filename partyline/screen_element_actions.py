@@ -107,6 +107,8 @@ class ElementAction(BaseModel):
 STALE = ("unknown element id: not in the current snapshot (the page changed or it was never read); "
          "find it again, or pass then to see the page after a click")
 REFRESH_FAILED = "could not refresh the window; read it again before acting"
+TARGET_CHANGING = ("target keeps changing; read it again when it settles, or use "
+                   "screen_window_snapshot + screen_window_click")
 
 
 DIFF = ("diff", "removed", "lines", "more", "next_offset", "note", "partial", "changed", "update_helper",
@@ -119,6 +121,12 @@ def diffed(reply):
     if reply.get("change_event_since_snapshot"):
         shown["change_event_since_snapshot"] = True
     return shown
+
+
+def action_token(elements, grant_id, ident):
+    tree = elements.snapshots.get(grant_id)
+    node = (tree.nodes.get(ident) or tree.nodes.get(tree.by_helper.get(ident))) if tree else None
+    return node.cached.get("action_token") if node else None
 
 
 async def after(hub, principal, grant, then, result):
@@ -162,9 +170,12 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
         with phase("target_ms"):
             target = True
             if body.action != "reload":
-                target, _ = await hub.elements.action_target(principal, grant, body.element_id)
+                target, busy = await hub.elements.action_target(principal, grant, body.element_id)
         if target is None:
+            if busy:
+                return {"status": "failed", "reason": "target_changed", "error": TARGET_CHANGING}
             return {"status": "failed", "error": REFRESH_FAILED}
+        token = action_token(hub.elements, grant["id"], body.element_id)
         async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window
             if body.mark is not None:
                 look, _, _ = hub.snapshots.looks.target(principal, grant, body.mark)
@@ -178,6 +189,11 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
             if not known:
                 tree = hub.elements.snapshots.get(grant["id"])
                 return {"status": "failed", "error": getattr(tree, "recovery_hint", None) or STALE}
+            if body.action != "reload" and (message["element_id"] != target or
+                    token != action_token(hub.elements, grant["id"], body.element_id)):
+                return {"status": "failed", "reason": "target_changed", "error": TARGET_CHANGING}
+            if token:
+                message["action_token"] = token
             hub.window_grants.spend(grant)
             if body.action == "set_files":
                 from .screen_file_input import ticket

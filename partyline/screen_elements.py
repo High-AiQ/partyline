@@ -232,12 +232,14 @@ class ElementsHub(ElementState):
 
         Events from elsewhere in the window do not stop an action: it proceeds when nothing at, above
         or below the target changed since the tree was captured. Anything else is read again, and
-        `(None, False)` means the target is still changing.
+        `(None, True)` means readable but changing; `(None, False)` means the read failed.
         """
         gid = grant["id"]
         tree = self.fresh(gid)
         previous = tree or self.snapshots.get(gid)
         counted = previous is not None and getattr(previous, "event_counter", None) is not None
+        if previous is not None and previous.action_identity:
+            return self._helper_id(previous, element_id)  # helper proves this backend node at dispatch
 
         def device():
             return resolve_window(self.hub, principal, gid)[1]
@@ -258,9 +260,9 @@ class ElementsHub(ElementState):
         node = self.node_for(tree, element_id)
         if tree.sources and getattr(tree, "event_counter", None) is not None:
             if node and not await self.target_stable(principal, grant, device(), tree, node.id):
-                return None, False
+                return None, True  # readable, but target stability could not be established
         elif tree.event_version != self.change_versions.get(gid, 0):
-            return None, False
+            return None, True
         return self._helper_id(tree, element_id)
 
     @staticmethod

@@ -13,7 +13,7 @@ from fastapi import HTTPException
 
 from .machine_scope import deny_unless
 
-REASONS = frozenset({"covered", "stale", "outside", "not_found"})  # codes the helper gives a point failure
+REASONS = frozenset({"covered", "stale", "outside", "not_found", "target_changed"})
 TEXT = re.compile(r"covered|outside the viewport|stale|unknown element|read (?:it|the window) again|"
                   r"could not refresh|not found|no such element|detached", re.IGNORECASE)
 KEPT = ("file", "width", "height", "snapshot", "marks", "marks_unchanged", "marks_note", "unchanged", "note",
@@ -49,7 +49,10 @@ async def attach(runtime, hub, store, principal, conv_id, grant, result, key="sc
     except HTTPException:
         return
     try:
-        async with asyncio.timeout(SECONDS):
+        busy = result.get("reason") == "target_changed"
+        if busy:
+            marks = False  # another full tree walk cannot explain a target stability refusal
+        async with asyncio.timeout(2 if busy else SECONDS):
             if marks:
                 await hub.elements.read(principal, None, grant["id"], {"refresh": True})
             extra = {"landing": landing} if landing is not None else {}

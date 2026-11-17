@@ -1,5 +1,15 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-17 — Whole-page quiet does not prove whether one CDP target is safe
+
+The false assumption was that a live page must stop producing DOM mutations before an element action
+can proceed. A continuously changing unrelated subtree defeated every whole-window barrier and then
+held the failure answer behind another tree walk. CDP actions now re-prove the original backend node,
+connection, document identity and bounds immediately before input; reads retain their churn metadata.
+`tests/test_cdp_identity.py` covers unrelated churn, related changes, movement, replacement, document
+changes and the bounded, unmarked failure picture with fake time. Reload reattachment errors also use
+the existing actionable extension-refusal explanation, covered by `tests/test_extension_fallback.py`.
+
 ## 2026-11-15 — A path-bound UIA ID is not a persistent comparison identity
 
 The false assumption was that a new helper ID necessarily means a control appeared. UIA helper IDs bind

@@ -8,6 +8,7 @@ from .cdp_dom_nodes import DETAIL, discover
 from .cdp_settle import Quiet
 from .cdp_transport import CDPError, DocumentChanged, PageUnavailable
 from .cdp_recovery import Recovery
+from .cdp_identity import TargetChanged, identity, reprove, token as identity_token
 
 
 class Page(Recovery):
@@ -23,6 +24,7 @@ class Page(Recovery):
         self.page_state, self.url = "alive", ""
         self.recovery_ready = False
         self.operation_epoch = None
+        self.action_proof = None
         self.quiet = Quiet()
         self.browser.listeners.add(self.event)
 
@@ -39,6 +41,9 @@ class Page(Recovery):
     async def call(self, method, params=None):
         self.guard()
         if method.startswith("Input.") or method == "DOM.setFileInputFiles":
+            if not self.dispatched and self.action_proof is not None:
+                await reprove(self, self.action_proof)
+                self.guard()
             self.dispatched = True
         try:
             return await self.browser.call(method, params, self.session, self.guard)
@@ -87,8 +92,15 @@ class Page(Recovery):
         await observe(frames["frameTree"])
         self.initialized = True
 
-    async def function(self, backend, recipe, arguments=(), release=True):
-        resolved = await self.call("DOM.resolveNode", {"backendNodeId": backend, "objectGroup": "partyline"})
+    async def function(self, backend, recipe, arguments=(), release=True, proof=False):
+        try:
+            resolved = await self.call("DOM.resolveNode", {
+                "backendNodeId": backend, "objectGroup": "partyline"})
+        except CDPError as exc:
+            if proof and type(exc) is CDPError:
+                self.guard()  # revocation or document loss must retain its own refusal
+                raise TargetChanged() from exc
+            raise
         obj = resolved["object"]["objectId"]
         try:
             result = await self.call("Runtime.callFunctionOn", {
@@ -166,14 +178,17 @@ class Page(Recovery):
                     if node.get("dom_discovered") and dom.get("hidden"):
                         continue
                 item = normalize(node, ident, ids.get(node.get("parentId")), dom)
+                proof = identity(self, dom)
+                item["action_token"] = identity_token(ident, proof)
                 elements.append(item)
-                self.nodes[ident] = node
+                self.nodes[ident] = {**node, "action_identity": proof, "action_token": item["action_token"]}
         finally:
             if (self.live and self.page_state == "alive" and self.access.grant is self.grant
                     and not self.access.gate.revoked.is_set()):
                 await self.call("Runtime.releaseObjectGroup", {"objectGroup": "partyline"})
         await self.call("Runtime.evaluate", {"expression": "0", "returnByValue": True})  # renderer fence
-        result = {"source": "cdp", "elements": elements, "snapshot_id": uuid.uuid4().hex,
+        result = {"source": "cdp", "action_identity_supported": True,
+                  "elements": elements, "snapshot_id": uuid.uuid4().hex,
                   "captured_event_counter": before, **self.access.event_status()}
         self.access.keep(result, cursor)
         if index + 2000 < len(nodes):

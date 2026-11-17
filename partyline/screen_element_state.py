@@ -93,6 +93,9 @@ class ElementState(EventScope):
                 return result
             if getattr(tree, "event_counter", None) is None:
                 return tree  # old helpers retain their explicit changed/partial response
+            if tree.action_identity:
+                tree.capture_raced = tree.changed  # report churn; actions use a live node proof
+                return tree
             roots = None
             if tree.sources and not tree.changed:
                 moved, roots = await self.judge(principal, grant, device, tree)
@@ -141,6 +144,7 @@ class ElementState(EventScope):
                 tree.note = "capture stopped: " + str(response["elements_unavailable"])[:100]
                 return tree
             tree.source = response.get("source", "uia")
+            tree.action_identity = tree.source == "cdp" and response.get("action_identity_supported") is True
             tree.transport = response.get("transport")
             tree.source_reason = response.get("source_reason")
             tree.page_state = response.get("page_state")

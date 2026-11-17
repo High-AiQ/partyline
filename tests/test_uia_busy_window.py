@@ -179,7 +179,7 @@ class BusyWindowTests(unittest.IsolatedAsyncioTestCase):
         self.provider.noisy = {EDIT}
         self.hub.changed("g")
         self.event(EDIT)
-        self.assertEqual((None, False), await self.hub.action_target(self.principal, GRANT,
+        self.assertEqual((None, True), await self.hub.action_target(self.principal, GRANT,
                                                                       self.stable(EDIT)))
         self.assertFalse(self.provider.calls)
 
@@ -187,13 +187,13 @@ class BusyWindowTests(unittest.IsolatedAsyncioTestCase):
         self.provider.noisy = {5}
         await self.read()
         self.hub.changed("g")
-        self.assertEqual((None, False), await self.hub.action_target(self.principal, GRANT,
+        self.assertEqual((None, True), await self.hub.action_target(self.principal, GRANT,
                                                                       self.stable(5)))
 
     async def test_a_fresh_tree_that_recorded_the_target_busy_refuses_it(self):
         self.provider.noisy = {EDIT}
         await self.read()
-        self.assertEqual((None, False), await self.hub.action_target(self.principal, GRANT,
+        self.assertEqual((None, True), await self.hub.action_target(self.principal, GRANT,
                                                                       self.stable(EDIT)))
         self.assertFalse(self.provider.calls)
 
@@ -219,7 +219,7 @@ class BusyWindowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(target)
         self.provider.noisy = {EDIT}
         await self.read(query="Name box", refresh=True)
-        self.assertEqual((None, False), await self.hub.action_target(self.principal, GRANT,
+        self.assertEqual((None, True), await self.hub.action_target(self.principal, GRANT,
                                                                       self.stable(2)))
 
     async def test_ancestry_kept_across_a_reorder_is_not_trusted(self):
@@ -237,7 +237,7 @@ class BusyWindowTests(unittest.IsolatedAsyncioTestCase):
         await self.read()  # quiet: the tree is fresh and flagged nothing
         self.event(EDIT)
         self.provider.noisy = {EDIT}  # and still changing, before any debounced push arrives
-        self.assertEqual((None, False), await self.hub.action_target(self.principal, GRANT,
+        self.assertEqual((None, True), await self.hub.action_target(self.principal, GRANT,
                                                                       self.stable(EDIT)))
 
     async def test_an_event_seen_only_by_the_final_status_check_stops_the_action(self):
@@ -249,7 +249,7 @@ class BusyWindowTests(unittest.IsolatedAsyncioTestCase):
         self.hub.capture_status = late
         await self.read(refresh=True)
         self.provider.noisy = {EDIT}
-        self.assertEqual((None, False), await self.hub.action_target(self.principal, GRANT,
+        self.assertEqual((None, True), await self.hub.action_target(self.principal, GRANT,
                                                                       self.stable(EDIT)))
 
     async def test_a_target_kept_only_as_a_retained_id_is_read_again(self):
@@ -259,7 +259,7 @@ class BusyWindowTests(unittest.IsolatedAsyncioTestCase):
         await self.read(query="one", refresh=True)  # a query tree: the Edit survives only as an action id
         self.assertNotIn(edit, self.hub.snapshots["g"].nodes)
         self.provider.noisy = {EDIT}
-        self.assertEqual((None, False), await self.hub.action_target(self.principal, GRANT, edit))
+        self.assertEqual((None, True), await self.hub.action_target(self.principal, GRANT, edit))
         self.provider.noisy = set()
         reads = len(self.reads)
         target, known = await self.hub.action_target(self.principal, GRANT, edit)

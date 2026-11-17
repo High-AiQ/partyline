@@ -85,7 +85,8 @@ class Socket:
             backend = int(p["objectId"])
             if p["arguments"] or p["functionDeclaration"] == self.native_select.blur:
                 return {"result": {"value": self.native_select.function(backend, p)}}
-            state = self.states.get(backend, {})
+            state = {"connected": backend in self.states, "document_identity": "document",
+                     "bounds": [0, 0, 100, 40], **self.states.get(backend, {})}
             if state.get("hit") is False:
                 state = {**state, "hit_reason": state.get("hit_reason", 'covered by DIV "overlay"')}
             return {"result": {"value": state}}

@@ -72,6 +72,29 @@ class FallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.f.chrome.fallback.remote, self.f.chrome.fallback.grants), (None, set()))
         self.assertIn("domain_refused", self.f.chrome.reasons[self.f.access])
 
+    async def test_reload_reattach_refusal_without_remote_debugging_gives_actionable_reason(self):
+        from partyline_helper.chrome_fallback import REASONS
+        await self.f.read()
+        page = next(iter(self.f.chrome.pages[self.f.access].values()))
+        page.quiet.wait = AsyncMock(return_value="quiet")
+        self.discoverable = False
+        self.peer.refuse = {1: "other_extension_frame"}
+        result = await self.f.chrome.action(self.f.access, dict(action="reload", element_id="page"))
+        self.assertEqual("unconfirmed", result["status"])  # reload ran before reattach was refused
+        self.assertEqual(REASONS["other_extension_frame"], result["error"])
+        self.assertEqual((None, set()), (self.f.chrome.fallback.remote, self.f.chrome.fallback.grants))
+
+    async def test_detached_recovery_attach_refusal_has_the_same_actionable_reason(self):
+        from partyline_helper.chrome_fallback import REASONS
+        await self.f.read()
+        page = next(iter(self.f.chrome.pages[self.f.access].values()))
+        page.page_state = "detached"
+        self.discoverable = False
+        self.peer.refuse = {1: "other_extension_frame"}
+        result = await self.f.chrome.action(self.f.access, dict(action="reload", element_id="page"))
+        self.assertEqual("failed", result["status"])
+        self.assertEqual(REASONS["other_extension_frame"], result["error"])
+
     async def test_revoking_the_grant_closes_the_remote_connection(self):
         self.peer.refuse = {1: "other_extension_frame"}
         await self.read_after_prompt()

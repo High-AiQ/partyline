@@ -10,6 +10,7 @@ from .cdp_mapping import frame, map_window, title_matches
 from .cdp_page import Page
 from .cdp_recovery import HINT, reload, read as read_page
 from .cdp_transport import CDPError, INSTRUCTION
+from .cdp_identity import failure
 from .chrome_fallback import Fallback
 from .chrome_operations import audit, chrome_label, operation, preferred, status
 
@@ -251,8 +252,8 @@ class Chrome:
             try:
                 return await reload(self, access, page)
             except CDPError as exc:
-                return {"status": "unconfirmed" if page and page.dispatched else "failed",
-                        "source": "cdp", "error": str(exc)}
+                return {"status": "unconfirmed" if page and page.dispatched else "failed", "source": "cdp",
+                        "error": self.fallback.reason(exc) or str(exc)}
         if page and page.page_state != "alive":
             return {"status": "failed", **self.metadata(access), "error": HINT}
         if not page:
@@ -271,10 +272,9 @@ class Chrome:
             error = str(exc)
             if message.get("action") == "set_files" and (not page.live or "revoked" in error):
                 error += "; use the Open dialog path instead"
-            return {"status": "unconfirmed" if page.dispatched else "failed",
-                    "source": "cdp", "error": error, "revoked_during": not page.live}
+            return failure(page, exc, error)
         finally:
-            page.operation_epoch = None
+            page.operation_epoch, page.action_proof = None, None
 
     @operation
     async def tabs(self, access):
