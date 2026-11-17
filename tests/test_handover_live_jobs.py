@@ -107,6 +107,7 @@ class LiveJobsTest(unittest.TestCase):
         app.include_router(hierarchy_router(self.runtime))
         actor = SimpleNamespace(kind='machine', conv_id='line', attachment_id='old')
         with patch('partyline.handover_jobs.process_snapshot', return_value=snapshot), \
+             patch('partyline.tmp_owners.process_snapshot', return_value=snapshot), \
              patch('partyline.handover_jobs.owned', return_value={proc.pid}), \
              patch('partyline.captain_handover.request_principal', return_value=actor), \
              patch('partyline.captain_handover_completion._try_detach', new_callable=AsyncMock), \
@@ -209,6 +210,7 @@ class LiveJobsTest(unittest.TestCase):
         from partyline.captain_handover_completion import complete_route
         actor = SimpleNamespace(kind='machine', conv_id='line', attachment_id='new')
         with patch('partyline.handover_jobs.process_snapshot', return_value=None), \
+             patch('partyline.tmp_owners.process_snapshot', return_value=None), \
              patch('partyline.captain_handover.request_principal', return_value=actor):
             with self.assertRaises(HTTPException) as caught:
                 asyncio.run(complete_route(self.runtime, None, 'line', CompleteIn(handover_id=self.ident)))

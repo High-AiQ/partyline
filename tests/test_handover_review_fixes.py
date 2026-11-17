@@ -55,6 +55,8 @@ class ReviewFixesTest(unittest.TestCase):
                                           '-c', f'mcp_servers.partyline.args={json.dumps(server_args)}']
                 self.runtime.live['old'] = adapter
                 with patch('partyline.handover_jobs.process_snapshot', return_value=snapshot), \
+                     patch('partyline.tmp_owners.process_snapshot', return_value=snapshot), \
+                     patch('partyline.handover_jobs.owned', return_value=set()), \
                      patch('partyline.captain_handover.request_principal', return_value=actor), \
                      patch('partyline.captain_handover_completion._try_detach', new_callable=AsyncMock), \
                      TestClient(app) as client:
