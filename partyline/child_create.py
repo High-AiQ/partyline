@@ -10,9 +10,9 @@ from .contracts import ConversationsChangedEvent
 from .conversation_contracts import LineStatus
 from .hierarchy import HierarchyError, create_child_conversation
 from .hierarchy_contracts import ChildCreatedResponse
-from .line_worktree import describe, line_cwd, place_child, placement_root
+from .line_worktree import describe, line_cwd, place_child, placement_root, repo_root
 from .machine_scope import deny_staffed_split, deny_unless, is_human
-from .task_workspaces import UpstreamUnavailable, describe as task_describe, place_task
+from .task_workspaces import UpstreamUnavailable, WorkspaceUnavailable, describe as task_describe, place_task
 from .system_notice import post_system_notice
 
 
@@ -50,6 +50,14 @@ async def create_child(runtime, principal, conv_id, body, workspace=False, on_re
         except UpstreamUnavailable as exc:
             db.delete_conversation(conv["id"])
             raise HTTPException(409, str(exc)) from exc
+        except OSError as exc:
+            if on_ready is not None:
+                on_ready(conv)  # retain the retry identity, but never staff a partial workspace
+            else:
+                db.delete_conversation(conv['id'])
+            if isinstance(exc, WorkspaceUnavailable):
+                raise
+            raise WorkspaceUnavailable(f'workspace for {repo_root(cwd) or cwd}: {exc}') from exc
         if cut_workspace and placed is None:
             db.delete_conversation(conv["id"])
             raise HTTPException(409, "no repository to cut the task from upstream")

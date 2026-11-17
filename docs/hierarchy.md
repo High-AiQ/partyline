@@ -1540,10 +1540,16 @@ shield (full), bolt (express) or 🧪 (suite). Legacy `light` API inputs and sto
   `repositories=[{"repository": path, "batch": [task_line_id_or_tag, explicit_sha, ...]}, ...]`.
   The single `repository` and `batch` form still works; mixing forms or repeating a
   repository is refused. Each batch is in cherry-pick order. Task references
-  resolve to their accepted SHAs for that repository; foreign or unaccepted tasks are
-  refused. A task that touched both repositories contributes its accepted SHA to each.
+  expand to every commit in their `base_sha..accepted` range for that repository;
+  merge commits and commits already reachable from its default branch are omitted,
+  including local default-branch history newer than the last fetched remote ref.
+  Foreign or unaccepted tasks are refused. A task that touched both repositories
+  contributes its own range to each. Explicit SHAs remain single commits. Omit
+  `review` (or pass `none`) for suites.
   Resolved batches and worktree paths are repeated in the runner's pack across restarts;
   the goal also lists all selected worktrees.
+  Placement failure returns a repository-specific `creation_error` without staffing the worker;
+  fix the reported cause and retry the same assignment. Never use the shared main checkouts.
   Use a suite run **before every batch PR**; never ask task sublines to run full suites.
 
 The flow is **tasks accepted → suite on the merged batch → reopen failures or create fixes →
@@ -1577,7 +1583,10 @@ pushes and creates the PR from the integration branch.
 
 On failure reopen the responsible task with `reopen_task`, or create a new task. Then create
 a new suite run, or `reopen_task(suite_id, goal, batch=[new SHAs or task IDs/tags], repository=...)`;
-repository is optional for a single-repository suite. For several repositories, pass
+repository is optional for a single-repository suite. Blocked suites can also be reopened
+with corrected batches and a new goal; missing selected worktrees are repaired, and a
+running worker is restarted when needed to refresh its write fence. Existing work is
+preserved. For several repositories, pass
 `repositories=[{"repository": path, "batch": [...]}, ...]` to replace all batches, or
 `repository` with `batch` to update one while retaining the others. Without batch inputs a
 reopen keeps every repository and its recorded SHAs for a targeted rerun.

@@ -253,7 +253,9 @@ setup, test})` to list, set, or delete environments. A set re-runs setup for aff
 open reviews and wakes their reviewers without changing the review round.
 
 Before every batch PR use `create_task(mode="suite", repository=..., batch=[...], ...)`.
-Batch entries are task IDs/tags resolving to accepted SHAs or explicit SHAs in order.
+Batch entries are task IDs/tags expanding to whole `base_sha..accepted` ranges, or explicit
+single SHAs, in order. Suites omit `review` (or pass `none`). Reopen a blocked suite to
+replace its batch and goal and repair missing selected worktrees.
 The runner integrates from main, runs every suite and delivers branch/SHA, per-suite
 pass/fail and best-effort failure attribution. It never pushes or creates a PR: the captain
 does both after a pass. On failure reopen responsible tasks or create fixes, then repeat

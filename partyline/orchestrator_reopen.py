@@ -1,4 +1,6 @@
-"""New work on a settled task line: an explicit reopen, never a silent chat hand-off."""
+"""New work on a settled task or a corrected blocked suite."""
+
+import asyncio
 
 from fastapi import HTTPException
 
@@ -46,6 +48,21 @@ async def reopen_task(runtime, actor, conv_id, body):
     async with task_lock(runtime, conv_id):
         from .preset_roles import require_named_role
         require_named_role(db, row['implementer_preset'], 'implementer')
+        row = task(db, conv_id)
+        if row['status'] not in ('approved', 'done') and not (
+                row['mode'] == 'suite' and row['status'] == 'blocked'):
+            raise HTTPException(409, 'only an approved or done task, or a blocked suite, can be reopened; '
+                                'active tasks take new direction through '
+                                'resume_work(conv_id, note) or message_task')
+        repaired = False
+        if row['mode'] == 'suite':
+            from .task_placement import ensure_placement
+            from .task_workspaces import WorkspaceUnavailable
+            try:
+                repaired = await asyncio.to_thread(
+                    ensure_placement, db, row, suite or row['suite_repositories'])
+            except WorkspaceUnavailable as exc:
+                raise HTTPException(409, str(exc)) from exc
         changed = db._exec(
             "UPDATE task_reviews SET status='implementing',round=0,sha=NULL,review_worktree=NULL,"
             "repositories='[]',what='',location='',findings='',previous_findings='',report_id=NULL,reviewer_restarts=0,"
@@ -53,7 +70,8 @@ async def reopen_task(runtime, actor, conv_id, body):
             "wait_reason='',wait_until=NULL,reviewer_env_gap=0,reviewer_nudged=0,reviewer_stall_report_id=NULL,"
             'overridden_by=NULL,consumed_through=MAX(consumed_through,'
             '(SELECT COALESCE(MAX(id),0) FROM messages WHERE conv_id=?)) '
-            "WHERE conv_id=? AND status IN ('approved','done')", (conv_id, conv_id))
+            "WHERE conv_id=? AND (status IN ('approved','done') OR (mode='suite' AND status='blocked'))",
+            (conv_id, conv_id))
         if changed.rowcount != 1:
             raise HTTPException(
                 409, 'only an approved or done task can be reopened; a blocked or implementing task '
@@ -62,6 +80,12 @@ async def reopen_task(runtime, actor, conv_id, body):
             save_repositories(db, conv_id, suite)
         set_goal(db, conv_id, suite_goal(goal, task(db, conv_id)) if row['mode'] == 'suite' else goal)
         att = db.get_attachment(row['implementer_id'])
+        if repaired and att and att['status'] in LIVE:
+            from .line_process_routes import detach_attachment
+            from .orchestrator_revive import ordered_detach
+            with ordered_detach(runtime, att['id']):
+                await detach_attachment(runtime, att['id'], survivors=False)
+            att = db.get_attachment(att['id'])
         if att and att['status'] not in LIVE:
             await restart(runtime, att, 'implementer', row['implementer_preset'])
     row = task(db, conv_id)

@@ -50,7 +50,8 @@ _DESCRIBE = {
                     '(no reviewer: run every suite on the merged batch before every batch PR). '
                     'Suite requires repositories=[{repository, batch}, ...], or the legacy repository '
                     'and batch form; never mix forms or repeat repositories. Batches contain task line '
-                    'IDs/tags resolving to accepted SHAs for that repository and/or explicit SHAs in '
+                    'IDs/tags expanding to every commit in base_sha..accepted for that repository, and/or '
+                    'explicit SHAs in '
                     'cherry-pick order. One runner creates an integration branch from current main in '
                     'each repository worktree, cherry-picks each batch, runs every repository\'s suites '
                     'and one combined end-to-end run across all trees. It ends with deliver naming '
@@ -65,7 +66,8 @@ _DESCRIBE = {
                     'Express and suite end with deliver; omit review or pass none. Mode is fixed. '
                     'Retry with the same name and assignment to recover the existing task; '
                     'conflicting names are refused. '
-                    'A creation_error means the task exists but staffing or notification needs attention.'),
+                    'A creation_error names failed placement, staffing or notification; do not use a '
+                    'shared checkout. Retry the same assignment after fixing it.'),
     'deliver': ('END an express or suite task: report results as text (what, where). Posts the report '
                 'to the root captain and marks the task done. Suite reports name branch/SHA, pass/fail per '
                 'suite and best-effort failure attribution; optionally pass '
@@ -77,7 +79,9 @@ _DESCRIBE = {
                       'create_task or tasks), never your root id. Does not start work or create anything; '
                       'refused for approved or done tasks (use reopen_task).'),
     'reopen_task': 'CONTINUE an approved or done EXISTING task with a new goal; conv_id is the task line id. '
-                   'For suite mode, omit batch inputs to keep all repositories; pass repositories '
+                   'Blocked suites may also reopen with corrected batches and repaired workspaces. Omit '
+                   'review for suites. For suite mode, omit batch inputs to keep all repositories; pass '
+                   'repositories '
                    '(per-repo ordered batches) to replace them, or batch with repository to update one.',
     'nudge_reviewer': 'Ask your reviewer to continue, once per round, with fixed text and no arguments.',
     'message_task': ('Message a task participant privately; while the task is in review, messages to '

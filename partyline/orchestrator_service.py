@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from .child_create import create_child
 from .contracts import ConversationsChangedEvent
 from .hierarchy_contracts import TaskChildIn
-from .task_workspaces import anchor, workspaces
+from .task_workspaces import WorkspaceUnavailable, anchor, workspaces
 from . import task_write_set
 from .review_worktrees import ReviewError
 from .review_install_sandbox import DependencyError
@@ -23,6 +23,7 @@ from .orchestrator_revive import (
 from .orchestrator_repin import pairs, repin, review_entries, verdict_matches
 from .orchestrator_handles import pick_tag
 from .orchestrator_suite import resolve_repositories, save_repositories, suite_brief, suite_goal
+from .suite_workspaces import ready
 from .memory_live_raise import check_task_memory
 from .orchestrator_staff import ensure_reviewer, restart, spawn
 from .orchestrator_store import (
@@ -68,7 +69,8 @@ async def _create_task(runtime, actor, root_id, body):
                                 'inspect it or choose a different name for new work')
         att = db.get_attachment(pending['implementer_id'])
         if (pending['status'] not in ('implementing', 'idle') or
-                (att and (att['status'] != 'exited' or att['cli_session']))):
+                (att and (att['status'] != 'exited' or att['cli_session']))) and (
+                    not suite or ready(pending)):
             return task(db, pending['conv_id'], visibility=True)
     creation_error = None
     if pending:
@@ -99,12 +101,30 @@ async def _create_task(runtime, actor, root_id, body):
                 raise  # placement never completed; no task was reserved
             creation_error = str(getattr(exc, 'detail', exc))
             logger.exception('task creation announcement failed for %s', conv_id)
+            if isinstance(exc, WorkspaceUnavailable):
+                return dict(task(db, conv_id, visibility=True), creation_error=creation_error)
+    repaired = False
+    if pending or suite:
+        from .task_placement import ensure_placement
+        try:
+            repaired = await asyncio.to_thread(ensure_placement, db, task(db, conv_id), suite)
+        except WorkspaceUnavailable as exc:
+            return dict(task(db, conv_id, visibility=True), creation_error=str(exc))
+        if suite:
+            from .goal import set_goal
+            set_goal(db, conv_id, suite_goal(body.goal, task(db, conv_id)))
     if granted:
         await task_write_set.grant(runtime, actor, conv_id, granted)
     spawn_failed = False
     try:
         existing = db.get_attachment(ident)
         if existing:
+            if repaired and existing['status'] in ('starting', 'running'):
+                from .line_process_routes import detach_attachment
+                from .orchestrator_revive import ordered_detach
+                with ordered_detach(runtime, ident):
+                    await detach_attachment(runtime, ident, survivors=False)
+                existing = db.get_attachment(ident)
             if body.memory_limit and existing['status'] == 'exited':
                 db._exec('UPDATE attachments SET memory_limit=? WHERE id=?',
                          (body.memory_limit, ident))

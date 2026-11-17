@@ -8,7 +8,7 @@ from partyline import fence_workspaces
 from partyline.fence_paths import write_set
 from partyline.orchestrator_contracts import ReviewRequestIn
 from partyline.orchestrator_service import request_review
-from partyline.task_workspaces import anchor, place_task, workspaces
+from partyline.task_workspaces import WorkspaceUnavailable, anchor, place_task, workspaces
 from tests.orchestrator_fixture import TaskFixture, git
 
 CLONES = ('argon-backend', 'argon-frontend')
@@ -147,7 +147,8 @@ class RollbackTest(WorkspaceFixture):
         os.makedirs(empty)
         git(empty, 'init', '-q', '-b', 'main')
         self.db.create_conversation('t', 'slice')
-        self.assertIsNone(place_task(self.db, 'root', 't'))
+        with self.assertRaisesRegex(WorkspaceUnavailable, 'no HEAD commit'):
+            place_task(self.db, 'root', 't')
         self.assertFalse(os.path.exists(os.path.join(self.top, '.partyline-worktrees', 'slice')))
         for name in CLONES:
             self.assertEqual(git(self.clones[name], 'branch', '--list', 'line/*'), '')

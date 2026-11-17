@@ -1,5 +1,25 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-17 — A failed task workspace is not an absent repository
+
+The false assumption was that `place_task` returning `None` after a failed nested worktree add
+could safely use ordinary child placement. That fallback created only the platform worktree,
+leaving selected suite repositories without workspace rows or paths. A failed add now retains a
+retryable task identity with a repository-specific `creation_error`, rolls back partial placement,
+and never starts a worker in that incomplete checkout. Reopening a blocked suite can replace its
+batch and repair missing selected worktrees without switching shared checkouts. The punctuation
+and nested `develop` layouts pass; injected add failure reproduces the fallback cause in
+`tests/test_suite_placement_recovery.py`. Independently, discovery and persisted workspace keys
+must compare the same Git/filesystem identity: symlinked nested repositories reproduced delivery's
+409, while subdirectory and linked-worktree roots failed discovery earlier. Task tags also denote
+the whole per-repository `base_sha..accepted` range, not just the accepted tip; explicit SHAs remain
+single commits. Both behaviors have temporary-repository regressions.
+The task range can also contain unrelated upstream history when a task merges or rebases onto
+the default branch. Exclude merge commits and both fetched and local default-branch history
+before generating picks; otherwise the runner receives empty picks or merges needing `-m`.
+`tests/test_suite_batch.py` covers merges, rebases and a local default ahead of its remote ref,
+and cherry-picks the resulting task-only batch onto the default branch.
+
 ## 2026-11-17 — Layout coordinates are not backend node identity
 
 The false assumption was that unchanged backend identity also required unchanged raw bounding-box

@@ -51,10 +51,17 @@ def _free(repos: list[str], folder: str, name: str) -> bool:
 
 def _add(repo: str, path: str, branch: str, start: str) -> bool:
     try:
-        return add_worktree(repo, path, "-b", branch, path, start,
-                            git=_git, branch=branch).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
+        result = add_worktree(repo, path, "-b", branch, path, start, git=_git, branch=branch)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise WorkspaceUnavailable(f'workspace for {repo}: {exc}') from exc
+    if result.returncode:
+        reason = result.stderr.strip() or 'git worktree add failed'
+        raise WorkspaceUnavailable(f'workspace for {repo}: {reason}')
+    return True
+
+
+class WorkspaceUnavailable(OSError):
+    """Placement failed: never fall back to a partial or shared checkout."""
 
 
 class UpstreamUnavailable(Exception):
@@ -103,20 +110,25 @@ def place_task(db, root_id: str, conv_id: str, base: str = "checkout") -> dict |
             if os.path.isfile(os.path.join(folder, guide)):
                 os.symlink(os.path.join(folder, guide), os.path.join(task_dir, guide))
     made: list[tuple[str, str, str]] = []
-    for repo in repos:
-        nested = os.path.realpath(repo) != os.path.realpath(folder)
-        where = os.path.join(task_dir, os.path.relpath(repo, folder)) if nested else task_dir
-        if nested and not plain:
-            _exclude(folder, os.path.relpath(repo, folder))
-        head = starts.get(repo) or rev(repo, "rev-parse", "HEAD")
-        if not (head and _add(repo, where, branch, head)):
-            for done, path, _head in reversed(made):
-                remove_registration(done, path)
-                _git("branch", "-D", branch, cwd=done)
-            if plain:
-                shutil.rmtree(task_dir, ignore_errors=True)
-            return None
-        made.append((repo, where, head))
+    try:
+        for repo in repos:
+            nested = os.path.realpath(repo) != os.path.realpath(folder)
+            where = os.path.join(task_dir, os.path.relpath(repo, folder)) if nested else task_dir
+            if nested and not plain:
+                _exclude(folder, os.path.relpath(repo, folder))
+            head = starts.get(repo) or rev(repo, "rev-parse", "HEAD")
+            if not head:
+                raise WorkspaceUnavailable(f'workspace for {repo}: repository has no HEAD commit')
+            if not _add(repo, where, branch, head):
+                raise WorkspaceUnavailable(f'workspace for {repo}: git worktree add failed')
+            made.append((repo, where, head))
+    except WorkspaceUnavailable:
+        for done, path, _head in reversed(made):
+            remove_registration(done, path)
+            _git("branch", "-D", branch, cwd=done)
+        if plain:
+            shutil.rmtree(task_dir, ignore_errors=True)
+        raise
     for repo, where, head in made:
         db._exec("INSERT INTO task_workspaces(conv_id,repository,path,branch,base_sha) "
                  "VALUES(?,?,?,?,?)", (conv_id, repo, where, branch, head))

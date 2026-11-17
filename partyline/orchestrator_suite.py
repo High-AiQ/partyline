@@ -9,12 +9,16 @@ from .line_worktree import line_cwd, rev
 from .orchestrator_share_ref import _commit
 from .orchestrator_store import task
 from .review_scope import _named
-from .task_workspaces import anchor, repositories_under, workspaces
+from .task_workspaces import anchor, workspaces
+from .suite_workspaces import repositories_for, workspace_for
+from .suite_batch import task_commits
 
 SUITE = (
     'Suite run: no reviewer. In each selected repository worktree, create an integration branch '
-    'from current main (fetch main first), then cherry-pick that repository\'s resolved batch '
+    'from current main (or the repository default branch; fetch it in this worktree first), '
+    'then cherry-pick that repository\'s resolved batch '
     'commits in order. '
+    'Fetch and switch only in the assigned suite worktrees; never switch shared main checkouts. '
     'Report conflicts you cannot resolve trivially; for version-number conflicts keep the batch '
     'numbers the captain gives in the goal. Run every suite the repository has, following its '
     'AGENTS.md. Run one combined end-to-end run across all selected trees served together. '
@@ -34,7 +38,7 @@ SUITE = (
 
 def resolve_batch(db, root_id, repository, batch):
     """Resolve only accepted task SHAs within this root and this repository."""
-    repos = [(repo, root_id) for repo in repositories_under(line_cwd(db, root_id) or '')]
+    repos = [(repo, root_id) for repo in repositories_for(line_cwd(db, root_id) or '')]
     hit = _named(repos, repository)
     if not hit:
         raise HTTPException(422, 'suite repository must be one of the root workspace repositories')
@@ -49,13 +53,14 @@ def resolve_batch(db, root_id, repository, batch):
             selected = _named(entries, repository)
             if row['status'] not in ('approved', 'done') or not row['sha'] or not selected:
                 raise HTTPException(422, f'batch task {name} has no accepted SHA for this repository')
-            sha = selected[1]['sha']
+            sha = _commit(repository, selected[1]['sha'])
             source = row['conv_id']
+            resolved.extend({'sha': commit, 'task': source}
+                            for commit in task_commits(db, row, repository, sha))
         else:
             if not re.fullmatch(r'[0-9a-f]{4,64}', name):
                 raise HTTPException(422, f'unknown batch task or commit SHA: {name}')
-            sha, source = name, None
-        resolved.append({'sha': _commit(repository, sha), 'task': source})
+            resolved.append({'sha': _commit(repository, name), 'task': None})
     return repository, resolved
 
 
@@ -106,12 +111,15 @@ def record_integration(db, row, repositories=None):
         reported[hit[0]] = item.sha
     if repositories is not None and set(reported) != set(selected):
         raise HTTPException(422, 'delivery repositories must name every suite repository')
-    spaces = {item['repository']: item for item in workspaces(db, row['conv_id'])}
+    spaces = workspaces(db, row['conv_id'])
     entries, branches = [], []
     for repository in selected:
-        space = spaces.get(repository)
+        space = workspace_for(spaces, repository)
         if space is None:
-            raise HTTPException(409, f'suite repository has no workspace: {repository}')
+            available = '\n'.join(f"- {item['repository']} at {item['path']}" for item in spaces) or 'none'
+            raise HTTPException(409, f'suite repository has no workspace: {repository}.\n'
+                                'Ask the root captain to restore the missing workspace or recreate '
+                                f'the suite task.\nAvailable workspaces:\n{available}')
         branch = rev(space['path'], 'symbolic-ref', '--short', 'HEAD')
         if not branch:
             raise HTTPException(409, 'suite delivery requires a named integration branch')
@@ -120,7 +128,7 @@ def record_integration(db, row, repositories=None):
             raise HTTPException(409, 'integration branch has no commit')
         if repository in reported and _commit(repository, reported[repository]) != sha:
             raise HTTPException(409, f'delivered SHA does not match integration branch in {repository}')
-        branches.append((branch, row['conv_id'], repository))
+        branches.append((branch, row['conv_id'], space['repository']))
         entries.append({'repository': repository, 'sha': sha, 'path': space['path']})
     for branch in branches:
         db._exec('UPDATE task_workspaces SET branch=? WHERE conv_id=? AND repository=?', branch)
