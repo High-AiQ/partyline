@@ -184,10 +184,15 @@ class ForcedRetirementTest(unittest.TestCase):
         self.assertTrue(os.path.isdir(child["cwd"]))
 
     def test_git_unknown_refuses_instead_of_treating_as_clean(self):
+        import errno
+
         child = self.child()
-        with patch("partyline.retirement_git._git", side_effect=OSError("git missing")):
-            with self.assertRaises(HTTPException):
-                inspect_git(self.db, child)
+        with patch("partyline.retirement_git._git",
+                   side_effect=OSError(errno.EROFS, "Read-only file system")):
+            response = self.preview(child)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("cannot inspect retirement Git state", response.json()["detail"])
+        self.assertIn("Read-only file system", response.json()["detail"])
 
     def test_retirement_audit_is_readable_in_scope(self):
         child = self.child()

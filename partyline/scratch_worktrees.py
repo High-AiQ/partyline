@@ -16,17 +16,16 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 import time
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .auth_guard import request_principal
-from .worktree_recovery import add_worktree, locked_paths, remove_registration
+from .auxiliary_removal import remove_checkout
+from .worktree_recovery import add_worktree, locked_paths
 from .line_worktree import _exclude, _git, rev
 from .machine_scope import deny_unless
-from .nested_repositories import keep_reason
 from .review_worktrees import (
     ReviewError,
     _SHA_DIR,
@@ -170,24 +169,9 @@ def list_scratch_worktrees(db, conv_id: str) -> list[dict]:
     ]
 
 
-def remove_scratch_path(path: str) -> bool:
-    """Delete one scratch checkout, git first; False if it failed or holds a repository."""
-    if not os.path.isdir(path):
-        marker = f"/{SCRATCH_DIR}/"
-        if marker in path:
-            remove_registration(path.split(marker, 1)[0], path)
-        return True
-    if keep_reason(path):
-        return False
-    marker = f"/{SCRATCH_DIR}/"
-    root = path.split(marker, 1)[0] if marker in path else None
-    if root and os.path.isdir(root):
-        done = _git("worktree", "remove", "--force", "--force", path, cwd=root)
-        if done.returncode == 0:
-            return True
-        logger.warning("scratch worktree prune: git refused %s; removing the tree", path)
-    shutil.rmtree(path, ignore_errors=True)
-    return not os.path.isdir(path)
+def remove_scratch_path(path: str, *, errors: list[str] | None = None) -> bool:
+    """Delete one scratch checkout; optionally collect safe refusal diagnostics."""
+    return remove_checkout(path, SCRATCH_DIR, git=_git, fallback=True, errors=errors)
 
 
 def drop_scratch_worktree(db, conv_id: str, sha: str) -> dict | None:

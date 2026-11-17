@@ -1,5 +1,6 @@
 """Nested worktrees survive retirement through their owning repository's branch."""
 
+import errno
 import os
 import shutil
 import socket
@@ -248,9 +249,12 @@ class NestedRetirementGuardTest(SafetyFixture, unittest.TestCase):
     def test_interrupted_removal_keeps_registration_and_retry_succeeds(self):
         child = self.child()
         Path(child["cwd"], "ignored").mkdir()
-        with patch("partyline.storage_removal.shutil.rmtree", side_effect=OSError("interrupted")):
+        with patch("partyline.retirement_force.remove_directory",
+                   side_effect=OSError(errno.EROFS, "Read-only file system")):
             response = self.force(child)
         self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("worktree removal did not complete", response.json()["detail"])
+        self.assertIn("Read-only file system", response.json()["detail"])
         self.assertIn(child["cwd"], _git("worktree", "list", "--porcelain", cwd=self.repo).stdout)
         self.assertTrue(Path(child["cwd"], ".git").exists())
         response = self.force(child)

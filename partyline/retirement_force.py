@@ -100,7 +100,8 @@ def _remove(state):
                 git(owner, "worktree", "remove", "--force", "--force", full)
         remove_directory(state["cwd"], state["root"])
     except OSError as exc:
-        raise HTTPException(409, "worktree removal did not complete; registration retained") from exc
+        raise HTTPException(409, "worktree removal did not complete; registration retained: "
+                            f"{operation_reason(exc)}") from exc
     git(state["root"], "worktree", "remove", "--force", "--force", state["cwd"])
     if owned:
         git(state["root"], "update-ref", "-d", f"refs/heads/{state['branch']}", owned)

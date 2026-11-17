@@ -79,7 +79,10 @@ def cleanup_auxiliary(db, line, audit_id):
             expected = next(row["head"] for row in history[table] if row["path"] == path)
             if os.path.isdir(path) and git(path, "rev-parse", "HEAD").strip() != expected:
                 raise HTTPException(409, "auxiliary HEAD changed; retained")
-            if not remove(path):
-                raise HTTPException(409, "auxiliary worktree cleanup failed; retained")
+            errors = []
+            if not remove(path, errors=errors):
+                detail = "; ".join(error for error in errors if error)
+                raise HTTPException(409, "auxiliary worktree cleanup failed; retained"
+                                    + (f": {detail}" if detail else ""))
             db._exec(f"DELETE FROM {table} WHERE conv_id=? AND path=?", (line["id"], path))
     return [path for paths in preserved.values() for path in paths]

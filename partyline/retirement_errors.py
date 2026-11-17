@@ -33,7 +33,8 @@ def operation_reason(exc: BaseException) -> str:
 
 
 def git_reason(done=None, exc=None) -> str:
-    """Git's trimmed stderr when available, without echoing credentials."""
+    """Git's trimmed stderr or safe launch error, without echoing credentials."""
     detail = "cannot inspect retirement Git state"
-    raw = getattr(done, "stderr", None) if done is not None else getattr(exc, "stderr", None)
-    return detail + (f": {text}" if (text := safe_text(raw)) else "")
+    if exc is not None:
+        return f"{detail}: {operation_reason(exc)}"
+    return detail + (f": {text}" if (text := safe_text(getattr(done, "stderr", None))) else "")
