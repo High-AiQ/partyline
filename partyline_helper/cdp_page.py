@@ -6,12 +6,13 @@ from .cdp_recipes import OBSERVER, STATE, WIDGET_ROLES, normalize, value
 from .cdp_ax import exposed
 from .cdp_dom_nodes import DETAIL, discover
 from .cdp_settle import Quiet
+from .cdp_page_dialogs import Dialogs
 from .cdp_transport import CDPError, DocumentChanged, PageUnavailable
 from .cdp_recovery import Recovery
 from .cdp_identity import TargetChanged, identity, reprove, token as identity_token
 
 
-class Page(Recovery):
+class Page(Dialogs, Recovery):
     def __init__(self, browser, access, target, session, changed):
         self.browser, self.access, self.target, self.session = browser, access, target, session
         self.grant, self.generation = access.grant, access.gate.generation
@@ -39,14 +40,14 @@ class Page(Recovery):
             raise DocumentChanged("Page document changed during input; read it again before acting")
 
     async def call(self, method, params=None):
-        self.guard()
+        self.dialog_guard()
         if method.startswith("Input.") or method == "DOM.setFileInputFiles":
             if not self.dispatched and self.action_proof is not None:
                 await reprove(self, self.action_proof)
                 self.guard()
             self.dispatched = True
         try:
-            return await self.browser.call(method, params, self.session, self.guard)
+            return await self.browser.call(method, params, self.session, self.dialog_guard)
         except PageUnavailable as exc:
             self.unavailable(exc.state)
             raise
@@ -58,6 +59,7 @@ class Page(Recovery):
         if message.get("sessionId") != self.session:
             return
         method = message["method"]
+        self.dialog_event(method, message.get("params", {}))
         if method.startswith(("DOM.", "Accessibility.", "Page.")) or (
                 method == "Runtime.bindingCalled"
                 and message.get("params", {}).get("name") == "__partylineChange"):
@@ -112,7 +114,7 @@ class Page(Recovery):
         finally:
             # Revocation forbids even cleanup calls; detaching releases the object group.
             if (release and self.live and self.page_state == "alive" and self.access.grant is self.grant
-                    and not self.access.gate.revoked.is_set()):
+                    and not self.access.gate.revoked.is_set() and not self.page_dialog):
                 await self.call("Runtime.releaseObject", {"objectId": obj})
 
     async def visible(self):
@@ -121,6 +123,7 @@ class Page(Recovery):
         return result.get("result", {}).get("value") is True
 
     async def snapshot(self, options=None):
+        self.dialog_guard()
         options = options or {}
         before = self.access.event_status()["event_counter"]
         if ident := options.get("inspect"):
@@ -184,7 +187,7 @@ class Page(Recovery):
                 self.nodes[ident] = {**node, "action_identity": proof, "action_token": item["action_token"]}
         finally:
             if (self.live and self.page_state == "alive" and self.access.grant is self.grant
-                    and not self.access.gate.revoked.is_set()):
+                    and not self.access.gate.revoked.is_set() and not self.page_dialog):
                 await self.call("Runtime.releaseObjectGroup", {"objectGroup": "partyline"})
         await self.call("Runtime.evaluate", {"expression": "0", "returnByValue": True})  # renderer fence
         result = {"source": "cdp", "action_identity_supported": True,

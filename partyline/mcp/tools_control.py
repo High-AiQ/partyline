@@ -13,14 +13,15 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 
 ELEMENT_ACTION_NOTE = (
-    "Act on screen_elements IDs or latest screen_window_look mark=n. CDP/UIA named actions; "
-    "invoke/click on an unsupported mark uses guarded point input. "
-    "Never reuse old marks; never script clicks. "
-    "After a click, read changes before deciding it failed; point fallback reports landed_in. "
-    "set_files: 1–10 media IDs/local paths, 200 MiB total; helper data refused. select takes value; "
+    "Act on screen_elements IDs or latest screen_window_look mark=n; never reuse marks; never script clicks. "
+    "CDP/UIA actions; unsupported invoke/click marks use guarded points (landed_in). "
+    "Read changes after clicks. "
+    "set_files: 1–10 media IDs/local paths, 200 MiB; helper data refused. select takes value; "
     "set_value edits; press: enter/tab/escape; force overrides disabled. then reads changes; "
-    "then.snapshot adds a picture. Failures carry screenshot (marks, snapshot id) for screen_window_click. "
-    'reload element_id="page" recovers Chrome. UIA window_* targets the window; drag: screen_drag.')
+    "then.snapshot adds a picture. Failures carry screenshot marks/snapshot for screen_window_click. "
+    'reload/dialog use element_id="page". dialog requires accept; '
+    'beforeunload accept=true leaves and discards unsaved changes. '
+    'UIA window_* targets the window; drag: screen_drag.')
 ELEMENT_ACTION_TIMEOUT = 125  # a 20s capture, a 35s exchange, the action, then a 20s failure picture
 WINDOW_CLICK_TIMEOUT = 150  # helper 70s, requested after/crosshair/failure pictures 20s each, plus margin
 ELEMENT_ACTION_THEN_TIMEOUT = 160  # also allow a post-action capture and event barrier
@@ -34,7 +35,8 @@ ELEMENT_ACTION_PROPERTIES = {
         "click", "invoke", "toggle", "set_value", "set_files", "press", "select", "add_to_selection",
         "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent", "scroll_into_view",
         "set_range_value", "window_close",
-        "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize", "reload"]},
+        "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize",
+        "reload", "dialog"]},
     "files": {"type": "array", "minItems": 1, "maxItems": 10,
               "items": {"type": "string", "minLength": 1, "maxLength": 128},
               "description": "For set_files: readable Partyline media IDs."},
@@ -43,6 +45,8 @@ ELEMENT_ACTION_PROPERTIES = {
               "description": "For set_files: absolute file paths on the paired computer."},
     "value": {"type": "string", "maxLength": 500,
               "description": "Text for set_value; option name for ComboBox select."},
+    "accept": {"type": "boolean", "description": "Required for dialog; explicit accept or dismiss."},
+    "prompt_text": {"type": "string", "maxLength": 500, "description": "Optional dialog prompt text."},
     "key": {"type": "string", "enum": ["enter", "tab", "escape"], "description": "For press; no modifiers."},
     "direction": {"type": "string", "enum": ["up", "down", "left", "right"], "description": "For scroll."},
     "amount": {"type": "string", "enum": ["small", "large"], "description": "For scroll."},

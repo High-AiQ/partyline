@@ -6,6 +6,7 @@ import { presenceSync } from "./presence-coordinator.svelte.js";
 import { applyPendingWireEvent, ignoreBackgroundFailure } from "./room-pending-sync.js";
 import type { Pin } from "../lib/pin-contracts";
 import { resources } from "./resources.svelte.js";
+import { chromeApproval } from "./chrome-approval.svelte.js";
 import { screenStatus } from "./screen-status.svelte.js";
 import { voicePresets } from "./voice-presets.svelte.js";
 
@@ -43,6 +44,9 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
     case "screen_share":
       screenStatus.revision++;
       room.screenShare = event.share;
+      break;
+    case "chrome_approval":
+      chromeApproval.apply(event);
       break;
     case "screen_devices_changed":
       screenStatus.revision++;

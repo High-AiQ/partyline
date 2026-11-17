@@ -16,9 +16,10 @@ from .screen_timing import timed, phase
 ACTIONS = Literal["click", "invoke", "toggle", "set_value", "press", "select", "add_to_selection",
                   "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent",
                   "scroll_into_view", "set_range_value", "window_close", "window_minimize", "window_maximize",
-                  "window_restore", "window_move", "window_resize", "set_files", "reload"]
+                  "window_restore", "window_move", "window_resize", "set_files", "reload", "dialog"]
 # Parameters each action takes; "set_scroll_percent" needs at least one of its two.
-PARAMS = {"set_files": ("files", "paths"), "press": ("key",), "select": ("value",), "set_value": ("value",),
+PARAMS = {"dialog": ("accept", "prompt_text"), "set_files": ("files", "paths"), "press": ("key",),
+          "select": ("value",), "set_value": ("value",),
           "scroll": ("direction", "amount"),
           "set_scroll_percent": ("horizontal_percent", "vertical_percent"),
           "set_range_value": ("number",), "window_move": ("x", "y"), "window_resize": ("width", "height")}
@@ -58,6 +59,8 @@ class ElementAction(BaseModel):
     paths: list[Annotated[str, Field(min_length=1, max_length=32767)]] | None = Field(
         default=None, min_length=1, max_length=10)
     value: str | None = Field(default=None, max_length=500)
+    accept: bool | None = Field(default=None, strict=True)
+    prompt_text: str | None = Field(default=None, max_length=500)
     key: Literal["enter", "tab", "escape"] | None = None
     direction: Literal["up", "down", "left", "right"] | None = None
     amount: Literal["small", "large"] | None = None
@@ -80,12 +83,14 @@ class ElementAction(BaseModel):
 
     def parameters(self):
         """Reject missing or foreign parameters, so the helper only sees what the action takes."""
-        if self.action == "reload" and self.element_id != "page":
-            raise ValueError('reload requires element_id="page"')
+        if self.action in ("reload", "dialog") and self.element_id != "page":
+            raise ValueError(f'{self.action} requires element_id="page"')
         if self.force and self.action not in ("invoke", "toggle", "select", "expand"):
             raise ValueError("force is supported only for invoke, toggle, select and expand")
         given = {name for name in ALL_PARAMS if getattr(self, name) is not None}
         wanted = set(PARAMS.get(self.action, ()))
+        if self.action == "dialog":
+            wanted = {"accept"} | (given & {"prompt_text"})
         if self.action == "set_files":
             if not 1 <= len(self.files or []) + len(self.paths or []) <= 10:
                 raise ValueError("set_files requires 1–10 files and/or paths total")
@@ -112,7 +117,7 @@ TARGET_CHANGING = ("target keeps changing; read it again when it settles, or use
 
 
 DIFF = ("diff", "removed", "lines", "more", "next_offset", "note", "partial", "changed", "update_helper",
-        "error", "elements_unavailable")
+        "error", "elements_unavailable", "page_dialog", "dialog_hint")
 
 
 def diffed(reply):
@@ -156,6 +161,8 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
             message["look_generation"] = look["generation"]
         if body.action == "press" and device.get("press", 0) < WINDOW_PRESS_VERSION:
             raise ValueError("update the Partyline helper to use press")
+        if body.action == "dialog" and device.get("chrome_dom", 0) < 5:
+            raise ValueError("update the Partyline helper to use dialog")
         if body.action == "reload" and device.get("chrome_dom", 0) < 4:
             raise ValueError("update the Partyline helper to use reload")
         if body.action == "set_files" and device.get("chrome_dom", 0) < 2:
@@ -169,7 +176,7 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
             audit_files(hub, principal, grant, body.files or [], total)
         with phase("target_ms"):
             target = True
-            if body.action != "reload":
+            if body.action not in ("reload", "dialog"):
                 target, busy = await hub.elements.action_target(principal, grant, body.element_id)
         if target is None:
             if busy:
@@ -182,14 +189,14 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
                 if look["generation"] != message["look_generation"]:
                     raise HTTPException(409, "stale mark; take a fresh screen_window_look")
             known = True
-            if body.action != "reload":
+            if body.action not in ("reload", "dialog"):
                 message["element_id"], known = hub.elements.locked_target(grant["id"], body.element_id)
             if message["element_id"] is None:
                 return {"status": "failed", "error": REFRESH_FAILED}
             if not known:
                 tree = hub.elements.snapshots.get(grant["id"])
                 return {"status": "failed", "error": getattr(tree, "recovery_hint", None) or STALE}
-            if body.action != "reload" and (message["element_id"] != target or
+            if body.action not in ("reload", "dialog") and (message["element_id"] != target or
                     token != action_token(hub.elements, grant["id"], body.element_id)):
                 return {"status": "failed", "reason": "target_changed", "error": TARGET_CHANGING}
             if token:

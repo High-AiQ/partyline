@@ -62,6 +62,8 @@ class ElementState(EventScope):
         if getattr(tree, "event_counter", None) is None:
             return {"error": "inspect unavailable; update the helper"}
         result = await self.exchange(principal, grant, device, "read_window_elements", inspect=node.helper)
+        if result.get("page_dialog"):
+            return result
         if "live" not in result:
             return {"error": result.get("error", "inspect unavailable; update the helper")}
         cached = {key: node.cached.get(key) for key in
@@ -137,6 +139,9 @@ class ElementState(EventScope):
                 if not tree.order:
                     raise
                 response = {"elements_unavailable": "helper did not respond"}
+            if response.get("page_dialog"):
+                return {"window": grant["id"], "window_title": grant["title"][:100],
+                        "process_name": grant["process"][:60], **response}
             if response.get("elements_unavailable"):
                 if not started and not tree.order:
                     return {"elements_unavailable": str(response["elements_unavailable"])[:160],

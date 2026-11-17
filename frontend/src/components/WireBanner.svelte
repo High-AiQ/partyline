@@ -7,6 +7,7 @@
    *   - `#wireDown` stays up for as long as the wire is actually down. A dropped
    *     server used to look exactly like a slow one.
    */
+  import ChromeApprovalNotice from "./ChromeApprovalNotice.svelte";
   import RestartApprovalDialog from "./dialogs/RestartApprovalDialog.svelte";
   import WriteSetGrantApprovalDialog from "./dialogs/WriteSetGrantApprovalDialog.svelte";
   import { dialogs } from "../state/dialogs.svelte";
@@ -121,6 +122,8 @@
     >
   </div>
 {/if}
+
+<ChromeApprovalNotice />
 
 {#if room.notice}
   <div

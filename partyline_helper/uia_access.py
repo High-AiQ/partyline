@@ -50,6 +50,7 @@ class WindowAccess:
         self.session, self.picker, self.list_windows, self.reader = session, picker, list_windows, reader
         self.platform, self.grant, self.generation = platform, None, 0
         self.unavailable = "not consented"
+        self.ended = None  # (reason, process) of the grant that last ended, for the words a reply uses
         self.picking = False
         self.gate = DispatchGate()
         self.elements = {}
@@ -86,6 +87,8 @@ class WindowAccess:
         self.generation += 1
         self.grant = None
         self.unavailable = reason
+        if grant:
+            self.ended = (reason, grant.get("process", ""))
         self.session.status.window_title = None
         if grant:
             if grant.get("marker") and not getattr(self, "preserve_update", False):

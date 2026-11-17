@@ -65,14 +65,19 @@ def resolve_window(hub, principal, window=None, device_name=None):
         own = [g for g in online if g["conv_id"] in lines]
         visible = visible_conversation_ids(hub.runtime.db, principal)  # never name a line it cannot see
         relevant = [g for g in online if g["conv_id"] not in lines and g["conv_id"] in visible]
+    def closed(window=None):
+        ended = hub.window_grants.closed
+        return (ended.text(window, owner_id=principal.user_id) if is_human(principal)
+                else ended.text(window, window_line_ids(hub.runtime.db, principal.conv_id)))
     if window:
         matches = ([g for g in own if window == g["id"]] or
                    [g for g in own if window == g["title"]])
         if not matches:
-            refuse([g for g in relevant or () if window in (g["id"], g["title"])], own, relevant is None)
+            refuse([g for g in relevant or () if window in (g["id"], g["title"])], own, relevant is None,
+                   closed(window))
         own = matches
     if not own:
-        refuse(relevant or (), own, relevant is None)
+        refuse(relevant or (), own, relevant is None, closed())
     if len(own) != 1:
         choices = "; ".join(f"{g['id']}: {g['title']} ({g['process']}) → «{g['line_name']}»" for g in own)
         raise HTTPException(409, "Several windows are shared with you; "
@@ -86,7 +91,9 @@ def resolve_window(hub, principal, window=None, device_name=None):
     return grant, hub.devices[grant["device_id"]]
 
 
-def refuse(held, own=(), person=False):
+def refuse(held, own=(), person=False, closed=None):
+    if closed:  # the window the caller used closed: say so, not that nothing was ever shared
+        raise HTTPException(403, closed)
     if person:
         raise HTTPException(403, "no window is shared with you; ask the person to share one")
     lines = ", ".join(sorted({f"«{g['line_name']}»" for g in held}))

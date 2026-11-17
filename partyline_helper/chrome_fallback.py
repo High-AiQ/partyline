@@ -6,17 +6,17 @@ keeps using the extension. Chrome's own error text never reaches here, only the 
 """
 import contextlib
 
-from .cdp_transport import BrowserConnection, CDPError, ExtensionRefused, INSTRUCTION
+from .cdp_transport import BrowserConnection, CDPError, ExtensionRefused, INSTRUCTION, SETUP
 
 SETTINGS = "chrome://inspect/#remote-debugging"
 PICK_AGAIN = "pick a tab again"
 REASONS = {
     "other_extension_frame": ("Chrome won't let extensions debug this page because another extension's frame "
                               f"is in it; enable remote debugging at {SETTINGS} or disable the extension "
-                              "that injects it"),
+                              "that injects it; " + SETUP),
     "debugger_already_attached": ("Chrome won't let the extension debug this page because DevTools or "
                                   "another debugging extension holds it; close that, or enable remote "
-                                  f"debugging at {SETTINGS}"),
+                                  f"debugging at {SETTINGS}; " + SETUP),
 }
 
 
@@ -44,6 +44,7 @@ class Fallback:
             return False  # remote debugging is off: the caller reports the actionable reason
         self.remote = remote
         self.grants.add(access)
+        self.chrome.approval.announce()
         self.trying.discard(access)
         self.because[access] = error.code
         if target := (access.grant or {}).get("target_id"):  # a picked tab: remember what it was
@@ -87,6 +88,7 @@ class Fallback:
                 self.chrome.reasons[access] = detail
                 self.chrome.invalidate(access)
             self.chrome.changed(access)
+        self.chrome.approval.announce()
 
     def why(self, access, browser):
         """A short reason this grant is not on the extension, for read replies; None when it is."""
@@ -101,6 +103,7 @@ class Fallback:
         grant back without Chrome asking Allow again."""
         pages = self.chrome.pages.get(access, {}).values()
         if (access not in self.grants or not getattr(extension, "socket", None)
+                or any(page.page_dialog for page in pages)
                 or not any(page.navigations for page in pages)):
             return
         self.grants.discard(access)
@@ -140,6 +143,7 @@ class Fallback:
         self.grants.discard(access)
         self.trying.discard(access)
         self.forget(access)
+        self.chrome.approval.announce()
         if not self.grants and not self.trying and self.remote:
             remote, self.remote = self.remote, None
             self.chrome.shares.spawn(remote.close())

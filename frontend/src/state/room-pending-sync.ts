@@ -6,6 +6,7 @@ import type {
   RestartRequestEvent,
   WriteSetGrantRequestEvent,
 } from "../lib/events";
+import { chromeApproval } from "./chrome-approval.svelte.js";
 import { restart } from "./restart.svelte.js";
 import { fence } from "./fence.svelte.js";
 import { writeSet } from "./write-set.svelte.js";
@@ -22,6 +23,7 @@ export function ignoreBackgroundFailure(): void {
  * first: a line list that failed to parse once hid the very restart that fixed it.
  */
 export function applyHelloPending(hello: HelloEvent, reconnected: boolean): void {
+  chromeApproval.reset(); // a clear sent while the wire was down never arrived; the server resends what holds
   if (hello.restart_request !== undefined) restart.apply(hello.restart_request);
   else void restart.load().catch(ignoreBackgroundFailure); // an older server: ask it once
   void fence.load(reconnected).catch(ignoreBackgroundFailure);

@@ -145,7 +145,7 @@ class ScreenHub:
                                             "message": "frame exceeds 4 MB"}))
                         continue
                     await self._frame(current, meta, data)
-                elif kind == "chrome_state":
+                elif kind in ("chrome_state", "chrome_approval"):
                     from .screen_chrome_state import receive
                     await receive(self, current, message)
                 elif kind == "preview":

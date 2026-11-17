@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from PIL import Image
 
 from partyline_helper.cdp_transport import CDPError
+from partyline_helper.cdp_page_dialogs import PageDialog
 from partyline_helper.client import Session
 from partyline_helper import point_cursor
 from partyline_helper.page_windows import PageSources
@@ -106,6 +107,9 @@ class FakePage:
         self.shown, self.on_input = True, None
         self.access = SimpleNamespace(event_status=lambda: {"event_counter": 4})
         self.fail = None
+
+    def dialog_guard(self):
+        pass
 
     async def visible(self):
         return self.shown
@@ -213,6 +217,25 @@ class CdpRouteTests(ClickFixture):
         self.ask.assert_not_called()  # no consent prompt, as for CDP element actions
         self.assertEqual(["dispatching", "completed"], [row["result"] for row in self.rows()])
         self.assertEqual({"cdp"}, {row["route"] for row in self.rows()})
+
+    async def test_a_dialog_opened_by_a_press_stays_typed_and_skips_post_input_settling(self):
+        self.page.page_dialog, self.page.guard = None, Mock()
+        call = self.page.call
+        async def modal(method, params=None):
+            if self.page.page_dialog:
+                raise PageDialog(self.page.page_dialog)
+            result = await call(method, params)
+            if method == "Input.dispatchMouseEvent" and params["type"] == "mousePressed":
+                self.page.page_dialog = dict(type="confirm", message="Proceed?", url="", default_prompt="")
+                raise PageDialog(self.page.page_dialog)
+            return result
+        self.page.call = modal
+        with patch("partyline_helper.window_click.Feedback.finish", side_effect=AssertionError("no settle")):
+            result = await self.click()
+        self.assertEqual(result["status"], "unconfirmed")
+        self.assertEqual(result["page_dialog"]["type"], "confirm")
+        self.assertIn("button release could not be confirmed", result["error"])
+        self.assertTrue(result["landing"]["input_sent"])
 
     async def test_a_picked_tab_that_is_not_the_one_shown_is_never_clicked(self):
         self.access.grant["target_id"] = "tab-2"

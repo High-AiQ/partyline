@@ -43,7 +43,7 @@ def dialog_pointer(grant, platform=sys.platform, list_windows=windows, scope_fac
 
 async def with_dialog_pointer(chrome, access, result):
     """Point a CDP read at a safe native dialog the Chrome window owns (CDP cannot see it)."""
-    if result is not None:
+    if result is not None and not result.get("page_dialog"):
         page = chrome.pages[access][chrome.selected[access]]
         pointer = await asyncio.to_thread(chrome.dialogs, access.grant)
         page.guard()

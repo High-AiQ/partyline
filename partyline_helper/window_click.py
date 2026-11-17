@@ -12,43 +12,23 @@ import time
 from partyline.point_geometry import GeometryError, locate
 
 from .cdp_transport import CDPError
+from .cdp_page_dialogs import PageDialog
 from .page_windows import PageSources
 from .point_cdp import page_frame
 from .point_consent import MouseConsent, clear
-from .point_cdp import CHROME
-from .point_cursor import CHANGED, COVERED, MOVED, PointRefused, run as cursor_run
+from .point_cursor import PointRefused, run as cursor_run
 from .point_ops import KEYBOARD, NEEDS_CLICK, POINTED, arguments, by_cdp, for_cursor, which
 from .point_win32 import Win32Pointer
 from .point_landing import evidence, landing_session
 from .point_feedback import Feedback
 from .uia_window_list import HARD_FLOOR
 from .uia_window_identity import live
+from .window_gone import explain
 
-STALE = ("the window moved, resized, closed or was re-granted since that snapshot, or the snapshot is "
-         "unknown: take a fresh screen_window_snapshot and click in its pixels")
-GONE = "consent revoked"
-HIDDEN = ("the tab this window grant selected is not the tab shown in the window, so a click at a point "
-          "of its picture could land on another page: take a fresh screen_window_snapshot")
-LATE = ("the click was not started in time (the person took too long or the server stopped waiting); "
-        "nothing was sent")
-PARTLY = ("the click ran out of time after it had started; it may be only partly delivered "
-          "(no button is left down)")
-FLOOR = "that window is never clickable (terminal, password manager, security or Partyline's own window)"
-AUDIT = "the helper could not write its audit log"
-TIMEOUT = 20  # a click that started finishes within this
-BUDGET = 30  # when the server names no deadline: seconds after the request arrives in which a click may start
-POINT_VERSION = 4  # the `windows` hello value that can also scroll, drag, type and press keys
-
-
-REASONS = {STALE: "stale", HIDDEN: "stale", COVERED: "covered", CHANGED: "covered", MOVED: "covered",
-           CHROME: "outside"}  # what a picture can explain: the server attaches one to these failures
-PARTS = (("outside the snapshot image", "outside"), ("frame or title bar", "outside"),
-         ("pinch-zoomed", "stale"), ("disagree about that snapshot", "stale"))
-
-
-def reason_code(text):
-    """A short code for a refusal a picture of the window can explain, or None."""
-    return REASONS.get(text) or next((code for part, code in PARTS if part in text), None)
+from .point_refusals import (  # re-exported for existing point callers
+    AUDIT, BUDGET, FLOOR, GONE, HIDDEN, LATE, PARTLY, POINT_VERSION as POINT_VERSION,
+    STALE, TIMEOUT, reason_code,
+)
 
 
 class Refused(Exception):
@@ -80,8 +60,10 @@ class PointClicks:
             async with operation_lock(entry):
                 check(access, message)
                 route, result = await self.run(entry, message, active)
+        except PageDialog as exc:
+            result = exc.result(status="failed")
         except (Refused, PointRefused, CDPError, StaleMark) as exc:
-            result = {"status": "failed", "error": str(exc),
+            result = {"status": "failed", "error": explain(access, str(exc)),
                       **({"reason": code} if (code := reason_code(str(exc))) else {})}
         except Exception as exc:  # noqa: BLE001 - whatever fails, the caller gets an answer, not a timeout
             print(f"Point {operation} failed: {exc!r}", flush=True)
@@ -195,6 +177,7 @@ class PointClicks:
         page = (await self.shares.chrome.page(access)
                 if str(grant.get("process", "")).lower() == "chrome.exe" else None)
         if page:
+            page.dialog_guard()
             feedback = Feedback(access, page, message["deadline"], self.clock)
             await feedback.start()
             route, result = "cdp", await self.via_cdp(entry, message, page, access, grant, generation, args)
@@ -219,7 +202,7 @@ class PointClicks:
                                                             points, epoch, args)
         if operation == "click" and result.get("status") == "completed":
             entry["point_clicked"] = generation  # typing and keys may follow in this grant
-        return route, await feedback.finish(result)
+        return route, result if result.get("page_dialog") else await feedback.finish(result)
 
     async def via_cdp(self, entry, message, page, access, grant, generation, args):
         operation = which(message)
@@ -243,7 +226,14 @@ class PointClicks:
             try:
                 info = await by_cdp(operation, page, frame, points, args, guard)
                 return {"status": "completed", "source": "cdp", **info}
+            except PageDialog as exc:
+                page.guard(document=False)
+                return exc.result(status=exc.action_status(page.dispatched))
             except CDPError as exc:
+                if getattr(page, "page_dialog", None):
+                    page.guard(document=False)
+                    return PageDialog(page.page_dialog).result(
+                        status="unconfirmed" if page.dispatched else "failed", error=str(exc))
                 if not page.dispatched:
                     raise Refused(str(exc)) from exc
                 return {"status": "unconfirmed", "source": "cdp", "error": str(exc),

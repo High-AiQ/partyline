@@ -75,6 +75,8 @@ async def send_snapshot(runtime, ws, conv_id):
     owner_id = getattr(ws, "screen_owner_id", None)
     if hub is not None and owner_id is not None:
         await pushed("screen", ws.send_json(snapshot(hub, owner_id, conv_id)))
+    if hub is not None:
+        await hub.window_grants.approvals.send_current(ws, conv_id)  # a tab opened mid-prompt
 
 
 async def refresh_snapshots(runtime):

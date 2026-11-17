@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .auth_guard import Principal
 from .auth_store import user_by_id
 from .machine_scope import visible_conversation_ids
+from .screen_chrome_approval import ChromeApprovals
+from .screen_closed_windows import ClosedWindows
 from .screen_window_notices import announce, live_processes
 from .preset_traits import match_preset
 from .screen_grants import GRANTS
@@ -89,6 +91,8 @@ class WindowGrants:
         self.actions = {}
         self.offers = {}
         self.known = {}  # helper grants known on this connection, including rows removed by triggers
+        self.closed = ClosedWindows()
+        self.approvals = ChromeApprovals(hub)  # which of the grants wait on Chrome's Allow prompt
 
     def spend(self, grant):
         counter = self.actions.setdefault(grant["id"], SimpleNamespace(times=deque(), count=0))
@@ -196,6 +200,8 @@ class WindowGrants:
             snapshots.end(grant_id)
         entry = self.known.pop(grant_id, None)
         device_id = entry["device_id"] if entry else None
+        if entry:
+            self.remember_end(grant_id, entry, reason)
         self.hub.runtime.db._exec("DELETE FROM screen_line_window_grants WHERE id=?", (grant_id,))
         if entry:
             await announce(self.hub.runtime, entry, grant_id, reason)
@@ -207,7 +213,18 @@ class WindowGrants:
             except (OSError, RuntimeError, WebSocketDisconnect):
                 pass  # Server authorization is already gone, even if the helper disconnected.
         if device_id:
+            await self.approvals.sync(device_id)
             await self.changed(device_id)
+
+    def remember_end(self, grant_id, entry, reason):
+        """A closed window is remembered so a later read names it; any other ending forgets the line's."""
+        row = self.hub.runtime.db._exec(
+            "SELECT g.process,d.owner_id FROM screen_line_window_grants g JOIN screen_devices d "
+            "ON d.id=g.device_id WHERE g.id=?", (grant_id,)).fetchone()
+        if reason == "window closed" and row:
+            self.closed.remember(grant_id, entry["conv_id"], row["owner_id"], entry["title"], row["process"])
+        else:
+            self.closed.forget_line(entry["conv_id"])
 
     async def revoke_standing(self, device_id, *, tell_helper=False, lines=None):
         rows = self.hub.runtime.db._exec(
@@ -228,6 +245,7 @@ class WindowGrants:
 
     async def disconnected(self, device_id, *, reason="helper disconnected"):
         self.offers.pop(device_id, None)
+        await self.approvals.sync(device_id)
         if reason == "helper disconnected" and self.hub.updates.paused(device_id):
             return
         for grant_id, entry in list(self.known.items()):
