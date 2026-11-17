@@ -124,6 +124,21 @@ class RetirementAuxiliaryTest(unittest.TestCase):
         self.assertEqual(response.json()["archived_ids"], [])
         self.assertTrue(os.path.isdir(child["cwd"]))
 
+    def test_auxiliary_git_prune_refusal_preserves_redacted_stderr(self):
+        import subprocess
+
+        child = self.child()
+        self.auxiliary(child)
+        stderr = "fatal: cannot remove a locked working tree; token=must-not-leak"
+        with patch("partyline.review_worktrees._git",
+                   return_value=subprocess.CompletedProcess([], 1, "", stderr)):
+            response = self.force(child)
+        self.assertEqual(response.status_code, 409, response.text)
+        detail = response.json()["detail"]
+        self.assertIn(f"line {child['id']} during auxiliary worktree prune", detail)
+        self.assertIn("cannot remove a locked working tree", detail)
+        self.assertNotIn("must-not-leak", detail)
+
     def test_legacy_temp_sweep_runs_once_for_recursive_force(self):
         child = self.child()
         self.child("grand", child["id"])

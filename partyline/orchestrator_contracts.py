@@ -35,8 +35,8 @@ class TaskIn(BaseModel):
                     'Fixed at creation; legacy light is accepted as full.')
     repository: str | None = Field(default=None, min_length=1, max_length=4096)
     batch: list[str] = Field(default_factory=list, max_length=128,
-                            description='Suite only: task line IDs/tags (accepted SHAs) and/or explicit '
-                                        'commit SHAs, in cherry-pick order, in repository.')
+                            description='Suite only: task line IDs/tags (whole base_sha..accepted ranges) '
+                                        'and/or explicit single commit SHAs, in cherry-pick order.')
     repositories: list[SuiteRepositoryIn] | None = Field(default=None, min_length=1, max_length=8)
 
     memory_limit: str | None = Field(default=None, pattern=r'^[1-9][0-9]{0,5}[KMG]$')

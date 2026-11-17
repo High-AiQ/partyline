@@ -52,7 +52,7 @@ def guide(state):
     return {"doors": DOORS,
             "goal_decisions": [
                 {"need": "New task",
-                 "operation": "create_task(name, goal, implementer, review, mode=full|express|suite, "
+                 "operation": "create_task(name, goal, implementer, mode=full|express|suite, "
                               "repository?, batch?)"},
                 {"need": "Change active task goal", "operation": "set_task_goal(conv_id, goal)"},
                 {"need": "New work on approved/done task", "operation": "reopen_task(conv_id, goal)"},

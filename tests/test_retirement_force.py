@@ -68,6 +68,13 @@ class ForcedRetirementTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertTrue(os.path.isdir(child["cwd"]))
 
+    def test_unchanged_previews_intentionally_reuse_the_same_token(self):
+        child = self.child()
+        first = self.preview(child).json()
+        second = self.preview(child).json()
+        self.assertEqual(first["preview_token"], second["preview_token"])
+        self.assertEqual(first["lines"], second["lines"])
+
     def test_same_path_new_bytes_make_preview_stale(self):
         child = self.child()
         self.dirty(child["cwd"])
@@ -125,6 +132,7 @@ class ForcedRetirementTest(unittest.TestCase):
             response = self.force(child, include_children=True)
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["archived_ids"], [])
+        self.assertIn(f"line {grand['id']} during recovery-ref capture", response.json()["detail"])
         for line in (child, grand):
             self.assertTrue(os.path.isdir(line["cwd"]))
             self.assertFalse(self.db.get_conversation(line["id"])["archived_at"])
@@ -139,6 +147,15 @@ class ForcedRetirementTest(unittest.TestCase):
         self.assertEqual(response.json()["pending_ids"], [grand["id"], child["id"]])
         self.assertTrue(os.path.isdir(child["cwd"]))
         self.assertTrue(os.path.isdir(grand["cwd"]))
+
+    def test_archive_failure_names_step_without_leaking_arbitrary_exception_text(self):
+        child = self.child()
+        with patch("partyline.retirement_force.archive_line",
+                   side_effect=RuntimeError("token=must-not-leak")):
+            response = self.force(child)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn(f"line {child['id']} during archive: RuntimeError", response.json()["detail"])
+        self.assertNotIn("must-not-leak", response.text)
 
     def test_ignored_files_are_listed_but_not_snapshotted(self):
         child = self.child()
@@ -167,10 +184,15 @@ class ForcedRetirementTest(unittest.TestCase):
         self.assertTrue(os.path.isdir(child["cwd"]))
 
     def test_git_unknown_refuses_instead_of_treating_as_clean(self):
+        import errno
+
         child = self.child()
-        with patch("partyline.retirement_git._git", side_effect=OSError("git missing")):
-            with self.assertRaises(HTTPException):
-                inspect_git(self.db, child)
+        with patch("partyline.retirement_git._git",
+                   side_effect=OSError(errno.EROFS, "Read-only file system")):
+            response = self.preview(child)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("cannot inspect retirement Git state", response.json()["detail"])
+        self.assertIn("Read-only file system", response.json()["detail"])
 
     def test_retirement_audit_is_readable_in_scope(self):
         child = self.child()
@@ -378,10 +400,15 @@ class ForcedRetirementTest(unittest.TestCase):
         _git("add", "scratch.txt", cwd=child["cwd"])
         before = _git("ls-files", "--stage", cwd=child["cwd"]).stdout
         state = inspect_git(self.db, child)
+        stderr = "fatal: https://user:password@example.test/repo token=secret"
         with patch("partyline.retirement_git.subprocess.run",
-                   return_value=subprocess.CompletedProcess([], 1, "", "failure")):
-            with self.assertRaisesRegex(HTTPException, "snapshot failed"):
+                   return_value=subprocess.CompletedProcess([], 1, "", stderr)):
+            with self.assertRaises(HTTPException) as caught:
                 snapshot(state, "failed")
+        self.assertIn("snapshot failed", caught.exception.detail)
+        self.assertIn("https://[redacted]@example.test/repo", caught.exception.detail)
+        self.assertNotIn("password", caught.exception.detail)
+        self.assertNotIn("secret", caught.exception.detail)
         self.assertEqual(_git("ls-files", "--stage", cwd=child["cwd"]).stdout, before)
 
     def test_mirror_only_tip_is_reported_and_preserved(self):

@@ -21,10 +21,11 @@ import time
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
+from .auxiliary_removal import remove_checkout
 from .nested_repositories import keep_reason
 from .system_notice import post_system_notice
 from .hierarchy_contracts import ReviewWorktreeIn, ReviewWorktreeOut
-from .worktree_recovery import add_worktree, locked_paths, remove_registration
+from .worktree_recovery import add_worktree, locked_paths
 from .line_worktree import REVIEW_DIR, _exclude, _git, line_cwd, repo_and_worktree, rev
 from .machine_scope import deny_unless
 from .task_workspaces import workspaces
@@ -152,29 +153,9 @@ def list_review_worktrees(db, conv_id: str) -> list[dict]:
     ]
 
 
-def remove_review_path(path: str) -> bool:
-    """Delete one review worktree directory; False when git refused to let go.
-
-    The checkout is disposable by contract — it holds no work of the line —
-    so removal is forced and never asks about uncommitted scratch.
-    """
-    if not os.path.isdir(path):
-        marker = f"/{REVIEW_DIR}/"
-        if marker in path:
-            remove_registration(path.split(marker, 1)[0], path)
-        return True
-    if keep_reason(path):
-        return False
-    marker = f"/{REVIEW_DIR}/"
-    root = path.split(marker, 1)[0] if marker in path else None
-    if root and os.path.isdir(root):
-        done = _git("worktree", "remove", "--force", "--force", path, cwd=root)
-        if done.returncode == 0:
-            return True
-        logger.warning("review worktree prune: git refused to remove %s", path)
-        return False
-    shutil.rmtree(path, ignore_errors=True)
-    return not os.path.isdir(path)
+def remove_review_path(path: str, *, errors: list[str] | None = None) -> bool:
+    """Delete one review worktree; optionally collect safe refusal diagnostics."""
+    return remove_checkout(path, REVIEW_DIR, git=_git, fallback=False, errors=errors)
 
 
 def prune_accepted_review(db, conv_id: str, sha: str) -> int:

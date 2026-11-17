@@ -117,7 +117,9 @@ implementers or reviewers for full suites, e2e suites or whole-suite coverage. T
 reports list the affected tests actually run. Legacy `light` means `full`.
 
 Before every batch PR, accept the tasks then create a reviewer-free `suite` line with
-`repository` and an ordered `batch` of task IDs/tags (accepted SHAs) and/or explicit SHAs.
+`repository` and an ordered `batch` of task IDs/tags (whole `base_sha..accepted` ranges)
+and/or explicit single SHAs. Omit `review` (or pass `none`) for suites. A blocked suite
+can be reopened with corrected batches and a new goal; missing selected worktrees are repaired.
 It creates an integration branch from current main, cherry-picks the batch and runs every
 repository suite. Put batch version numbers in its goal to settle version conflicts.
 The runner delivers the branch/SHA, pass/fail per suite and best-effort failure attribution

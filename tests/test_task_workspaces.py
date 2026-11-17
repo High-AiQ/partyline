@@ -8,7 +8,7 @@ from partyline import fence_workspaces
 from partyline.fence_paths import write_set
 from partyline.orchestrator_contracts import ReviewRequestIn
 from partyline.orchestrator_service import request_review
-from partyline.task_workspaces import anchor, place_task, workspaces
+from partyline.task_workspaces import WorkspaceUnavailable, anchor, place_task, workspaces
 from tests.orchestrator_fixture import TaskFixture, git
 
 CLONES = ('argon-backend', 'argon-frontend')
@@ -147,7 +147,8 @@ class RollbackTest(WorkspaceFixture):
         os.makedirs(empty)
         git(empty, 'init', '-q', '-b', 'main')
         self.db.create_conversation('t', 'slice')
-        self.assertIsNone(place_task(self.db, 'root', 't'))
+        with self.assertRaisesRegex(WorkspaceUnavailable, 'no HEAD commit'):
+            place_task(self.db, 'root', 't')
         self.assertFalse(os.path.exists(os.path.join(self.top, '.partyline-worktrees', 'slice')))
         for name in CLONES:
             self.assertEqual(git(self.clones[name], 'branch', '--list', 'line/*'), '')
@@ -296,6 +297,80 @@ class RetirementTest(AcceptAndRetireFixture):
         self.assertFalse(os.path.exists(folder))
         self.assertEqual(git(self.clones['argon-backend'], 'rev-parse', 'line/slice'),
                          self.shas['argon-backend'])
+
+    async def force_retire(self):
+        from partyline.media import MediaStore
+        from partyline.retirement_force import retire as force
+        from partyline.retirement_preview import preview
+
+        await self.runtime.stop_attachments(self.conv_id)
+        self.db._exec("UPDATE attachments SET status='detached' WHERE conv_id=?", (self.conv_id,))
+        self.db._exec("UPDATE task_reviews SET merged=1 WHERE conv_id=?", (self.conv_id,))
+        self.assertEqual(self.row()['status'], 'done')
+        self.assertTrue(self.row()['merged'])
+        self.assertTrue(all(att['status'] == 'detached'
+                            for att in self.db.list_attachments(self.conv_id)))
+        MediaStore(self.db, os.path.join(self.directory.name, 'media'))
+        evidence = preview(self.db, self.captain, self.conv_id, False)
+        response = await force(self.runtime, self.captain, self.conv_id, include_children=False,
+                               stop_processes=True, clear_goal=True,
+                               preview_token=evidence['preview_token'], presence=None)
+        return evidence, response
+
+    async def test_force_retires_a_clean_merged_plain_task_container(self):
+        await self.finished()
+        folder = self.db.get_conversation(self.conv_id)['cwd']
+        self.merge_all()
+        evidence, response = await self.force_retire()
+        self.assertIsNone(evidence['lines'][0]['git'])
+        self.assertEqual(response['ok'], True, response)
+        self.assertFalse(os.path.exists(folder))
+
+    async def test_write_fence_failure_names_line_step_and_os_reason(self):
+        import errno
+        from unittest.mock import patch
+
+        await self.finished()
+        self.merge_all()
+        with patch('partyline.task_teardown.preserve',
+                   side_effect=OSError(errno.EROFS, 'Read-only file system')):
+            evidence, response = await self.force_retire()
+        self.assertIsNone(evidence['lines'][0]['git'])
+        self.assertEqual(response.status_code, 409)
+        detail = response.body.decode()
+        self.assertIn(f'line {self.conv_id} during worktree removal or registration', detail)
+        self.assertIn('Read-only file system', detail)
+        self.assertNotEqual(detail, 'retirement failed; remaining lines retained')
+        self.assertFalse(self.db.get_conversation(self.conv_id)['archived_at'])
+
+    async def test_missing_workspace_rows_are_a_preview_and_retire_blocker(self):
+        from partyline.media import MediaStore
+        from partyline.retirement_force import retire as force
+        from partyline.retirement_preview import preview
+
+        await self.finished()
+        self.merge_all()
+        self.db._exec('DELETE FROM task_workspaces WHERE conv_id=?', (self.conv_id,))
+        MediaStore(self.db, os.path.join(self.directory.name, 'media'))
+        evidence = preview(self.db, self.captain, self.conv_id, False)
+        self.assertIsNone(evidence['lines'][0]['git'])
+        self.assertEqual(evidence['blockers'][0]['code'], 'workspace_registration_missing')
+        with self.assertRaises(HTTPException) as caught:
+            await force(self.runtime, self.captain, self.conv_id, include_children=False,
+                        stop_processes=True, clear_goal=True,
+                        preview_token=evidence['preview_token'], presence=None)
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertIn(f'preflight blocked line {self.conv_id}', caught.exception.detail)
+        self.assertIn('no task_workspaces registration', caught.exception.detail)
+
+    async def test_force_retires_a_clean_merged_repository_task_with_nested_workspaces(self):
+        await self.finished(repository=True)
+        folder = self.db.get_conversation(self.conv_id)['cwd']
+        self.merge_all()
+        evidence, response = await self.force_retire()
+        self.assertIsNotNone(evidence['lines'][0]['git'])
+        self.assertEqual(response['ok'], True, response)
+        self.assertFalse(os.path.exists(folder))
 
     async def test_a_dirty_worktree_keeps_the_whole_task_folder(self):
         await self.finished()

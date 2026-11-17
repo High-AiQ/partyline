@@ -22,6 +22,7 @@ from .line_worktree import rev
 from .nested_repositories import keep_reason, nested_repositories
 from .retirement_nested import linked_owner
 from .retirement_git import git, snapshot
+from .retirement_errors import operation_reason
 from .retirement_worktree import remove_directory
 from .task_teardown import teardown
 from .retirement_preview import force_authorized, identity, plan, token
@@ -99,7 +100,8 @@ def _remove(state):
                 git(owner, "worktree", "remove", "--force", "--force", full)
         remove_directory(state["cwd"], state["root"])
     except OSError as exc:
-        raise HTTPException(409, "worktree removal did not complete; registration retained") from exc
+        raise HTTPException(409, "worktree removal did not complete; registration retained: "
+                            f"{operation_reason(exc)}") from exc
     git(state["root"], "worktree", "remove", "--force", "--force", state["cwd"])
     if owned:
         git(state["root"], "update-ref", "-d", f"refs/heads/{state['branch']}", owned)
@@ -159,6 +161,12 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
         evidence = await asyncio.to_thread(plan, db, principal, target, include_children, presence)
         if not hmac.compare_digest(preview_token, token(db, evidence)):
             raise HTTPException(409, "retirement preview is stale or belongs to another principal")
+        blockers = [(line["id"], blocker) for line in evidence["lines"]
+                    for blocker in line.get("blockers", [])]
+        if blockers:
+            line_id, blocker = blockers[0]
+            raise HTTPException(409, f"retirement preflight blocked line {line_id} during workspace "
+                                f"registration check: {blocker['message']}")
         # Every missing flag in one refusal, before anything is snapshotted,
         # stopped or removed: one round trip, and a refused call leaves no trace.
         missing = set()
@@ -179,50 +187,63 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
                     "clear_goal": clear_goal, "stop_processes": stop_processes,
                     "preview_token": preview_token, "plan": evidence}
         await _audit(db, audit_id, principal, target, "attempted", decision, recovery)
+        failed_line, step = target, "recovery-ref capture"
         try:
             # Every snapshot succeeds before any process or line is retired.
             for line in evidence["lines"]:
+                failed_line, step = line["id"], "recovery-ref capture"
                 recovery[line["id"]] = {}
                 if line["git"]:
                     recovery[line["id"]] = await asyncio.to_thread(
                         snapshot, line["git"], audit_id + "/" + line["id"])
+                step = "auxiliary recovery-ref capture"
                 recovery[line["id"]].update(await asyncio.to_thread(
                     recover_auxiliary, line, audit_id + "/" + line["id"]))
                 await _audit(db, audit_id, principal, target, "snapshotted", decision, recovery)
+            step = "post-snapshot state check"
             fresh = await asyncio.to_thread(plan, db, principal, target, include_children, presence,
                                             f"refs/partyline/discarded/{audit_id}/")
             if evidence != fresh:
                 raise HTTPException(409, "retirement changed during snapshot; refresh preview")
             force_authorized(db, principal, target)
             for line in evidence["lines"]:
-                line_id = line["id"]
+                line_id = failed_line = line["id"]
                 # Git inspection and drift checks come first: a refusal here
                 # finds the worktree and every process exactly as it was.
+                step = "pre-stop state check"
                 current = await asyncio.to_thread(
                     _recheck, db, principal, target, line, presence, audit_id)
                 force_authorized(db, principal, target)
+                step = "process stop"
                 for att in live_attachments(db, line_id, False):
                     await detach_attachment(runtime, att["id"])
                     stopped.append(att["name"])
                 force_authorized(db, principal, target)
+                step = "post-stop state check"
                 current = await asyncio.to_thread(
                     _recheck, db, principal, target, line, presence, audit_id,
                     "after process stop")
                 conv = db.get_conversation(line_id)
+                step = "worktree removal or registration"
                 removed = await asyncio.to_thread(_remove_line, db, line_id, current)
                 if not removed and (reason := keep_reason(conv.get("cwd") or "")):
                     kept.append(reason)
+                step = "auxiliary worktree prune"
                 preserved_paths.extend(await asyncio.to_thread(cleanup_auxiliary, db, line, audit_id))
+                step = "write-fence temporary-directory cleanup"
                 await asyncio.to_thread(reap_line_tmp, db, line_id)
                 if clear_goal and conv.get("goal"):
+                    step = "goal clear"
                     set_goal(db, line_id, "")
+                step = "archive"
                 await archive_line(runtime, line_id)
                 completed.append(line_id)
                 await _audit(db, audit_id, principal, target, "in_progress",
                        {**decision, "completed": completed}, recovery)
         except Exception as exc:
-            detail = (exc.detail if isinstance(exc, HTTPException)
-                      else "retirement failed; remaining lines retained")
+            reason = exc.detail if isinstance(exc, HTTPException) else operation_reason(exc)
+            detail = (f"retirement failed for line {failed_line} during {step}: {reason}; "
+                      "remaining lines retained")
             preserved_paths = [row["path"] for row in db._exec(
                 "SELECT path FROM retirement_preserved_paths WHERE audit_id=? ORDER BY path",
                 (audit_id,)).fetchall()]

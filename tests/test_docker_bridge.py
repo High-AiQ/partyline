@@ -1,8 +1,10 @@
 import asyncio
+import contextlib
 import gc
 import os
 import signal
 import stat
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -27,6 +29,17 @@ class DockerBridgeTest(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(patcher.stop)
         bridge.proc, bridge.attempts, bridge.last_error, bridge.lock = None, [], None, None
         bridge.stderr.clear()
+        self.bridge_processes = []
+        create_subprocess = asyncio.create_subprocess_exec
+
+        async def track_bridge_process(*args, **kwargs):
+            proc = await create_subprocess(*args, **kwargs)
+            self.bridge_processes.append(proc)
+            return proc
+
+        process_patch = patch.object(asyncio, "create_subprocess_exec", track_bridge_process)
+        process_patch.start()
+        self.addCleanup(process_patch.stop)
 
         async def daemon(reader, writer):
             data = await reader.read()
@@ -36,7 +49,7 @@ class DockerBridgeTest(unittest.IsolatedAsyncioTestCase):
 
         self.daemon = await asyncio.start_unix_server(daemon, path=self.host)
         self.addAsyncCleanup(self._close_daemon)
-        self.addAsyncCleanup(bridge.terminate)
+        self.addAsyncCleanup(self._stop_bridge)
         self.addAsyncCleanup(docker_relay.stop, "line")
 
         async def refused_directly(path, *args, **kwargs):
@@ -52,10 +65,29 @@ class DockerBridgeTest(unittest.IsolatedAsyncioTestCase):
         self.daemon.close()
         await self.daemon.wait_closed()
 
+    async def _stop_bridge(self):
+        await bridge.terminate()
+        for proc in self.bridge_processes:
+            # Stop every process group, including a bridge replaced after a restart.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            await proc.wait()
+            self.assertIsNotNone(proc.returncode)
+
     def fake_sg(self, body: str):
         path = os.path.join(self.tmp.name, "sg")
         with open(path, "w") as handle:
             handle.write(f"#!/bin/sh\n{body}\n")
+        os.chmod(path, 0o755)
+        patcher = patch.object(docker_bridge_client, "SG", path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def fake_sg_exec(self):
+        path = os.path.join(self.tmp.name, "sg")
+        with open(path, "w") as handle:
+            handle.write(f"#!{sys.executable}\nimport os, shlex, sys\n"
+                         "args = shlex.split(sys.argv[3])\nos.execvp(args[0], args)\n")
         os.chmod(path, 0o755)
         patcher = patch.object(docker_bridge_client, "SG", path)
         patcher.start()
@@ -70,7 +102,7 @@ class DockerBridgeTest(unittest.IsolatedAsyncioTestCase):
         return reply
 
     async def test_a_refused_host_socket_is_reached_through_the_bridge(self):
-        self.fake_sg('exec sh -c "$3"')  # stands in for `sg docker -c CMD`
+        self.fake_sg_exec()  # stands in for `sg docker -c CMD`
         self.assertEqual(await self.ask(), b"daemon:GET /_ping")
         info = bridge.info()
         self.assertTrue(info["running"])
@@ -82,7 +114,7 @@ class DockerBridgeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["probe"], "ok")
 
     async def test_a_dead_bridge_is_restarted(self):
-        self.fake_sg('exec sh -c "$3"')
+        self.fake_sg_exec()
         await self.ask()
         first = bridge.proc.pid
         os.killpg(first, signal.SIGKILL)
@@ -104,7 +136,7 @@ class DockerBridgeTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(bridge.info()["running"])
 
     async def test_paths_with_spaces_and_quotes_survive_the_sg_command_string(self):
-        self.fake_sg('exec sh -c "$3"')
+        self.fake_sg_exec()
         spaced = os.path.join(self.tmp.name, "it's a dir")
         with patch.object(docker_bridge_client, "BRIDGE_ROOT", spaced):
             self.assertEqual(await self.ask(), b"daemon:GET /_ping")
@@ -119,8 +151,9 @@ class DockerBridgeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(docker_bridge_client.BRIDGE_ROOT, hidden)
         self.assertNotIn(docker_bridge_client.BRIDGE_ROOT,
                          [argv[i + 1] for i, a in enumerate(argv) if a == "--bind"])
-        own = fence._bwrap_argv({**base, "docker_relays_exist": True,
-                                 "docker_socket": docker_relay.start("line")}, ["cli"])
+        with patch.object(docker_relay, "start", return_value=os.path.join(self.tmp.name, "relay.sock")):
+            own = fence._bwrap_argv({**base, "docker_relays_exist": True,
+                                     "docker_socket": docker_relay.start("line")}, ["cli"])
         self.assertNotIn(docker_bridge_client.BRIDGE_ROOT,
                          [own[i + 1] for i, a in enumerate(own) if a == "--bind"])
 

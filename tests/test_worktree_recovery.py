@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 from partyline.db import Db
 from partyline.line_worktree import _git, place_child
 from partyline.line_subtree import archive_line
-from partyline.task_workspaces import place_task, workspaces
+from partyline.task_workspaces import WorkspaceUnavailable, place_task, workspaces
 from partyline.worktree_lifecycle import archive_worktree_if_safe, sweep_orphaned_worktrees
 from partyline.worktree_recovery import (
     add_worktree, heal_initializing, registrations, remove_registration,
@@ -89,7 +89,8 @@ class RecoveryTest(unittest.IsolatedAsyncioTestCase):
             return done
 
         with patch('partyline.task_workspaces._git', side_effect=fail_second):
-            self.assertIsNone(place_task(self.db, 'root', 'kid'))
+            with self.assertRaisesRegex(WorkspaceUnavailable, 'interrupted checkout'):
+                place_task(self.db, 'root', 'kid')
         for repo in repos:
             self.assertEqual(self.paths(repo), {str(repo)})
             self.assertNotEqual(_git('show-ref', '--verify', 'refs/heads/line/kid',

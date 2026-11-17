@@ -12,6 +12,7 @@ from .hierarchy import descendants, lead_attachment, parent_id_of
 from .machine_scope import deny_unless, is_human
 from .retirement_git import DISPLAY, MAX_BYTES, MAX_FILES, MAX_IGNORED_BYTES, MAX_IGNORED_FILES, inspect_git
 from .retirement_auxiliary import inspect_auxiliary
+from .retirement_worktree import registration_blockers
 
 MAX_LINES = 50
 
@@ -67,6 +68,7 @@ def plan(db, principal, target, include_children, presence=None, recovery_prefix
         lines.append({"id": line_id, "parent_id": parent_id_of(conv), "name": conv["name"],
                       "goal": conv.get("goal", ""), "children": children,
                       "attachments": attachments, "git": state,
+                      "blockers": registration_blockers(db, conv, state),
                       "temporary_directories": [str(guarded_path(att_id))
                                                 for att_id in line_tmp_ids(db, [line_id])],
                       "auxiliary_worktrees_preserved": auxiliary,
@@ -117,9 +119,11 @@ def preview(db, principal, target, include_children, presence=None):
                 row["git"][key] = {"count": len(state[key]), "paths": state[key][:DISPLAY],
                                     "truncated": len(state[key]) > DISPLAY}
         lines.append(row)
+    blockers = [{"line_id": line["id"], **blocker} for line in evidence["lines"]
+                for blocker in line["blockers"]]
     return {"target": target, "include_children": include_children,
             "force_allowed": allowed, "preview_token": token(db, evidence), "lines": lines,
-            "required_flags": required_flags(evidence),
+            "required_flags": required_flags(evidence), "blockers": blockers,
             "implications": "force_discard captures both the index and tracked/untracked working files "
             "in separate recovery refs and anchors each clean auxiliary HEAD before removal; "
             "ignored files are lost. Uploads/messages and dirty auxiliary worktrees are retained; "
