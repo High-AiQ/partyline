@@ -181,7 +181,12 @@ class ServerSideTests(unittest.IsolatedAsyncioTestCase):
             hub = ElementState()
             hub.exchange = AsyncMock(return_value={"events_supported": True, "subscription_live": True,
                                                    "event_counter": 9, "event_sources": sources})
-            return await hub.target_stable(None, {}, {}, self.tree, self.tree.by_helper[target])
+            result = await hub.target_stable(None, {}, {}, self.tree, self.tree.by_helper[target])
+            if not result:
+                from partyline.screen_element_actions import changing
+                hub.snapshots = {"g": self.tree}
+                self.assertIn("subtree " + self.tree.by_helper[ids[0]], changing(hub, "g")["error"])
+            return result
         self.assertTrue(await stable(["b"], "c"))
         self.assertTrue(await stable(["d"], "c"))
         self.assertFalse(await stable(["c"], "c"))

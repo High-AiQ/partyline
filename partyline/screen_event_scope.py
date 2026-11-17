@@ -66,6 +66,12 @@ class EventScope:
         if status.get("event_counter") == tree.event_counter:
             return False, [], set()
         found = status.get("event_sources")
+        tree.event_busy = ", ".join(label for bad, label in (
+            (not fields or not isinstance(found, dict), "event sources unavailable"),
+            (isinstance(found, dict) and found.get("overflow"), "event source overflow"),
+            (isinstance(found, dict) and found.get("unplaced"), "unplaced event sources"),
+            (status.get("events_supported") is not True, "events unsupported"),
+            (status.get("subscription_live") is not True, "event subscription inactive")) if bad)
         if (not fields or not isinstance(found, dict) or found.get("overflow") or found.get("unplaced")
                 or status.get("events_supported") is not True or status.get("subscription_live") is not True):
             return True, None, set()
@@ -95,20 +101,32 @@ class EventScope:
         return moved, outermost(tree, ids)
 
     async def target_stable(self, principal, grant, device, tree, ident):
-        """No event came from the target, an ancestor or anything below it since the capture began."""
+        """No related event since capture; legacy sources lack property detail to narrow safely.
+
+        An ancestor event could mean disabled/inert state or changed structure, not
+        just styling. Only helpers with backend identity proof bypass this barrier.
+        Store diagnostics on the checked tree; replies using a newer capture may
+        fall back to a generic window-change explanation.
+        """
+        tree.action_busy = "event counter unavailable or target absent"
         if getattr(tree, "event_counter", None) is None or ident not in tree.nodes:
             return False
         moved, chains, unsure = await self.events(principal, grant, device, tree)
         if not moved:
             return True
         if chains is None:
+            tree.action_busy = "events cannot be placed: " + tree.event_busy
             return False
         for chain in chains:
             source = tree.by_helper.get(chain[0])
             if source is None:
                 if chain[0] in unsure or tree.cursor or tree.nodes[ident].helper in chain:
+                    tree.action_busy = f"events in target subtree {ident} or unread/stale ancestry"
                     return False  # at or below the target without a node of its own, or unplaceable
             elif related(tree, source, ident):
+                relation = "target" if source == ident else (
+                    "ancestor" if source in above(tree, ident) else "descendant")
+                tree.action_busy = f"events at {relation} subtree {source}"
                 return False
         return True
 

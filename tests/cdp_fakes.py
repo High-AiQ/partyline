@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from partyline_helper.cdp import Chrome
+from partyline_helper.cdp_recipes import DISPATCH
 from partyline_helper.cdp_transport import BrowserConnection
 from partyline_helper.status import Status
 from partyline_helper.uia_access import WindowAccess
@@ -32,6 +33,7 @@ class Socket:
         self.states = {1: {}, 2: dict(tag="A", aria_disabled=True, hit=True),
                        3: dict(tag="SELECT", value="old", selected_index=0, selected_count=1, hit=True)}
         self.eval_value = {"ok": True}
+        self.frame_offsets, self.box_quads = {}, {}
         self.document = {}
         self.options = [dict(label="Old", value="old"), dict(label="New", value="New")]
         self.focused = None
@@ -87,8 +89,11 @@ class Socket:
                 return {"result": {"value": self.native_select.function(backend, p)}}
             state = {"connected": backend in self.states, "document_identity": "document",
                      "bounds": [0, 0, 100, 40], **self.states.get(backend, {})}
+            if p["functionDeclaration"] == DISPATCH:
+                left, top, right, bottom = state["bounds"]
+                state.update(x=(left + right) / 2, y=(top + bottom) / 2)
             if state.get("hit") is False:
-                state = {**state, "hit_reason": state.get("hit_reason", 'covered by DIV "overlay"')}
+                state = {**state, "reason": state.get("reason") or "element is covered"}
             return {"result": {"value": state}}
         if method == "DOM.focus":
             self.focused = p["backendNodeId"]
@@ -99,7 +104,12 @@ class Socket:
                 else self.eval_value
             return {"result": {"value": value}}
         if method == "DOM.getBoxModel":
-            return {"model": {"content": [0, 0, 100, 0, 100, 40, 0, 40]}}
+            backend = p["backendNodeId"]
+            left, top, right, bottom = self.states.get(backend, {}).get("bounds", [0, 0, 100, 40])
+            dx, dy = self.frame_offsets.get(backend, (0, 0))
+            quad = [left + dx, top + dy, right + dx, top + dy,
+                    right + dx, bottom + dy, left + dx, bottom + dy]
+            return {"model": {"content": self.box_quads.get(backend, quad)}}
         return {}
 
     async def close(self):

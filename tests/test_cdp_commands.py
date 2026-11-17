@@ -177,7 +177,8 @@ class HitRecipe(TestCase):
     def run_hit(self, scene):
         script = r"""
 const innerWidth=800, innerHeight=600;
-const doc={host:null};
+const style={visibility:'visible',display:'block'};
+const doc={host:null,defaultView:{getComputedStyle:()=>style}};
 const el=(tagName,parentNode=null,attrs={})=>({tagName,parentNode,assignedSlot:null,shadowRoot:null,
   getAttribute:k=>attrs[k]??null,getRootNode(){let n=this;while(n.parentNode)n=n.parentNode;return n;},
   getBoundingClientRect:()=>({x:10,y:10,width:100,height:40}),ownerDocument:doc});
@@ -191,6 +192,15 @@ switch(SCENE){
  case 'open-empty': {const root=shadow(host,'open',()=>null);target=el('BUTTON',root);top=host;break;}
  case 'closed-host': {const root=shadow(host,'closed',()=>null);target=el('BUTTON',root);top=host;break;}
  case 'slotted': {shadow(host,'open',()=>null);target=el('SPAN',host);top=host;break;}
+ case 'hidden': {target=el('BUTTON',body);top=target;style.visibility='hidden';break;}
+ case 'collapsed': {target=el('BUTTON',body);top=target;style.visibility='collapse';break;}
+ case 'display-none': {target=el('BUTTON',body);top=target;style.display='none';break;}
+ case 'zero-size': {target=el('BUTTON',body);top=target;
+   target.getBoundingClientRect=()=>({x:10,y:10,width:0,height:40});break;}
+ case 'offscreen': {target=el('BUTTON',body);top=target;
+   target.getBoundingClientRect=()=>({x:900,y:10,width:100,height:40});break;}
+ case 'moved': {target=el('BUTTON',body);top=target;
+   target.getBoundingClientRect=()=>({x:50.25,y:70.75,width:100,height:40});break;}
  case 'overlay': {target=el('BUTTON',body);top=el('DIV',body,{'aria-label':'Dialog'});break;}
  case 'plain-ancestor': {const wrap=el('DIV',body);target=el('BUTTON',wrap);top=wrap;break;}
 }
@@ -203,8 +213,16 @@ console.log(JSON.stringify((RECIPE).call(target)));
     def test_a_hit_on_the_targets_own_component_host_counts_as_the_target(self):
         for scene in ("open-host", "open-empty", "closed-host", "slotted"):
             with self.subTest(scene=scene):
-                self.assertEqual(self.run_hit(scene), {"hit": True})
+                self.assertEqual(self.run_hit(scene), {"hit": True, "x": 60, "y": 30})
 
     def test_unrelated_overlays_and_plain_ancestors_still_cover_the_target(self):
-        self.assertEqual(self.run_hit("overlay"), {"hit": False, "reason": 'covered by DIV "Dialog"'})
-        self.assertEqual(self.run_hit("plain-ancestor"), {"hit": False, "reason": "covered by DIV"})
+        self.assertEqual(self.run_hit("overlay"), {"hit": False, "reason": "element is covered"})
+        self.assertEqual(self.run_hit("plain-ancestor"), {"hit": False, "reason": "element is covered"})
+
+    def test_live_point_visibility_and_viewport_are_checked(self):
+        for scene in ('hidden', 'collapsed', 'display-none', 'zero-size'):
+            with self.subTest(scene=scene):
+                self.assertEqual(self.run_hit(scene),
+                                 {"hit": False, "reason": "element is no longer visible"})
+        self.assertEqual(self.run_hit('offscreen'), {"hit": False, "reason": "outside viewport"})
+        self.assertEqual(self.run_hit('moved'), {"hit": True, "x": 100.25, "y": 90.75})
