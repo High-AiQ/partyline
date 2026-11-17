@@ -13,6 +13,18 @@ from tests.test_helper_install import FakeRegistry
 
 
 class NativeInstallTests(unittest.TestCase):
+    def test_install_reports_missing_worker_imports_without_registering_a_broken_extension(self):
+        with tempfile.TemporaryDirectory() as root:
+            home = Path(root)
+            binary = home / 'PartylineChromeHost'
+            binary.write_text('fake executable')
+            with patch.object(native_install, 'config_path', return_value=home / 'config/helper.json'), \
+                    patch.object(native_install, 'host_executable', return_value=binary), \
+                    patch.object(native_install, 'missing_worker_imports', return_value=['backoff.js']):
+                messages = native_install.install('Linux', home, [str(binary)])
+            self.assertIn('missing file(s): backoff.js', messages[0])
+            self.assertFalse((home / 'config/chrome-native-host.json').exists())
+
     def test_public_key_derives_exact_registered_id_and_minimal_permissions(self):
         manifest = json.loads(Path('partyline_chrome/manifest.json').read_text())
         digest = hashlib.sha256(base64.b64decode(manifest['key'])).hexdigest()[:32]
