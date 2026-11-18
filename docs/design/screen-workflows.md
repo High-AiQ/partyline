@@ -178,6 +178,49 @@ evidence is missing, mark the step unresolved and request a focused
 demonstration. Use the recording path for adapters with incomplete transcripts.
 [Tool and turn telemetry](../telemetry.md)
 
+Phase 2 recordings live in Partyline's existing SQLite database. A person starts
+and stops each recording explicitly on a line with an active window grant. The
+server records grant-route calls, their bounded arguments and outcomes, semantic
+target facts, and timed narration. The record expires 30 days after it starts.
+Demonstrations are readable only by the person who owns the recorded grant or
+by a process on that grant's line or one of its ancestors. The grant owner and
+grant line are retained with the record so this remains checkable after the
+window grant closes. A stopped demonstration can be used to propose a draft; saving a
+draft does not create approval.
+
+History import reads timestamped screen-call telemetry and timestamped speech
+lines from walkthrough messages. It reads call arguments and results directly
+from the adapter's existing structured transcript only when a person requests
+an interval import; Partyline does not ingest or retain those values through
+telemetry. Calls match the selected grant by ID or title. Missing arguments,
+results, outcomes, or window attribution remain unresolved. Narration timing is reconstructed only when the
+walkthrough includes its duration header; otherwise the text is preserved with
+its timing marked unavailable. The learner must not infer any of these values.
+`screen_workflow_draft` validates every reachable root and component file in
+the line checkout after those files have been written through the ordinary
+line write fence. Its stored revision is the complete bundle hash used by
+person approval.
+
+Preview captures a complete observation into a separate in-memory tree and ID
+space. It calls only the existing read operation and leaves the live element
+IDs untouched. A step target is `resolved`, `not_required`, `missing`,
+`ambiguous`, or `multiply_matched`. A precondition is `resolved` when its target
+and predicate can be evaluated. Its separate `verdict` is true, false, or null.
+An `absent` check with a missing target is `resolved` with a true verdict; a
+`present` check with a missing target is `resolved` with a false verdict. Checks
+that need a value, notice text, or file count return a null verdict when their
+target is missing. A missing step target remains `missing` even if an absence
+check passes, because the step still has no target to act on. The panel reports
+false verdicts as violated in this observation. All checks use one static
+observation; preview does not simulate earlier steps changing the UI. A later
+step may depend on an earlier action, so one observation cannot establish all
+sequential preconditions as a runnable sequence. `missing`,
+`ambiguous`, and `multiply_matched` mean a target could not be checked, while
+`unresolved` means the target was found but the required value was not
+observable. The panel, MCP preview, and API use these same state names and
+verdict. A preview result is evidence for review; it never grants approval or
+dispatches an action.
+
 The learner extracts the repeated sequence, turning instance data into typed
 parameters and keeping stable control roles, labels, and scopes. For example,
 derive a row scope from its header or a supplied row label, then resolve the
@@ -373,6 +416,13 @@ authenticates review, approval, confirmation, and audit calls.
 | `POST /runs/{run_id}/stop` | Stop the run. |
 | `POST /runs/{run_id}/resume` | Resume the same run with `{"parameters":{…}}`. The body can be `{}` while the original parameters are cached. |
 | `GET /runs/{run_id}/audit` | Read the content-free run audit. |
+| `POST /demonstrations` | Person starts recording on an existing window grant. |
+| `POST /demonstrations/{id}/stop` | Person stops a recording, including a call-capped recording. |
+| `GET /demonstrations/{id}` | Read authorized calls and timed narration. |
+| `POST /demonstrations/from-history` | Import a bounded line interval; missing call evidence stays unresolved. |
+| `POST /drafts` | Validate a complete checked-out bundle and store its unapproved hash plus narration alignment. |
+| `POST /preview` | Read the live window and report target and precondition matches without input. |
+| `GET /learning` | List visible demonstrations, drafts, alignments and latest preview. |
 
 The [record lab definition](../../tests/fixtures/screen-workflows/edit-record.yaml)
 and `/lab/window-bench/workflow.html` exercise the CDP path. The lab accepts
@@ -600,6 +650,23 @@ the generic test page's saved-state record. [Telemetry](../telemetry.md)
 Estimated effort assumes reuse of the current grant services and helper event
 sources. Wiring a reliable event feed for delayed checks and enforcing the
 fixer's proposal-only capability are the largest uncertainties.
+
+### Learning evaluation protocol
+
+The opt-in synthetic learner evaluation uses a held-out generic editor case
+with a different module count and different text. Score the proposed bundle
+before any model run: (1) schema validation and typed parameter coverage, (2)
+all observed repeated actions represented in order, (3) labels and scopes used
+where observed, (4) every unverifiable or missing fact marked unresolved, (5)
+irreversible actions requiring confirmation, (6) no ambiguous target in the
+held-out preview, and (7) held-out saved state matches the requested inputs.
+For this synthetic fixture, a held-out preview score is computed by expanding
+the candidate bundle with held-out values and checking every target and
+precondition against the hand-authored semantic target inventory. The saved
+state criterion compares expanded values with the fixture's expected held-out
+state. Report each criterion as pass/fail; no weighted score can hide an unsafe
+or unresolved step. Record the model command and raw proposal. Do not run the
+evaluation as a task gate.
 
 ## Decisions
 

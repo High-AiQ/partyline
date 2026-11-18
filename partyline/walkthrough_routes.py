@@ -96,6 +96,10 @@ def walkthrough_router(runtime, hub, store):
             await hub.walkthroughs.stop(take)
             segments = speech_segments([segment.model_dump() for segment in body.segments], body.no_input)
             narration = "" if body.segments else speech_text(body.transcript_text, body.no_input)
+            from .screen_workflow_learning import walkthrough_narration
+            timed_segments = segments or ([{"start": 0, "text": narration}] if narration else [])
+            walkthrough_narration(runtime.db, conv_id, principal.user_id,
+                                  take.started_epoch, timed_segments)
             frames = await asyncio.to_thread(select_frames, take.buffer.frames, segments)
             caption = assemble_message(body.notes, segments, frames,
                                        body.transcription_error and not body.no_input, body.duration_ms,

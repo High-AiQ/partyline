@@ -113,10 +113,14 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
                       "landing": unavailable(body, geometry, points)}
             result["landing"]["input_sent"] = False
             await attach(runtime, hub, store, principal, conv_id, grant, result)
+            from .screen_workflow_learning import record_call
+            record_call(runtime.db, grant["id"], f"screen_window_{body.operation}",
+                        body.model_dump(exclude_none=True), "failed")
             return result
     name = f"point_{body.operation}"
     result = {"status": "unconfirmed"}
     retained = False
+    observation = None
     try:
         async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window
             if mark is not None:
@@ -134,10 +138,12 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
                 budget=BUDGET, wait=WAIT, **({"look_generation": generation} if generation else {}))
             result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
             if "point_observation" in result:
+                observation = result["point_observation"]
                 try:
                     deny_unless(runtime.db, principal, conv_id, "read")
                 except HTTPException:
                     result.pop("point_observation")
+                    observation = None
                     result["changes"] = "unavailable: read permission required"
                 else:
                     retained = point_changes(hub.elements, grant["id"], result)
@@ -161,6 +167,9 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
                      landing=points[-1])
     if failed(result) and not (needs_crop and points):  # use only one diagnostic picture
         await attach(runtime, hub, store, principal, conv_id, grant, result)
+    from .screen_workflow_learning import record_call
+    record_call(runtime.db, grant["id"], f"screen_window_{body.operation}",
+                body.model_dump(exclude_none=True), status, observation)
     return result
 
 

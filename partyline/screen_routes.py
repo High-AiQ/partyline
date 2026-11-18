@@ -45,10 +45,12 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
     hub.media_store = store
     from .screen_workflow_audit import recover as recover_workflows
     from .screen_workflow_routes import workflow_lab, workflows_router
+    from .screen_workflow_learning_routes import learning_router
     from .screen_workflows import Workflows
     recover_workflows(runtime.db)
     hub.workflows = Workflows(hub)
     app.include_router(workflows_router(hub.workflows))
+    app.include_router(learning_router(hub.workflows))
     app.add_api_route("/lab/window-bench/workflow.html", workflow_lab, include_in_schema=False)
     app.state.screen_hub = hub
     runtime.screen_hub = hub

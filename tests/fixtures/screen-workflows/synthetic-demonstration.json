@@ -1,0 +1,24 @@
+{
+  "line": "fixture",
+  "started_at": 1784390400,
+  "stopped_at": 1784390468,
+  "calls": [
+    {"index":0,"at":1784390402,"operation":"screen_elements","arguments":{"query":"Document title"},"outcome":"returned","observation":{"targets":[{"role":"textbox","name":"Document title","scope":"Editor"}] }},
+    {"index":1,"at":1784390405,"operation":"screen_element_action","arguments":{"action":"set_value","value":"Quarterly notes"},"outcome":"completed","observation":{"targets":[{"role":"textbox","name":"Document title","scope":"Editor"}]}},
+    {"index":2,"at":1784390410,"operation":"screen_window_snapshot","arguments":{"window":"fixture-window"},"outcome":"returned","observation":{"targets":[{"role":"button","name":"Add text module","scope":"Editor"}] }},
+    {"index":3,"at":1784390414,"operation":"screen_element_action","arguments":{"action":"invoke","target":{"role":"button","name":"Add text module"}},"outcome":"completed","observation":{"targets":[{"role":"dialog","name":"Module editor","scope":"Editor"}]}},
+    {"index":4,"at":1784390418,"operation":"screen_element_action","arguments":{"action":"set_value","value":"First module body"},"outcome":"completed","observation":{"targets":[{"role":"textbox","name":"Body text","scope":"Module editor"}]}},
+    {"index":5,"at":1784390422,"operation":"screen_element_action","arguments":{"action":"invoke","target":{"role":"button","name":"Save module"}},"outcome":"completed","observation":{"targets":[{"role":"status","name":"Module saved","scope":"Editor"}]}},
+    {"index":6,"at":1784390428,"operation":"screen_element_action","arguments":{"action":"invoke","target":{"role":"button","name":"Add module"}},"outcome":"completed","observation":{"targets":[{"role":"dialog","name":"Module editor","scope":"Editor"}]}},
+    {"index":7,"at":1784390432,"operation":"screen_element_action","arguments":{"action":"set_value","value":"Second module body"},"outcome":"completed","observation":{"targets":[{"role":"textbox","name":"Module body","scope":"Module editor"}]}},
+    {"index":8,"at":1784390436,"operation":"screen_element_action","arguments":{"action":"invoke","target":{"role":"button","name":"Save module"}},"outcome":"completed","observation":{"targets":[{"role":"status","name":"Module saved","scope":"Editor"}]}},
+    {"index":9,"at":1784390444,"operation":"screen_elements","arguments":{"query":"Publish document"},"outcome":"returned","observation":{"targets":[{"role":"button","name":"Publish document","scope":"Editor"}]}},
+    {"index":10,"at":1784390448,"operation":"screen_element_action","arguments":{"action":"invoke","target":{"role":"button","name":"Publish document"}},"outcome":"completed","observation":{"targets":[{"role":"status","name":"Document published","scope":"Editor"}]}}
+  ],
+  "narration": [
+    {"index":0,"at":1784390401,"text":"The title changes for each document, so make it a text parameter."},
+    {"index":1,"at":1784390412,"text":"I repeat this same module sequence for each item in the list."},
+    {"index":2,"at":1784390426,"text":"The second pass has the same labeled fields, so preserve the role and scope."},
+    {"index":3,"at":1784390442,"text":"I publish only after every module is saved; this is irreversible and needs confirmation."}
+  ]
+}

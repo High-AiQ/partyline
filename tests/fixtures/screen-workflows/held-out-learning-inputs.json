@@ -1,0 +1,35 @@
+{
+  "title": "A different title",
+  "modules": [
+    {
+      "kind": "text",
+      "images": [],
+      "alt": "",
+      "headline": "New heading",
+      "body": "Held out content with different wording.",
+      "rows": []
+    },
+    {
+      "kind": "table",
+      "images": [],
+      "alt": "",
+      "headline": "",
+      "body": "",
+      "rows": [
+        {
+          "row": "North",
+          "reference": "Season",
+          "cells": [
+            {
+              "row": "North",
+              "column": "Window",
+              "choice": "text",
+              "text_field": "Window text",
+              "text": "Winter"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -59,3 +59,26 @@ WORKFLOW_RESUME_MIGRATIONS = [
     "ALTER TABLE screen_workflow_runs ADD COLUMN resume_attachment_id TEXT",
     "ALTER TABLE screen_workflow_events ADD COLUMN actor_attachment_id TEXT",
 ]
+
+WORKFLOW_LEARNING_MIGRATIONS = [
+    """CREATE TABLE IF NOT EXISTS screen_workflow_demonstrations(
+        id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, grant_id TEXT NOT NULL,
+        owner_id INTEGER NOT NULL, started_at REAL NOT NULL, stopped_at REAL,
+        expires_at REAL NOT NULL, state TEXT NOT NULL, calls TEXT NOT NULL DEFAULT '[]',
+        narration TEXT NOT NULL DEFAULT '[]')""",
+    "CREATE INDEX IF NOT EXISTS idx_workflow_demos_line "
+    "ON screen_workflow_demonstrations(conv_id,started_at)",
+    "CREATE INDEX IF NOT EXISTS idx_workflow_demos_expiry ON screen_workflow_demonstrations(expires_at)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_demo_one_active_line "
+    "ON screen_workflow_demonstrations(conv_id) WHERE state='recording'",
+    """CREATE TRIGGER IF NOT EXISTS delete_workflow_demos AFTER DELETE ON conversations
+        BEGIN DELETE FROM screen_workflow_demonstrations WHERE conv_id=OLD.id; END""",
+    """CREATE TABLE IF NOT EXISTS screen_workflow_drafts(
+        id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, demonstration_id TEXT NOT NULL,
+        name TEXT NOT NULL, path TEXT NOT NULL, revision TEXT NOT NULL,
+        latest_preview TEXT, created_at REAL NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS idx_workflow_drafts_line ON screen_workflow_drafts(conv_id,created_at)",
+    "ALTER TABLE screen_workflow_demonstrations ADD COLUMN grant_owner_id INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE screen_workflow_drafts ADD COLUMN alignment TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE screen_workflow_demonstrations ADD COLUMN grant_line_id TEXT NOT NULL DEFAULT ''",
+]

@@ -1,0 +1,65 @@
+version: 1
+name: publish-document
+description: Publish rich content for a document.
+use_when: The document editor is open with an empty draft in the granted window.
+parameters:
+  title: {type: text, max_length: 200}
+  modules:
+    type: list
+    min_items: 1
+    max_items: 7
+    items:
+      type: record
+      fields:
+        kind: {type: enum, choices: [image, text, table]}
+        images: {type: list, items: media_id, max_items: 1}
+        alt: {type: text, max_length: 200}
+        headline: {type: text, max_length: 200}
+        body: {type: text}
+        rows:
+          type: list
+          max_items: 10
+          items:
+            type: record
+            fields:
+              row: {type: text, max_length: 100}
+              reference: {type: text, max_length: 100}
+              cells:
+                type: list
+                max_items: 5
+                items:
+                  type: record
+                  fields:
+                    row: {type: text, max_length: 100}
+                    column: {type: text, max_length: 100}
+                    choice: {type: enum, choices: [included, excluded, text]}
+                    text_field: {type: text, max_length: 100}
+                    text: {type: text}
+steps:
+  - id: title
+    target: {role: textbox, name: Document title}
+    action: set_value
+    inputs: {value: {param: title}}
+    postcondition: {check: value_equals, expected: {param: title}, timeout_ms: 3000}
+    confirm: false
+  - for_each: modules
+    steps:
+      - id: module
+        use: {by: kind, cases: {image: image-module, text: text-module, table: table-module}}
+        case_bindings:
+          image: {images: {item: images}, alt: {item: alt}}
+          text: {headline: {item: headline}, body: {item: body}}
+          table: {rows: {item: rows}}
+  - id: publish
+    target: {role: button, name: Publish document}
+    action: invoke
+    preconditions:
+      - {check: present, target: {role: status, name: Publication ready}}
+      - {check: absent, target: {role: dialog, name: Module editor}}
+    postcondition:
+      check: notice_text
+      target: {role: status, name: Publication status}
+      expected: Document published
+      timeout_ms: 5000
+    confirm: true
+    effect: Publish the document and its saved modules.

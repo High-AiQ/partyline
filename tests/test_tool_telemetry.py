@@ -47,10 +47,11 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(record["timestamp"], 500)
         self.assertEqual((record["query"], record["refresh"], record["more"], record["then"]),
                          (True, True, True, False))
-        self.assertNotIn("private", json.dumps(record))
-        self.assertNotIn("password", json.dumps(record))
-        self.assertNotIn("éhello", json.dumps(record))
-        ToolCall.model_validate(record)
+        metrics = record
+        self.assertNotIn("private", json.dumps(metrics))
+        self.assertNotIn("password", json.dumps(metrics))
+        self.assertNotIn("éhello", json.dumps(metrics))
+        ToolCall.model_validate(metrics)
 
     def test_operations_are_allowlisted_and_actions_unwrapped(self):
         for name, args, sub in [
@@ -66,7 +67,8 @@ class CaptureTests(unittest.TestCase):
             with self.subTest(name=name, args=args):
                 record = self.measure(name, args)
                 self.assertEqual(record["sub_op"], sub)
-                self.assertNotIn("secret", json.dumps(record))
+                metrics = {key: value for key, value in record.items() if key != "_transcript"}
+                self.assertNotIn("secret", json.dumps(metrics))
         self.assertTrue(self.measure("screen_element_action", {"action": "invoke", "then": {}})["then"])
         self.assertEqual(self.measure("secret")["tool"], "unknown")
         self.assertEqual(self.measure([])["tool"], "unknown")

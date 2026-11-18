@@ -38,6 +38,69 @@ def start_lab(ui, line):
     return lab
 
 
+def prepare_held_out_preview_state(lab, parameters):
+    """Expose an independent held-out semantic inventory on the generic editor fixture."""
+    lab.evaluate(
+        """(heldOut) => {
+          const root = document.querySelector('#document-editor');
+          const dialog = document.querySelector('#module-editor');
+          const form = document.querySelector('#module-fields');
+          const saved = document.querySelector('#saved-modules');
+          const ready = document.querySelector('#publish-ready');
+          const status = document.querySelector('#publish-status');
+          const field = (tag, name, value = '') => {
+            const wrap = document.createElement('p');
+            const label = document.createElement('label');
+            const input = document.createElement(tag);
+            const id = 'preview-' + String(name).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join('-');
+            label.htmlFor = id;
+            label.textContent = name;
+            input.id = id;
+            input.setAttribute('aria-label', name);
+            if (tag === 'select') {
+              for (const option of ['', 'included', 'excluded', 'text']) {
+                input.add(new Option(option || 'Choose…', option, false, option === value));
+              }
+            } else input.value = value;
+            wrap.append(label, input);
+            return wrap;
+          };
+          form.replaceChildren(
+            field('input', 'Headline', heldOut.modules[0].headline),
+            field('textarea', 'Body text', heldOut.modules[0].body),
+            field('button', 'Save module')
+          );
+          const table = document.createElement('table');
+          const body = document.createElement('tbody');
+          const rowData = heldOut.modules[1].rows[0];
+          const cellData = rowData.cells[0];
+          const row = document.createElement('tr');
+          row.id = 'preview-row';
+          row.setAttribute('aria-label', rowData.row);
+          const referenceCell = document.createElement('td');
+          referenceCell.append(field('input', 'Reference', rowData.reference));
+          const optionCell = document.createElement('td');
+          optionCell.append(
+            field('select', cellData.column, cellData.choice),
+            field('input', cellData.text_field, cellData.text)
+          );
+          row.append(referenceCell, optionCell);
+          body.append(row);
+          table.append(body);
+          form.append(table, field('button', 'Add row'));
+          document.querySelector('#document-title').value = heldOut.title;
+          saved.replaceChildren(Object.assign(document.createElement('li'), {
+            textContent: 'Held-out saved module'
+          }));
+          ready.hidden = false;
+          status.textContent = 'Document published';
+          if (!dialog.open) dialog.showModal();
+          root.dataset.previewState = 'held-out';
+        }""",
+        parameters,
+    )
+
+
 def start_run(ui, line):
     api = ui.page.request
     image = io.BytesIO()
@@ -65,6 +128,8 @@ class DocumentWorkflowBrowserTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, rate):
             workspace = Path(temporary)
             shutil.copytree(FIXTURE / "publish-document", workspace / ".partyline/workflows")
+            (workspace / ".partyline/workflows/publish-document.yaml").write_bytes(
+                (FIXTURE / "expected-learned-workflow.yaml").read_bytes())
             with ui_session(["Document work"]) as ui:
                 app = ui.page
                 lines = app.request.get(ui.base_url + "/api/conversations", headers=ui.auth_headers)
@@ -107,3 +172,55 @@ class DocumentWorkflowBrowserTest(unittest.TestCase):
                 report = app.request.get(audit, headers=ui.auth_headers).json()
                 committed = [e["step_index"] for e in report["events"] if e["event"] == "verified"]
                 self.assertEqual(committed, list(range(1, report["total_steps"] + 1)))
+
+    def test_record_draft_preview_then_person_approves_the_exact_revision(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            shutil.copytree(FIXTURE / "publish-document", workspace / ".partyline/workflows")
+            (workspace / ".partyline/workflows/publish-document.yaml").write_bytes(
+                (FIXTURE / "expected-learned-workflow.yaml").read_bytes())
+            with ui_session(["Learning review"]) as ui:
+                app = ui.page
+                lines = app.request.get(ui.base_url + "/api/conversations", headers=ui.auth_headers)
+                line = lines.json()[0]["id"]
+                place_checkout(ui, line, workspace)
+                lab = start_lab(ui, line)
+                prefix = f"{ui.base_url}/api/conversations/{line}/screen-workflows"
+                started = app.request.post(prefix + "/demonstrations", headers=ui.auth_headers,
+                                           data={"window": "document-window"})
+                assert started.ok, started.text()
+                demo_id = started.json()["id"]
+                read = app.request.post(
+                    f"{ui.base_url}/api/conversations/{line}/screen-elements?window=document-window",
+                    headers=ui.auth_headers,
+                )
+                assert read.ok, read.text()
+                stopped = app.request.post(prefix + f"/demonstrations/{demo_id}/stop",
+                                           headers=ui.auth_headers)
+                assert stopped.ok, stopped.text()
+                draft = app.request.post(prefix + "/drafts", headers=ui.auth_headers,
+                                         data={"demonstration_id": demo_id, "workflow": "publish-document"})
+                assert draft.ok, draft.text()
+                assert draft.json()["approved"] is False
+                held_out = json.loads((FIXTURE / "held-out-learning-inputs.json").read_text())
+                prepare_held_out_preview_state(lab, held_out)
+                preview = app.request.post(prefix + "/preview", headers=ui.auth_headers, data={
+                    "draft_id": draft.json()["id"], "window": "document-window", "parameters": held_out,
+                })
+                assert preview.ok, preview.text()
+                assert preview.json()["read_only"] is True
+                steps = preview.json()["steps"]
+                assert len(steps) > 10
+                for step in steps:
+                    assert step["state"] in {"resolved", "not_required"}, step
+                    for check in step["preconditions"]:
+                        assert check["state"] in {"resolved", "not_required"}, (step, check)
+                approval = app.request.put(prefix + "/definitions/publish-document/approval",
+                                           headers=ui.auth_headers,
+                                           data={"revision": draft.json()["revision"]})
+                assert approval.ok, approval.text()
+                review = app.request.get(prefix + "/definitions/publish-document/review",
+                                         headers=ui.auth_headers)
+                assert review.ok, review.text()
+                assert review.json()["approved"] is True
+                assert review.json()["revision"] == draft.json()["revision"]
