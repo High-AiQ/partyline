@@ -40,7 +40,7 @@ import stat
 import sys
 from pathlib import Path
 
-from .transcript import unwrap_user_query
+from partyline.adapters.bundled.grok.transcript import unwrap_user_query
 
 # Grok's own wording for the offload. Presence of this marker is only a hint
 # that resolution is worth attempting; authorization is the path check below.

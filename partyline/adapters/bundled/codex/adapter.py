@@ -34,6 +34,7 @@ from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.session_seed import seed
 from partyline.adapters.bundled.codex.resume_usage import tail_history_with_usage
 from partyline.adapters.bundled.codex.thread_history import user_text as _item_text
+from partyline.adapters.bundled.codex.workflow_skills import seed_home
 from partyline.adapters.turn_usage import TurnUsage
 from partyline.turn_usage_parse import CodexTurns
 from partyline.adapters.compaction import is_compaction_record
@@ -57,7 +58,6 @@ class PartylineAdapter(TurnUsage, BaseAdapter):
         """This attachment's private CODEX_HOME, created and seeded."""
         home = os.path.join(HOME_ROOT, self.att["id"])
         os.makedirs(os.path.join(home, "sessions"), exist_ok=True)
-        from .workflow_skills import seed_home
         seed_home(home, SHARED_HOME, SHARED, self.att.get("_workflow_skills"))
         if prior := self.att.get("cli_session"):
             self._link_prior_session(home, prior)

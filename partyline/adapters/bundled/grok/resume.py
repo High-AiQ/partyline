@@ -19,8 +19,8 @@ import os
 from pathlib import Path
 from typing import TypeVar
 
-from .markers import match_marked_records, unsafe_resume_backlog
-from .transcript import AssistantRecord
+from partyline.adapters.bundled.grok.markers import match_marked_records, unsafe_resume_backlog
+from partyline.adapters.bundled.grok.transcript import AssistantRecord
 
 MAX_ANCHOR = 64
 MAX_MATCH_PAIRS = 100_000
