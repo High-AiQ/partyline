@@ -140,9 +140,10 @@ class Commands(IsolatedAsyncioTestCase):
                                               timing=self.f.session.send.await_args.kwargs["timing"])
         await worker.close()
 
+    @patch("partyline_helper.cdp_page.PAGE_CAP", 16)
     async def test_continuation_and_racing_event(self):
         self.f.socket.nodes = [dict(nodeId=str(n), role={"value": "StaticText"}, name={"value": "x"})
-                               for n in range(2001)]
+                               for n in range(17)]
         result = await self.f.read()
         cursor = result["next_cursor"]
         self.assertTrue(result["truncated"])

@@ -1,6 +1,6 @@
 """Selected-tab counters and single-commit popup selection use deterministic protocol events."""
 from unittest import IsolatedAsyncioTestCase, TestCase
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from partyline_helper.cdp_recipes import STATE
 from tests.cdp_fakes import Fixture
@@ -14,12 +14,13 @@ class ActiveSelect(IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.f.close)
         await self.f.read()
 
+    @patch("partyline_helper.cdp_page.PAGE_CAP", 16)
     async def test_background_tab_cannot_break_selected_tab_continuation(self):
         old = self.f.chrome.pages[self.f.access]["a"]
         self.f.socket.visible.update(a=False, b=True)
         self.f.window["title"] = "Background - Google Chrome"
         self.f.socket.nodes = [dict(nodeId=str(n), role={"value": "StaticText"}, name={"value": "row"})
-                               for n in range(2001)]
+                               for n in range(17)]
         first = await self.f.read()
         counter = self.f.state.count
         self.f.socket.event(session="a")

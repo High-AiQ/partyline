@@ -87,9 +87,10 @@ class HiddenFiles(IsolatedAsyncioTestCase):
         self.f.socket.document = dom('#document', 1, [dom('INPUT', 42, type='file', id='attachment')])
         self.f.socket.states[42] = dict(tag='INPUT', type='file', hidden=True, files=[], file_count=0)
 
+    @patch("partyline_helper.cdp_page.PAGE_CAP", 16)
     async def test_continuation_reuses_discovery_and_ignored_ax_inputs_are_supplemented(self):
         self.f.socket.nodes = [dict(nodeId=str(n), role={'value': 'StaticText'}, name={'value': 'Text'})
-                               for n in range(2001)]
+                               for n in range(17)]
         self.f.socket.nodes.append(dict(nodeId='ignored', backendDOMNodeId=42, ignored=True))
         first = await self.f.read()
         with patch('partyline.screen_tree.MAX_TREE', 2):

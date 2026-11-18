@@ -14,6 +14,9 @@ from .cdp_page_mapping import map_nodes
 from .timing import Timing
 
 
+PAGE_CAP = 2000
+
+
 class Page(Dialogs, Recovery):
     def __init__(self, browser, access, target, session, changed):
         self.browser, self.access, self.target, self.session = browser, access, target, session
@@ -215,7 +218,7 @@ class Page(Dialogs, Recovery):
             .encode(), digest_size=8).hexdigest() for n in nodes}
         try:
             with timing.phase("dom_mapping_ms"):
-                elements = await map_nodes(self, nodes, ids, epoch, index)
+                elements = await map_nodes(self, nodes, ids, epoch, index, PAGE_CAP)
         finally:
             if (self.live and self.page_state == "alive" and self.access.grant is self.grant
                     and not self.access.gate.revoked.is_set() and not self.page_dialog):
@@ -226,9 +229,9 @@ class Page(Dialogs, Recovery):
                   "elements": elements, "snapshot_id": uuid.uuid4().hex,
                   "captured_event_counter": before, **self.access.event_status()}
         self.access.keep(result, cursor)
-        if index + 2000 < len(nodes):
+        if index + PAGE_CAP < len(nodes):
             token = uuid.uuid4().hex[:12]
-            self.access.walks[token] = {"nodes": nodes, "index": index + 2000,
+            self.access.walks[token] = {"nodes": nodes, "index": index + PAGE_CAP,
                                         "counter": before, "epoch": epoch}
             result.update(next_cursor=token, truncated=True)
         timing.values["mapped_nodes"] = len(elements)

@@ -10,9 +10,9 @@ from .cdp_transport import CDPError
 MAP_CONCURRENCY = 16
 
 
-async def map_nodes(page, nodes, ids, epoch, index):
+async def map_nodes(page, nodes, ids, epoch, index, limit):
     elements = []
-    pending = iter(nodes[index:index + 2000])
+    pending = iter(nodes[index:index + limit])
     while batch := list(islice(pending, MAP_CONCURRENCY)):
         frames = {}
         for node in batch:
