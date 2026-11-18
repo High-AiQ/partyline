@@ -23,6 +23,7 @@ class Take:
     device_id: str
     buffer: WalkthroughBuffer = field(default_factory=WalkthroughBuffer)
     started: float | None = None
+    started_epoch: float | None = None
     stopped: bool = False
     expiry: asyncio.TimerHandle | None = None
     deadline: asyncio.TimerHandle | None = None
@@ -51,6 +52,7 @@ class Takes:
         if take.started is not None or take.stopped:
             raise ValueError("walkthrough is already started or stopped")
         take.started = self.clock()
+        take.started_epoch = time.time()
         if share.frames:
             self.add(share, share.frames[-1])
         take.deadline = asyncio.get_running_loop().call_later(

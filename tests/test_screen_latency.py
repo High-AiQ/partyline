@@ -68,7 +68,8 @@ class TimingTests(unittest.IsolatedAsyncioTestCase):
                           'helper_ax_tree_ms': 4, 'helper_dispatch_proof_ms': 5}, item['timing'])
         # Real records use a bounded elapsed clock, not the artificial started=0 above.
         item['latency_ms'] = 1
-        self.assertEqual(item['timing'], ToolCall.model_validate(item).model_dump()['timing'])
+        metrics = {key: value for key, value in item.items() if key != "_transcript"}
+        self.assertEqual(item['timing'], ToolCall.model_validate(metrics).model_dump()['timing'])
         for value in (None, [], {}, {'timing': []}):
             self.assertEqual({}, extract(value))
 

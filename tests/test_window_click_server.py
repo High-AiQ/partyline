@@ -176,6 +176,38 @@ class WindowClickTests(ClickFixture, unittest.IsolatedAsyncioTestCase):
                          (last["grant"], last["process"], last["point"], last["screen"]))
         self.assertNotIn("data", json.dumps(rows))  # metadata only, never pixels
 
+    async def test_recording_keeps_point_observation_before_delta_rendering_consumes_it(self):
+        await self.grant("a")
+        await self.snapshot()
+        started = await self.client.post(
+            "/api/conversations/alpha/screen-workflows/demonstrations",
+            json={"window": "g1"}, headers=self.human(self.owner),
+        )
+        self.assertEqual(started.status_code, 200, started.text)
+        self.click_answer["point_observation"] = {
+            "before": {"elements": [], "snapshot_id": "before"},
+            "after": {"elements": [{
+                "id": "save", "control_type": "Button", "semantic_role": "button",
+                "name": "Save", "path": "Editor",
+            }], "snapshot_id": "after"},
+        }
+
+        def consume(hub, grant_id, result):
+            result.pop("point_observation")
+            return True
+
+        with patch("partyline.screen_window_click.point_changes", side_effect=consume):
+            response = await self.click()
+        self.assertEqual(200, response.status_code, response.text)
+        demo = await self.client.get(
+            f"/api/conversations/alpha/screen-workflows/demonstrations/{started.json()['id']}",
+            headers=self.human(self.owner),
+        )
+        call = next(item for item in demo.json()["calls"] if item["operation"] == "screen_window_click")
+        self.assertEqual(call["observation"]["targets"], [
+            {"role": "button", "name": "Save", "scope": "Editor"},
+        ])
+
     async def test_a_helper_refusal_is_returned_and_audited(self):
         await self.grant("a")
         await self.snapshot()

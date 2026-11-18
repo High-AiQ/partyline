@@ -13,7 +13,6 @@ const WorkflowListingSchema = z.union([
   WorkflowSummarySchema,
   z.object({ name: z.string(), error: z.string() }),
 ]);
-
 const TargetSchema = z.object({
   role: z.string(),
   name: z.json(),
@@ -69,6 +68,92 @@ const WorkflowReviewSchema = WorkflowSummarySchema.extend({
     pieces: z.record(z.string(), ReviewPieceSchema),
   }),
 });
+const PreviewStateSchema = z.enum([
+  "not_required",
+  "resolved",
+  "missing",
+  "ambiguous",
+  "multiply_matched",
+  "unresolved",
+]);
+const PreviewStepSchema = z.object({
+  step: z.string(),
+  state: PreviewStateSchema,
+  match_count: z.number(),
+  ambiguous: z.boolean(),
+  multiply_matched: z.boolean(),
+  preconditions: z.array(
+    z.object({
+      state: PreviewStateSchema,
+      match_count: z.number(),
+      ambiguous: z.boolean(),
+      multiply_matched: z.boolean(),
+      verdict: z.boolean().nullable(),
+    }),
+  ),
+});
+const PreviewSchema = z.object({
+  draft_id: z.string(),
+  revision: z.string(),
+  read_only: z.literal(true),
+  steps: z.array(PreviewStepSchema),
+});
+export type WorkflowPreviewStep = z.infer<typeof PreviewStepSchema>;
+export function workflowPreviewIsClean(step: WorkflowPreviewStep): boolean {
+  return (
+    (step.state === "resolved" || step.state === "not_required") &&
+    step.preconditions.every(
+      (check) => (check.state === "resolved" || check.state === "not_required") && check.verdict === true,
+    )
+  );
+}
+export function workflowPreviewLabel(step: WorkflowPreviewStep): string {
+  const count = ` · ${String(step.match_count)} matches`;
+  const violated = step.preconditions.filter((check) => check.verdict === false).length;
+  const unresolved = step.preconditions.filter(
+    (check) =>
+      check.verdict === null ||
+      (check.state !== "resolved" && check.state !== "not_required" && check.verdict),
+  ).length;
+  return `${step.state}${count}${violated ? ` · ${String(violated)} precondition${violated === 1 ? "" : "s"} violated` : ""}${unresolved ? ` · ${String(unresolved)} precondition${unresolved === 1 ? "" : "s"} unresolved` : ""}`;
+}
+const LearningSchema = z.object({
+  demonstrations: z.array(
+    z.object({
+      id: z.string(),
+      started_at: z.number(),
+      stopped_at: z.number().nullable(),
+      state: z.string(),
+      calls: z.array(
+        z.object({
+          index: z.number(),
+          at: z.number(),
+          operation: z.string(),
+          arguments: z.json().nullable(),
+          outcome: z.string(),
+          observation: z.json().nullable(),
+          narration: z.string().nullable(),
+          unresolved: z.string().optional(),
+        }),
+      ),
+      narration: z.array(z.object({ index: z.number(), at: z.number().nullable(), text: z.string() })),
+    }),
+  ),
+  drafts: z.array(
+    z.object({
+      id: z.string(),
+      demonstration_id: z.string(),
+      name: z.string(),
+      revision: z.string(),
+      current: z.boolean(),
+      approved: z.boolean(),
+      bundle: WorkflowReviewSchema.shape.bundle.nullable(),
+      alignment: z.record(z.string(), z.number().int()),
+      latest_preview: PreviewSchema.nullable(),
+    }),
+  ),
+});
+export type WorkflowLearning = z.infer<typeof LearningSchema>;
 
 const ConfirmationSchema = z.object({
   token: z.string(),
@@ -104,6 +189,30 @@ const run = (line: string, id: string) => `${base(line)}/runs/${encodeURICompone
 export const workflowApi = {
   list: (line: string) =>
     request(base(line), { schema: z.object({ workflows: z.array(WorkflowListingSchema) }) }),
+  learning: (line: string) => request(base(line) + "/learning", { schema: LearningSchema }),
+  startDemonstration: (line: string, window: string) =>
+    request(base(line) + "/demonstrations", {
+      schema: z.object({ id: z.string() }),
+      method: "POST",
+      body: { window },
+    }),
+  stopDemonstration: (line: string, id: string) =>
+    request(`${base(line)}/demonstrations/${encodeURIComponent(id)}/stop`, {
+      schema: z.object({ id: z.string(), state: z.string() }),
+      method: "POST",
+    }),
+  narrateDemonstration: (line: string, id: string, text: string) =>
+    request(`${base(line)}/demonstrations/${encodeURIComponent(id)}/narration`, {
+      schema: z.object({ id: z.string() }),
+      method: "POST",
+      body: { text },
+    }),
+  historyDemonstration: (line: string, window: string, start: number, end: number) =>
+    request(base(line) + "/demonstrations/from-history", {
+      schema: z.object({ id: z.string(), state: z.string() }),
+      method: "POST",
+      body: { window, start, end },
+    }),
   review: (line: string, name: string) =>
     request(definition(line, name) + "/review", { schema: WorkflowReviewSchema }),
   approve: (line: string, name: string, revision: string) =>

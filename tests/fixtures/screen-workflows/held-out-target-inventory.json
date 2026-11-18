@@ -1,0 +1,28 @@
+{
+  "source": "independent semantic inventory for the held-out generic editor state",
+  "nodes": [
+    {"id": "editor", "role": "window", "name": "Document editor"},
+    {"id": "title", "role": "textbox", "name": "Document title", "parent": "editor",
+     "value": "A different title"},
+    {"id": "add-text", "role": "button", "name": "Add text module", "parent": "editor"},
+    {"id": "add-table", "role": "button", "name": "Add comparison table", "parent": "editor"},
+    {"id": "add-row", "role": "button", "name": "Add row", "parent": "module-editor"},
+    {"id": "publish", "role": "button", "name": "Publish document", "parent": "editor"},
+    {"id": "ready", "role": "status", "name": "Publication ready", "parent": "editor"},
+    {"id": "published", "role": "status", "name": "Publication status", "parent": "editor"},
+    {"id": "published-text", "role": "text", "name": "Document published", "parent": "published"},
+    {"id": "module-editor", "role": "dialog", "name": "Module editor", "parent": "editor"},
+    {"id": "headline", "role": "textbox", "name": "Headline", "parent": "module-editor",
+     "value": "New heading"},
+    {"id": "body", "role": "textbox", "name": "Body text", "parent": "module-editor",
+     "value": "Held out content with different wording."},
+    {"id": "save", "role": "button", "name": "Save module", "parent": "module-editor"},
+    {"id": "row-north", "role": "row", "name": "North", "parent": "module-editor"},
+    {"id": "reference", "role": "textbox", "name": "Reference", "parent": "row-north",
+     "value": "Season"},
+    {"id": "column-window", "role": "combobox", "name": "Window", "parent": "row-north",
+     "value": "text"},
+    {"id": "window-text", "role": "textbox", "name": "Window text", "parent": "row-north",
+     "value": "Winter"}
+  ]
+}

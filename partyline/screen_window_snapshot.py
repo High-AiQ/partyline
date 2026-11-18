@@ -203,7 +203,18 @@ def snapshot_router(runtime, hub, store):
                               tier: Literal["thumb", "full"] | None = None):
         principal = request_principal(request)
         deny_unless(runtime.db, principal, conv_id, "read")
-        return await hub.snapshots.take(principal, store, window, device, marks, tier)
+        from .screen_grants import resolve_window
+        grant, _ = resolve_window(hub, principal, window, device)
+        from .screen_workflow_learning import record_call
+        try:
+            result = await hub.snapshots.take(principal, store, window, device, marks, tier)
+        except HTTPException:
+            record_call(runtime.db, grant["id"], "screen_window_snapshot",
+                        {"marks": marks, "tier": tier}, "failed")
+            raise
+        record_call(runtime.db, grant["id"], "screen_window_snapshot",
+                    {"marks": marks, "tier": tier}, "returned", None)
+        return result
 
     @router.post("/api/conversations/{conv_id}/screen-window-look")
     @timed
@@ -213,6 +224,17 @@ def snapshot_router(runtime, hub, store):
         deny_unless(runtime.db, principal, conv_id, "read")
         if query is not None and not 1 <= len(query) <= 200:
             raise HTTPException(422, "query must have 1–200 characters")
-        return await hub.snapshots.looks.take(principal, store, window, detail, query)
+        from .screen_grants import resolve_window
+        grant, _ = resolve_window(hub, principal, window)
+        from .screen_workflow_learning import record_call
+        try:
+            result = await hub.snapshots.looks.take(principal, store, window, detail, query)
+        except HTTPException:
+            record_call(runtime.db, grant["id"], "screen_window_look",
+                        {"detail": detail, "query": query}, "failed")
+            raise
+        record_call(runtime.db, grant["id"], "screen_window_look",
+                    {"detail": detail, "query": query}, "returned", None)
+        return result
 
     return router

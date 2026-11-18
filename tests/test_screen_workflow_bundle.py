@@ -1,6 +1,7 @@
 """Composition checks every reachable file and expands concrete typed invocations."""
 
 import json
+import importlib.util
 import shutil
 import tempfile
 import unittest
@@ -53,6 +54,67 @@ class WorkflowBundleTests(unittest.TestCase):
         self.assertEqual(confirm["effect"], "Publish the document and its saved modules.")
         call = review["pieces"]["text-cell"]["definition"]["steps"][0]
         self.assertEqual(call["with"]["row"], {"param": "row"})
+
+    def test_expected_learned_workflow_validates_held_out_module_count_and_text(self):
+        expected = self.folder / "expected-learned-workflow.yaml"
+        expected.write_bytes((EXAMPLE.parent / "expected-learned-workflow.yaml").read_bytes())
+        (self.folder / f"{ROOT}.yaml").write_bytes(expected.read_bytes())
+        bundle = load_bundle(self.space, ROOT)
+        held_out = {
+            "title": "Different title",
+            "modules": [
+                {"kind": "text", "images": [], "alt": "", "headline": "New heading",
+                 "body": "Held out body", "rows": []},
+                {"kind": "table", "images": [], "alt": "", "headline": "", "body": "",
+                 "rows": [{"row": "North", "reference": "Season", "cells": [
+                     {"row": "North", "column": "Window", "choice": "text",
+                      "text_field": "Window text", "text": "Winter"}]}]},
+            ],
+        }
+        plan = bundle.plan(held_out)
+        self.assertTrue(plan)
+        self.assertEqual(dict(plan)["title"].inputs.value, "Different title")
+        self.assertTrue(any(step_id.startswith("module[2]/table-module") for step_id, _ in plan))
+        self.assertTrue(any(step_id.startswith("module[1]/text-module") for step_id, _ in plan))
+        self.assertTrue(any(step_id.startswith("module[2]/table-module") for step_id, _ in plan))
+        from partyline.screen_workflow_preview import inspect_plan
+        from partyline.screen_tree import Snapshot
+        from partyline.screen_tree_ids import IdSpace
+
+        inventory = json.loads((EXAMPLE.parent / "held-out-target-inventory.json").read_text())
+        tree = Snapshot("held-out", 0, IdSpace())
+        tree.add([{
+            "id": node["id"],
+            "control_type": node["role"],
+            "semantic_role": node["role"],
+            "name": node["name"],
+            **({"parent": node["parent"]} if "parent" in node else {}),
+            **({"value": node["value"]} if "value" in node else {}),
+        } for node in inventory["nodes"]])
+        results = inspect_plan(tree, plan)
+        self.assertEqual([result["step"] for result in results], [step_id for step_id, _ in plan])
+        for result in results:
+            self.assertIn(result["state"], {"resolved", "not_required"}, result["step"])
+            self.assertFalse(result["ambiguous"], result["step"])
+            self.assertFalse(result["multiply_matched"], result["step"])
+            self.assertTrue(all(check["state"] in {"resolved", "not_required"}
+                                and check["verdict"] is not None
+                                for check in result["preconditions"]), result["step"])
+
+    def test_eval_model_prompt_never_contains_held_out_values(self):
+        script = Path(__file__).resolve().parents[1] / "scripts/eval-screen-workflow-learning.py"
+        spec = importlib.util.spec_from_file_location("screen_workflow_eval", script)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        demo = (EXAMPLE.parent / "synthetic-demonstration.json").read_text()
+        skill = (Path(__file__).resolve().parents[1] / "skills/learn-screen-workflow/SKILL.md").read_text()
+        prompt = module.model_prompt(demo, skill)
+        held_out = json.loads((EXAMPLE.parent / "held-out-learning-inputs.json").read_text())
+        for value in (
+            held_out["title"], held_out["modules"][0]["headline"],
+            held_out["modules"][0]["body"], held_out["modules"][1]["rows"][0]["cells"][0]["text"],
+        ):
+            self.assertNotIn(value, prompt)
 
     def test_editing_an_unselected_component_invalidates_ancestor_approval_and_skill(self):
         original = load_bundle(self.space, ROOT)

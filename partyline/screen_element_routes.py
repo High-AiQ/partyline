@@ -27,9 +27,16 @@ def elements_router(runtime, hub, store=None):
         try:
             result = await hub.elements.read(principal, device, window, options)
         except HTTPException:
+            from .screen_workflow_learning import record_call
+            record_call(runtime.db, grant["id"], "screen_elements", options, "failed")
             await core.record_standing_window_access(
                 runtime, hub, principal, conv_id, "uia_read", window, device, "failed")
             raise
+        from .screen_workflow_learning import read_observation, record_call
+        tree = hub.elements.fresh(grant["id"])
+        record_call(runtime.db, grant["id"], "screen_elements", options,
+                    "unavailable" if result.get("elements_unavailable") else "returned",
+                    read_observation(tree, result))
         await core.record_standing_window_access(runtime, hub, principal, conv_id, "uia_read", window, device,
                                                  "failed" if result.get("elements_unavailable") else "read")
         return result
@@ -63,10 +70,18 @@ def elements_router(runtime, hub, store=None):
             else:
                 result = await core.element_action(runtime, hub, conv_id, body, request)
         except HTTPException:
+            from .screen_workflow_learning import record_call
+            record_call(runtime.db, grant["id"], "screen_element_action",
+                        body.model_dump(exclude_none=True), "failed")
             if call:
                 await core.record_standing_window_access(
                     runtime, hub, principal, conv_id, call, body.window, None, "failed")
             raise
+        from .screen_workflow_learning import read_observation, record_call
+        tree = hub.elements.fresh(grant["id"])
+        record_call(runtime.db, grant["id"], "screen_element_action",
+                    body.model_dump(exclude_none=True), result.get("status", "returned"),
+                    read_observation(tree, result.get("after")))
         if call:
             await core.record_standing_window_access(
                 runtime, hub, principal, conv_id, call, body.window, None, result.get("status", "failed"))

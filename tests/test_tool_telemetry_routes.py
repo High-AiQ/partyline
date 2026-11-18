@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from partyline import auth_store, auth_tokens, tool_telemetry
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
+from partyline.mcp.telemetry import record as telemetry_record
 from partyline.storage_cleanup import cleanup
 from partyline.tool_telemetry_contracts import ToolCall
 from partyline.tool_telemetry_routes import telemetry_router
@@ -61,6 +62,30 @@ class RouteTests(unittest.TestCase):
         saved = json.loads(self.db._exec("SELECT metrics FROM tool_calls").fetchone()[0])
         self.assertEqual(timing, saved["timing"])
         self.assertEqual(422, self.ingest([self.record(timing={"private title": 1})]).status_code)
+
+    def test_screen_metric_rejects_unstructured_content(self):
+        raw = telemetry_record(
+            "screen_element_action", {"window": "grant", "action": "set_value", "value": "Private text"},
+            "completed", {"status": "completed"}, False, time.perf_counter(),
+        )
+        metric = ToolCall.model_validate(raw)
+        response = self.ingest([metric.model_dump()])
+        self.assertEqual(response.status_code, 200, response.text)
+        stored = json.loads(self.db._exec("SELECT metrics FROM tool_calls").fetchone()[0])
+        self.assertNotIn("Private text", json.dumps(stored))
+        self.assertNotIn("arguments", stored)
+        self.assertNotIn("observation", stored)
+        columns = {row["name"] for row in self.db._exec("PRAGMA table_info(tool_calls)").fetchall()}
+        self.assertNotIn("arguments", columns)
+        self.assertNotIn("observation", columns)
+        tables = {row["name"] for row in self.db._exec(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        self.assertNotIn("structured_screen_transcripts", tables)
+        self.assertEqual(self.client.post(
+            "/api/telemetry/tool-calls",
+            json={"records": [metric.model_dump()], "transcripts": [{"arguments": {"x": "y"}}]},
+            headers=self.machine(),
+        ).status_code, 422)
 
     def test_percentiles_flags_groups_filters_and_attribution(self):
         records = [self.record(n, is_error=n == 20) for n in range(1, 21)]
