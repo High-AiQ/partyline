@@ -8,18 +8,29 @@ line and descendants. The line management dialog shows this as its only metrics 
 period and include-sublines controls plus the breakdown behind a disclosure. It offers the last hour, local-calendar
 today, or since the line started (subject to the roughly 30-day telemetry retention), and hides when there is no use.
 
-A computer-use response is counted once when its labels include a known `screen_*` tool, including an `extras`
-operation and the element-action shorthand. Calling other tools in the same response does not duplicate its tokens.
-The response reports actual input, cache-read, cache-write, output and total tokens, and recorded model thinking time.
+A computer-use response contributes its full input, cache-read, cache-write, output and total tokens and its recorded
+model thinking time once. Claude Code and OpenCode v2 use response labels for known `screen_*` tools, including
+`extras` operations and the element-action shorthand.
+
+Codex attributes a recorded screen-call completion to the next recorded response on the same attachment. The
+interval starts just after the previous response, or at the retention cutoff for the first retained response, and
+includes the current response's timestamp. If responses share a timestamp, the first stored row gets the calls at
+that boundary. Direct screen tools, screen tools called through `extras`, and `get_media` calls tagged
+`media_source=screen` qualify. The response timestamp determines whether its tokens are in the requested period.
+Its qualifying call can be earlier in retained history. The tool counters use their own call timestamps.
+
+This is best-effort attribution. Delayed tool telemetry can appear in a later summary, dropped or expired records can
+leave a response unattributed, and a missing response boundary can shift a call to the next recorded response.
+Screen tools awaiting a response contribute to the tool counters as soon as their telemetry arrives.
+
 The canonical screen vocabulary is `mcp.catalog.SCREEN`; the summary partitions it into device actions, reads, and
 control/attachment calls. Direct and `extras` calls both count. Inline images and screen-referenced images later
 delivered by `get_media` are summed, with unknown estimates counted separately rather than treated as zero. A bounded
 in-memory reference set supplies only the fixed `media_source=screen` label; media IDs are never persisted. Screen
 latency is totalled over those calls. Errors/refusals include MCP errors and structured failed outcomes; unconfirmed
 and legacy-unknown outcomes are reported separately. Action p50/p95 use nearest rank over intervals between
-consecutive action-completion timestamps
-within each process; an interval includes the intervening model/tool time and any pause, so the detail labels it
-“between actions” rather than claiming a response-to-call join that the tables do not store.
+consecutive action completions within each process. Those intervals include the intervening model/tool time and any
+pause. The detail labels them “between actions”.
 
 `cost_usd` is explicitly `null`: there is no price table, and subscription usage is not billed per token. It is the
 extension point if pricing is added later. All existing tool-call and turn collection/read endpoints remain intact.
@@ -83,8 +94,8 @@ Every other adapter records nothing and is untouched.
 Attachment, line and adapter; the model id when the transcript names one; uncached input, cache
 read, cache write, output and reasoning tokens; the context size; the response's own timestamp; and
 the **names** of the tools it called, with the operation for `extras` and `captain` and the
-element action for `screen_element_action` (`extras:invoke`), the same labelling the tool-result
-telemetry uses so the two tables join on (tool, operation); an operation outside the fixed
+element action for `screen_element_action` (`extras:invoke`). Where the adapter exposes a Partyline
+tool, its labels match the tool-result telemetry vocabulary. An operation outside the fixed
 vocabulary is dropped. Tools that are not Partyline's keep a safe name (`Bash`, `exec`). No prompt, reply,
 argument value, result, path or file name is stored; tool names with unsafe characters become
 `unknown`. A response is one row, keyed by the transcript's response id, so a repeated line
@@ -131,7 +142,8 @@ Not measured:
 - **Sub-agents and child sessions.** Claude Code writes sub-agent responses to separate files
   that are not tailed, and OpenCode child sessions are not read, so their spend is not counted.
 - **Codex tool operations.** Codex runs tools through one `exec` code tool, so the tool is named
-  `exec` and its operations are not visible; named calls (`wait`, `sleep`) are.
+  `exec` in per-response telemetry, alongside named calls such as `wait` and `sleep`. Computer-use
+  totals use the separate tool-call records to attribute Codex responses as described above.
 - **Anything before the process started.** A resumed CLI can show earlier history; only responses
   newer than this process's spawn count (a resume or restart-plan reattachment allows no clock slack,
   a fresh spawn five seconds), so a session is never charged twice. Resumed processes record like fresh ones.
