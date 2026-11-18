@@ -7,9 +7,10 @@ from .cdp_ax import exposed
 from .cdp_dom_nodes import DETAIL, discover
 from .cdp_settle import Quiet
 from .cdp_page_dialogs import Dialogs
-from .cdp_transport import CDPError, DocumentChanged, PageUnavailable
+from .cdp_transport import CDPError, DocumentChanged, ExtensionRefused, PageUnavailable
 from .cdp_recovery import Recovery
-from .cdp_identity import TargetChanged, identity, reprove, token as identity_token, unactionable
+from .cdp_identity import (CHILD_FRAME, UNRESOLVED, TargetChanged, identity, reprove,
+                           token as identity_token, unactionable)
 
 
 class Page(Dialogs, Recovery):
@@ -18,7 +19,8 @@ class Page(Dialogs, Recovery):
         self.grant, self.generation = access.grant, access.gate.generation
         self.changed = changed
         self.epoch, self.nodes = 0, {}
-        self.parents, self.actionable = {}, set()  # this read's parent links and actionable ids
+        self.parents, self.actionable, self.frames = {}, set(), {}  # this read's links, ids and frames
+        self.main_frame = None
         self.navigations = 0
         self.identity = uuid.uuid4().hex[:8]
         self.active, self.live, self.dispatched = False, True, False
@@ -91,6 +93,7 @@ class Page(Dialogs, Recovery):
                         {"source": OBSERVER, "worldName": "partyline"})
         frames = await self.call("Page.getFrameTree")
         self.url = frames["frameTree"]["frame"].get("url") or self.url
+        self.main_frame = frames["frameTree"]["frame"].get("id")
         async def observe(tree):
             context = await self.call("Page.createIsolatedWorld", {
                 "frameId": tree["frame"]["id"], "worldName": "partyline"})
@@ -109,6 +112,10 @@ class Page(Dialogs, Recovery):
             if proof and type(exc) is CDPError:
                 self.guard()  # revocation or document loss must retain its own refusal
                 raise TargetChanged("backend node no longer resolves") from exc
+            # A read may keep a node that did not resolve (plain CDP failure or the extension's command
+            # failure); runtime failures after it resolved are never labelled this way.
+            exc.unresolved = type(exc) is CDPError or (
+                isinstance(exc, ExtensionRefused) and exc.code == "debugger_command_failed")
             raise
         obj = resolved["object"]["objectId"]
         try:
@@ -166,6 +173,7 @@ class Page(Dialogs, Recovery):
             self.nodes.clear()
             self.parents.clear()
             self.actionable.clear()
+            self.frames.clear()
             epoch = self.epoch
             raw = (await self.call("Accessibility.getFullAXTree"))["nodes"]
             nodes = exposed(raw)
@@ -180,15 +188,19 @@ class Page(Dialogs, Recovery):
         try:
             for node in nodes[index:index + 2000]:
                 ident = ids[node["nodeId"]]
-                dom, unreachable = {}, False
+                dom, unreachable = {}, None
+                # A frame id on the node or its nearest ancestor in this read is the only frame evidence.
+                above = self.frames.get(ids.get(node.get("parentId")))
+                frame = self.frames[ident] = node.get("frameId") or above
                 if node.get("backendDOMNodeId"):
                     try:
                         dom = await self.function(node["backendDOMNodeId"], STATE, release=False)
                     except CDPError as exc:
-                        if type(exc) is not CDPError:
+                        if not getattr(exc, "unresolved", False):
                             raise
                         self.guard()  # revocation or document loss keeps its own refusal
-                        unreachable = True  # e.g. an out-of-process child frame
+                        unreachable = (CHILD_FRAME if frame and self.main_frame and frame != self.main_frame
+                                       else UNRESOLVED)
                 named = value(node.get("name")) or dom.get("aria_label") or dom.get("title")
                 if not unreachable and not node.get("file_input_discovered") and (
                         node.get("dom_discovered") or not named

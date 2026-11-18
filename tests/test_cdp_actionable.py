@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 from partyline.screen_element_actions import ElementAction, element_action
 from partyline.screen_failure_snapshot import failed
-from partyline_helper.cdp_identity import NotActionable, TargetChanged, prove
+from partyline_helper.cdp_identity import CHILD_FRAME, UNRESOLVED, NotActionable, TargetChanged, prove
+from partyline_helper.cdp_transport import CDPError
 from types import SimpleNamespace
 
 from tests import test_cdp_identity as identity
@@ -28,23 +29,34 @@ class ActionableTests(unittest.IsolatedAsyncioTestCase):
                  name={"value": "Save"}),
             dict(nodeId="8", parentId="5", role={"value": "StaticText"}, name={"value": "Virtual"}),
             dict(nodeId="9", parentId="5", backendDOMNodeId=9, role={"value": "StaticText"},
-                 name={"value": "Inside frame"}),
+                 name={"value": "Inside frame"}, frameId="child"),
+            dict(nodeId="10", parentId="9", backendDOMNodeId=10, role={"value": "StaticText"},
+                 name={"value": "Nested in frame"}),
+            dict(nodeId="11", parentId="5", backendDOMNodeId=11, role={"value": "StaticText"},
+                 name={"value": "Gone text"}),
         ]
+        self.code, self.failing, self.runtime = -32000, {9, 10, 11}, set()
         socket.states.update({5: dict(tag="DIV"), 6: dict(non_element=3), 7: dict(tag="BUTTON", hit=True),
-                              9: dict(tag="SPAN")})
+                              9: dict(tag="SPAN"), 10: dict(tag="SPAN"), 11: dict(tag="SPAN")})
         send = socket.send
 
         async def reject(raw):
             message = json.loads(raw)
-            if message["method"] == "DOM.resolveNode" and message["params"]["backendNodeId"] == 9:
+            params = message["params"]
+            failing = ((message["method"] == "DOM.resolveNode" and params["backendNodeId"] in self.failing)
+                       or (message["method"] == "Runtime.callFunctionOn"
+                           and params["objectId"] in self.runtime))
+            if failing:
                 socket.calls.append(message)
                 socket.queue.put_nowait({"id": message["id"], "error": {
-                    "code": -32000, "message": "No node with given id found"}})
+                    "code": self.code, "message": "No node with given id found"}})
                 return
             await send(raw)
         patcher = patch.object(socket, "send", side_effect=reject)
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    TRANSPORTS = (-32000, "debugger_command_failed")  # direct CDP and the extension relay
 
     async def items(self):
         reply = await self.f.read()
@@ -68,9 +80,8 @@ class ActionableTests(unittest.IsolatedAsyncioTestCase):
         virtual = items["Virtual"]
         self.assertEqual(("accessibility-only node", wrapper["id"]), (virtual["why"], virtual["act_on"]))
         frame = items["Inside frame"]
-        self.assertEqual(False, frame["actionable"])
-        self.assertIn("child frame", frame["why"])
-        self.assertEqual(wrapper["id"], frame["act_on"])
+        self.assertEqual((False, CHILD_FRAME, wrapper["id"]),
+                         (frame["actionable"], frame["why"], frame["act_on"]))
         self.assertTrue(all("token" not in e or e["action_token"] for e in items.values()))
 
     async def test_no_ancestor_means_no_act_on_field(self):
@@ -104,13 +115,33 @@ class ActionableTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(f"target has no DOM element (text node); act on its parent {wrapper.id}",
                          result["error"])
 
+    async def test_unresolved_nodes_stay_listed_on_both_transports_with_their_own_cause(self):
+        for code in self.TRANSPORTS:
+            with self.subTest(code=code):
+                self.code = code
+                items = await self.items()
+                wrapper = next(e for e in items.values() if e["dom"].get("tag") == "DIV")
+                self.assertEqual((CHILD_FRAME, wrapper["id"]),
+                                 (items["Inside frame"]["why"], items["Inside frame"]["act_on"]))
+                self.assertEqual(CHILD_FRAME, items["Nested in frame"]["why"])  # frame id is inherited
+                self.assertEqual(UNRESOLVED, items["Gone text"]["why"])  # the main frame is not blamed
+                self.assertNotIn("actionable", items["Save"])
+
+    async def test_runtime_failures_on_a_main_frame_link_are_never_called_a_frame(self):
+        for code in self.TRANSPORTS:
+            with self.subTest(code=code):
+                self.code, self.runtime = code, {"2"}
+                with self.assertRaises(CDPError) as caught:
+                    await self.f.read()
+                self.assertFalse(getattr(caught.exception, "unresolved", False))
+
     async def test_unreachable_frame_refusal_names_the_cause(self):
         await self.f.read()
         page = self.f.chrome.pages[self.f.access]["a"]
-        frame = next(i for i, n in page.nodes.items() if "child frame" in n.get("not_actionable", ""))
+        frame = next(i for i, n in page.nodes.items() if n.get("not_actionable") == CHILD_FRAME)
         result = await self.f.chrome.action(self.f.access, dict(action="invoke", element_id=frame))
         self.assertEqual("not_actionable", result["reason"])
-        self.assertIn("child frame not reachable from this page session", result["error"])
+        self.assertIn(f"({CHILD_FRAME})", result["error"])
 
     async def test_element_targets_keep_the_identity_proof_and_target_changed(self):
         await self.read()

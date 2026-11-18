@@ -22,12 +22,16 @@ class NotActionable(CDPError):
             "act on a parent element, or use screen_window_snapshot + screen_window_click"))
 
 
-def unactionable(node, dom, unreachable=False):
+CHILD_FRAME = "child frame not reachable from this page session"
+UNRESOLVED = "node did not resolve in this page session"
+
+
+def unactionable(node, dom, unreachable=None):
     """Why CDP cannot act on a read node, or None for an Element target with a live backend node."""
     if not node.get("backendDOMNodeId"):
         return "accessibility-only node"
     if unreachable:
-        return "child frame not reachable from this page session"
+        return unreachable
     if "non_element" in dom:
         return "text node" if dom["non_element"] == 3 else "not an element"
     return None

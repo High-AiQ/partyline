@@ -1420,7 +1420,10 @@ retain the event-counter barrier.
 
 **Elements CDP cannot act on (helper 1.8.5).** Some listed nodes have no DOM element to drive: an
 accessibility-only node without a backend node, a text node (a dialog's label text, pseudo content), or a
-node whose frame the page session cannot evaluate in. The read keeps them (they still carry text) but marks
+node that does not resolve in the page session (direct CDP, or the extension's command failure). That last
+case says `child frame not reachable from this page session` only when the read gives a frame id (on the
+node or its nearest ancestor) other than the main frame's; otherwise `node did not resolve in this page
+session`. A runtime failure after a node resolved is never relabelled: the read fails as before. The read keeps them (they still carry text) but marks
 them with `actionable: false`, a short `why` and, when an actionable ancestor is in the same read, `act_on`
 (its id); actionable elements carry none of these fields. The compact line shows
 `no-dom(text node;act_on=<id>)`. Acting on one refuses before any input with its own fixed
