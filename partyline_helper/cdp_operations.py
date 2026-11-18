@@ -4,6 +4,7 @@ from .cdp_identity import failure
 from .cdp_page_dialogs import PageDialog
 from .cdp_recovery import HINT, reload
 from .cdp_transport import CDPError
+from .workflow_dispatch import changed, document
 
 
 async def action(self, access, message):
@@ -22,6 +23,13 @@ async def action(self, access, message):
             "Awaiting Chrome approval; call reload again after Chrome allows the connection"
             if pending else self.browser_of(access).reason())}
     page = await self.page(access)
+    if expected := message.get("workflow_source"):
+        observed = "cdp" if page else "uia"
+        if expected != observed:
+            return {"status": "failed", "reason": "workflow_source", "source": observed}
+        if page and (message.get("workflow_document") != document(page) or
+                     changed(message, access.event_status)):
+            return {"status": "failed", "reason": "workflow_evidence", "source": observed}
     if message.get("action") == "set_files" and (not page or self.sources.get(access) != "cdp"):
         return {"status": "failed", "error": "CDP unavailable; use the Open dialog path instead"}
     if message.get("type") == "window_eval" and not page:

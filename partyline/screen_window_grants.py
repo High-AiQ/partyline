@@ -146,6 +146,8 @@ class WindowGrants:
             entry = self.known.get(event.grant_id)
             if entry and entry["device_id"] == device["id"]:
                 self.hub.elements.changed(event.grant_id)
+                if workflows := getattr(self.hub, "workflows", None):
+                    workflows.changed(event.grant_id)
             return
         response = {"type": "window_grant_result", "request_id": ident, "ok": False}
         try:
@@ -193,6 +195,8 @@ class WindowGrants:
         raise ValueError("this helper cannot share a window with a line; update the Partyline helper")
 
     async def revoke(self, grant_id, tell_helper=True, *, reason="revoked by the person"):
+        if workflows := getattr(self.hub, "workflows", None):
+            workflows.ended(grant_id)
         self.actions.pop(grant_id, None)
         if elements := getattr(self.hub, "elements", None):
             elements.end(grant_id)

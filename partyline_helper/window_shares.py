@@ -253,7 +253,7 @@ class WindowShares:
     async def watch(self):
         async with WindowEvents(self._changes) as events:
             while True:
-                for entry in list(self.grants.values()):
+                for ident, entry in list(self.grants.items()):
                     access = entry["access"]
                     grant = access.grant
                     if not grant:
@@ -267,10 +267,12 @@ class WindowShares:
                         continue
                     if reason == "window closed":
                         access.revoke(reason)
-                    elif reason == "secure desktop active":
+                    elif reason == "secure desktop active" and not access.gate.revoked.is_set():
                         access.gate.invalidate()
-                    elif access.grant and access.gate.revoked.is_set():
-                        access.gate.grant()
+                        self.queue_change(ident)
+                    elif not reason and access.grant and access.gate.revoked.is_set():
+                        if access.gate.grant() is not None:
+                            self.queue_change(ident)
                 await events.wait()
 
     async def close(self):

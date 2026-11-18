@@ -21,6 +21,14 @@ class FileInput(IsolatedAsyncioTestCase):
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
 
+    async def test_exposed_file_input_has_workflow_role_and_readback(self):
+        self.f.socket.states[3].update(tag="INPUT", type="file", file_count=0)
+        tree = await self.f.read()
+        node = tree["elements"][2]
+        self.assertEqual(node["semantic_role"], "file_input")
+        self.assertEqual(node["file_count"], 0)
+        self.assertIn("set_files", node["actions"])
+
     async def test_single_and_multiple_files_read_back_and_cleanup(self):
         self.f.socket.states[3].update(tag='INPUT', type='file')
         original = self.f.socket.response

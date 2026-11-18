@@ -51,9 +51,11 @@ def ticket(hub, principal, grant, files, path_count=0):
         hub.file_tickets.pop(key, None)
 
 
-def audit_files(hub, principal, grant, ids, total):
+def audit_files(hub, principal, grant, ids, total, *, include_ids=True):
     info = {"grant": grant["id"], "line": principal.conv_id, "process": principal.name,
-            "operation": "set_files", "file_count": len(ids), "total_bytes": total, "media_ids": ids}
+            "operation": "set_files", "file_count": len(ids), "total_bytes": total}
+    if include_ids:
+        info["media_ids"] = ids
     record(hub.runtime.db, grant["id"], principal.conv_id or grant["conv_id"], principal.name,
            json.dumps(info, separators=(",", ":")))
 

@@ -155,13 +155,16 @@ def audit(self, access, message, operation):
     info = {"grant": access.session.window_grant_id, "line": message.get("line_id", ""),
             "process": message.get("agent", ""), "operation": operation,
             "input_length": len(message.get("expression", message.get("value", "")) or "")}
+    if message.get("workflow_source"):
+        info["request_id"] = message["request_id"]
     if message.get("action") == "dialog":
         info.update(operation="dialog", accept=message.get("accept"),
                     input_length=len(message.get("prompt_text", "")))
     if message.get("action") == "set_files":
         info.update(operation="set_files", file_count=len(message.get("files", [])),
-                    total_bytes=sum(f["bytes"] for f in message.get("files", [])),
-                    media_ids=[f["id"] for f in message.get("files", [])])
+                    total_bytes=sum(f["bytes"] for f in message.get("files", [])))
+        if not message.get("workflow_source"):
+            info["media_ids"] = [f["id"] for f in message.get("files", [])]
     self.session.tools.audit.append("action", "window", str(info["process"])[:120], "chrome",
                                     json.dumps(info, separators=(",", ":")))
 

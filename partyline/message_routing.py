@@ -234,6 +234,9 @@ async def route_message(
         if attachment["name"].lower() in bangs:
             # Interrupt first, report after: a notice posted before delivery
             # would ride the very digest it is describing.
+            hub = getattr(runtime, "screen_hub", None)
+            if workflows := getattr(hub, "workflows", None):
+                workflows.interrupt(attachment["id"])
             notices.append((await interrupt_for(attachment, adapter)).notice)
         try:
             if await runtime.deliver_pending(conv_id, attachment, adapter):

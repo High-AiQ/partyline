@@ -6,7 +6,7 @@ the person approves it for unattended use. A server-side runner with no model
 replays each step through the existing window grant and verifies the outcome
 before advancing. The format and runner are source-agnostic across UI Automation
 (UIA), Chrome DevTools Protocol (CDP), and guarded point input. Browser checks
-and direct file attachment are explicitly CDP-only. A small model gets one
+that depend on the DOM and direct file attachment are explicitly CDP-only. A small model gets one
 chance to propose a repair when a step fails.
 
 1. Record a successful demonstration or reconstruct it from an authorized line history.
@@ -31,7 +31,10 @@ successful step. These are field observations from one session. [Telemetry](../t
 ## Workflow file
 
 Use versioned YAML with a JSON-compatible data model. A workflow has a name,
-typed parameter declarations, and an ordered list of steps with unique IDs.
+a short description, `use_when` guidance, typed parameter declarations, and
+an ordered list of steps with unique IDs. Keep the YAML readable so a person
+or a model can understand the reviewed plan and follow it manually when
+needed.
 Parameters support text, enumerated text, media IDs, and bounded lists of typed
 items or records. A list can bind directly to an action input or expand a
 bounded sequence of steps, such as filling table rows in input order. Expand
@@ -51,7 +54,7 @@ Each step defines the following fields.
 | `requires` | Explicit source or feature requirements for steps that depend on specific capabilities, such as `cdp.set_files` or `cdp.screen_eval`. The validator rejects a missing declaration for either capability. |
 | `preconditions` | Optional predicates over the current view, such as the expected dialog being open or the destination field being empty. |
 | `postcondition` | Required predicate and bounded timeout. A distinct semantic target can describe the expected result, such as a notice after a save. |
-| `confirm` | Required boolean. Set it to `true` for any irreversible or externally committing effect. Review covers the effect of keys and dialog responses as well as labeled buttons. |
+| `confirm` | Required boolean. Set it to `true` for any irreversible or externally committing effect and supply an `effect` description. Review covers the effect of keys and dialog responses as well as labeled buttons. |
 | `allow_point` | Optional boolean, off by default. Enables the guarded point route for the declared action. |
 | `allowed_dismissals` | Optional list of semantic dialog targets and approved dismiss actions. Empty by default. |
 | `navigation` | Optional expected document transition with a destination landmark to verify. Default is to stay in the current document. |
@@ -80,6 +83,8 @@ This excerpt shows the syntax for a portable field edit and a CDP-only attachmen
 ```yaml
 version: 1
 name: edit-module
+description: Attach an image and fill its alternative text.
+use_when: The edit dialog is open in a granted window.
 parameters:
   alt_text: {type: text, max_length: 500}
   images: {type: list, items: media_id, min_items: 1, max_items: 1}
@@ -91,13 +96,11 @@ steps:
     inputs:
       files: {param: images}
     preconditions:
-      - {check: screen_eval, requires: [cdp.screen_eval], predicate: file_count_equals,
-         arguments: {target: step_target, count: 0}}
+      - {check: file_count_equals, requires: [cdp.set_files], expected: 0}
     postcondition:
-      check: screen_eval
-      requires: [cdp.screen_eval]
-      predicate: file_count_equals
-      arguments: {target: step_target, count: 1}
+      check: file_count_equals
+      requires: [cdp.set_files]
+      expected: 1
       timeout_ms: 5000
     confirm: false
 
@@ -145,7 +148,7 @@ if the dialog is a separate window. macOS AX and Linux AT-SPI remain planned
 sources. [Window elements](../screen-helper.md#read-a-windows-windows-ui-elements) ·
 [CDP window mapping](../../partyline_helper/cdp_mapping.py)
 
-For a point fallback, the runner may resolve a unique reviewed semantic
+For a future attended point fallback, the runner may resolve a unique reviewed semantic
 target to the matching mark in a fresh `screen_window_look` only when the step
 explicitly permits the route. It sends the current mark or snapshot-bound
 point through the existing guarded window tools. For point `type` and `key`,
@@ -191,6 +194,24 @@ run and each changed revision require approval. Per-action confirmation still
 applies during replay. A learner or repairer may propose a revision through
 the project's ordinary write fence and review path. [Line checkouts](../hierarchy.md#the-checkout-a-line-works-in)
 
+### Generated workflow skills
+
+Each approval publishes a thin, line-local skill where supported. It contains
+the workflow name, its description and `use_when` from YAML, the typed
+parameters, and the source and feature requirements. It instructs the model
+to call `screen_workflow_start` with the workflow name, parameters, existing
+grant ID and a stable client key, then report the outcome posted to the line.
+The workflow steps stay in the YAML and execute in the model-free runner.
+
+Partyline regenerates the skill on approval and withdraws it when the
+revision changes or a person revokes approval. Phase 1 installs the projection
+into private Codex attachment homes on Linux and macOS. It writes no
+generated files into the project. Codex on Windows, Claude Code and OpenCode
+v2 use MCP discovery until their installation paths are wired. The MCP
+catalog is authoritative for all clients. Phase 2 documents the learner
+and repairer procedure in a separate repository skill.
+[Adapter session files](../adapters.md#locate-the-transcript-unambiguously)
+
 ## Server runner and MCP entry points
 
 The runner is a server-side job using the same operations as the existing
@@ -234,7 +255,9 @@ run even after the grant ends. Expose the same tools through `extras` when
 needed by clients that do not re-list. [MCP catalog](../../partyline/mcp/catalog.py)
 
 ```text
-screen_workflow_start(workflow, window, parameters, client_key, roles?)
+screen_workflow_list() -> {workflows}
+screen_workflow_show(workflow) -> {definition, revision, approved}
+screen_workflow_start(workflow, window, parameters, client_key)
   -> {run_id, revision, state}
 screen_workflow_status(run_id)
   -> {state, verified_steps, total_steps, current_step, outcome?}
@@ -248,9 +271,57 @@ identical request data and reject conflicting reuse. Stop is idempotent and
 gates dispatch immediately. Publish a start notice, bounded progress updates
 (such as completed groups), confirmation and escalation requests, and a final
 outcome on the run's line using server events. Include the run ID, revision,
-verified count, current step, and stop reason. Tool callers can query a
-snapshot on demand. Deliver completion and action-needed notices without
-requiring the caller to poll or take a model turn per step.
+verified count, current step, and stop reason. Confirmation notices give the
+window owner the run status and confirmation API paths. Confirmation, paused
+handoffs, and final outcomes wake the attachment that started the run.
+Start and progress notices go to the line without waking a process.
+Tool callers can query a snapshot on demand.
+
+### Phase 1 interface
+
+Version 1 supports `invoke`, `set_value`, `select` and CDP-only `set_files`
+with existing line-readable media IDs. Its checks are `present`, `absent`,
+`value_equals`, `notice_text`, and CDP file-count read-back
+(`file_count_equals`). A check defaults to the step target. `requires`
+supports `uia`, `cdp`, and `cdp.set_files`. For a list of records, write a
+`for_each` entry with a list parameter name and nested `steps`. Within its
+steps, `{item: field}` binds a record field and `{item: true}` binds a scalar
+list item. Ordinals use provider tree order within the named scope and
+require an exact `match_count`. Expanded runs are limited to 128 steps.
+
+The runner captures and validates a complete view when it needs to prove
+scope, uniqueness, or absence. It reuses a complete view from the same run
+only when a live subscription and helper event counter prove it is current.
+It uses a freshly resolved semantic target and one helper action per step. An unresolved check waits for the existing
+grant-scoped event feed until its one-shot deadline. A missing feed permits
+a complete immediate verification. Guarded point input, page navigation,
+arbitrary JavaScript and dialog dismissal are outside the Phase 1 runner.
+A step that needs point input and declares `allow_point` leaves a paused
+handoff for the person. The new helper capability carries request-scoped
+cancellation and document identity through the dispatch boundary.
+
+All REST paths below are relative to
+`/api/conversations/{conv_id}/screen-workflows`. A person's access token
+authenticates review, approval, confirmation, and audit calls.
+
+| Method and path | Request or result |
+| --- | --- |
+| `GET /` (base path) | List workflow names, revisions and approval state. |
+| `GET /definitions/{name}` | Show the typed definition and its revision. |
+| `GET /definitions/{name}/review` | Read the exact review plan as a person. |
+| `PUT /definitions/{name}/approval` | Approve with `{"revision":"<sha256>"}` after review. |
+| `DELETE /definitions/{name}/approval` | Revoke that workflow's approval on this checkout. |
+| `POST /runs` | Start with `workflow`, `window`, `parameters`, and `client_key`. |
+| `GET /runs/{run_id}` | Read run status. The window owner sees pending confirmation context and its token. |
+| `POST /runs/{run_id}/confirmation` | The window owner decides with `{"token":"<challenge>","allow":true}`. |
+| `POST /runs/{run_id}/stop` | Stop the run. |
+| `GET /runs/{run_id}/audit` | Read the content-free run audit. |
+
+The [record lab definition](../../tests/fixtures/screen-workflows/edit-record.yaml)
+and `/lab/window-bench/workflow.html` exercise the CDP path. The lab accepts
+`?scenario=delayed`, `?scenario=ambiguous`, and `?scenario=interrupted`. The
+UIA test runs a native-control fixture without a CDP route. Its image
+attachment counterpart requires a separately authored dialog flow.
 
 ## Escalation and model effort
 
@@ -328,14 +399,15 @@ Store workflows under `<project>/.partyline/workflows/<name>.yaml` and version
 them with the project. The runner resolves a workflow name using the server's
 assigned line working directory, then walks its filesystem parents up to and
 including the configured project root. The nearest file wins. Reject paths in
-the name, escapes through symlinks, and invalid nearer files. Use the line's
+the name, symlinks or junctions in workflow paths, and invalid nearer files. Use the line's
 authorized project path and open and pin the validated bytes so edits during
 execution cannot change a run. Never search a parent line's separate worktree
 or accept a server filesystem path from the caller.
 
-Lines share workflows by checking out the project's committed files. A child
-with a different revision gets its own resolved copy and has to meet the same
-file-approval and window-grant rules. Workflow sharing conveys the plan only.
+Lines share workflows by checking out the project's committed files. The approval
+record identifies the project, checkout, and relative file path. A file
+change, replacement, or copy requires approval of the resolved file again.
+Workflow sharing conveys the plan only.
 Keep the review record and run data in Partyline. The Partyline repository
 ships the format, runner, and generic examples. Application-specific workflows
 live in the projects that own them. [Line checkout rules](../hierarchy.md#the-checkout-a-line-works-in)
@@ -422,7 +494,7 @@ the generic test page's saved-state record. [Telemetry](../telemetry.md)
 
 | Phase | Scope and exit | Estimated engineering effort |
 | --- | --- | --- |
-| 1. Format and deterministic runner | Implement review, start/stop, audit, and a few action types (`invoke`, `set_value`, `select`) with presence, value, and notice checks on a generic test page. Exercise UIA and CDP where exposed, including delayed saves, ambiguous targets, capability refusals, and interruption. Add replay to the comparison once it supports the matched task steps. | 5–8 working days |
+| 1. Format and deterministic runner | Implement review, start/stop, audit, and a few action types (`invoke`, `set_value`, `select`) with presence, absence, value, and notice checks on a generic test page. Include CDP file input and file-count read-back. Exercise UIA and CDP where exposed, including delayed saves, ambiguous targets, capability refusals, and interruption. Add replay to the comparison once it supports the matched task steps. | 5–8 working days |
 | 2. Learning and distillation | Record a live demonstration, support transcript-backed drafts, and show a reviewable workflow and preview. Validate parameterization and target scope on held-out inputs. | 4–6 working days |
 | 3. Model-assisted repair | Add the small-model proposal role and strong-model file repair. Test with independent offline labels, then seek a decision on a live reversible pilot. Measure whether repair improves task completion and time. | 5–8 working days, excluding time to collect held-out recordings |
 
@@ -430,9 +502,25 @@ Estimated effort assumes reuse of the current grant services and helper event
 sources. Wiring a reliable event feed for delayed checks and enforcing the
 fixer's proposal-only capability are the largest uncertainties.
 
-### Open questions for the person
+## Decisions
 
-- Which repeated workflows and desktop sources should phase 1 cover beyond the generic fixture?
-- Who may approve a revision across project lines, and how long should optional demonstration recordings be retained?
-- Which effective model presets and data destinations may see narrow screen evidence, and may any point fallback run unattended?
-- Should the comparison include a separate stress set for app changes and interruptions, and how many repeats fit the approved budget?
+1. Phase 1 covers a generic lab flow that opens a dialog, selects a type,
+   attaches an image, fills its alt text and other text fields, fills a
+   small table, saves, and checks a saved notice. Include delayed saves,
+   ambiguous targets, and interruptions. Exercise CDP and UIA, including
+   a non-CDP UIA path with fakes. Keep test data and fixtures generic.
+2. A person approves the exact content hash within the project. Any edit
+   voids the approval. Captains and models can propose revisions. Approval
+   does not transfer to another project's copy.
+3. Keep evidence at existing destinations. In Phases 2–3 only presets
+   already permitted to see the line's screen may see workflow evidence.
+   Give the small fixer one narrow element read or marked look. A full
+   screenshot requires a step declared visual. Optional demonstration
+   recordings expire after 30 days. Run audit follows screen-audit retention.
+4. Unattended point fallback is disabled in Phases 1–2. Pause for the person
+   when a step needs it. An attended point route requires explicit permission
+   in the approved step. Revisit after collecting comparison data.
+5. Keep a separate small stress set for app changes and interruptions.
+   Use the preregistered comparison's repeats and budget.
+6. Edge continues to use UIA and guarded point input. CDP for that browser
+   is a separate follow-up.

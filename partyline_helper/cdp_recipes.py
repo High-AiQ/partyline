@@ -143,6 +143,10 @@ def normalize(node, ident, parent, dom=None):
             "readonly": dom.get("readonly", False), "inert": dom.get("inert", False),
             "aria_properties": "disabled=true" if dom.get("aria_disabled") else "",
             "viewport_bounds": dom.get("bounds"), "dom": dom}
+    if aria_role in ("dialog", "alertdialog", "alert", "status", "row", "table", "region", "main"):
+        item["semantic_role"] = aria_role
+    if isinstance(dom.get("file_count"), int):
+        item.update(semantic_role="file_input", file_count=dom["file_count"])
     if not dom.get("password"):
         text = dom.get("value") if dom.get("value") is not None else value(node.get("value"))
         if text is not None:

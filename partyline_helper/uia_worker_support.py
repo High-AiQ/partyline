@@ -23,7 +23,11 @@ def audit(session, grant, message, props, result):
     params = {} if message.get("action") == "set_value" else {
         key: value for key, value in args.items()
         if number(value) or (isinstance(value, str) and len(value) <= 16)}
-    if params:
+    if message.get("workflow_source"):
+        info.pop("name", None)
+        info.pop("scope_window", None)
+        info["request_id"] = message["request_id"]
+    elif params:
         info["params"] = params
     if result.get("close_requested"):
         info["window_closed"] = bool(result.get("window_closed"))

@@ -7,6 +7,7 @@ from websockets.exceptions import ConnectionClosed
 from .uia_action_worker import ActionWorker, audit
 from .timing import Timing
 from .window_gone import explain
+from .workflow_dispatch import WorkflowAction
 
 
 READ_TIMEOUT = 33  # seconds; START_LIMIT + BUDGET + KILL_SLACK must stay below it
@@ -36,6 +37,7 @@ class WindowTask:
         self.task = None
         self.read_task = None
         self.actions = ActionWorker(session)
+        self.workflow = None
 
     def busy(self):
         return any(task and not task.done() for task in (self.task, self.read_task))
@@ -61,11 +63,25 @@ class WindowTask:
                 result = {"status": "failed", "error": "audit unavailable"}
             await self.session.send("window_element_result", request_id=message["request_id"], **result)
             return
+        if message.get("workflow_source"):
+            self.workflow = operation = WorkflowAction(message)
+            message = {**message, "_workflow_cancelled": operation.cancelled}
         self.task = asyncio.create_task(self._action(message, Timing()))
 
+    def cancel_workflow(self, request_id):
+        if self.workflow and self.workflow.id == request_id:
+            self.workflow.cancelled.set()
+
     async def _action(self, message, queued=None):
-        async with self.operation_lock:
-            await self._action_locked(message, queued)
+        workflow = self.workflow
+        token = workflow.activate(message) if workflow else None
+        try:
+            async with self.operation_lock:
+                await self._action_locked(message, queued)
+        finally:
+            if workflow:
+                workflow.reset(token)
+                self.workflow = None
 
     async def _action_locked(self, message, queued=None):
         timing = queued or Timing()
@@ -84,6 +100,8 @@ class WindowTask:
                 return
             chrome = getattr(self.session, "chrome", None)
             result = await chrome.action(self.session.window, message) if chrome else None
+            if result is None and message.get("workflow_source") == "cdp":
+                result = {"status": "failed", "reason": "workflow_source", "source": "uia"}
             if result is None and message.get("action") == "set_files":
                 result = {"status": "failed", "error": "CDP unavailable; use the Open dialog path instead"}
             if result is None:
@@ -114,8 +132,15 @@ class WindowTask:
         chrome = getattr(self.session, "chrome", None)
         result = await chrome.read(self.session.window, options, message or {}) if chrome else None
         if result is None:
-            result = await self.session.window.snapshot(options)
+            access = self.session.window
+            workflow_read = (message or {}).get("workflow_read") is True
+            generation = access.gate.generation if workflow_read else None
+            result = await access.snapshot(options)
             result["source"] = "uia"
+            if workflow_read:
+                result["workflow_document"] = str(generation)
+                if access.gate.revoked.is_set() or generation != access.gate.generation:
+                    result["changed"] = True
             if chrome and self.session.window in chrome.reasons:
                 result["source_reason"] = chrome.reasons[self.session.window]
         if chrome:
@@ -167,6 +192,8 @@ class WindowTask:
 
     def cancel(self):
         """Cancel queued and in-flight reads/actions before any awaited teardown."""
+        if self.workflow:
+            self.workflow.cancelled.set()
         for task in (self.task, self.read_task):
             if task:
                 task.cancel()

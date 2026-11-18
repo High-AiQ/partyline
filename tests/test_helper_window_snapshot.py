@@ -223,10 +223,10 @@ class HelperSnapshotTests(unittest.IsolatedAsyncioTestCase):
         error = await self.socket.next("error")
         self.assertEqual(("r10", "unsupported: snapshot_window"), (error["request_id"], error["message"]))
 
-    async def test_the_hello_announces_screenshots_and_the_helper_patch_version(self):
+    async def test_the_hello_announces_screenshots_and_the_helper_version(self):
         self.assertEqual(5, WINDOWS_VERSION)
         self.assertEqual(2, SNAPSHOT_VERSION)
-        self.assertEqual("1.8.6", __version__)
+        self.assertEqual("1.9.0", __version__)
 
 
 class WindowGrabTests(unittest.TestCase):

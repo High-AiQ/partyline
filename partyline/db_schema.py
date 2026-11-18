@@ -9,6 +9,7 @@ from .turn_usage_schema import MIGRATIONS as TURN_USAGE
 from .reviewer_progress_schema import MIGRATIONS as REVIEWER_PROGRESS
 from .db_schema_helper_updates import HELPER_UPDATES
 from .review_hold_schema import MIGRATIONS as REVIEW_HOLD
+from .screen_workflow_schema import WORKFLOW_MIGRATIONS
 MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
@@ -223,9 +224,7 @@ MIGRATIONS = [
     "ALTER TABLE conversations ADD COLUMN chapter_of TEXT",
     "ALTER TABLE conversations ADD COLUMN chapter INTEGER NOT NULL DEFAULT 1",
     "CREATE INDEX IF NOT EXISTS idx_conversations_chapter_of ON conversations(chapter_of)",
-    # Review worktrees a line is having adversarially reviewed, keyed by path
-    # so two lines can never claim one directory. Records let accept, retire,
-    # and the startup sweep prune them; the SHAs themselves stay in the repo.
+    # Registered review worktrees are pruned when accepted, retired, or swept on startup.
     """CREATE TABLE IF NOT EXISTS review_worktrees(
         path TEXT PRIMARY KEY,
         conv_id TEXT NOT NULL,
@@ -297,4 +296,4 @@ MIGRATIONS += ["UPDATE task_reviews SET mode='full' WHERE mode='light'",
     "ALTER TABLE task_reviews ADD COLUMN suite_repository TEXT",
     "ALTER TABLE task_reviews ADD COLUMN suite_batch TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE task_reviews ADD COLUMN suite_repositories TEXT NOT NULL DEFAULT '[]'",
-] + PRESET_OVERRIDES
+] + PRESET_OVERRIDES + WORKFLOW_MIGRATIONS

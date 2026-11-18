@@ -164,7 +164,8 @@ class Session(SessionTransport):
         elif kind in WINDOW_MESSAGES:
             await self.windows.receive(message)
         elif kind in ("read_window_elements", "window_element_action", "window_eval", "snapshot_window",
-                      "window_click", "window_point", "look_window") and "grant_id" in message:
+                      "window_click", "window_point", "look_window",
+                      "cancel_workflow_action") and "grant_id" in message:
             await self.windows.dispatch(message)
         elif kind == "read_window_elements":
             await self.window_task.submit(message["request_id"], read_options(message))
@@ -188,7 +189,8 @@ class Session(SessionTransport):
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
                         helper_version=helper_version(), monitors=self.desktop.monitors(),
                         control=CONTROL_VERSION, tools=TOOLS_VERSION, windows=WINDOWS_VERSION,
-                        press=PRESS_VERSION, chrome_dom=5, chrome=current(self.windows.chrome),
+                        press=PRESS_VERSION, chrome_dom=5, workflow_actions=True,
+                        chrome=current(self.windows.chrome),
                         window_access=self.window_access_enabled, update_check=True,
                         auto_update=self.updates.enabled, update_recovery=recovery_path().exists())
         show_current(self.windows.chrome)  # a reconnect to the server keeps the live extension state

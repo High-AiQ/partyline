@@ -152,6 +152,8 @@ async def shutdown_runtime(runtime) -> None:
     runtime.stopping = True
     if hub := getattr(runtime, "screen_hub", None):
         hub.updates.close()
+        if workflows := getattr(hub, "workflows", None):
+            await workflows.close()
     runtime._shutdown_resume = snapshot_shutdown_plan(runtime.db, runtime.live)
     from .attachment_stop_audit import direct_stop
     for ident, adapter in list(runtime.live.items()):

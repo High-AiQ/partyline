@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from . import (
     tools_blender, tools_bridge, tools_captain, tools_check, tools_control, tools_core, tools_handover,
-    tools_resources, tools_tasks, tools_turn_usage, tools_usage,
+    tools_resources, tools_tasks, tools_turn_usage, tools_usage, tools_workflows,
 )
 from .captain_schemas import ACK_HINT
 from .client import ApiError
@@ -21,10 +21,10 @@ from .descriptions import one_line, slim_schema
 
 # The order a name is looked up in; the first module serving it handles the call.
 DISPATCH = (tools_usage, tools_turn_usage, tools_blender, tools_bridge, tools_check, tools_control,
-            tools_handover, tools_resources, tools_tasks, tools_core, tools_captain)
+            tools_handover, tools_resources, tools_tasks, tools_workflows, tools_core, tools_captain)
 # The order tools are shown in.
 LISTING = (tools_usage, tools_turn_usage, tools_core, tools_captain, tools_tasks, tools_resources,
-           tools_handover, tools_control, tools_blender, tools_check, tools_bridge)
+           tools_handover, tools_control, tools_workflows, tools_blender, tools_check, tools_bridge)
 
 # Reached through extras(op, args): rare errands, or tools a client cannot be given later.
 EXTRAS_OPS = frozenset({
@@ -65,7 +65,8 @@ def door(name: str, state: dict) -> str | None:
     if (name in WINDOW_ACCESS and state.get("dynamic_screen_tools")
             and not state.get("window_access")):
         return "-"
-    if name in EXTRAS_OPS or (name in SCREEN_CONTROL | {tools_bridge.NAME, "screen_window_look"}
+    specialist = SCREEN_CONTROL | tools_workflows.NAMES | {tools_bridge.NAME, "screen_window_look"}
+    if name in EXTRAS_OPS or (name in specialist
                               and not state.get("dynamic_screen_tools")):
         return EXTRAS
     if name in (*tools_captain.OPERATIONS, *tools_tasks.OPERATIONS) and name not in EVERYDAY:

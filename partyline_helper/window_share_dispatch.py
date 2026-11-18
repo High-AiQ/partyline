@@ -9,6 +9,10 @@ def label(message):
 
 async def dispatch(shares, message):
     entry = shares.grants.get(message.get("grant_id"))
+    if message["type"] == "cancel_workflow_action":
+        if entry:
+            entry["worker"].cancel_workflow(message.get("request_id"))
+        return
     if entry and entry.get("standing_access") and not shares.session.window_access_enabled:
         call = label(message)
         shares.session.window_access_audit.append(message.get("line", ""), message.get("agent", ""),

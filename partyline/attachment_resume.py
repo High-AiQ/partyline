@@ -223,6 +223,8 @@ async def _resume_adapter_locked(
         start_fresh_context(runtime.db, att)
     try:
         await asyncio.to_thread(wire_attachment, att, runtime, hook_url, resume=True)
+        from .screen_workflow_skills import prepare_attachment as prepare_skills
+        await prepare_skills(runtime, att)
         history = await asyncio.to_thread(delivered_history, runtime.db, att)
         att["delivered_bodies"] = history.bodies
         att["delivered_transcript_records"] = history.transcript_records

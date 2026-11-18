@@ -73,6 +73,7 @@ class HelperHello(HelperMessage):
     windows: int = 0  # window-grant protocol; 1 shares a window with a line, absent before helper 1.1.0
     press: int = 0  # element-scoped key messages; absent before helper 1.2.0
     chrome_dom: int = 0
+    workflow_actions: bool = False
     chrome: ChromeState | None = None
     window_access: bool = False  # helper-owned standing permission; fail closed for older helpers
     update_check: bool = False

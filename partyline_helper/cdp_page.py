@@ -7,11 +7,15 @@ from .cdp_ax import exposed
 from .cdp_dom_nodes import DETAIL, discover
 from .cdp_settle import Quiet
 from .cdp_page_dialogs import Dialogs
+from .workflow_dispatch import cdp_guard, document
 from .cdp_transport import CDPError, DocumentChanged, ExtensionRefused, PageUnavailable
 from .cdp_recovery import Recovery
 from .cdp_identity import TargetChanged, reprove
 from .cdp_page_mapping import map_nodes
 from .timing import Timing
+
+
+PAGE_CAP = 2000
 
 
 class Page(Dialogs, Recovery):
@@ -37,6 +41,7 @@ class Page(Dialogs, Recovery):
         self.browser.listeners.add(self.event)
 
     def guard(self, document=True, healthy=True):
+        cdp_guard()
         if (not self.live or self.grant.get("chrome_cancelled") or self.access.grant is not self.grant
                 or self.access.gate.revoked.is_set()
                 or self.access.gate.generation != self.generation):
@@ -215,7 +220,7 @@ class Page(Dialogs, Recovery):
             .encode(), digest_size=8).hexdigest() for n in nodes}
         try:
             with timing.phase("dom_mapping_ms"):
-                elements = await map_nodes(self, nodes, ids, epoch, index)
+                elements = await map_nodes(self, nodes, ids, epoch, index, PAGE_CAP)
         finally:
             if (self.live and self.page_state == "alive" and self.access.grant is self.grant
                     and not self.access.gate.revoked.is_set() and not self.page_dialog):
@@ -223,12 +228,12 @@ class Page(Dialogs, Recovery):
         with timing.phase("renderer_fence_ms"):
             await self.call("Runtime.evaluate", {"expression": "0", "returnByValue": True})  # renderer fence
         result = {"source": "cdp", "action_identity_supported": True,
-                  "elements": elements, "snapshot_id": uuid.uuid4().hex,
+                  "elements": elements, "snapshot_id": uuid.uuid4().hex, "workflow_document": document(self),
                   "captured_event_counter": before, **self.access.event_status()}
         self.access.keep(result, cursor)
-        if index + 2000 < len(nodes):
+        if index + PAGE_CAP < len(nodes):
             token = uuid.uuid4().hex[:12]
-            self.access.walks[token] = {"nodes": nodes, "index": index + 2000,
+            self.access.walks[token] = {"nodes": nodes, "index": index + PAGE_CAP,
                                         "counter": before, "epoch": epoch}
             result.update(next_cursor=token, truncated=True)
         timing.values["mapped_nodes"] = len(elements)

@@ -156,7 +156,10 @@ async def after(hub, principal, grant, then, result):
 
 @timed
 async def element_action(runtime, hub, conv_id: str, body: ElementAction, request: Request):
-    principal = request_principal(request)
+    return await perform_element_action(runtime, hub, conv_id, body, request_principal(request))
+
+
+async def perform_element_action(runtime, hub, conv_id, body, principal, workflow=None):
     deny_unless(runtime.db, principal, conv_id, "write")
     if body.then:
         deny_unless(runtime.db, principal, conv_id, "read")
@@ -180,17 +183,23 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
             if body.paths and device.get("chrome_dom", 0) < 3:
                 raise ValueError("update the helper to use local paths")
             files, total = resolve_files(hub, principal, body.files or [])
-            audit_files(hub, principal, grant, body.files or [], total)
+            audit_files(hub, principal, grant, body.files or [], total, include_ids=workflow is None)
+        if workflow:
+            message.update(workflow.fields())
         with phase("target_ms"):
             target = True
             if body.action not in ("reload", "dialog"):
-                target, busy = await hub.elements.action_target(principal, grant, body.element_id)
+                target, busy = ((workflow.node.helper, True) if workflow else
+                                await hub.elements.action_target(principal, grant, body.element_id))
         if target is None:
             if busy:
                 return changing(hub.elements, grant["id"])
             return {"status": "failed", "error": REFRESH_FAILED}
-        token = action_token(hub.elements, grant["id"], body.element_id)
+        token = (workflow.node.cached.get("action_token") if workflow else
+                 action_token(hub.elements, grant["id"], body.element_id))
         async with hub.elements.locked(grant["id"]):  # processes on the line never interleave on a window
+            if workflow:
+                workflow.check(hub.elements)
             if body.mark is not None:
                 look, _, _ = hub.snapshots.looks.target(principal, grant, body.mark)
                 if look["generation"] != message["look_generation"]:
@@ -211,6 +220,7 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
             if token:
                 message["action_token"] = token
             hub.window_grants.spend(grant)
+            dispatch = {"dispatch": workflow.dispatch} if workflow else {}
             if body.action == "set_files":
                 from .screen_file_input import ticket
                 with ticket(hub, principal, grant, files, len(body.paths or [])) as key:
@@ -222,11 +232,11 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
                         message["file_limits"] = {"file": MAX_FILE_BYTES, "total": MAX_TOTAL}
                     response = await hub.elements.exchange(principal, grant, device, "window_element_action",
                         agent=principal.name, title=grant.get("title", ""),
-                        process=grant.get("process", ""), **message)
+                        process=grant.get("process", ""), **dispatch, **message)
             else:
                 response = await hub.elements.exchange(principal, grant, device, "window_element_action",
                     agent=principal.name, title=grant.get("title", ""),
-                    process=grant.get("process", ""), **message)
+                    process=grant.get("process", ""), **dispatch, **message)
         result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
         if result.get("reason") == "not_actionable" and (ancestor := result.get("act_on")):
             tree = hub.elements.snapshots.get(grant["id"])

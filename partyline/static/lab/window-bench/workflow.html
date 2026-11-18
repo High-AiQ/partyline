@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Record workflow · window bench</title>
+    <script type="module" crossorigin src="/assets/lab/window-bench/workflow-BXSlJ7Y9.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
+  </head>
+  <body>
+    <main>
+      <h1>Record workflow</h1>
+      <button id="edit" type="button">Edit record</button>
+      <p role="status" aria-label="Save status" id="save-status" data-saves="0"></p>
+      <dialog aria-labelledby="editor-title">
+        <h2 id="editor-title">Record editor</h2>
+        <form>
+          <p>
+            <label for="kind">Record type</label>
+            <select id="kind">
+              <option value="text">Text</option>
+              <option value="image">Image</option>
+            </select>
+          </p>
+          <p>
+            <label for="image">Record image</label>
+            <input id="image" aria-label="Record image" type="file" accept="image/*" />
+          </p>
+          <p><label for="alt">Alternative text</label> <input id="alt" /></p>
+          <p><label for="title">Title</label> <input id="title" /></p>
+          <p><label for="notes">Notes</label> <textarea id="notes"></textarea></p>
+          <table>
+            <caption>
+              Record rows
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Label</th>
+                <th scope="col">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr aria-label="First row">
+                <td><input aria-label="Label" /></td>
+                <td><input aria-label="Value" /></td>
+              </tr>
+              <tr aria-label="Second row">
+                <td><input aria-label="Label" /></td>
+                <td><input aria-label="Value" /></td>
+              </tr>
+            </tbody>
+          </table>
+          <p><button id="save" type="submit">Save record</button></p>
+        </form>
+      </dialog>
+    </main>
+  </body>
+</html>

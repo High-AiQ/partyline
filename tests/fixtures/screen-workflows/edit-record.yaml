@@ -1,0 +1,92 @@
+version: 1
+name: edit-record
+description: Fill a record in the window interaction lab.
+use_when: The record lab is open in a granted window.
+parameters:
+  kind: {type: enum, choices: [image, text]}
+  images: {type: list, items: media_id, min_items: 1, max_items: 1}
+  alt_text: {type: text, max_length: 200}
+  title: {type: text, max_length: 200}
+  notes: {type: text}
+  rows:
+    type: list
+    min_items: 2
+    max_items: 2
+    items:
+      type: record
+      fields:
+        row: {type: enum, choices: [First row, Second row]}
+        label: {type: text, max_length: 100}
+        value: {type: text, max_length: 100}
+steps:
+  - id: open-editor
+    target: {role: button, name: Edit record}
+    action: invoke
+    confirm: false
+    postcondition:
+      check: present
+      target: {role: dialog, name: Record editor}
+      timeout_ms: 3000
+  - id: select-kind
+    target: {role: combobox, name: Record type, within: {role: dialog, name: Record editor}}
+    action: select
+    inputs: {value: {param: kind}}
+    confirm: false
+    postcondition: {check: value_equals, expected: {param: kind}, timeout_ms: 3000}
+  - id: attach-image
+    target: {role: file_input, name: Record image}
+    action: set_files
+    requires: [cdp.set_files]
+    inputs: {files: {param: images}}
+    preconditions:
+      - {check: file_count_equals, requires: [cdp.set_files], expected: 0}
+    confirm: false
+    postcondition:
+      check: file_count_equals
+      requires: [cdp.set_files]
+      expected: 1
+      timeout_ms: 5000
+  - id: edit-alt
+    target: {role: textbox, name: Alternative text, within: {role: dialog, name: Record editor}}
+    action: set_value
+    inputs: {value: {param: alt_text}}
+    confirm: false
+    postcondition: {check: value_equals, expected: {param: alt_text}, timeout_ms: 3000}
+  - id: edit-title
+    target: {role: textbox, name: Title, within: {role: dialog, name: Record editor}}
+    action: set_value
+    inputs: {value: {param: title}}
+    confirm: false
+    postcondition: {check: value_equals, expected: {param: title}, timeout_ms: 3000}
+  - id: edit-notes
+    target: {role: textbox, name: Notes, within: {role: dialog, name: Record editor}}
+    action: set_value
+    inputs: {value: {param: notes}}
+    confirm: false
+    postcondition: {check: value_equals, expected: {param: notes}, timeout_ms: 3000}
+  - for_each: rows
+    steps:
+      - id: edit-row-label
+        target: {role: textbox, name: Label, within: {role: row, name: {item: row}}}
+        action: set_value
+        inputs: {value: {item: label}}
+        confirm: false
+        postcondition: {check: value_equals, expected: {item: label}, timeout_ms: 3000}
+      - id: edit-row-value
+        target: {role: textbox, name: Value, within: {role: row, name: {item: row}}}
+        action: set_value
+        inputs: {value: {item: value}}
+        confirm: false
+        postcondition: {check: value_equals, expected: {item: value}, timeout_ms: 3000}
+  - id: save-record
+    target: {role: button, name: Save record, within: {role: dialog, name: Record editor}}
+    action: invoke
+    confirm: true
+    effect: Save the edited record to the lab's local saved-state counter.
+    preconditions:
+      - {check: present, target: {role: dialog, name: Record editor}}
+    postcondition:
+      check: notice_text
+      target: {role: status, name: Save status}
+      expected: Record saved
+      timeout_ms: 5000

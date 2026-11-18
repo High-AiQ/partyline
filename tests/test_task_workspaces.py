@@ -364,13 +364,16 @@ class RetirementTest(AcceptAndRetireFixture):
         self.assertIn('no task_workspaces registration', caught.exception.detail)
 
     async def test_force_retires_a_clean_merged_repository_task_with_nested_workspaces(self):
-        await self.finished(repository=True)
-        folder = self.db.get_conversation(self.conv_id)['cwd']
-        self.merge_all()
-        evidence, response = await self.force_retire()
-        self.assertIsNotNone(evidence['lines'][0]['git'])
-        self.assertEqual(response['ok'], True, response)
-        self.assertFalse(os.path.exists(folder))
+        from unittest.mock import patch
+
+        with patch('tests.test_task_workspaces.CLONES', ('argon-backend',)):
+            await self.finished(repository=True)
+            folder = self.db.get_conversation(self.conv_id)['cwd']
+            self.merge_all()
+            evidence, response = await self.force_retire()
+            self.assertIsNotNone(evidence['lines'][0]['git'])
+            self.assertEqual(response['ok'], True, response)
+            self.assertFalse(os.path.exists(folder))
 
     async def test_a_dirty_worktree_keeps_the_whole_task_folder(self):
         await self.finished()
