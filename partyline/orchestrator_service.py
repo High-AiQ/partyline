@@ -44,7 +44,9 @@ async def _create_task(runtime, actor, root_id, body):
     db = runtime.db
     root = require_root(db, actor, root_id)
     from .preset_roles import require_named_role
-    require_named_role(db, body.implementer, 'implementer')
+    from .preset_overrides import rewrite, record_task_overrides
+    selected = require_named_role(db, body.implementer, 'implementer')
+    rewrite(selected['adapter'], selected['command'], body.model, body.effort)
     check_task_memory(db, actor, body.memory_limit)
     suite = resolve_repositories(db, root_id, body) if body.mode == 'suite' else None
     if body.mode in ('express', 'suite'):
@@ -53,6 +55,11 @@ async def _create_task(runtime, actor, root_id, body):
         policy = 'none'
     else:
         policy = validate_policy(db, body.review or root['default_review_policy'])
+    if body.review_model is not None or body.review_effort is not None:
+        if policy in ('none', 'captain'):
+            raise HTTPException(422, 'review overrides require a reviewer preset')
+        reviewer = require_named_role(db, policy, 'reviewer')
+        rewrite(reviewer['adapter'], reviewer['command'], body.review_model, body.review_effort)
     granted = task_write_set.check(db, actor, root_id, body.write_set) if body.write_set else []
     existing_line = db._exec(
         'SELECT id FROM conversations WHERE parent_id=? AND name=? AND archived_at IS NULL',
@@ -63,6 +70,8 @@ async def _create_task(runtime, actor, root_id, body):
         if (not pending or pending['goal'] not in (body.goal.strip(), expected_goal)
                 or pending['implementer_preset'] != body.implementer or pending['policy'] != policy
                 or pending['mode'] != body.mode
+                or any(pending.get(k) != getattr(body, k) for k in
+                       ('model', 'effort', 'review_model', 'review_effort'))
                 or (suite and [{key: item[key] for key in ('repository', 'batch')}
                                for item in pending['suite_repositories']] != suite)):
             raise HTTPException(409, f"line {existing_line['id']} already uses this task name; "
@@ -84,9 +93,10 @@ async def _create_task(runtime, actor, root_id, body):
             conv_id = conv['id']
             db._exec(
                 'INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,policy,tag,'
-                'created_at,mode) VALUES(?,?,?,?,?,?,?,?)',
+                'created_at,mode,model,effort,review_model,review_effort) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                 (conv_id, root_id, ident, body.implementer, policy, pick_tag(db, conv_id), time.time(),
-                 body.mode))
+                 body.mode, body.model, body.effort, body.review_model, body.review_effort))
+            record_task_overrides(db, conv_id, actor, body, policy)
             if suite:
                 save_repositories(db, conv_id, suite)
                 from .goal import set_goal
@@ -133,7 +143,8 @@ async def _create_task(runtime, actor, root_id, body):
         else:
             tag = task(db, conv_id)['tag']
             await spawn(runtime, conv_id, body.implementer, ident,
-                        handle=f'impl-{tag}' if tag else None, memory_limit=body.memory_limit)
+                        handle=f'impl-{tag}' if tag else None, memory_limit=body.memory_limit,
+                        model=body.model, effort=body.effort)
     except (HTTPException, ValueError, OSError) as exc:
         spawn_failed = True
         creation_error = str(getattr(exc, 'detail', exc))

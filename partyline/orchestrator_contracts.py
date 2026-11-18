@@ -26,6 +26,10 @@ class TaskIn(BaseModel):
     goal: str = Field(min_length=1, max_length=MAX_TASK_GOAL, pattern=r'\S')
     implementer: str = Field(min_length=1, max_length=120)
     review: str | None = Field(default=None, min_length=1, max_length=120)
+    model: str | None = None
+    effort: str | None = None
+    review_model: str | None = None
+    review_effort: str | None = None
     base: Literal['head', 'upstream'] = 'head'
     mode: TaskMode = Field(
         default='full',
@@ -185,6 +189,10 @@ class TaskReview(BaseModel):
     root_id: str
     implementer_id: str
     implementer_preset: str
+    model: str | None = None
+    effort: str | None = None
+    review_model: str | None = None
+    review_effort: str | None = None
     policy: str
     mode: TaskMode = 'full'
     suite_repository: str | None = None

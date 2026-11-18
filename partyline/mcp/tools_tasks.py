@@ -35,7 +35,9 @@ _WHO = {'env_gap': "the task's reviewer", 'deliver': 'the implementer of an expr
 
 _DESCRIBE = {
     'create_task': ('START new work: creates a new task line (conv_id defaults to your root line) with one '
-                    'implementer with Fast implementer checked; select a free one. Reviewers require '
+                    'implementer with Fast implementer checked; select a free one. Optional model and effort '
+                    'override the selected Claude or Codex preset; review_model and review_effort do the '
+                    'same for a preset reviewer. Other preset settings remain unchanged. Reviewers require '
                     'Can manage a line. Prefer Reads images for visual work. Its goal is stored on the task '
                     'line and sent to the implementer '
                     'at birth and on wakes until delivery is proven, then on change or restart. '

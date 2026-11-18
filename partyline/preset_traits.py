@@ -96,7 +96,9 @@ def match_preset(attachment: dict, presets: list[dict]) -> dict | None:
         if (preset["adapter"] == adapter
                 and (preset["name"].lower() == recorded if recorded
                      else _numbered_handle(name, preset["name"].lower()))
-                and argv == command):
+                and (argv == command or (recorded and
+                     (attachment.get("model_override") is not None or
+                      attachment.get("effort_override") is not None)))):
             hits.append(preset)
     return hits[0] if len(hits) == 1 else None
 

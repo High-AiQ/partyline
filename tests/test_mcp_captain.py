@@ -75,6 +75,23 @@ class CaptainToolTests(unittest.TestCase):
         lacking = {**client.state, "actions": [a for a in client.state["actions"] if a != "chapter"]}
         self.assertNotIn("new_chapter", {t["name"] for t in tools_captain.tool_list(lacking)})
 
+    def test_attach_worker_forwards_preset_overrides(self):
+        client = Client()
+        original = client.request
+
+        def request(method, path, payload=None):
+            if path == '/api/presets':
+                return [{'name': 'luna', 'adapter': 'codex', 'command': 'wrapper'}]
+            return original(method, path, payload)
+
+        client.request = request
+        tools_captain.call(client, 'attach_worker', {
+            'conv_id': 'child', 'name': 'worker', 'adapter': 'codex', 'preset_name': 'luna',
+            'model': 'new', 'effort': 'medium'}, client.state)
+        self.assertEqual(client.calls[-1], ('POST', '/api/conversations/child/attachments', {
+            'name': 'worker', 'adapter': 'codex', 'command': 'wrapper', 'preset_name': 'luna',
+            'model': 'new', 'effort': 'medium'}))
+
     def test_attach_worker_forwards_successor(self):
         client = Client()
         tools_captain.call(client, "attach_worker", {

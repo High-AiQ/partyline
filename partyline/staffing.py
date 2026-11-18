@@ -142,7 +142,12 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
             if conv["id"] not in subtree:
                 continue
             role = " captain" if att.get("is_lead") else ""
-            label = f"{att['name']} «{conv['name']}»{role}"
+            from .preset_overrides import label as preset_label
+            override = ""
+            if matched and (att.get("model_override") or att.get("effort_override")):
+                override = " · " + preset_label(matched["name"], att.get("model_override"),
+                                                att.get("effort_override"))
+            label = f"{att['name']} «{conv['name']}»{role}{override}"
             compactions = compacted.get(att["id"])
             if compactions:
                 label += f" ×{compactions} compactions"

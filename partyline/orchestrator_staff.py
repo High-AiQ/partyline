@@ -13,18 +13,21 @@ from .preset_roles import require_named_role
 
 
 async def spawn(runtime, conv_id, preset_name, ident, cwd=None, handle=None, memory_limit=None,
-                role="implementer"):
+                role="implementer", model=None, effort=None):
     from . import server
     selected = require_named_role(runtime.db, preset_name, role)
+    from .preset_overrides import rewrite
+    raw_command = rewrite(selected['adapter'], selected['command'], model, effort)
     command = validated_attachment_command(
-        selected['adapter'], selected['command'], server.ADAPTERS, server.ADAPTER_METADATA)
+        selected['adapter'], raw_command, server.ADAPTERS, server.ADAPTER_METADATA)
     name = unique_handle(runtime.db, conv_id, handle or selected['name'])
     await reserve_new_attachment(
         runtime.db, att_id=ident, conv_id=conv_id, name=name,
         adapter=selected['adapter'], command=command, cwd=cwd or line_cwd(runtime.db, conv_id),
         runtime_owner=str(uuid.uuid4()), start_after_history=True,
         lease=parse_size(memory_limit) if memory_limit else None)
-    runtime.db._exec('UPDATE attachments SET preset=? WHERE id=?', (selected['name'], ident))
+    runtime.db._exec('UPDATE attachments SET preset=?,model_override=?,effort_override=? WHERE id=?',
+                     (selected['name'], model, effort, ident))
     return await server._start_attachment(runtime.db.get_attachment(ident), staffing_role=role)
 
 
@@ -41,7 +44,8 @@ async def ensure_reviewer(runtime, row):
     att = db.get_attachment(ident)
     if att is None:
         await spawn(runtime, row['conv_id'], row['policy'], ident, row['review_worktree'],
-                    handle=f"review-{row['tag']}" if row.get('tag') else None, role="reviewer")
+                    handle=f"review-{row['tag']}" if row.get('tag') else None, role="reviewer",
+                    model=row.get("review_model"), effort=row.get("review_effort"))
     else:
         if att['status'] in ('starting', 'running'):
             from .line_process_routes import detach_attachment

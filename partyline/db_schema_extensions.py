@@ -25,6 +25,7 @@ from .request_outcome_schema import MIGRATIONS as REQUEST_OUTCOMES
 from .orchestrator_schema import MIGRATIONS as ORCHESTRATOR
 from .asr_schema import MIGRATIONS as ASR
 from .captain_idle_schema import MIGRATIONS as CAPTAIN_IDLE
+from .preset_override_schema import MIGRATIONS as PRESET_OVERRIDES  # noqa: F401
 
 MIGRATIONS = (MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + SCRATCH + LEASE
                   + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR + HANDOVER)

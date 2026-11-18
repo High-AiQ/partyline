@@ -49,3 +49,19 @@ class AttachmentResponse(BaseModel):
         if self.adapter != "raw":
             self.counts_toward_total = True
         return self
+
+
+class AttachIn(BaseModel):
+    name: str
+    adapter: str = "opencode"
+    command: str = ""
+    cwd: str = ""
+    update: bool = False
+    counts_toward_total: bool | None = None
+    # 2.14: a captain may deliberately put a second implementer on one branch.
+    allow_shared_branch: bool = False
+    successor: bool = False
+    preset_name: str | None = None
+    model: str | None = None
+    effort: str | None = None
+    staffing_role: Literal["implementer", "captain"] = "implementer"

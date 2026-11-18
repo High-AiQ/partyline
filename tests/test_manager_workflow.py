@@ -76,6 +76,21 @@ class ManagerWorkflowTest(unittest.TestCase):
         self.db.close()
         self.directory.cleanup()
 
+    def test_machine_principals_cannot_write_presets_or_adapters(self):
+        self.client.post('/api/conversations/root/lead', json={'attachment_id': 'root-mgr'},
+                         headers=self.human)
+        self.db.set_attachment_status('root-impl', 'running', None)
+        payload = {'title': 'Test', 'name': 'test', 'adapter': 'fake', 'command': 'fake'}
+        for principal in (self.root, self.impl):
+            for method, path in (('post', '/api/presets'),
+                                 ('put', '/api/presets/fixture-manager'),
+                                 ('delete', '/api/presets/fixture-manager'),
+                                 ('post', '/api/adapters/reload'),
+                                 ('post', '/api/adapters/import'),
+                                 ('delete', '/api/adapters/fake')):
+                result = self.client.request(method, path, headers=principal, json=payload)
+                self.assertEqual(result.status_code, 403, (method, path, result.text))
+
     def test_human_appoints_root_child_assignment_report_and_cross_line_deny(self):
         appointed = self.client.post(
             "/api/conversations/root/lead",

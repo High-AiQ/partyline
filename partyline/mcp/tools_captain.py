@@ -87,7 +87,8 @@ def tool_list(state: dict) -> list[dict]:
             "create_child": "Create a child line; its captain requires Can manage a line checked.",
             "new_chapter": "Start a fresh line that continues your own line (same parent, folder, topic, "
                 "goal, notes and captain style; nothing moves or is deleted). A person appoints its captain.",
-            "attach_worker": "Staff an implementer with Fast implementer checked; "
+            "attach_worker": "Staff an implementer with Fast implementer checked; model and effort may "
+                "override a Claude or Codex preset. "
                 "for visual work prefer Reads images. Set staffing_role=captain for a sub-captain. "
                 "For handover, attach on your own line with successor=true, "
                 "wait 60 seconds, then use offer_handover to offer captainship.",
