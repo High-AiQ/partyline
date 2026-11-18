@@ -28,7 +28,7 @@ import re
 import time
 from datetime import datetime
 
-from . import logparse
+from partyline.adapters.bundled.antigravity import logparse
 
 # Antigravity records at most about 4 KB of submitted input. Past that it keeps
 # a verbatim head, replaces the middle with this marker, re-appends a

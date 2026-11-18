@@ -6,7 +6,9 @@ disk. Nothing sleeps and nothing races: the only concurrency is git, and git is
 run against a local repository we created ourselves.
 """
 
+import ast
 import os
+import sys
 import subprocess
 import shutil
 import tempfile
@@ -568,6 +570,37 @@ class BundledManifestFenceTest(unittest.TestCase):
         for manifest_path in loader.BUNDLED_ROOT.glob("*/adapter.toml"):
             with self.subTest(adapter=manifest_path.parent.name):
                 self.assertNotIn("write_paths", loader._manifest(manifest_path.parent))
+
+
+class BundledPackageImportTest(unittest.TestCase):
+    """The loader execs an entrypoint with no parent package, so it cannot use relative imports."""
+
+    def test_codex_adapter_loaded_by_the_loader_builds_its_home(self):
+        with isolated_registry(), tempfile.TemporaryDirectory() as root, \
+                tempfile.TemporaryDirectory() as shared:
+            adapter_id = loader.load_adapter(loader.BUNDLED_ROOT / "codex")
+            cls = registry.ADAPTERS[adapter_id]
+            module = sys.modules[cls.__module__]
+            adapter = cls.__new__(cls)
+            adapter.att = {"id": "att-1"}
+            with patch.object(module, "HOME_ROOT", os.path.join(root, "homes")), \
+                    patch.object(module, "SHARED_HOME", shared):
+                home = adapter.codex_home()
+            self.assertEqual(home, os.path.join(root, "homes", "att-1"))
+            self.assertTrue(os.path.isdir(os.path.join(home, "sessions")))
+
+    def test_every_bundled_adapter_loads_through_the_loader(self):
+        with isolated_registry():
+            loader.load_bundled_adapters()
+
+    def test_no_bundled_file_uses_a_relative_import(self):
+        relative = []
+        for path in sorted(loader.BUNDLED_ROOT.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+            relative += [f"{path.relative_to(loader.BUNDLED_ROOT)}:{node.lineno}"
+                         for node in ast.walk(tree)
+                         if isinstance(node, ast.ImportFrom) and node.level]
+        self.assertEqual(relative, [])
 
 
 if __name__ == "__main__":

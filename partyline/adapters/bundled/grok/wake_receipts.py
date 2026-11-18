@@ -9,8 +9,8 @@ import os
 import uuid
 from dataclasses import dataclass
 
-from . import offloaded_prompt
-from .transcript import user_input
+from partyline.adapters.bundled.grok import offloaded_prompt
+from partyline.adapters.bundled.grok.transcript import user_input
 
 # Receipt diagnostics. The unresolved failure is an ordering question — which
 # index was seeded, where the paste boundary sat, which record arrived, and

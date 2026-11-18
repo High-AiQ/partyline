@@ -6,7 +6,7 @@ from collections import Counter
 
 from partyline.transcript_delivery import TranscriptDeliveryRecord
 
-from .transcript import AssistantRecord
+from partyline.adapters.bundled.grok.transcript import AssistantRecord
 
 MAX_RESUME_BACKLOG = 10
 MIN_RATIO_TRANSCRIPT = 20
