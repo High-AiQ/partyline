@@ -12,6 +12,31 @@ class TargetChanged(CDPError):
         super().__init__(f"target changed: {detail}; {TARGET_CHANGED}")
 
 
+class NotActionable(CDPError):
+    """The listed node has no DOM element CDP can drive; nothing changed, so a re-read cannot help."""
+
+    def __init__(self, why, act_on=None):
+        self.act_on = act_on
+        super().__init__(f"target has no DOM element ({why}); " + (
+            f"act on its parent {act_on}" if act_on else
+            "act on a parent element, or use screen_window_snapshot + screen_window_click"))
+
+
+CHILD_FRAME = "child frame not reachable from this page session"
+UNRESOLVED = "node did not resolve in this page session"
+
+
+def unactionable(node, dom, unreachable=None):
+    """Why CDP cannot act on a read node, or None for an Element target with a live backend node."""
+    if not node.get("backendDOMNodeId"):
+        return "accessibility-only node"
+    if unreachable:
+        return unreachable
+    if "non_element" in dom:
+        return "text node" if dom["non_element"] == 3 else "not an element"
+    return None
+
+
 def identity(page, state):
     return (page.epoch, state.get("document_identity"),
             tuple(round(value) for value in state.get("bounds") or ()))
@@ -67,4 +92,5 @@ async def reprove(page, node, mouse=False):
 def failure(page, exc, error):
     return {"status": "unconfirmed" if page.dispatched else "failed", "source": "cdp",
             "error": error, "revoked_during": not page.live,
-            **({"reason": "target_changed"} if isinstance(exc, TargetChanged) else {})}
+            **({"reason": "target_changed"} if isinstance(exc, TargetChanged) else
+               {"reason": "not_actionable", "act_on": exc.act_on} if isinstance(exc, NotActionable) else {})}

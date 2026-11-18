@@ -228,6 +228,11 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
                     agent=principal.name, title=grant.get("title", ""),
                     process=grant.get("process", ""), **message)
         result = {key: value for key, value in response.items() if key not in ("type", "request_id")}
+        if result.get("reason") == "not_actionable" and (ancestor := result.get("act_on")):
+            tree = hub.elements.snapshots.get(grant["id"])
+            if stable := tree.by_helper.get(ancestor) if tree else None:  # name it as the read listed it
+                result["act_on"] = stable
+                result["error"] = str(result.get("error", "")).replace(ancestor, stable)
         if result.get("status") in ("completed", "no_effect") and not result.get("grant_ended"):
             if body.then and body.then.reads():
                 result["after"] = await after(hub, principal, grant, body.then, result)

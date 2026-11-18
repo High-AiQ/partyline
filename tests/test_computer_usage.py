@@ -18,7 +18,7 @@ from partyline.mcp.catalog import SCREEN
 from partyline.turn_usage import RETENTION_SECONDS
 
 
-class ComputerUsageTests(unittest.TestCase):
+class ComputerUsageFixture(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -27,11 +27,15 @@ class ComputerUsageTests(unittest.TestCase):
         for conv in ("line", "child", "other"):
             self.db.create_conversation(conv, conv)
             self.db.add_attachment("att-" + conv, conv, conv, "claude", ["fake"], directory.name)
+        for attachment, conv in (("codex-line", "line"), ("codex-peer", "line"), ("codex-child", "child")):
+            self.db.add_attachment(attachment, conv, attachment, "codex", ["fake"], directory.name)
         set_parent(self.db, "child", "line")
         self.now = time.time()
         self.number = 0
 
-    def turn(self, calls, *, conv="line", tokens=(10, 20, 30, 40), model_ms=1000, timestamp=None):
+    def turn(self, calls, *, conv="line", attachment=None, tokens=(10, 20, 30, 40), model_ms=1000,
+             timestamp=None):
+        att = self.db.get_attachment(attachment or "att-" + conv)
         self.number += 1
         input_tokens, cache_read, cache_write, output = tokens
         self.db._exec(
@@ -39,21 +43,24 @@ class ComputerUsageTests(unittest.TestCase):
                cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, total_tokens,
                context_tokens, context_window, calls, timestamp, model_ms)
                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (conv, "att-" + conv, "claude", f"r{self.number}", "model", input_tokens, cache_read,
+            (att["conv_id"], att["id"], att["adapter"], f"r{self.number}", "model", input_tokens, cache_read,
              cache_write, output, 0, sum(tokens), sum(tokens[:3]), None, json.dumps(calls),
              self.now - 60 if timestamp is None else timestamp, model_ms),
         )
 
-    def call(self, tool, *, sub_op="", conv="line", timestamp=None, latency=100, images=None, error=False,
-             outcome="ok", media_source="other"):
+    def call(self, tool, *, sub_op="", conv="line", attachment=None, timestamp=None, latency=100,
+             images=None, error=False, outcome="ok", media_source="other"):
+        att = self.db.get_attachment(attachment or "att-" + conv)
         metrics = {"tool": tool, "sub_op": sub_op, "latency_ms": latency, "is_error": error,
                    "outcome": outcome, "media_source": media_source, "images": images or []}
         self.db._exec(
             "INSERT INTO tool_calls(conv_id, attachment_id, adapter, timestamp, metrics) VALUES(?,?,?,?,?)",
-            (conv, "att-" + conv, "claude", self.now - 60 if timestamp is None else timestamp,
+            (att["conv_id"], att["id"], att["adapter"], self.now - 60 if timestamp is None else timestamp,
              json.dumps(metrics)),
         )
 
+
+class ComputerUsageTests(ComputerUsageFixture):
     def read(self, **kwargs):
         return summary(self.db, "line", ["line"], 0, now=self.now, **kwargs)
 
@@ -91,6 +98,60 @@ class ComputerUsageTests(unittest.TestCase):
                          (2, 10000, 20000))
         self.assertIsNone(result.cost_usd)
 
+    def test_codex_uses_screen_calls_in_each_response_window(self):
+        att = "codex-line"
+        for age in (70, 60, 50, 40, 30):
+            screen = age in (70, 50, 40)
+            self.turn(["exec"], attachment=att, timestamp=self.now - age,
+                      tokens=(10, 20, 0, 40) if screen else (1000, 0, 0, 0))
+
+        # Delayed telemetry may be ingested out of order, after the response is stored.
+        self.call("screen_click", attachment=att, timestamp=self.now - 80)
+        self.call("screen_elements", attachment=att, timestamp=self.now - 75)
+        self.call("turn_usage", attachment=att, timestamp=self.now - 65)
+        self.call("get_media", attachment=att, timestamp=self.now - 64)
+        self.call("screen_unknown", attachment=att, timestamp=self.now - 62)
+        self.call("extras", sub_op="screen_window_snapshot", attachment=att, timestamp=self.now - 55)
+        self.call("get_media", media_source="screen", attachment=att, timestamp=self.now - 45)
+        self.call("screen_key", attachment=att, timestamp=self.now - 25)
+
+        result = self.read()
+        self.assertEqual((result.responses, result.total_tokens, result.model_ms), (3, 210, 3000))
+        self.assertEqual((result.input_tokens, result.cache_read_tokens, result.output_tokens), (30, 60, 120))
+        self.assertEqual((result.calls, result.actions, result.reads), (4, 2, 2))
+
+    def test_codex_attribution_is_isolated_by_attachment(self):
+        self.call("screen_click", attachment="codex-line")
+        self.turn(["exec"], attachment="codex-line")
+        self.turn(["exec"], attachment="codex-peer", tokens=(1000, 0, 0, 0))
+        self.call("screen_click")
+        self.turn(["screen_click", "extras:screen_elements"], tokens=(25, 0, 0, 0))
+        self.call("screen_click", timestamp=self.now - 55)
+        self.turn(["Bash"], timestamp=self.now - 50, tokens=(1000, 0, 0, 0))
+
+        result = self.read()
+        self.assertEqual((result.responses, result.total_tokens, result.calls), (2, 125, 3))
+
+    def test_codex_window_keeps_prior_boundaries_and_counts_tied_responses_once(self):
+        att = "codex-line"
+        before_window = self.now - 100
+        at_retention = self.now - RETENTION_SECONDS
+        self.call("screen_click", attachment=att, timestamp=at_retention - 1)
+        self.turn(["exec"], attachment=att, timestamp=at_retention + 1, tokens=(1000, 0, 0, 0))
+        self.call("screen_click", attachment=att, timestamp=before_window)
+        self.turn(["exec"], attachment=att, timestamp=before_window)
+        self.call("screen_click", attachment=att, timestamp=self.now - 90)
+        self.turn(["exec"], attachment=att, timestamp=self.now - 80)
+        self.turn(["exec"], attachment=att, timestamp=self.now - 80, tokens=(1000, 0, 0, 0))
+        self.turn(["exec"], attachment=att, timestamp=self.now - 70, tokens=(1000, 0, 0, 0))
+
+        retained = self.read()
+        self.assertEqual((retained.responses, retained.total_tokens), (2, 200))
+        partial = summary(self.db, "line", ["line"], self.now - 85, now=self.now)
+        self.assertEqual((partial.responses, partial.total_tokens, partial.calls), (1, 100, 0))
+        later = summary(self.db, "line", ["line"], self.now - 75, now=self.now)
+        self.assertEqual(later.responses, 0)
+
     def test_action_intervals_never_cross_processes(self):
         self.call("screen_click", timestamp=self.now - 50)
         self.call("screen_key", conv="child", timestamp=self.now - 40)
@@ -112,16 +173,9 @@ class ComputerUsageTests(unittest.TestCase):
         self.assertEqual(expired.since, self.now - RETENTION_SECONDS)
 
 
-class ComputerUsageRouteTests(unittest.TestCase):
+class ComputerUsageRouteTests(ComputerUsageFixture):
     def setUp(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        self.db = Db(directory.name + "/test.db")
-        self.addCleanup(self.db.close)
-        for conv in ("line", "child", "other"):
-            self.db.create_conversation(conv, conv)
-            self.db.add_attachment(conv, conv, conv, "claude", ["fake"], directory.name)
-        set_parent(self.db, "child", "line")
+        super().setUp()
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(computer_usage_router(type("Runtime", (), {"db": self.db})()))
@@ -132,7 +186,7 @@ class ComputerUsageRouteTests(unittest.TestCase):
             auth_tokens.signing_secret(self.db), person["id"])}
 
     def machine(self, conv="line"):
-        return {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, conv)}
+        return {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "att-" + conv)}
 
     def get(self, conv="line", headers=None, **params):
         return self.client.get("/api/telemetry/computer-use/summary", params={"conv_id": conv, **params},
@@ -151,3 +205,15 @@ class ComputerUsageRouteTests(unittest.TestCase):
         result = self.get(include_descendants=True).json()
         self.assertTrue(result["include_descendants"])
         self.assertEqual((result["responses"], result["calls"], result["cost_usd"]), (0, 0, None))
+
+    def test_include_descendants_adds_codex_responses_and_calls(self):
+        for attachment, tokens in (("codex-line", 100), ("codex-child", 50)):
+            self.call("screen_click", attachment=attachment)
+            self.turn(["exec"], attachment=attachment, tokens=(tokens, 0, 0, 0))
+        self.call("screen_click", conv="other")
+        self.turn(["screen_click"], conv="other")
+
+        line = self.get().json()
+        self.assertEqual((line["responses"], line["total_tokens"], line["calls"]), (1, 100, 1))
+        tree = self.get(include_descendants=True).json()
+        self.assertEqual((tree["responses"], tree["total_tokens"], tree["calls"]), (2, 150, 2))

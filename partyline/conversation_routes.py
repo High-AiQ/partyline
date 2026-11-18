@@ -34,6 +34,7 @@ from .runtime import NAME_RE, RESERVED_NAMES
 from .resource_budget import reserve_new_attachment
 from .attachment_lifecycle import remove_stopped_record
 from .system_notice import post_system_notice
+from .preset_overrides import attachment_command, save_attachment_override
 
 
 def _server():
@@ -213,9 +214,10 @@ def register_conversation_routes(
         name = unique_handle(db, conv_id, body.name)
         if body.adapter != "raw" and body.counts_toward_total is not None:
             raise HTTPException(400, "counts_toward_total is only available for raw adapters")
+        raw_command, selected_base = attachment_command(db, body)
         try:
             command = validated_attachment_command(
-                body.adapter, body.command, s.ADAPTERS, s.ADAPTER_METADATA
+                body.adapter, raw_command, s.ADAPTERS, s.ADAPTER_METADATA
             )
             update_argv = requested_update_argv(
                 s.ADAPTER_METADATA, body.adapter, body.update
@@ -234,15 +236,15 @@ def register_conversation_routes(
             if body.preset_name:
                 import shlex
                 try:
-                    matches = (selected['adapter'] == body.adapter
-                               and shlex.split(selected['command']) == command)
+                    expected = raw_command if selected_base else selected['command']
+                    matches = selected['adapter'] == body.adapter and shlex.split(expected) == command
                 except ValueError:
                     matches = False
                 if not matches:
                     raise HTTPException(400, f"preset '{body.preset_name}' does not match the command")
             require_role(selected, role, name=body.preset_name or body.name)
         else:
-            selected = None
+            selected = selected_base if (body.model is not None or body.effort is not None) else None
         # A machine works where its line works; a person may choose.
         chosen = "" if not is_human(principal) else body.cwd.strip()
         cwd = os.path.abspath(os.path.expanduser(
@@ -258,8 +260,7 @@ def register_conversation_routes(
             successor=body.successor,
         )
         if selected:
-            db._exec('UPDATE attachments SET preset=? WHERE id=?', (selected['name'], att_id))
-            att['preset'] = selected['name']
+            save_attachment_override(db, att, selected, body, principal, role)
         try:
             placed = (None if body.successor else
                       await asyncio.to_thread(ensure_placed, db, conv_id, ignore_attachment_id=att_id))

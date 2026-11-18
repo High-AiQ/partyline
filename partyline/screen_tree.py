@@ -16,7 +16,7 @@ LINE_NAME = 240  # characters of a name shown on a line
 LINE_VALUE = 80
 STATE_FIELDS = ("enabled", "value", "toggle", "selected", "expand_state", "name", "aria_properties",
                 "source", "provider_identity", "disabled_provenance", "readonly", "inert", "viewport_bounds",
-                "hidden", "action_token")
+                "hidden", "action_token", "actionable", "why", "act_on")
 
 
 def clean(value, limit=NAME_FIELD):
@@ -108,6 +108,8 @@ class Snapshot:
                        self.space.give(identity(base, node, self.places[place])))
             self.anchors[node.id] = node.id if named(node) else above
             self.by_helper[node.helper] = node.id
+            if node.cached.get("act_on"):  # the nearest actionable ancestor, named by its stable id
+                node.cached["act_on"] = self.by_helper.get(node.cached["act_on"], node.cached["act_on"])
             self.nodes[node.id] = node
             self.order.append(node.id)
             self.kids.setdefault(node.parent, []).append(node.id)
@@ -182,6 +184,9 @@ class Snapshot:
             flags[flags.index("disabled")] = "disabled(" + ";".join(evidence) + ")"
         if node.cached.get("source") == "cdp" and "selected" in node.cached:
             flags.append("selected:" + str(node.cached["selected"]).lower())
+        if node.cached.get("actionable") is False:
+            parts.append("no-dom(" + clean(node.cached.get("why"), 60)
+                         + (";act_on=" + node.cached["act_on"] if node.cached.get("act_on") else "") + ")")
         for flag in ("readonly", "inert"):
             if node.cached.get(flag):
                 flags.append(flag)

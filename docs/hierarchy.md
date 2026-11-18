@@ -1714,3 +1714,5 @@ are not read from the reviewed repository. Reviewers scope configured commands t
 tests reaching changed code, never full/e2e suites or whole-suite coverage. They list test
 commands and results, and call `env_gap` only when affected tests cannot run. A root captain can
 set an environment and wake the reviewer in the same round.
+
+Captains may select a model and/or reasoning effort when staffing from a Claude or Codex preset, including a preset reviewer. The person controls presets, adapters, commands, and all other flags; captains cannot supply a replacement command through these overrides.

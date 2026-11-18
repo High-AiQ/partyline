@@ -8,7 +8,7 @@ from .approval_contracts import (
     ApprovalsChangedEvent, RestartRequestEvent, WriteSetGrantRequestEvent,
 )
 from .memory_contracts import MemoryEvent
-from .attachment_contracts import AttachmentResponse
+from .attachment_contracts import AttachmentResponse, AttachIn  # noqa: F401
 from .media_contracts import FileRef
 from .line_process_contracts import LineLiveEvent
 from .presence_contracts import WorkingEvent
@@ -25,18 +25,6 @@ class ConvIn(BaseModel):
     name: str
 
 
-class AttachIn(BaseModel):
-    name: str
-    adapter: str = "opencode"
-    command: str = ""
-    cwd: str = ""
-    update: bool = False
-    counts_toward_total: bool | None = None
-    # 2.14: a captain may deliberately put a second implementer on one branch.
-    allow_shared_branch: bool = False
-    successor: bool = False
-    preset_name: str | None = None
-    staffing_role: Literal["implementer", "captain"] = "implementer"
 class TopicIn(BaseModel):
     topic: str = ""
 

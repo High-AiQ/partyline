@@ -6,13 +6,15 @@ from .cdp_dom_nodes import DETAIL
 from .cdp_input import key
 from .cdp_select import select_option
 from .cdp_transport import CDPError, DocumentChanged
-from .cdp_identity import TargetChanged, prove
+from .cdp_identity import NotActionable, TargetChanged, prove
 
 KEYS = {"enter": ("Enter", 13), "tab": ("Tab", 9), "escape": ("Escape", 27)}
 
 
 async def act(page, message):
     node = page.nodes.get(message.get("element_id"))
+    if node and node.get("not_actionable"):
+        raise NotActionable(node["not_actionable"], node.get("act_on"))
     if not node or not node.get("backendDOMNodeId"):
         raise TargetChanged("backend node unavailable")
     if message.get("action_token", node.get("action_token")) != node.get("action_token"):

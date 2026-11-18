@@ -1418,6 +1418,21 @@ budget; other failure pictures retain their existing budget. The proof establish
 last observation before input, not a promise that page code will never change afterward. Older helpers
 retain the event-counter barrier.
 
+**Elements CDP cannot act on (helper 1.8.5).** Some listed nodes have no DOM element to drive: an
+accessibility-only node without a backend node, a text node (a dialog's label text, pseudo content), or a
+node that does not resolve in the page session (direct CDP, or the extension's command failure). That last
+case says `child frame not reachable from this page session` only when the read gives a frame id (on the
+node or its nearest ancestor) other than the main frame's; otherwise `node did not resolve in this page
+session`. A runtime failure after a node resolved is never relabelled: the read fails as before. The read keeps them (they still carry text) but marks
+them with `actionable: false`, a short `why` and, when an actionable ancestor is in the same read, `act_on`
+(its id); actionable elements carry none of these fields. The compact line shows
+`no-dom(text node;act_on=<id>)`. Acting on one refuses before any input with its own fixed
+`reason: not_actionable` (not `target_changed`), for example
+`target has no DOM element (text node); act on its parent <id>`, and the result carries `act_on`.
+Nothing changed, so a re-read does not help: act on `act_on`, or use the point path. The refusal is
+`status: failed` (nothing dispatched), takes no failure picture and is not retried. Element targets
+still pass the unchanged identity proof.
+
 `uia_events.PROPERTIES` includes IsEnabled (30010), Value (30045), Toggle (30086), SelectionItem
 (30079), ExpandCollapse (30070), Name (30005), AriaRole (30101), AriaProperties (30102) and
 LegacyIAccessible State (30096). Persistent property and structure registration uses

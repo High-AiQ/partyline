@@ -18,8 +18,18 @@ ACTIONS = frozenset({
 READS = frozenset({"screen_frame", "screen_elements", "screen_window_snapshot", "screen_window_look",
                    "screen_windows"})
 ELEMENT_ACTIONS = frozenset(ELEMENT_ACTION_PROPERTIES["action"]["enum"])
+_SCREEN_NAMES = tuple(sorted(SCREEN))
+_SCREEN_MARKS = ",".join("?" for _ in _SCREEN_NAMES)
+_COMPUTER_CALL = f"""(
+    json_extract(metrics, '$.tool') IN ({_SCREEN_MARKS}) OR
+    (json_extract(metrics, '$.tool') = 'extras' AND
+     json_extract(metrics, '$.sub_op') IN ({_SCREEN_MARKS})) OR
+    (json_extract(metrics, '$.tool') = 'get_media' AND
+     json_extract(metrics, '$.media_source') = 'screen')
+)"""
 BASIS = (
-    "Model tokens are counted once for each response that called a screen tool, directly or through extras. "
+    "Model tokens are counted once per computer-use response. Codex uses recorded screen calls between "
+    "responses on the same attachment. Other adapters use tool labels. "
     "Actions and reads are screen calls; other_calls are control or attachment calls. Image tokens are "
     "estimates; unknown estimates are counted separately. Model time is recorded thinking time and tool time "
     "is screen-call latency. Action p50/p95 are nearest-rank intervals between consecutive action "
@@ -47,6 +57,33 @@ def _screen_name(metrics) -> str | None:
     return None
 
 
+def _computer_turns(db, line_ids, marks, since, retained_since):
+    # Find the prior response even when it precedes the requested window. Use
+    # (timestamp, id) order so tied responses cannot both claim the same call.
+    rows = db._exec(
+        f"""SELECT response.*, CASE WHEN response.adapter = 'codex' THEN EXISTS (
+            SELECT 1 FROM tool_calls AS call
+            WHERE call.attachment_id = response.attachment_id AND call.conv_id = response.conv_id
+              AND call.timestamp BETWEEN MAX(?, COALESCE(previous.timestamp, 0)) AND response.timestamp
+              AND call.timestamp IS NOT previous.timestamp
+              AND {_COMPUTER_CALL}
+        ) END AS has_screen_call
+        FROM turn_usage AS response
+        LEFT JOIN turn_usage AS previous ON previous.id = CASE WHEN response.adapter = 'codex' THEN (
+            SELECT prior.id FROM turn_usage AS prior
+            WHERE prior.attachment_id = response.attachment_id
+              AND (prior.timestamp, prior.id) < (response.timestamp, response.id)
+            ORDER BY prior.timestamp DESC, prior.id DESC LIMIT 1
+        ) END
+        WHERE response.conv_id IN ({marks}) AND response.timestamp >= ?""",
+        (retained_since, *_SCREEN_NAMES, *_SCREEN_NAMES, *line_ids, since),
+    ).fetchall()
+    return [row for row in rows if (
+        row["has_screen_call"] if row["adapter"] == "codex"
+        else _is_computer_response(json.loads(row["calls"]))
+    )]
+
+
 def _action_intervals(calls) -> list[float]:
     grouped = defaultdict(list)
     for row, name in calls:
@@ -62,26 +99,17 @@ def _action_intervals(calls) -> list[float]:
 
 def summary(db, conv_id, line_ids, since, include_descendants=False, *, now=None) -> ComputerUseSummary:
     now = time.time() if now is None else now
-    since = max(since, now - RETENTION_SECONDS)
+    retained_since = now - RETENTION_SECONDS
+    since = max(since, retained_since)
     marks = ",".join("?" for _ in line_ids)
-    turns = db._exec(
-        f"SELECT * FROM turn_usage WHERE conv_id IN ({marks}) AND timestamp >= ?", (*line_ids, since),
-    ).fetchall()
-    turns = [row for row in turns if _is_computer_response(json.loads(row["calls"]))]
+    turns = _computer_turns(db, line_ids, marks, since, retained_since)
     records = db._exec(
-        f"""SELECT * FROM tool_calls WHERE conv_id IN ({marks}) AND timestamp >= ? AND (
-            json_extract(metrics,'$.tool') LIKE 'screen\\_%' ESCAPE '\\' OR
-            (json_extract(metrics,'$.tool')='extras' AND
-             json_extract(metrics,'$.sub_op') LIKE 'screen\\_%' ESCAPE '\\') OR
-            (json_extract(metrics,'$.tool')='get_media' AND
-             json_extract(metrics,'$.media_source')='screen'))""",
-        (*line_ids, since),
+        f"SELECT * FROM tool_calls WHERE conv_id IN ({marks}) AND timestamp >= ? AND {_COMPUTER_CALL}",
+        (*line_ids, since, *_SCREEN_NAMES, *_SCREEN_NAMES),
     ).fetchall()
     parsed = [(row, json.loads(row["metrics"])) for row in records]
     calls = [(row, name) for row, metrics in parsed if (name := _screen_name(metrics)) is not None]
-    image_metrics = [metrics for _, metrics in parsed if _screen_name(metrics) or (
-        metrics.get("tool") == "get_media" and metrics.get("media_source") == "screen")]
-    images = [image for metrics in image_metrics for image in metrics["images"]]
+    images = [image for _, metrics in parsed for image in metrics["images"]]
     intervals = _action_intervals(calls)
     return ComputerUseSummary(
         conv_id=conv_id, since=since, include_descendants=include_descendants, basis=BASIS,

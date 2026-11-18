@@ -118,8 +118,11 @@ async def deliver_since_attach(runtime, ident):
 
 async def announce_attachment(runtime, att, *, fresh):
     action = "started fresh; previous session not resumed" if fresh else "joined"
+    from .preset_overrides import label
+    display = (label(att["preset"], att.get("model_override"), att.get("effort_override"))
+               if att.get("preset") else att["adapter"])
     await runtime.post_message(
         att["conv_id"], "system", "system",
-        f"@{att['name']} {action} · `{' '.join(att['command'])}` · "
+        f"@{att['name']} {action} · {display} · "
         f"{att['cwd']} · session {att['id']}",
     )

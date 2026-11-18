@@ -1,6 +1,6 @@
 """The SQLite schema and its append-only migration history; append idempotent entries, never edit."""
 from .db_schema_base import SCHEMA  # noqa: F401
-from .db_schema_extensions import MIGRATIONS as EXTENSIONS
+from .db_schema_extensions import MIGRATIONS as EXTENSIONS, PRESET_OVERRIDES
 from .captain_style_schema import MIGRATIONS as RETIRE_MANAGER_TREE
 from .review_env_schema import MIGRATIONS as REVIEW_ENVIRONMENTS
 from .tool_telemetry_schema import MIGRATIONS as TOOL_TELEMETRY
@@ -297,4 +297,4 @@ MIGRATIONS += ["UPDATE task_reviews SET mode='full' WHERE mode='light'",
     "ALTER TABLE task_reviews ADD COLUMN suite_repository TEXT",
     "ALTER TABLE task_reviews ADD COLUMN suite_batch TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE task_reviews ADD COLUMN suite_repositories TEXT NOT NULL DEFAULT '[]'",
-]
+] + PRESET_OVERRIDES

@@ -35,6 +35,8 @@ def schema(name):
         "attach_worker": obj({**line, "name": text("Exact worker handle.", 32, 1),
             "adapter": text("Exact adapter id.", 80, 1), "command": text("Optional command.", 2000),
             "preset_name": text("Optional exact preset name; read-only match.", 32),
+            "model": text("Optional preset model override.", 80),
+            "effort": text("Optional preset reasoning effort override.", 20),
             "staffing_role": {"type": "string", "enum": ["implementer", "captain"],
                               "description": "Role to staff; defaults to implementer."},
             "counts_toward_total": {"type": "boolean"},

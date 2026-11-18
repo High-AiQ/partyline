@@ -128,6 +128,7 @@ def execute(client, op, args, state):
             body["successor"] = True
         if args.get("staffing_role"):
             body["staffing_role"] = args["staffing_role"]
+        body.update({key: args[key] for key in ("model", "effort") if key in args})
         preset_name = args.get("preset_name")
         if preset_name:
             body["preset_name"] = preset_name
@@ -137,7 +138,10 @@ def execute(client, op, args, state):
                 raise ValueError("preset_name must exactly match one preset with this adapter")
             if not args.get("command"):
                 body["command"] = matches[0].get("command", "")
-        return client.request("POST", _path(conv, "attachments"), body)
+        result = client.request("POST", _path(conv, "attachments"), body)
+        if isinstance(result, dict):
+            result.pop("command", None)
+        return result
     paths = {
         "create_child": ("create_child", "POST", "children"),
         "new_chapter": ("chapter", "POST", "chapter"),

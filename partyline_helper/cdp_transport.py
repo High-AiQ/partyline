@@ -63,7 +63,9 @@ def command_error(error, method=None):
     message = str(error.get("message", "")).lower()
     if any(term in message for term in ("session with given id", "session closed", "target closed")):
         return PageUnavailable("detached")
-    return CDPError("Chrome rejected the CDP command")
+    refused = CDPError("Chrome rejected the CDP command")
+    refused.rejected = True  # an answer from Chrome, unlike a timeout or socket error
+    return refused
 
 
 def discover(root=None):

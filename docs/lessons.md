@@ -1,5 +1,12 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-18 — Wrapper tool labels hide Codex screen calls
+
+The false assumption was that every adapter's response labels identify screen operations. A Codex
+`exec` label hid those operations, leaving token totals empty even when screen calls were recorded.
+Use recorded call completions and response boundaries on the same attachment for Codex attribution.
+`tests/test_computer_usage.py` covers delayed telemetry, multiple attachments, and window boundaries.
+
 ## 2026-11-17 — A failed task workspace is not an absent repository
 
 The false assumption was that `place_task` returning `None` after a failed nested worktree add
