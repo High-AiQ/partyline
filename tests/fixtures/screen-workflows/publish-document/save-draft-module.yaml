@@ -1,0 +1,11 @@
+version: 1
+name: save-draft-module
+description: Save the open module into the local document draft.
+use_when: A module is ready in the editor.
+steps:
+  - id: save
+    target: {role: button, name: Save module, within: {role: dialog, name: Module editor}}
+    action: invoke
+    preconditions: [{check: present, target: {role: dialog, name: Module editor}}]
+    postcondition: {check: absent, target: {role: dialog, name: Module editor}, timeout_ms: 3000}
+    confirm: false

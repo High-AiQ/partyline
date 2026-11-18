@@ -1,0 +1,15 @@
+version: 1
+name: choose-cell
+description: Select an option in a comparison cell.
+use_when: The comparison row is visible.
+parameters:
+  row: {type: text, max_length: 100}
+  column: {type: text, max_length: 100}
+  choice: {type: enum, choices: [included, excluded, text]}
+steps:
+  - id: choose
+    target: {role: combobox, name: {param: column}, within: {role: row, name: {param: row}}}
+    action: select
+    inputs: {value: {param: choice}}
+    postcondition: {check: value_equals, expected: {param: choice}, timeout_ms: 3000}
+    confirm: false

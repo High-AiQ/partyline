@@ -17,6 +17,7 @@ from .pin_contracts import PinsChangedEvent
 from .resource_contracts import ResourceSnapshotEvent
 from .asr_contracts import AsrPresetsChangedEvent
 from .retirement_contracts import RetirementRecovery
+from .screen_workflow_events import WorkflowRunsChanged
 
 RestartPlanMode = Literal["offer", "automatic"]
 RestartPlanScope = Literal["line", "all"]
@@ -280,6 +281,7 @@ Event = (
     | ReattachOfferEvent | ReattachDecisionEvent
     | RestartRequestEvent | WriteSetGrantRequestEvent | MemoryEvent | ReactionEvent | PinsChangedEvent
     | ResourceSnapshotEvent | AsrPresetsChangedEvent
+    | WorkflowRunsChanged
 )
 class HookEventRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")

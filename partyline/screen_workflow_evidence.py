@@ -143,6 +143,7 @@ class Dispatch:
             raise StopWorkflow("action evidence changed before dispatch")
 
     def dispatch(self, request_id):
+        self.run.require_current()
         self.check(self.run.service.hub.elements)
         self.run.record_dispatch(request_id)
 
@@ -160,7 +161,7 @@ class WindowScreen:
             previous = elements.fresh(grant["id"])
             if (
                 previous
-                and getattr(previous, "workflow_run", None) == run.id
+                and getattr(previous, "workflow_run", None) is run.observation_key
                 and not previous.partial
                 and previous.live_events
                 and previous.event_counter is not None
@@ -177,7 +178,7 @@ class WindowScreen:
             space.renew()
             tree = Snapshot(None, elements.clock(), space)
             tree.workflow_read = True
-            tree.workflow_run = run.id
+            tree.workflow_run = run.observation_key
             tree.event_version = elements.change_versions.get(grant["id"], 0)
             deadline = elements.clock() + 20
             capture = await elements.capture_parts(run.principal, grant, device, tree, deadline)

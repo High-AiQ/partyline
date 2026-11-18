@@ -49,3 +49,13 @@ WORKFLOW_MIGRATIONS = [
     """CREATE TRIGGER IF NOT EXISTS delete_screen_workflow_events AFTER DELETE ON screen_workflow_runs
         BEGIN DELETE FROM screen_workflow_events WHERE run_id=OLD.id; END""",
 ]
+
+
+WORKFLOW_RESUME_MIGRATIONS = [
+    "ALTER TABLE screen_workflow_runs ADD COLUMN plan_hash TEXT",
+    "ALTER TABLE screen_workflow_runs ADD COLUMN window_hash TEXT",
+    "ALTER TABLE screen_workflow_runs ADD COLUMN input_pending INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE screen_workflow_events ADD COLUMN step_index INTEGER",
+    "ALTER TABLE screen_workflow_runs ADD COLUMN resume_attachment_id TEXT",
+    "ALTER TABLE screen_workflow_events ADD COLUMN actor_attachment_id TEXT",
+]

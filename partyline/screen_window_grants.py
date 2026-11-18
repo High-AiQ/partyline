@@ -98,6 +98,10 @@ class WindowGrants:
         counter = self.actions.setdefault(grant["id"], SimpleNamespace(times=deque(), count=0))
         self.hub.control._spend(counter)
 
+    def remaining_actions(self, grant_id):
+        counter = self.actions.get(grant_id)
+        return max(0, self.hub.control.limits.per_session - (counter.count if counter else 0))
+
     def connected(self, device):
         current = self.hub.devices.get(device["id"])
         return (current is not None and current["socket"] is device["socket"] and

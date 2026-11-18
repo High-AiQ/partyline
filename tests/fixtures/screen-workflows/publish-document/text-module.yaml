@@ -1,0 +1,28 @@
+version: 1
+name: text-module
+description: Add a headline and body text.
+use_when: Editing a document draft.
+parameters:
+  headline: {type: text, max_length: 200}
+  body: {type: text}
+steps:
+  - id: add
+    target: {role: button, name: Add text module}
+    action: invoke
+    preconditions: [{check: absent, target: {role: dialog, name: Module editor}}]
+    postcondition: {check: present, target: {role: dialog, name: Module editor}, timeout_ms: 3000}
+    confirm: false
+  - id: headline
+    target: {role: textbox, name: Headline}
+    action: set_value
+    inputs: {value: {param: headline}}
+    postcondition: {check: value_equals, expected: {param: headline}, timeout_ms: 3000}
+    confirm: false
+  - id: body
+    target: {role: textbox, name: Body text}
+    action: set_value
+    inputs: {value: {param: body}}
+    postcondition: {check: value_equals, expected: {param: body}, timeout_ms: 3000}
+    confirm: false
+  - id: save
+    use: save-draft-module

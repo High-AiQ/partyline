@@ -5,7 +5,7 @@ import { mountWorkflow } from "./workflow";
 function mount(mode: string) {
   const body = new DOMParser().parseFromString(page, "text/html").querySelector("main");
   if (!body) throw new Error("missing fixture main");
-  const dialog = body.querySelector("dialog");
+  const dialog = body.querySelector<HTMLDialogElement>("#record-editor");
   if (!dialog) throw new Error("missing fixture dialog");
   dialog.showModal = () => (dialog.open = true);
   dialog.close = () => (dialog.open = false);
@@ -18,15 +18,15 @@ function mount(mode: string) {
     interrupt,
     () => true,
   );
-  body.querySelector("button")?.click();
+  body.querySelector<HTMLButtonElement>("#edit")?.click();
   return { body, dialog, pending, interrupt };
 }
 
 test("the fixture commits a delayed save only when the scheduled effect arrives", () => {
   const { body, dialog, pending } = mount("delayed");
   expect(dialog.open).toBe(true);
-  const notice = body.querySelector<HTMLElement>("[role=status]");
-  const form = body.querySelector("form");
+  const notice = body.querySelector<HTMLElement>("#save-status");
+  const form = dialog.querySelector("form");
   form?.dispatchEvent(new Event("submit", { cancelable: true }));
   expect(notice?.dataset.saves).toBe("0");
   expect(notice?.textContent).toBe("");
@@ -41,8 +41,8 @@ test("stress scenarios expose duplicate targets and an interruption without a co
   const ambiguous = mount("ambiguous");
   expect(ambiguous.dialog.querySelectorAll("button[type=submit]")).toHaveLength(2);
   const { body, dialog, interrupt } = mount("interrupted");
-  body.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true }));
+  dialog.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true }));
   expect(interrupt).toHaveBeenCalledOnce();
   expect(dialog.open).toBe(true);
-  expect(body.querySelector("[role=status]")?.textContent).toBe("");
+  expect(body.querySelector("#save-status")?.textContent).toBe("");
 });

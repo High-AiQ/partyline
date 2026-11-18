@@ -1,0 +1,17 @@
+{
+  "title": "Field notes",
+  "modules": [
+    {"kind": "image", "images": ["fixture-image"], "alt": "A trail through a meadow", "headline": "", "body": "", "rows": []},
+    {"kind": "text", "images": [], "alt": "", "headline": "Field observations", "body": "Three routes were surveyed.", "rows": []},
+    {"kind": "table", "images": [], "alt": "", "headline": "", "body": "", "rows": [
+      {"row": "Row 1", "reference": "Access", "cells": [
+        {"row": "Row 1", "column": "Option 1", "choice": "included", "text_field": "", "text": ""},
+        {"row": "Row 1", "column": "Option 2", "choice": "text", "text_field": "Option 2 text", "text": "Seasonal"}
+      ]},
+      {"row": "Row 2", "reference": "Shelter", "cells": [
+        {"row": "Row 2", "column": "Option 1", "choice": "excluded", "text_field": "", "text": ""},
+        {"row": "Row 2", "column": "Option 2", "choice": "text", "text_field": "Option 2 text", "text": "Open all year"}
+      ]}
+    ]}
+  ]
+}

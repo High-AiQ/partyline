@@ -2,6 +2,7 @@ import { AsrSettingsSchema } from "./asr-contracts";
 /** Runtime-validated WebSocket events and commands. */
 
 import { z } from "zod";
+import { WorkflowRunsChangedEventSchema } from "./workflow-events";
 import {
   AttachmentSchema,
   ChatMessageSchema,
@@ -255,6 +256,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ScreenShareEventSchema,
   ScreenDevicesChangedEventSchema,
   ScreenSnapshotEventSchema,
+  WorkflowRunsChangedEventSchema,
   ChromeApprovalEventSchema,
   PinsChangedEventSchema,
   AsrPresetsChangedEventSchema,

@@ -1,0 +1,20 @@
+version: 1
+name: text-cell
+description: Select Text in a comparison cell and fill its revealed input.
+use_when: The comparison row is visible.
+parameters:
+  row: {type: text, max_length: 100}
+  column: {type: text, max_length: 100}
+  choice: {type: enum, choices: [text]}
+  text_field: {type: text, max_length: 100}
+  text: {type: text}
+steps:
+  - id: reveal
+    use: choose-cell
+    with: {row: {param: row}, column: {param: column}, choice: {param: choice}}
+  - id: fill
+    target: {role: textbox, name: {param: text_field}, within: {role: row, name: {param: row}}}
+    action: set_value
+    inputs: {value: {param: text}}
+    postcondition: {check: value_equals, expected: {param: text}, timeout_ms: 3000}
+    confirm: false

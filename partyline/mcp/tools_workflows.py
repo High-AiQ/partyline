@@ -7,7 +7,7 @@ from .validation import validate_arguments
 PREFIX = "screen_workflow_"
 START = PREFIX + "start"
 OPERATIONS = {
-    "list": ("List workflow definitions and approval for this line.", {}, ()),
+    "list": ("List workflow definitions, approval and accessible runs for this line.", {}, ()),
     "show": (
         "Show a workflow's exact revision, parameters, and action plan.",
         {"workflow": {"type": "string"}},
@@ -23,8 +23,16 @@ OPERATIONS = {
         },
         ("workflow", "window", "parameters", "client_key"),
     ),
+    "resume": (
+        "Resume an approved workflow at its first unverified action, using the original parameters.",
+        {
+            "run_id": {"type": "string"},
+            "parameters": {"type": "object", "additionalProperties": True},
+        },
+        ("run_id", "parameters"),
+    ),
     "status": (
-        "Read a workflow run's current state. The initiating process can query ended runs.",
+        "Read a run's state. Its starter or latest resuming process can query ended runs.",
         {"run_id": {"type": "string"}},
         ("run_id",),
     ),
@@ -52,7 +60,7 @@ def tool_list(state):
             },
         }
         for op, (description, props, required) in OPERATIONS.items()
-        if op not in ("start", "stop")
+        if op not in ("start", "resume", "stop")
         or (
             "write" in state.get("actions", ())
             and (op == "stop" or state.get("screen_windows") or not state.get("dynamic_screen_tools"))
@@ -66,10 +74,12 @@ def call(client, name, args, state):
     base = f"/api/conversations/{quote(client.home, safe='')}/screen-workflows"
     op = name.removeprefix(PREFIX)
     if op == "list":
-        return client.request("GET", base)
+        return {**client.request("GET", base), **client.request("GET", base + "/runs")}
     if op == "show":
         return client.request("GET", base + "/definitions/" + quote(args["workflow"], safe=""))
     if op == "start":
         return client.request("POST", base + "/runs", args)
     path = base + "/runs/" + quote(args["run_id"], safe="")
+    if op == "resume":
+        return client.request("POST", path + "/resume", {"parameters": args["parameters"]})
     return client.request("POST", path + "/stop") if op == "stop" else client.request("GET", path)

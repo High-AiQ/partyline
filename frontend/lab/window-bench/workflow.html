@@ -3,54 +3,108 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Record workflow · window bench</title>
+    <title>Document editor · window bench</title>
   </head>
   <body>
     <main>
-      <h1>Record workflow</h1>
-      <button id="edit" type="button">Edit record</button>
-      <p role="status" aria-label="Save status" id="save-status" data-saves="0"></p>
-      <dialog aria-labelledby="editor-title">
-        <h2 id="editor-title">Record editor</h2>
-        <form>
-          <p>
-            <label for="kind">Record type</label>
-            <select id="kind">
-              <option value="text">Text</option>
-              <option value="image">Image</option>
-            </select>
-          </p>
-          <p>
-            <label for="image">Record image</label>
-            <input id="image" aria-label="Record image" type="file" accept="image/*" />
-          </p>
-          <p><label for="alt">Alternative text</label> <input id="alt" /></p>
-          <p><label for="title">Title</label> <input id="title" /></p>
-          <p><label for="notes">Notes</label> <textarea id="notes"></textarea></p>
-          <table>
-            <caption>
-              Record rows
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Label</th>
-                <th scope="col">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr aria-label="First row">
-                <td><input aria-label="Label" /></td>
-                <td><input aria-label="Value" /></td>
-              </tr>
-              <tr aria-label="Second row">
-                <td><input aria-label="Label" /></td>
-                <td><input aria-label="Value" /></td>
-              </tr>
-            </tbody>
-          </table>
-          <p><button id="save" type="submit">Save record</button></p>
-        </form>
-      </dialog>
+      <section id="document-editor" aria-labelledby="document-editor-title">
+        <h1 id="document-editor-title">Document editor</h1>
+        <p><label for="document-title">Document title</label> <input id="document-title" /></p>
+        <div>
+          <button id="add-image" type="button" data-module="image">Add image module</button>
+          <button id="add-text" type="button" data-module="text">Add text module</button>
+          <button id="add-table" type="button" data-module="table">Add comparison table</button>
+        </div>
+        <ol id="saved-modules" aria-label="Saved modules"></ol>
+        <p id="publish-ready" role="status" aria-label="Publication ready" hidden>Ready to publish</p>
+        <p id="publish-status" role="status" aria-label="Publication status" data-publishes="0"></p>
+        <button id="publish" type="button">Publish document</button>
+        <label id="failure-control" hidden
+          ><input id="block-publishing" type="checkbox" /> Block publishing</label
+        >
+        <dialog id="module-editor" aria-label="Module editor">
+          <h2 id="module-kind"></h2>
+          <form id="module-fields"></form>
+        </dialog>
+        <dialog id="image-dialog" aria-label="Image file dialog">
+          <h2>Image file dialog</h2>
+          <label for="module-image">Image file</label>
+          <input id="module-image" type="file" accept="image/*" aria-label="Image file" />
+          <button id="use-image" type="button">Use image</button>
+        </dialog>
+      </section>
+      <details id="record-lab">
+        <summary>Single-record fixture</summary>
+        <button id="edit" type="button">Edit record</button>
+        <p role="status" aria-label="Save status" id="save-status" data-saves="0"></p>
+        <dialog id="record-editor" aria-labelledby="editor-title">
+          <h2 id="editor-title">Record editor</h2>
+          <form>
+            <p>
+              <label for="kind">Record type</label>
+              <select id="kind">
+                <option value="text">Text</option>
+                <option value="image">Image</option>
+              </select>
+            </p>
+            <p>
+              <label for="image">Record image</label>
+              <input id="image" aria-label="Record image" type="file" accept="image/*" />
+            </p>
+            <p><label for="alt">Alternative text</label> <input id="alt" /></p>
+            <p><label for="title">Title</label> <input id="title" /></p>
+            <p><label for="notes">Notes</label> <textarea id="notes"></textarea></p>
+            <table>
+              <caption>
+                Record rows
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Label</th>
+                  <th scope="col">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr aria-label="First row">
+                  <td><input aria-label="Label" /></td>
+                  <td><input aria-label="Value" /></td>
+                </tr>
+                <tr aria-label="Second row">
+                  <td><input aria-label="Label" /></td>
+                  <td><input aria-label="Value" /></td>
+                </tr>
+              </tbody>
+            </table>
+            <p><button id="save" type="submit">Save record</button></p>
+          </form>
+        </dialog>
+      </details>
+      <template id="image-fields">
+        <button id="choose-image" type="button">Choose image</button>
+        <output id="chosen-image" aria-label="Chosen image"></output>
+        <p><label for="module-alt">Alternative text</label> <input id="module-alt" /></p>
+      </template>
+      <template id="text-fields">
+        <p><label for="module-headline">Headline</label> <input id="module-headline" /></p>
+        <p><label for="module-body">Body text</label> <textarea id="module-body"></textarea></p>
+      </template>
+      <template id="table-fields">
+        <table aria-label="Comparison">
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Option 1</th>
+              <th scope="col">Option 2</th>
+              <th scope="col">Option 3</th>
+              <th scope="col">Option 4</th>
+              <th scope="col">Option 5</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <button id="add-row" type="button">Add row</button>
+      </template>
+      <template id="module-save"><button id="save-module" type="submit">Save module</button></template>
     </main>
     <script type="module" src="/src/lab/window-bench/workflow.ts"></script>
   </body>

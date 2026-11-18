@@ -1,10 +1,13 @@
 """Version 1 workflow format and deterministic expansion to a typed action plan."""
 
+from __future__ import annotations
+
 from typing import Annotated, Literal
 
 from pydantic import Field, TypeAdapter, model_validator
 
 from .screen_workflow_parameters import (
+    EnumParameter,
     Label,
     ListParameter,
     MediaList,
@@ -15,10 +18,11 @@ from .screen_workflow_parameters import (
     Strict,
     Text,
     WorkflowName,
-    validate_input,
+    check_depth,
 )
 
-MAX_STEPS = 128
+MAX_DECLARED_STEPS = 128
+MAX_REPEAT_DEPTH = 4
 Capability = Literal["uia", "cdp", "cdp.set_files"]
 
 
@@ -116,9 +120,33 @@ class Step(Strict):
         return set(self.requires).union(*(check.requires for check in checks))
 
 
+class DispatchBy(Strict):
+    by: Slug
+    cases: dict[Text, WorkflowName] = Field(min_length=1, max_length=50)
+
+
+class Use(Strict):
+    id: Slug
+    use: WorkflowName | DispatchBy
+    with_: dict[Slug, Binding] = Field(default_factory=dict, max_length=32, alias="with")
+    case_bindings: dict[Text, dict[Slug, Binding]] = Field(default_factory=dict, max_length=50)
+
+    def destinations(self):
+        if isinstance(self.use, str):
+            return [(self.use, self.with_)]
+        return [
+            (name, {**self.with_, **self.case_bindings.get(choice, {})})
+            for choice, name in self.use.cases.items()
+        ]
+
+
 class Repeat(Strict):
-    for_each: Slug
-    steps: list[Step] = Field(min_length=1, max_length=32)
+    for_each: Slug | Binding
+    steps: list[Entry] = Field(min_length=1, max_length=MAX_DECLARED_STEPS)
+
+
+Entry = Step | Use | Repeat
+Repeat.model_rebuild()
 
 
 def bindings(value):
@@ -167,50 +195,61 @@ def check_bindings(step, parameters, item):
             raise ValueError(f"{step.id} requires a declared text binding")
 
 
+def entries(steps, parameters, item=None, depth=0):
+    """Yield authored leaves together with their lexical item declaration."""
+    for entry in steps:
+        if isinstance(entry, Repeat):
+            if depth >= MAX_REPEAT_DEPTH:
+                raise ValueError(f"repeat nesting exceeds {MAX_REPEAT_DEPTH}")
+            decl = (
+                parameters.get(entry.for_each) if isinstance(entry.for_each, str)
+                else binding_type(entry.for_each, parameters, item)
+            )
+            if not isinstance(decl, ListParameter):
+                raise ValueError("for_each requires a declared list")
+            yield from entries(entry.steps, parameters, decl.items, depth + 1)
+        else:
+            yield entry, item, depth
+
+
+def check_use(entry, parameters, item):
+    if isinstance(entry.use, DispatchBy):
+        spec = binding_type(Item(item=entry.use.by), parameters, item)
+        if not isinstance(spec, EnumParameter) or entry.use.cases.keys() != set(spec.choices):
+            raise ValueError(f"{entry.id} cases must exactly cover the item enum")
+        if entry.case_bindings.keys() - entry.use.cases.keys():
+            raise ValueError(f"{entry.id} bindings name an unknown case")
+    elif entry.case_bindings:
+        raise ValueError(f"{entry.id} case_bindings requires enum dispatch")
+    for _, refs in entry.destinations():
+        if any(binding_type(ref, parameters, item) is None for ref in refs.values()):
+            raise ValueError(f"{entry.id} requires declared parameter or item bindings")
+
+
 class Workflow(Strict):
     version: Literal[1]
     name: WorkflowName
     description: Label
     use_when: Label
     parameters: dict[Slug, Parameter] = Field(default_factory=dict, max_length=32)
-    steps: list[Step | Repeat] = Field(min_length=1, max_length=MAX_STEPS)
+    steps: list[Entry] = Field(min_length=1, max_length=MAX_DECLARED_STEPS)
 
     @model_validator(mode="after")
     def references(self):
+        for spec in self.parameters.values():
+            check_depth(spec)
         seen = set()
-        maximum = 0
-        for entry in self.steps:
-            decl = self.parameters.get(entry.for_each) if isinstance(entry, Repeat) else None
-            if isinstance(entry, Repeat) and not isinstance(decl, ListParameter):
-                raise ValueError("for_each requires a declared list")
-            steps = entry.steps if isinstance(entry, Repeat) else [entry]
-            maximum += len(steps) * (decl.max_items if decl else 1)
-            for step in steps:
-                if step.id in seen:
-                    raise ValueError("step IDs must be unique")
-                seen.add(step.id)
-                check_bindings(step, self.parameters, decl.items if decl else None)
-        if maximum > MAX_STEPS:
-            raise ValueError(f"expanded plan may exceed {MAX_STEPS} steps")
+        for entry, item, _ in entries(self.steps, self.parameters):
+            if entry.id in seen or len(seen) >= MAX_DECLARED_STEPS:
+                raise ValueError(f"step IDs must be unique and limited to {MAX_DECLARED_STEPS}")
+            seen.add(entry.id)
+            (check_use if isinstance(entry, Use) else check_bindings)(entry, self.parameters, item)
         return self
 
     def plan(self, supplied):
-        if supplied.keys() != self.parameters.keys():
-            raise ValueError("supply exactly the declared parameters")
-        parameters = {name: validate_input(spec, supplied[name]) for name, spec in self.parameters.items()}
-        result = []
-        for entry in self.steps:
-            if isinstance(entry, Repeat):
-                for index, item in enumerate(parameters[entry.for_each], 1):
-                    result.extend(
-                        (f"{step.id}[{index}]", Step.model_validate(bind(step, parameters, item)))
-                        for step in entry.steps
-                    )
-            else:
-                result.append((entry.id, Step.model_validate(bind(entry, parameters))))
-        if not result:
-            raise ValueError("a run requires at least one expanded step")
-        return result
+        from .screen_workflow_plan import expand
+
+        return expand(self, {self.name: self}, supplied)
 
 
 def workflow_name(value):

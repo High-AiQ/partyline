@@ -1,0 +1,40 @@
+version: 1
+name: image-module
+description: Attach an image through the file dialog and supply alternative text.
+use_when: Editing a document draft.
+parameters:
+  images: {type: list, items: media_id, min_items: 1, max_items: 1}
+  alt: {type: text, max_length: 200}
+steps:
+  - id: add
+    target: {role: button, name: Add image module}
+    action: invoke
+    preconditions: [{check: absent, target: {role: dialog, name: Module editor}}]
+    postcondition: {check: present, target: {role: dialog, name: Module editor}, timeout_ms: 3000}
+    confirm: false
+  - id: choose
+    target: {role: button, name: Choose image}
+    action: invoke
+    postcondition: {check: present, target: {role: dialog, name: Image file dialog}, timeout_ms: 3000}
+    confirm: false
+  - id: attach
+    target: {role: file_input, name: Image file, within: {role: dialog, name: Image file dialog}}
+    action: set_files
+    requires: [cdp.set_files]
+    inputs: {files: {param: images}}
+    preconditions: [{check: file_count_equals, expected: 0, requires: [cdp.set_files]}]
+    postcondition: {check: file_count_equals, expected: 1, requires: [cdp.set_files], timeout_ms: 5000}
+    confirm: false
+  - id: accept
+    target: {role: button, name: Use image, within: {role: dialog, name: Image file dialog}}
+    action: invoke
+    postcondition: {check: absent, target: {role: dialog, name: Image file dialog}, timeout_ms: 3000}
+    confirm: false
+  - id: alt
+    target: {role: textbox, name: Alternative text}
+    action: set_value
+    inputs: {value: {param: alt}}
+    postcondition: {check: value_equals, expected: {param: alt}, timeout_ms: 3000}
+    confirm: false
+  - id: save
+    use: save-draft-module
