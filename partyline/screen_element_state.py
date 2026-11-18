@@ -129,6 +129,8 @@ class ElementState(EventScope):
         started = tree.snapshot_id is not None
         while True:
             fields = {"cursor": tree.cursor} if tree.cursor else {}
+            if getattr(tree, "workflow_read", False):
+                fields["workflow_read"] = True
             if tree.scope:
                 fields["query_scope"] = tree.scope
             if tree.cursor and tree.sources:
@@ -153,6 +155,8 @@ class ElementState(EventScope):
             tree.transport = response.get("transport")
             tree.source_reason = response.get("source_reason")
             tree.page_state = response.get("page_state")
+            tree.document = response.get("workflow_document")
+            tree.live_events = response.get("subscription_live") is True
             tree.recovery_hint = response.get("recovery_hint")
             counter = response.get("captured_event_counter")
             if not started:

@@ -840,6 +840,7 @@ dependencies = [
     { name = "pyte" },
     { name = "python-multipart" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -888,6 +889,7 @@ requires-dist = [
     { name = "pyte", specifier = ">=0.8" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=311" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
     { name = "websockets", marker = "extra == 'helper'", specifier = ">=14" },
     { name = "windows-capture", marker = "sys_platform == 'win32' and extra == 'helper'", specifier = ">=2.0.1" },

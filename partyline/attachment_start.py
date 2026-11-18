@@ -54,6 +54,8 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
         from .context_epoch import start_fresh_context
         start_fresh_context(runtime.db, att)
         await asyncio.to_thread(prepare_attachment, att, runtime, hook_url, checkpoint)
+        from .screen_workflow_skills import prepare_attachment as prepare_skills
+        await prepare_skills(runtime, att)
         adapter = make_adapter(
             att["adapter"], att,
             presence.posting(conv_id, ident, runtime.post_callback(ident, conv_id, owner)),

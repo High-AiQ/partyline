@@ -16,7 +16,7 @@ LINE_NAME = 240  # characters of a name shown on a line
 LINE_VALUE = 80
 STATE_FIELDS = ("enabled", "value", "toggle", "selected", "expand_state", "name", "aria_properties",
                 "source", "provider_identity", "disabled_provenance", "readonly", "inert", "viewport_bounds",
-                "hidden", "action_token", "actionable", "why", "act_on")
+                "hidden", "file_count", "semantic_role", "action_token", "actionable", "why", "act_on")
 
 
 def clean(value, limit=NAME_FIELD):

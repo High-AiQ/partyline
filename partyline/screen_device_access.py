@@ -10,7 +10,7 @@ def connected_device(device, socket, hello):
     return {**device, "socket": socket, "name": hello.device_name, "os": hello.os,
             "helper_version": hello.helper_version, "control": hello.control,
             "tools": hello.tools, "windows": hello.windows, "press": hello.press,
-            "chrome_dom": hello.chrome_dom,
+            "chrome_dom": hello.chrome_dom, "workflow_actions": hello.workflow_actions,
             "chrome": hello.chrome.model_dump() if hello.chrome else None,
             "window_access_enabled": hello.window_access,
             "monitors": [item.model_dump() for item in hello.monitors]}

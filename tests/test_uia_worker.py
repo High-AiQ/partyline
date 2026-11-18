@@ -175,6 +175,27 @@ class GateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("revoked", (await pending)["error"])
         self.assertEqual([], provider.calls)
 
+    async def test_workflow_stop_blocks_provider_input_without_revoking_grant(self):
+        provider = Provider()
+        gate = DispatchGate()
+        generation = gate.grant()
+        grant = {"hwnd": 1, "pid": 2}
+        stopped = threading.Event()
+        foreground = provider.foreground
+
+        def stop_before_input():
+            stopped.set()
+            return foreground()
+
+        provider.foreground = stop_before_input
+        access = SimpleNamespace(gate=gate, list_windows=lambda: [grant])
+        message = {"element_id": element_id(provider, 1, [0]), "action": "set_value", "value": "new",
+                   "_workflow_cancelled": stopped}
+        result = run_action(access, grant, generation, message, factory=lambda _: provider)
+        self.assertEqual(result["error"], "workflow action cancelled")
+        self.assertEqual(provider.calls, [])
+        self.assertFalse(gate.revoked.is_set())
+
     async def test_revoke_during_pattern_call_discards_reread(self):
         provider = Provider()
         entered, finish = threading.Event(), threading.Event()

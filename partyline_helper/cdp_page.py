@@ -7,6 +7,7 @@ from .cdp_ax import exposed
 from .cdp_dom_nodes import DETAIL, discover
 from .cdp_settle import Quiet
 from .cdp_page_dialogs import Dialogs
+from .workflow_dispatch import cdp_guard, document
 from .cdp_transport import CDPError, DocumentChanged, ExtensionRefused, PageUnavailable
 from .cdp_recovery import Recovery
 from .cdp_identity import TargetChanged, reprove
@@ -40,6 +41,7 @@ class Page(Dialogs, Recovery):
         self.browser.listeners.add(self.event)
 
     def guard(self, document=True, healthy=True):
+        cdp_guard()
         if (not self.live or self.grant.get("chrome_cancelled") or self.access.grant is not self.grant
                 or self.access.gate.revoked.is_set()
                 or self.access.gate.generation != self.generation):
@@ -226,7 +228,7 @@ class Page(Dialogs, Recovery):
         with timing.phase("renderer_fence_ms"):
             await self.call("Runtime.evaluate", {"expression": "0", "returnByValue": True})  # renderer fence
         result = {"source": "cdp", "action_identity_supported": True,
-                  "elements": elements, "snapshot_id": uuid.uuid4().hex,
+                  "elements": elements, "snapshot_id": uuid.uuid4().hex, "workflow_document": document(self),
                   "captured_event_counter": before, **self.access.event_status()}
         self.access.keep(result, cursor)
         if index + PAGE_CAP < len(nodes):

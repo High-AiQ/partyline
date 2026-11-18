@@ -11,6 +11,7 @@ from .uia_press import press
 from .uia_snapshot import MAX_TEXT
 from .uia_selection import effect, select_call
 from .uia_window_identity import live
+from .workflow_dispatch import cancelled, changed as evidence_changed
 
 
 STATE_KEYS = ("name", "value", "toggle", "enabled", "focused", "selected", "expand_state", "range_value",
@@ -54,6 +55,8 @@ def _run_action(access, grant, generation, message, factory, timing):
             fresh, initial = prepare(provider, message["element_id"], message["action"], arg, path, force)
         node = fresh
         def check():
+            if cancelled(message):
+                raise ValueError("workflow action cancelled")
             if access.gate.revoked.is_set() or access.gate.generation != generation:
                 raise ValueError("revoked")
             current = windows_now()
@@ -62,6 +65,8 @@ def _run_action(access, grant, generation, message, factory, timing):
             if (not any(item["hwnd"] == grant["hwnd"] and item["pid"] == grant["pid"] for item in current)
                     or (grant.get("marker") and not live(grant))):
                 raise ValueError("window closed")
+            if cancelled(message):
+                raise ValueError("workflow action cancelled")
         named_select = message["action"] == "select" and isinstance(arg, str)
         forced = force and not initial.get("enabled")
         call = select_call(provider, fresh, arg, initial, check, force) if named_select else None
@@ -96,6 +101,12 @@ def _run_action(access, grant, generation, message, factory, timing):
                 before = provider.foreground()
             if access.gate.revoked.is_set():
                 raise ValueError("revoked")
+            if cancelled(message):
+                raise ValueError("workflow action cancelled")
+            if (message.get("workflow_source") == "uia" and
+                    message.get("workflow_document") != str(generation)) or evidence_changed(
+                    message, getattr(access, "event_status", None)):
+                raise ValueError("workflow evidence changed")
             try:
                 dispatched = True
                 with timing.phase("uia_ms"):
@@ -172,7 +183,8 @@ def _run_action(access, grant, generation, message, factory, timing):
         if reason == "revoked" and dispatched:
             return {"status": "completed", "revoked_during": True,
                     "state_unavailable": "consent revoked", **observed}
-        allowed = ("revoked", "secure desktop active", "window closed")
+        allowed = ("revoked", "secure desktop active", "window closed",
+                   "workflow action cancelled", "workflow evidence changed")
         known = isinstance(exc, ActionRefused) or reason in allowed
         return {"status": "failed", "error": reason if known else "UI Automation failed", **observed}
     except Exception:

@@ -18,6 +18,7 @@ from .screen_element_state import ElementState, compare
 from .screen_event_scope import busy_note
 from .screen_tree_ids import IdSpace
 from .screen_tree_answer import answer
+from .screen_workflow_wire import operation
 from .op_timing import pushed
 from .screen_timing import timed, phase, helper
 
@@ -37,13 +38,14 @@ class ElementsHub(ElementState):
         self.change_versions = {}
         self.after_action = set()
 
-    async def exchange(self, principal, grant, device, kind, wait=35, **fields):
+    async def exchange(self, principal, grant, device, kind, wait=35, dispatch=None, **fields):
         require_window(self.hub, principal, grant["id"])
         ident = str(uuid.uuid4())
         future = asyncio.get_running_loop().create_future()
         self.waiters[ident] = (device["id"], future)
         try:
-            async with asyncio.timeout(600 if fields.get("action") == "set_files" else wait):
+            async with operation(device, ident, grant["id"], dispatch), asyncio.timeout(
+                    600 if fields.get("action") == "set_files" else wait):
                 line_id = getattr(principal, "conv_id", None) or grant.get("conv_id", "")
                 line = self.hub.runtime.db.get_conversation(line_id) if line_id else None
                 with phase("send_ms"):
