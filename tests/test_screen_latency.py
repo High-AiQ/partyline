@@ -60,11 +60,12 @@ class TimingTests(unittest.IsolatedAsyncioTestCase):
 
     def test_telemetry_keeps_only_fixed_numeric_phases_and_stop_reasons(self):
         value = {'timing': {'target_ms': 2, 'helper_uia_ms': 3, 'helper_barrier_stop': 'quiet',
+                            'helper_ax_tree_ms': 4, 'helper_dispatch_proof_ms': 5,
                             'secret': 'page contents', 'diff_ms': float('nan'), 'send_ms': -1,
                             'answer_ms': True}}
         item = record('screen_element_action', {'action': 'invoke'}, '{}', value, False, 0)
-        self.assertEqual({'target_ms': 2, 'helper_uia_ms': 3, 'helper_barrier_stop': 'quiet'},
-                         item['timing'])
+        self.assertEqual({'target_ms': 2, 'helper_uia_ms': 3, 'helper_barrier_stop': 'quiet',
+                          'helper_ax_tree_ms': 4, 'helper_dispatch_proof_ms': 5}, item['timing'])
         # Real records use a bounded elapsed clock, not the artificial started=0 above.
         item['latency_ms'] = 1
         self.assertEqual(item['timing'], ToolCall.model_validate(item).model_dump()['timing'])

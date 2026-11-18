@@ -1,17 +1,50 @@
 """Page input dispatched through a consent-guarded CDP session."""
 import json
 
-from .cdp_recipes import HIT, STATE
-from .cdp_dom_nodes import DETAIL
+from .cdp_recipes import ACTION_STATE, HIT, STATE
 from .cdp_input import key
 from .cdp_select import select_option
 from .cdp_transport import CDPError, DocumentChanged
 from .cdp_identity import NotActionable, TargetChanged, prove
+from .timing import Timing
 
 KEYS = {"enter": ("Enter", 13), "tab": ("Tab", 9), "escape": ("Escape", 27)}
 
 
 async def act(page, message):
+    timing = Timing()
+    action_epoch = page.epoch
+    previous, page.operation_timing = page.operation_timing, timing
+    previous_defer, page.defer_object_releases = page.defer_object_releases, True
+    error = None
+    try:
+        result = await _act(page, message, timing)
+    except Exception as exc:
+        error = exc
+    finally:
+        try:
+            if (page.live and page.page_state == "alive" and page.epoch == action_epoch
+                    and page.access.grant is page.grant
+                    and not page.access.gate.revoked.is_set() and not page.page_dialog):
+                timing.values["cdp_commands"] = timing.values.get("cdp_commands", 0) + 1
+                with timing.phase("cdp_roundtrip_sum_ms"):
+                    try:
+                        await page.raw("Runtime.releaseObjectGroup", {"objectGroup": "partyline"})
+                    except CDPError:
+                        pass  # action outcome and do-not-retry status outrank remote-object cleanup
+        finally:
+            page.defer_object_releases = previous_defer
+            page.operation_timing = previous
+    timing.values["total_ms"] = timing.elapsed(timing.started)
+    if error:
+        error.screen_timing = dict(timing.values)
+        raise error.with_traceback(error.__traceback__)
+    if isinstance(result, dict):
+        result.setdefault("timing", {}).update(timing.values)
+    return result
+
+
+async def _act(page, message, timing):
     node = page.nodes.get(message.get("element_id"))
     if node and node.get("not_actionable"):
         raise NotActionable(node["not_actionable"], node.get("act_on"))
@@ -20,11 +53,13 @@ async def act(page, message):
     if message.get("action_token", node.get("action_token")) != node.get("action_token"):
         raise TargetChanged("document identity token changed")
     backend = node["backendDOMNodeId"]
-    state = await page.function(backend, STATE, proof=True)
-    prove(page, node, state)
+    with timing.phase("target_proof_ms"):
+        recipe = ACTION_STATE if node.get("dom_discovered") else STATE
+        state = await page.function(backend, recipe, proof=True)
+        prove(page, node, state)
     page.action_proof = node
     action = message["action"]
-    if node.get("dom_discovered") and (await page.function(backend, DETAIL)).get("hidden"):
+    if node.get("dom_discovered") and state.get("hidden"):
         raise CDPError("element is no longer visible")
     if not message.get("force") and any(state.get(k) for k in ("native_disabled", "aria_disabled", "inert")):
         raise CDPError("element reports disabled (DOM/ARIA/inert)")
@@ -61,7 +96,8 @@ async def act(page, message):
             if message.get("key") not in KEYS:
                 raise CDPError("press requires enter, tab or escape")
             await key(page, *KEYS[message["key"]])
-        settle = await page.quiet.wait()
+        with timing.phase("settle_wait_ms"):
+            settle = await page.quiet.wait()
         counter = page.access.event_status()["event_counter"]
         observed = await page.function(backend, STATE)
         if action == "set_files":

@@ -34,7 +34,9 @@ async def action(self, access, message):
         try:
             return await page.handle_dialog(message)
         except CDPError as exc:
-            return failure(page, exc, str(exc))
+            result = failure(page, exc, str(exc))
+            result["timing"] = getattr(exc, "screen_timing", {})
+            return result
     if page and page.page_dialog:
         page.guard()
         return PageDialog(page.page_dialog).result(status="failed")
@@ -71,7 +73,9 @@ async def action(self, access, message):
         error = str(exc)
         if message.get("action") == "set_files" and (not page.live or "revoked" in error):
             error += "; use the Open dialog path instead"
-        return failure(page, exc, error)
+        result = failure(page, exc, error)
+        result["timing"] = getattr(exc, "screen_timing", {})
+        return result
     finally:
         page.operation_epoch, page.action_proof = None, None
 

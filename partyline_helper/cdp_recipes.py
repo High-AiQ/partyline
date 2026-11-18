@@ -40,6 +40,10 @@ STATE = r"""function() {
      e.ownerDocument.defaultView.getComputedStyle(e).visibility)}:{}),
    bounds:[r.left,r.top,r.right,r.bottom]};
 }"""
+
+ACTION_STATE = "function() {const state=(" + STATE + ").call(this);const r=this.getBoundingClientRect();" \
+    "const v=this.ownerDocument.defaultView.getComputedStyle(this).visibility;" \
+    "return {...state,hidden:!r.width||!r.height||v==='hidden'||v==='collapse'};}"
 # Action-only: never run per node during reads (layout hit tests and text reads on large
 # containers per element exhausted renderer memory on big pages).
 HIT = r"""function() {

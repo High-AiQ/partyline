@@ -21,6 +21,7 @@ from .point_ops import KEYBOARD, NEEDS_CLICK, POINTED, arguments, by_cdp, for_cu
 from .point_win32 import Win32Pointer
 from .point_landing import evidence, landing_session
 from .point_feedback import Feedback
+from .timing import Timing
 from .uia_window_list import HARD_FLOOR
 from .uia_window_identity import live
 from .window_gone import explain
@@ -46,6 +47,7 @@ class PointClicks:
         self.consent = MouseConsent(ask, self.clock)
 
     async def handle(self, entry, message):
+        timing = Timing()
         from .screen_access_audit import audit_window, begin_window_call, end_window_call
         access = entry["access"]
         session = getattr(access, "session", self.shares.session)
@@ -78,6 +80,7 @@ class PointClicks:
         except OSError:
             result = {"status": "failed", "error": AUDIT}
         result["landing"] = message["landing"]
+        result.setdefault("timing", {})["total_ms"] = timing.elapsed(timing.started)
         await self.shares.session.send("window_element_result", request_id=message["request_id"], **result)
 
     @staticmethod

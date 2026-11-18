@@ -89,7 +89,7 @@ class HelperTimingTests(unittest.IsolatedAsyncioTestCase):
         with patch('partyline_helper.timing.clock', clock):
             await session.send('window_elements', before=gate, timing={'walk_ms': 1})
         packet = json.loads(session.socket.send.await_args.args[0])
-        self.assertEqual({'walk_ms': 1, 'reply_ms': 5}, packet['timing'])
+        self.assertEqual({'walk_ms': 1, 'reply_ms': 5, 'serialize_ms': 0}, packet['timing'])
 
     def test_child_launch_initialization_walk_and_reply_fake_clock(self):
         clock = Clock()
@@ -156,7 +156,7 @@ class HelperTimingTests(unittest.IsolatedAsyncioTestCase):
                 patch('partyline_helper.window_snapshot.asyncio.to_thread', thread), \
                 patch('partyline_helper.window_snapshot.prepare', encode):
             await WindowSnapshots(shares, backend).take({'access': access}, {'agent': 'a'}, 'r')
-        self.assertEqual({'capture_ms': 5, 'encode_ms': 7}, packets[0]['timing'])
+        self.assertEqual({'capture_ms': 5, 'encode_ms': 7, 'total_ms': 12}, packets[0]['timing'])
         async def exchange(*args, **kwargs):
             return {'ok': True, 'timing': {}}
         hub = SimpleNamespace(elements=SimpleNamespace(exchange=exchange))
