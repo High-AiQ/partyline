@@ -18,12 +18,8 @@ async def operation(device, ident, grant_id, dispatch):
         if dispatch:
             try:
                 async with asyncio.timeout(2):
-                    await pushed(
-                        "screen",
-                        device["socket"].send_json(
-                            {"type": "cancel_workflow_action", "request_id": ident, "grant_id": grant_id}
-                        ),
-                    )
+                    payload = {"type": "cancel_workflow_action", "request_id": ident, "grant_id": grant_id}
+                    await pushed("screen", device["socket"].send_json(payload))
             except (TimeoutError, OSError, RuntimeError, WebSocketDisconnect):
                 pass  # an action already sent remains unconfirmed
         raise
