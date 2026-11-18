@@ -1083,11 +1083,14 @@ The helper has its own version in `partyline_helper/__init__.py`, independent of
 server. Changes to helper code, Windows packaging, or shared helper imports require a
 helper version bump. Server changes require a server bump; a change touching both
 requires both. Features bump minor, fixes patch, and breaking changes major.
+A helper bump also bumps `version` in `partyline_chrome/manifest.json` to the same value;
+`scripts/version_policy.py` fails the pull request when the two differ.
 
 On a green merge, CI tags changed helper versions `helper-v<version>` and builds
 the Windows installer. Its release contains `PartylineHelper-Setup-<version>.exe`
 and `PartylineHelper-Setup-<version>.exe.sha256`. The extension manifest version must
-match the helper version; CI checks that before freezing. Pull requests also build
+match the helper version; `version-policy` checks that on every pull request and the
+Windows installer job checks it again before freezing. Pull requests also build
 smoke-test artifacts. Server `v<version>` tags do not create helper releases.
 
 At connection or reconnection the server compares the reported helper version with

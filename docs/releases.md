@@ -13,7 +13,8 @@ immutable `vMAJOR.MINOR.PATCH` tag whenever `partyline/__init__.py` changes,
 so the tag list is complete by construction — nobody has to remember. The
 version itself is enforced separately: `scripts/version_policy` requires the
 bump implied by the change set's Conventional Commit subjects, owned by
-exactly one commit.
+exactly one commit. It also requires `version` in `partyline_chrome/manifest.json` to equal
+the helper `__version__` at head, so a helper bump always bumps the extension manifest.
 
 GitHub Releases were kept by hand for a while and lapsed after `v0.34.2`,
 while tagging carried on to `v0.42.x`. The result was a repository front page

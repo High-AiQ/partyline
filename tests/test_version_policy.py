@@ -9,6 +9,7 @@ from pathlib import Path
 from scripts.version_policy import (
     Change,
     Version,
+    extension_manifest_failure,
     history_verdict,
     required_bump,
     source_version,
@@ -178,12 +179,18 @@ class CliHistoryTest(unittest.TestCase):
             sys.executable, str(SCRIPT), "--base", base, "--head", head, check=False
         )
 
+    def write_manifest(self, version):
+        chrome = self.repo / "partyline_chrome"
+        chrome.mkdir(exist_ok=True)
+        (chrome / "manifest.json").write_text(f'{{"version": "{version}"}}\n')
+
     def setup_helper(self):
         helper = self.repo / "partyline_helper"
         helper.mkdir()
         (helper / "__init__.py").write_text('__version__ = "1.0.0"\n')
         (helper / "client.py").write_text("old\n")
-        self.command("git", "add", "partyline_helper")
+        self.write_manifest("1.0.0")
+        self.command("git", "add", "partyline_helper", "partyline_chrome")
         self.commit("chore: establish helper")
         self.base = self.command("git", "rev-parse", "HEAD").stdout.strip()
         return helper
@@ -196,7 +203,8 @@ class CliHistoryTest(unittest.TestCase):
         self.assertIn("helper", self.policy().stdout)
         self.assertEqual(self.policy().returncode, 1)
         (helper / "__init__.py").write_text('__version__ = "1.0.1"\n')
-        self.command("git", "add", "partyline_helper")
+        self.write_manifest("1.0.1")
+        self.command("git", "add", "partyline_helper", "partyline_chrome")
         self.command("git", "commit", "--amend", "--no-edit", "-q")
         self.assertEqual(self.policy().returncode, 0, self.policy().stdout)
 
@@ -206,6 +214,28 @@ class CliHistoryTest(unittest.TestCase):
         self.command("git", "add", "partyline_helper")
         self.commit("fix: unnecessary helper bump")
         self.assertEqual(self.policy().returncode, 1)
+
+    def test_cli_rejects_a_helper_bump_that_leaves_the_manifest_behind(self):
+        helper = self.setup_helper()
+        (helper / "client.py").write_text("new\n")
+        (helper / "__init__.py").write_text('__version__ = "1.0.1"\n')
+        self.command("git", "add", "partyline_helper")
+        self.commit("fix: repair helper")
+        result = self.policy()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("partyline_chrome/manifest.json version is 1.0.0", result.stdout)
+        self.assertIn("__version__ is 1.0.1", result.stdout)
+
+    def test_cli_rejects_a_helper_without_a_manifest(self):
+        helper = self.setup_helper()
+        self.command("git", "rm", "-q", "-r", "partyline_chrome")
+        self.commit("chore: drop manifest")
+        self.base = self.command("git", "rev-parse", "HEAD").stdout.strip()
+        (helper / "client.py").write_text("new\n")
+        (helper / "__init__.py").write_text('__version__ = "1.0.1"\n')
+        self.command("git", "add", "partyline_helper")
+        self.commit("fix: repair helper")
+        self.assertIn("is missing", self.policy().stdout)
 
     def test_cli_accepts_a_fix_that_owns_its_patch_bump(self):
         self.write_version("0.21.8")
@@ -281,6 +311,31 @@ def imported_partyline_modules(source, shared_module, root):
         else:
             paths.add(path + ".py")
     return paths
+
+
+class ExtensionManifestTest(unittest.TestCase):
+    helper = Version(1, 8, 6)
+
+    def test_matching_version_passes(self):
+        self.assertIsNone(extension_manifest_failure(self.helper, '{"version": "1.8.6"}'))
+
+    def test_mismatch_names_both_files_and_both_values(self):
+        failure = extension_manifest_failure(self.helper, '{"version": "1.8.4"}')
+        for text in ("partyline_chrome/manifest.json", "partyline_helper/__init__.py", "1.8.4", "1.8.6"):
+            self.assertIn(text, failure)
+
+    def test_missing_manifest_fails(self):
+        self.assertIn("is missing", extension_manifest_failure(self.helper, None))
+
+    def test_unreadable_manifest_fails(self):
+        for text in ("{not json", "[]", "{}", '{"version": 186}'):
+            self.assertIsNotNone(extension_manifest_failure(self.helper, text), text)
+
+    def test_checked_in_manifest_matches_the_checked_in_helper(self):
+        root = Path(__file__).resolve().parents[1]
+        helper = source_version((root / "partyline_helper" / "__init__.py").read_text())
+        manifest = (root / "partyline_chrome" / "manifest.json").read_text()
+        self.assertIsNone(extension_manifest_failure(helper, manifest))
 
 
 class HelperPathTest(unittest.TestCase):

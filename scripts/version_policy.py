@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import re
 import subprocess
 from dataclasses import dataclass
@@ -154,6 +155,7 @@ HELPER_SHARED = {"partyline/file_events.py", "partyline/file_watch_paths.py", "p
                  "partyline/screen_look_data.py", "partyline/screen_tree.py",
                  "partyline/screen_tree_ids.py", "partyline/screen_tree_query.py"}
 HELPER_VERSION_PATH = "partyline_helper/__init__.py"
+EXTENSION_MANIFEST_PATH = "partyline_chrome/manifest.json"
 
 
 def helper_path(path: str) -> bool:
@@ -201,6 +203,14 @@ def helper_init_content(revision: str) -> str:
     return ast.dump(tree)
 
 
+def manifest_without_version(revision: str) -> object:
+    try:
+        data = json.loads(git("show", f"{revision}:{EXTENSION_MANIFEST_PATH}"))
+    except (subprocess.CalledProcessError, ValueError):
+        return None
+    return {k: v for k, v in data.items() if k != "version"} if isinstance(data, dict) else data
+
+
 def scoped_subject(revision: str, scope: str | None) -> str:
     subject = git("show", "-s", "--format=%s", revision)
     if scope is None:
@@ -211,9 +221,44 @@ def scoped_subject(revision: str, scope: str | None) -> str:
         if not relevant and HELPER_VERSION_PATH in paths:
             relevant = helper_init_content(f"{revision}^") != helper_init_content(revision)
     else:
+        # A manifest edit that only moves its version follows a helper bump; it is no server change.
+        if EXTENSION_MANIFEST_PATH in paths and (
+                manifest_without_version(f"{revision}^") == manifest_without_version(revision)):
+            paths = [p for p in paths if p != EXTENSION_MANIFEST_PATH]
         relevant = any((not helper_path(p) or p in HELPER_SHARED)
                        and not p.startswith(("tests/", "docs/", "scripts/", ".github/")) for p in paths)
     return subject if relevant else "chore: outside release scope"
+
+
+def extension_manifest_failure(helper: Version, manifest: str | None) -> str | None:
+    """Return a failure unless the extension manifest version equals the helper version.
+
+    ``manifest`` is the manifest text at head, or ``None`` when the file is missing.
+    """
+    where = f"{EXTENSION_MANIFEST_PATH} must match {HELPER_VERSION_PATH}"
+    if manifest is None:
+        return f"{where}: {EXTENSION_MANIFEST_PATH} is missing (helper version {helper})"
+    try:
+        data = json.loads(manifest)
+    except ValueError as error:
+        return f"{where}: {EXTENSION_MANIFEST_PATH} is not valid JSON ({error})"
+    found = data.get("version") if isinstance(data, dict) else None
+    if not isinstance(found, str):
+        return f"{where}: {EXTENSION_MANIFEST_PATH} has no string version (helper version {helper})"
+    if found != str(helper):
+        return (
+            f"{where}: {EXTENSION_MANIFEST_PATH} version is {found} but "
+            f"{HELPER_VERSION_PATH} __version__ is {helper}; a helper bump also bumps the "
+            "extension manifest"
+        )
+    return None
+
+
+def head_extension_manifest(revision: str) -> str | None:
+    try:
+        return git("show", f"{revision}:{EXTENSION_MANIFEST_PATH}")
+    except subprocess.CalledProcessError:
+        return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -240,6 +285,12 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         bump = required_bump([change.subject for change in changes])
         print(f"{scope} version policy satisfied: {base} -> {head} ({bump or 'no release'})")
+    helper_head = revision_version(args.head, HELPER_VERSION_PATH)
+    failure = helper_head != Version(0, 0, 0) and extension_manifest_failure(
+        helper_head, head_extension_manifest(args.head))
+    if failure:
+        print(f"FAIL: {failure}")
+        return 1
     return 0
 
 
