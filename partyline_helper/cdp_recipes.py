@@ -1,6 +1,6 @@
 """Read-only DOM observations and native select keyboard planning."""
 STATE = r"""function() {
- if(!this.getBoundingClientRect) return {};
+ if(!this.getBoundingClientRect) return {non_element:this.nodeType};
  const e=this, r=e.getBoundingClientRect();
  const documents=globalThis.__partylineDocuments??=new WeakMap();
  if(!documents.has(e.ownerDocument))

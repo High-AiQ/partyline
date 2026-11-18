@@ -19,6 +19,7 @@ ELEMENT_ACTION_NOTE = (
     "set_files: 1–10 media IDs/local paths, 200 MiB; helper data refused. select takes value; "
     "set_value edits; press: enter/tab/escape; force overrides disabled. then reads changes; "
     "then.snapshot adds a picture. Failures carry screenshot marks/snapshot for screen_window_click. "
+    "no-dom: act on its act_on id. "
     'reload/dialog use element_id="page". dialog requires accept; '
     'beforeunload accept=true leaves and discards unsaved changes. '
     'UIA window_* targets the window; drag: screen_drag.')

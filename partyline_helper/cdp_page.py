@@ -9,7 +9,7 @@ from .cdp_settle import Quiet
 from .cdp_page_dialogs import Dialogs
 from .cdp_transport import CDPError, DocumentChanged, PageUnavailable
 from .cdp_recovery import Recovery
-from .cdp_identity import TargetChanged, identity, reprove, token as identity_token
+from .cdp_identity import TargetChanged, identity, reprove, token as identity_token, unactionable
 
 
 class Page(Dialogs, Recovery):
@@ -18,6 +18,7 @@ class Page(Dialogs, Recovery):
         self.grant, self.generation = access.grant, access.gate.generation
         self.changed = changed
         self.epoch, self.nodes = 0, {}
+        self.parents, self.actionable = {}, set()  # this read's parent links and actionable ids
         self.navigations = 0
         self.identity = uuid.uuid4().hex[:8]
         self.active, self.live, self.dispatched = False, True, False
@@ -163,6 +164,8 @@ class Page(Dialogs, Recovery):
         else:
             self.access.forget()
             self.nodes.clear()
+            self.parents.clear()
+            self.actionable.clear()
             epoch = self.epoch
             raw = (await self.call("Accessibility.getFullAXTree"))["nodes"]
             nodes = exposed(raw)
@@ -173,14 +176,22 @@ class Page(Dialogs, Recovery):
             f'{self.access.session.window_grant_id}:{self.identity}:{self.target}:{epoch}:'
             f'{n.get("backendDOMNodeId", n["nodeId"])}'
             .encode(), digest_size=8).hexdigest() for n in nodes}
-        elements = []
+        elements, parents, actionable = [], self.parents, self.actionable
         try:
             for node in nodes[index:index + 2000]:
                 ident = ids[node["nodeId"]]
-                dom = (await self.function(node["backendDOMNodeId"], STATE, release=False)
-                       if node.get("backendDOMNodeId") else {})
+                dom, unreachable = {}, False
+                if node.get("backendDOMNodeId"):
+                    try:
+                        dom = await self.function(node["backendDOMNodeId"], STATE, release=False)
+                    except CDPError as exc:
+                        if type(exc) is not CDPError:
+                            raise
+                        self.guard()  # revocation or document loss keeps its own refusal
+                        unreachable = True  # e.g. an out-of-process child frame
                 named = value(node.get("name")) or dom.get("aria_label") or dom.get("title")
-                if not node.get("file_input_discovered") and (node.get("dom_discovered") or not named
+                if not unreachable and not node.get("file_input_discovered") and (
+                        node.get("dom_discovered") or not named
                         and (dom.get("focusable") or dom.get("role") in WIDGET_ROLES | {"gridcell"})):
                     dom.update(await self.function(node["backendDOMNodeId"], DETAIL, release=False))
                     # AX can expose zero-size controls activated through their visible labels.
@@ -189,8 +200,23 @@ class Page(Dialogs, Recovery):
                 item = normalize(node, ident, ids.get(node.get("parentId")), dom)
                 proof = identity(self, dom)
                 item["action_token"] = identity_token(ident, proof)
+                parents[ident] = item["parent"]
+                extra = {}
+                if why := unactionable(node, dom, unreachable):
+                    above = item["parent"]
+                    for _ in range(64):  # the parent chain is already in this read
+                        if above is None or above in actionable:
+                            break
+                        above = parents.get(above)
+                    item.update(actionable=False, why=why)
+                    if above in actionable:
+                        item["act_on"] = above
+                    extra = {"not_actionable": why, "act_on": item.get("act_on")}
+                else:
+                    actionable.add(ident)
                 elements.append(item)
-                self.nodes[ident] = {**node, "action_identity": proof, "action_token": item["action_token"]}
+                self.nodes[ident] = {**node, "action_identity": proof, "action_token": item["action_token"],
+                                     **extra}
         finally:
             if (self.live and self.page_state == "alive" and self.access.grant is self.grant
                     and not self.access.gate.revoked.is_set() and not self.page_dialog):

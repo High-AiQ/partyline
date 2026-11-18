@@ -89,6 +89,8 @@ class Socket:
                 return {"result": {"value": self.native_select.function(backend, p)}}
             state = {"connected": backend in self.states, "document_identity": "document",
                      "bounds": [0, 0, 100, 40], **self.states.get(backend, {})}
+            if "non_element" in state:  # a text or document node answers only its node type
+                return {"result": {"value": {"non_element": state["non_element"]}}}
             if p["functionDeclaration"] == DISPATCH:
                 left, top, right, bottom = state["bounds"]
                 state.update(x=(left + right) / 2, y=(top + bottom) / 2)
