@@ -23,6 +23,7 @@ from .screen_workflow_evidence import (
 )
 
 logger = logging.getLogger(__name__)
+RUN_SECONDS = 45 * 60
 
 
 class Run(ConfirmationStops):
@@ -42,6 +43,9 @@ class Run(ConfirmationStops):
         self.source = None
         self.document = None
         self.intent = False
+        self.window_hash = None
+        self.resuming = False
+        self.observation_key = object()
         self.reason = None
         self.confirmation = None
         self.changes = Changes()
@@ -85,6 +89,10 @@ class Run(ConfirmationStops):
         if device["socket"] is not self.socket:
             raise StopWorkflow("screen helper disconnected", "stopped")
         return grant, device
+
+    def require_current(self):
+        if not self.revision.current():
+            raise StopWorkflow("approved workflow bundle changed", "stopped")
 
     async def watch_authority(self):
         tables = (
@@ -146,26 +154,19 @@ class Run(ConfirmationStops):
         self.executing = True
         authority = asyncio.create_task(self.watch_authority())
         state, outcome = "completed", "all steps verified"
+        deadline = self.service.clock() + RUN_SECONDS
         try:
-            self.authorize()
-            await self.post("started")
-            for step_id, step in self.plan:
-                self.step_id = step_id
-                audit.change(self, "running")
-                await self.perform(step)
-                self.verified += 1
-                self.intent = False
-                audit.event(self, "verified")
-                audit.change(self, "running")
-                if self.verified < len(self.plan) and self.verified % 8 == 0:
-                    await self.post("in progress")
-            self.step_id = None
+            async with self.service.timeout_at(deadline):
+                await self.execute_plan()
         except StopWorkflow as exc:
             state, outcome = exc.state, str(exc)
         except asyncio.CancelledError:
             state, outcome = "stopped", self.reason or "server stopped"
         except (TimeoutError, OSError, RuntimeError, HTTPException):
-            state, outcome = "failed", "screen operation unavailable"
+            if self.service.clock() >= deadline:
+                state, outcome = "stopped", "overall run deadline elapsed"
+            else:
+                state, outcome = "failed", "screen operation unavailable"
         except Exception:
             # Raw helper exceptions can include screen content. Keep only the exception class.
             logger.error("Unexpected workflow failure in run %s", self.id)
@@ -174,12 +175,30 @@ class Run(ConfirmationStops):
             self.executing = False
             self.confirmation = None
             authority.cancel()
+            if self.verified >= len(self.plan):
+                self.step_id = None
+            else:
+                self.step_id = self.plan[self.verified][0]
             if self.intent:
                 outcome += ", input outcome uncertain"
             audit.event(self, "finished", outcome=outcome)
             audit.change(self, state, outcome)
             self.service.release(self)
+        await self.service.push_changed(self)
         await self.post(outcome, wake_starter=True)
+
+    async def execute_plan(self):
+        self.authorize()
+        await self.post("resumed" if self.resuming else "started")
+        for step_id, step in self.plan[self.verified:]:
+            self.step_id = step_id
+            audit.change(self, "running")
+            await self.service.push_changed(self)
+            await self.perform(step)
+            audit.journal(self, "verified")
+            self.resuming = False
+            if self.verified < len(self.plan) and self.verified % 8 == 0:
+                await self.post("in progress")
 
     async def observe(self, step):
         tree = await self.service.screen.observe(self)
@@ -195,7 +214,14 @@ class Run(ConfirmationStops):
         if self.document is not None and (self.document != document or self.source != tree.source):
             raise StopWorkflow("window source or document changed")
         if self.document is None:
-            for step_id, remaining in self.plan:
+            window_hash = audit.fingerprint(self.db, [self.grant_id, tree.source, document])
+            if self.window_hash is not None and window_hash != self.window_hash:
+                raise StopWorkflow("resumed window source or document changed", "stopped")
+            if self.window_hash is None:
+                sql = "UPDATE screen_workflow_runs SET window_hash=? WHERE id=?"
+                self.db._exec(sql, (window_hash, self.id))
+                self.window_hash = window_hash
+            for step_id, remaining in self.plan[self.verified:]:
                 require_capabilities(step_id, remaining, tree.source, device)
         self.document, self.source = document, tree.source
         return tree
@@ -209,7 +235,10 @@ class Run(ConfirmationStops):
                 raise StopWorkflow("point input requires the person", "paused")
             raise StopWorkflow("semantic target is missing")
         node = nodes[0]
-        if step.action not in node.actions or node.cached.get("actionable") is False:
+        if (
+            step.action not in node.actions or "disabled" in node.flags
+            or node.cached.get("actionable") is False
+        ):
             if step.allow_point:
                 raise StopWorkflow("point input requires the person", "paused")
             raise capability_error(self.step_id, f"{tree.source}.{step.action}", tree.source)
@@ -218,10 +247,15 @@ class Run(ConfirmationStops):
         return node
 
     async def perform(self, step):
+        self.require_current()
         tree = await self.observe(step)
         if tree is None:
             raise StopWorkflow("screen evidence changed during capture")
         node = self.target(tree, step)
+        if self.resuming and self.intent and (
+            not step.preconditions or verdict(tree, step.postcondition, step.target) is not False
+        ):
+            raise StopWorkflow("safe retry could not be verified for previous input", "stopped")
         if step.confirm:
             tree, node = await self.confirm(step, tree, node)
         fresh = (
@@ -257,8 +291,7 @@ class Run(ConfirmationStops):
             raise StopWorkflow("postcondition deadline elapsed") from exc
 
     def record_dispatch(self, request_id):
-        audit.event(self, "dispatch", request_id=request_id)
-        self.intent = True
+        audit.journal(self, "dispatch", request_id=request_id)
 
 
 def configured_directory(line, attachment=None):

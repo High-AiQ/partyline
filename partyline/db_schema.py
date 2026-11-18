@@ -9,7 +9,7 @@ from .turn_usage_schema import MIGRATIONS as TURN_USAGE
 from .reviewer_progress_schema import MIGRATIONS as REVIEWER_PROGRESS
 from .db_schema_helper_updates import HELPER_UPDATES
 from .review_hold_schema import MIGRATIONS as REVIEW_HOLD
-from .screen_workflow_schema import WORKFLOW_MIGRATIONS
+from .screen_workflow_schema import WORKFLOW_MIGRATIONS, WORKFLOW_RESUME_MIGRATIONS
 MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
@@ -296,4 +296,4 @@ MIGRATIONS += ["UPDATE task_reviews SET mode='full' WHERE mode='light'",
     "ALTER TABLE task_reviews ADD COLUMN suite_repository TEXT",
     "ALTER TABLE task_reviews ADD COLUMN suite_batch TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE task_reviews ADD COLUMN suite_repositories TEXT NOT NULL DEFAULT '[]'",
-] + PRESET_OVERRIDES + WORKFLOW_MIGRATIONS
+] + PRESET_OVERRIDES + WORKFLOW_MIGRATIONS + WORKFLOW_RESUME_MIGRATIONS

@@ -7,6 +7,8 @@
    * all. Fixed coordinates then have to be re-derived whenever they stop
    * meaning anything, which is what `place()` and the window listeners are for.
    */
+  import WorkflowPanel from "../dialogs/WorkflowPanel.svelte";
+  import { dialogs } from "../../state/dialogs.svelte.js";
   import { tick } from "svelte";
   import type { Conversation } from "../../lib/contracts";
   import { canStartChapter } from "../../lib/chapters";
@@ -95,6 +97,12 @@
     role="menuitem"
     class="rounded-[3px] border-0 bg-transparent p-2 px-[11px] text-left text-[10.5px] whitespace-nowrap tracking-[0.06em] text-cream-dim transition-colors duration-100 hover:bg-copper hover:text-ink focus-visible:bg-copper focus-visible:text-ink focus-visible:outline-0"
     onclick={choose(onrename)}>rename</button
+  >
+  <button
+    type="button"
+    role="menuitem"
+    class="rounded-[3px] border-0 bg-transparent p-2 px-[11px] text-left text-[10.5px] tracking-[0.06em] text-cream-dim hover:bg-copper hover:text-ink focus-visible:bg-copper focus-visible:text-ink focus-visible:outline-0"
+    onclick={choose((line) => dialogs.open(WorkflowPanel, { line: line.id }))}>workflows</button
   >
   {#if onchapter && canStartChapter(conversation)}
     <button

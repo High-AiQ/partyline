@@ -12,8 +12,8 @@ from pydantic import TypeAdapter
 
 from . import screen_workflow_audit as audit
 from .file_events import FileEvents
-from .screen_workflow_files import load, names
-from .screen_workflow_format import Step
+from .screen_workflow_bundle import load_bundle
+from .screen_workflow_files import names
 from .screen_workflow_parameters import Slug
 
 logger = logging.getLogger(__name__)
@@ -25,17 +25,9 @@ def skill_name(workflow):
 
 def render(revision):
     workflow = revision.workflow
-    requirements = sorted(
-        {
-            item
-            for entry in workflow.steps
-            for step in ([entry] if isinstance(entry, Step) else entry.steps)
-            for item in step.capabilities
-        }
-    )
     parameters = {name: spec.model_dump() for name, spec in workflow.parameters.items()}
     metadata = json.dumps(
-        {"workflow": workflow.name, "parameters": parameters, "requires": requirements},
+        {"workflow": workflow.name, "parameters": parameters, "requires": revision.capabilities},
         indent=2,
         ensure_ascii=True,
     )
@@ -43,9 +35,12 @@ def render(revision):
     return (
         f"---\nname: {skill_name(workflow)}\ndescription: {description}\n---\n\n"
         f"```json\n{metadata}\n```\n\n"
-        f"Call `screen_workflow_start` (or its `extras` entry) for `{workflow.name}` with the "
+        f"Call `screen_workflow_start` (or its `extras` entry) for `{workflow.name}`, an approved "
+        "workflow which may also be a component, with the "
         "parameters, existing window grant ID, and a stable client key, then report the outcome "
-        "when it arrives on the line.\n"
+        "when it arrives on the line. The runner invokes all component workflows. "
+        "If it stops, use `screen_workflow_status` and `screen_workflow_resume` with the same "
+        "run ID and original parameters.\n"
     )
 
 
@@ -57,7 +52,7 @@ def approved_definitions(db, space):
     result = {}
     for name in names(space):
         try:
-            revision = load(space, name)
+            revision = load_bundle(space, name)
             if audit.approval(db, revision):
                 result[skill_name(revision.workflow)] = render(revision)
         except (OSError, ValueError):

@@ -1,0 +1,55 @@
+version: 1
+name: table-module
+description: Add comparison rows and choose each cell's input type.
+use_when: Editing a document draft.
+parameters:
+  rows:
+    type: list
+    min_items: 1
+    max_items: 10
+    items:
+      type: record
+      fields:
+        row: {type: text, max_length: 100}
+        reference: {type: text, max_length: 100}
+        cells:
+          type: list
+          max_items: 5
+          items:
+            type: record
+            fields:
+              row: {type: text, max_length: 100}
+              column: {type: text, max_length: 100}
+              choice: {type: enum, choices: [included, excluded, text]}
+              text_field: {type: text, max_length: 100}
+              text: {type: text}
+steps:
+  - id: add
+    target: {role: button, name: Add comparison table}
+    action: invoke
+    preconditions: [{check: absent, target: {role: dialog, name: Module editor}}]
+    postcondition: {check: present, target: {role: dialog, name: Module editor}, timeout_ms: 3000}
+    confirm: false
+  - for_each: rows
+    steps:
+      - id: row
+        target: {role: button, name: Add row}
+        action: invoke
+        preconditions: [{check: absent, target: {role: row, name: {item: row}}}]
+        postcondition: {check: present, target: {role: row, name: {item: row}}, timeout_ms: 3000}
+        confirm: false
+      - id: reference
+        target: {role: textbox, name: Reference, within: {role: row, name: {item: row}}}
+        action: set_value
+        inputs: {value: {item: reference}}
+        postcondition: {check: value_equals, expected: {item: reference}, timeout_ms: 3000}
+        confirm: false
+      - for_each: {item: cells}
+        steps:
+          - id: cell
+            use: {by: choice, cases: {included: choose-cell, excluded: choose-cell, text: text-cell}}
+            with: {row: {item: row}, column: {item: column}, choice: {item: choice}}
+            case_bindings:
+              text: {text_field: {item: text_field}, text: {item: text}}
+  - id: save
+    use: save-draft-module

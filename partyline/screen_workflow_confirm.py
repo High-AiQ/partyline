@@ -3,7 +3,6 @@
 import asyncio
 import secrets
 from dataclasses import dataclass
-from urllib.parse import quote
 
 from fastapi import HTTPException
 
@@ -19,6 +18,7 @@ class Confirmation:
     future: asyncio.Future
     step: object
     version: int
+    deadline: float
 
 
 class ConfirmationStops:
@@ -27,18 +27,14 @@ class ConfirmationStops:
             raise StopWorkflow("confirmation requires a live event feed")
         cursor = self.changes.version
         future = asyncio.get_running_loop().create_future()
-        self.confirmation = Confirmation(secrets.token_urlsafe(24), future, step, cursor)
+        deadline = self.service.clock() + CONFIRM_SECONDS
+        self.confirmation = Confirmation(secrets.token_urlsafe(24), future, step, cursor, deadline)
         audit.change(self, "awaiting_confirmation")
         audit.event(self, "confirmation_requested")
-        deadline = self.service.clock() + CONFIRM_SECONDS
-        path = f"/api/conversations/{quote(self.conv_id, safe='')}/screen-workflows/runs/{self.id}"
         try:
             async with self.service.timeout_at(deadline):
-                await self.post(
-                    f"waiting for human confirmation. The window owner can GET `{path}` for the token "
-                    f"and POST the decision to `{path}/confirmation` within {CONFIRM_SECONDS} seconds.",
-                    wake_starter=True,
-                )
+                await self.service.push_changed(self)
+                await self.post("waiting for human confirmation in chat.", wake_starter=True)
                 decision = await self.confirmation_result(future, cursor)
         except TimeoutError as exc:
             raise StopWorkflow("confirmation expired", "stopped") from exc
@@ -55,6 +51,7 @@ class ConfirmationStops:
         ):
             raise StopWorkflow("confirmation target changed", "stopped")
         audit.change(self, "running")
+        await self.service.push_changed(self)
         return current, target
 
     async def confirmation_result(self, future, cursor):
@@ -69,7 +66,10 @@ class ConfirmationStops:
 
     def confirmation_view(self):
         current = self.confirmation
-        if not current or current.future.done() or current.version != self.changes.version:
+        if not current or self.reason or current.future.done() or current.version != self.changes.version:
+            return None
+        remaining = current.deadline - self.service.clock()
+        if remaining <= 0:
             return None
         step = current.step
         inputs = step.inputs.model_dump(exclude_none=True)
@@ -78,6 +78,7 @@ class ConfirmationStops:
         return {
             "token": current.token,
             "effect": step.effect,
+            "remaining_seconds": remaining,
             "action": step.action,
             "target": step.target.model_dump(exclude_none=True),
             "inputs": inputs,
@@ -88,5 +89,6 @@ class ConfirmationStops:
         if not self.confirmation_view() or not secrets.compare_digest(token, current.token):
             raise HTTPException(409, "confirmation is stale or already used")
         self.authorize()
+        self.require_current()
         audit.event(self, "confirmation_accepted" if allowed else "confirmation_denied", actor_id=user_id)
         current.future.set_result(allowed)

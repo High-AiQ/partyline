@@ -5,9 +5,15 @@ import json
 import unittest
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 from partyline.media_files import prepared_file
+from partyline.screen_control import ControlLimits
+from partyline import screen_workflow_audit as workflow_audit
+from partyline.mcp import tools_workflows
+from partyline.screen_workflow_run import RUN_SECONDS
+from partyline.screen_workflow_evidence import StopWorkflow
 from tests.test_return_path import Recorder
 from tests.window_grant_fixtures import WindowGrantFixture
 
@@ -54,20 +60,23 @@ class Clock:
     @asynccontextmanager
     async def deadline(self, at):
         task = asyncio.current_task()
-        self.deadlines[task] = at
+        deadlines = self.deadlines.setdefault(task, [])
+        deadlines.append(at)
         try:
             yield
         except asyncio.CancelledError:
-            if self.now >= at:
+            if self.now >= at and min(deadlines) == at:
                 raise TimeoutError from None
             raise
         finally:
-            self.deadlines.pop(task, None)
+            deadlines.remove(at)
+            if not deadlines:
+                self.deadlines.pop(task)
 
     def advance(self, seconds):
         self.now += seconds
-        for task, deadline in self.deadlines.items():
-            if deadline <= self.now:
+        for task, deadlines in self.deadlines.items():
+            if min(deadlines) <= self.now:
                 task.cancel()
 
 
@@ -224,6 +233,7 @@ class WorkflowTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
 
     async def approve_definition(self, name="portable"):
         shown = await self.client.get(f"{BASE}/definitions/{name}/review", headers=self.human_headers)
+        self.assertEqual(shown.status_code, 200, shown.text)
         approved = await self.client.put(
             f"{BASE}/definitions/{name}/approval",
             headers=self.human_headers,
@@ -303,6 +313,121 @@ class WorkflowTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(repeated.status_code, 409)
 
+    async def test_large_plan_has_separate_budget(self):
+        self.hub.control.limits = ControlLimits(per_session=5)
+        head, steps = PORTABLE.split("steps:\n", 1)
+        entries = steps.split("  - id: ")
+        opening, closing = entries[1], entries[4]
+        expanded = "".join(
+            "  - id: " + (opening if i % 2 == 0 else closing).replace(
+                "open\n" if i % 2 == 0 else "close\n", f"step-{i}\n", 1
+            ) for i in range(8)
+        )
+        (self.workflow_dir / "portable.yaml").write_text(head + "steps:\n" + expanded)
+        await self.approve_definition()
+        run_id, run = await self.start()
+        if run:
+            await run.task
+        status = await self.get_status(run_id)
+        self.assertEqual((status["state"], status["total_steps"]), ("completed", 8))
+        self.assertEqual(len(self.actions), 8)
+        report = (await self.client.get(f"{BASE}/runs/{run_id}/audit", headers=self.human_headers)).json()
+        self.assertEqual(report["action_budget"], 8)
+        self.assertEqual(self.hub.window_grants.remaining_actions("g1"), 5)
+        for _ in range(5):
+            self.clock.advance(0.125)
+            self.hub.window_grants.spend({"id": "g1"})
+        self.clock.advance(1)
+        with self.assertRaisesRegex(ValueError, "session cap"):
+            self.hub.window_grants.spend({"id": "g1"})
+
+    async def test_budget_overrun_and_rate_limit_stop_runner(self):
+        (self.workflow_dir / "portable.yaml").write_text(PORTABLE)
+        await self.approve_definition()
+        self.hub.control.limits = ControlLimits(per_second=1)
+        self.clock.advance(2)
+        self.hub.window_grants.spend({"id": "g1"})
+        run_id, run = await self.start(key="rate-test")
+        if run:
+            await run.task
+        self.assertEqual(self.actions, [])
+        self.assertEqual((await self.get_status(run_id))["state"], "failed")
+
+    async def test_uncertain_last_step_can_be_retried(self):
+        path = self.workflow_dir / "portable.yaml"
+        path.write_text(PORTABLE.replace(
+            "action: invoke\n    confirm: false\n    postcondition: {check: absent",
+            "action: invoke\n    preconditions: [{check: present}]\n    confirm: false\n"
+            "    postcondition: {check: absent",
+        ))
+        await self.approve_definition()
+        original = self.apply_action
+        failed = False
+
+        async def uncertain(message):
+            nonlocal failed
+            if message["element_id"] == "close" and not failed:
+                failed = True
+                self.clock.advance(0.125)
+                self.hub.elements.receive(self.device, {
+                    "request_id": message["request_id"], "status": "unconfirmed", "source": self.source
+                })
+                return
+            await original(message)
+
+        self.apply_action = uncertain
+        run_id, run = await self.start()
+        if run:
+            await run.task
+        self.assertEqual((await self.get_status(run_id))["verified_steps"], 3)
+        response = await self.client.post(
+            f"{BASE}/runs/{run_id}/resume", headers=self.machine_headers, json={}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        if active := self.service.runs.get(run_id):
+            await active.task
+        self.assertEqual((await self.get_status(run_id))["state"], "completed")
+        report = (await self.client.get(f"{BASE}/runs/{run_id}/audit", headers=self.human_headers)).json()
+        self.assertEqual(report["retries_remaining"], 3)
+        self.assertIn("retry; 3 run retries remaining", [event["outcome"] for event in report["events"]])
+
+    async def test_retry_caps_and_cursor_are_persisted(self):
+        (self.workflow_dir / "portable.yaml").write_text(PORTABLE)
+        await self.approve_definition()
+        run_id, run = await self.start()
+        if run:
+            await run.task
+        revision = await self.service.revision("alpha", "portable")
+        plan = revision.plan({"text": "private text"})
+        self.db._exec("DELETE FROM screen_workflow_events WHERE run_id=?", (run_id,))
+        self.db._exec(
+            "UPDATE screen_workflow_runs SET verified_steps=0, current_step=? WHERE id=?",
+            (plan[0][0], run_id),
+        )
+        runner = SimpleNamespace(db=self.db, id=run_id, plan=plan, verified=0, step_id=plan[0][0],
+                                 source="uia", resuming=True)
+        for _ in range(3):
+            runner.resuming = True  # each dispatch is a separate resumed attempt
+            workflow_audit.journal(runner, "dispatch", request_id="test")
+        runner.resuming = True
+        with self.assertRaisesRegex(StopWorkflow, "per-step retry cap"):
+            workflow_audit.journal(runner, "dispatch", request_id="test")
+        runner.step_id = plan[1][0]
+        with self.assertRaisesRegex(StopWorkflow, "resume cursor"):
+            workflow_audit.journal(runner, "dispatch", request_id="test")
+        runner.step_id = plan[0][0]
+        workflow_audit.journal(runner, "verified")
+        runner.step_id = plan[1][0]
+        for _ in range(3):
+            runner.resuming = True
+            workflow_audit.journal(runner, "dispatch", request_id="test")
+        workflow_audit.journal(runner, "verified")
+        runner.step_id = plan[2][0]
+        workflow_audit.journal(runner, "dispatch", request_id="test")
+        runner.resuming = True
+        with self.assertRaisesRegex(StopWorkflow, "run retry allowance"):
+            workflow_audit.journal(runner, "dispatch", request_id="test")
+
     async def test_lab_page_is_available_without_a_grant(self):
         page = await self.client.get("/lab/window-bench/workflow.html")
         self.assertEqual(page.status_code, 200)
@@ -381,8 +506,7 @@ class WorkflowTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         addressed = [body for body in self.starter.bodies() if body.startswith("@a Screen workflow")]
         confirmation, final = addressed
         self.assertIn("waiting for human confirmation", confirmation)
-        self.assertIn(f"GET `{BASE}/runs/{run_id}`", confirmation)
-        self.assertIn(f"POST the decision to `{BASE}/runs/{run_id}/confirmation`", confirmation)
+        self.assertIn("confirmation in chat", confirmation)
         self.assertIn("all steps verified", final)
         self.assertEqual(self.peer.delivered, [])
         report = await self.client.get(f"{BASE}/runs/{run_id}/audit", headers=self.human_headers)
@@ -485,3 +609,186 @@ class WorkflowTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(attempted.status_code, 403)
+
+    async def test_resume_refuses_changed_parameters_and_precondition_then_skips_committed_steps(self):
+        path = self.workflow_dir / "portable.yaml"
+        path.write_text(PORTABLE.replace(
+            "action: set_value",
+            'action: set_value\n    preconditions: [{check: value_equals, expected: ""}]'
+        ))
+        await self.approve_definition()
+        self.values["title"] = "locked"
+        run_id, run = await self.start()
+        if run:
+            await run.task
+        stopped = await self.get_status(run_id)
+        self.assertEqual((stopped["state"], stopped["current_step"], stopped["verified_steps"]),
+                         ("failed", "fill", 2))
+        self.assertEqual(self.actions, [("open", "invoke"), ("kind", "select")])
+        path = f"{BASE}/runs/{run_id}/resume"
+        wrong = await self.client.post(
+            path, headers=self.machine_headers, json={"parameters": {"text": "changed"}}
+        )
+        self.assertEqual(wrong.status_code, 409)
+        peer = await self.client.post(path, headers=self.machine("peer"), json={})
+        self.assertEqual(peer.status_code, 422)
+
+        refused = await self.client.post(path, headers=self.machine_headers, json={})
+        self.assertEqual(refused.status_code, 200, refused.text)
+        if active := self.service.runs.get(run_id):
+            await active.task
+        self.assertIn("precondition failed", (await self.get_status(run_id))["outcome"])
+        self.assertEqual(len(self.actions), 2)
+
+        self.values["title"] = ""
+        self.service.recent_inputs.values.clear()
+        self.assertTrue((await self.get_status(run_id))["needs_parameters"])
+        missing = await self.client.post(path, headers=self.human_headers, json={})
+        self.assertEqual(missing.status_code, 422)
+        self.db.set_attachment_status("a", "exited", "activation-a")
+        self.db.add_attachment("replacement", "alpha", "replacement", "raw", ["shell"], "/tmp", "replaced")
+        replacement = self.machine("replacement")
+        discovered = await self.client.get(f"{BASE}/runs", headers=replacement)
+        self.assertEqual([item["run_id"] for item in discovered.json()["runs"]], [run_id])
+        resumed = await self.client.post(
+            path, headers=replacement, json={"parameters": {"text": "private text"}}
+        )
+        self.assertEqual(resumed.status_code, 200, resumed.text)
+        self.assertEqual(resumed.json()["run_id"], run_id)
+        if active := self.service.runs.get(run_id):
+            await active.task
+        self.assertEqual((await self.get_status(run_id, replacement))["state"], "completed")
+        self.assertEqual([name for name, _ in self.actions], ["open", "kind", "title", "close"])
+        report = (await self.client.get(f"{BASE}/runs/{run_id}/audit", headers=self.human_headers)).json()
+        self.assertEqual([e["step_index"] for e in report["events"] if e["event"] == "verified"],
+                         [1, 2, 3, 4])
+
+        self.values["title"] = ""
+        new_id, new = await self.start(key="another-key", headers=replacement)
+        if new:
+            await new.task
+        self.assertNotEqual(new_id, run_id)
+        self.assertEqual([name for name, _ in self.actions][4:], ["open", "kind", "title", "close"])
+        self.assertEqual(report["attachment_id"], "a")
+        self.assertEqual(report["resume_attachment_id"], "replacement")
+        self.assertIn("replacement", [
+            e["actor_attachment_id"] for e in report["events"] if e["event"] == "resume_requested"
+        ])
+
+    async def test_a_process_can_discover_and_resume_a_persons_run_on_its_grant(self):
+        path = self.workflow_dir / "portable.yaml"
+        path.write_text(PORTABLE.replace(
+            "action: set_value",
+            'action: set_value\n    preconditions: [{check: value_equals, expected: ""}]'
+        ))
+        await self.approve_definition()
+        self.values["title"] = "locked"
+        run_id, run = await self.start(headers=self.human_headers)
+        if run:
+            await run.task
+        process = self.machine("peer")
+        url = f"{BASE}/runs/{run_id}"
+        listing = await self.client.get(f"{BASE}/runs", headers=process)
+        listed = listing.json()["runs"][0]
+        self.assertEqual(listed["run_id"], run_id)
+        self.assertTrue(listed["resumable"])
+        self.assertTrue(listed["needs_parameters"])
+        self.assertEqual((await self.get_status(run_id, process))["current_step"], "fill")
+
+        wrong_line = await self.client.post(url + "/resume", headers=self.machine("b"), json={
+            "parameters": {"text": "private text"},
+        })
+        self.assertEqual(wrong_line.status_code, 403)
+        stopped_by_peer = await self.client.post(url + "/stop", headers=process)
+        self.assertEqual(stopped_by_peer.status_code, 404)
+
+        # Simulate a live grant ID that now belongs to a different owner.
+        self.db._exec("UPDATE screen_workflow_runs SET owner_id=? WHERE id=?",
+                      (self.other_user["id"], run_id))
+        changed_owner = await self.client.post(url + "/resume", headers=process, json={
+            "parameters": {"text": "private text"},
+        })
+        self.assertEqual(changed_owner.status_code, 409)
+        listing = await self.client.get(f"{BASE}/runs", headers=process)
+        self.assertEqual(listing.json()["runs"], [])
+        self.assertEqual(len(self.actions), 2)
+        self.db._exec("UPDATE screen_workflow_runs SET owner_id=? WHERE id=?",
+                      (self.owner["id"], run_id))
+
+        self.values["title"] = ""
+        restarted = await self.client.post(url + "/resume", headers=process, json={
+            "parameters": {"text": "private text"},
+        })
+        self.assertEqual(restarted.status_code, 200, restarted.text)
+        if active := self.service.runs.get(run_id):
+            await active.task
+        self.assertEqual(self.actions, [("open", "invoke"), ("kind", "select"),
+                                        ("title", "set_value"), ("close", "invoke")])
+        await self.hub.window_grants.revoke("g1")
+        self.assertEqual((await self.get_status(run_id, process))["state"], "completed")
+        unseen = await self.client.get(f"{BASE}/runs", headers=self.machine_headers)
+        self.assertEqual(unseen.json()["runs"], [])
+
+    def test_mcp_workflow_listing_includes_discoverable_runs(self):
+        client = Mock(home="alpha")
+        definitions = {"workflows": [{"name": "portable"}]}
+        runs = {"runs": [{"run_id": "run"}]}
+        client.request.side_effect = [definitions, runs]
+        result = tools_workflows.call(client, "screen_workflow_list", {}, {"kind": "machine"})
+        self.assertEqual(result, {**definitions, **runs})
+        self.assertEqual(client.request.call_args.args, ("GET", f"{BASE}/runs"))
+
+    async def test_resume_rejects_a_changed_approved_bundle(self):
+        definition = self.workflow_dir / "portable.yaml"
+        definition.write_text(PORTABLE)
+        await self.approve_definition()
+        self.live = False
+        self.hold = True
+        run_id, run = await self.start()
+        await self.reached(run, self.sent_input)
+        run.stop("stopped for test")
+        await run.task
+        definition.write_text(PORTABLE + "\n# Another revision.\n")
+        await self.approve_definition()
+        resumed = await self.client.post(
+            f"{BASE}/runs/{run_id}/resume", headers=self.machine_headers, json={}
+        )
+        self.assertEqual(resumed.status_code, 409)
+        self.assertIn("original approved workflow bundle", resumed.text)
+
+    async def test_overall_run_deadline_cancels_the_inflight_action(self):
+        (self.workflow_dir / "portable.yaml").write_text(PORTABLE)
+        await self.approve_definition()
+        self.hold = True
+        run_id, run = await self.start()
+        await self.reached(run, self.sent_input)
+        self.clock.advance(RUN_SECONDS)
+        await run.task
+        self.assertTrue(self.cancelled.is_set())
+        outcome = await self.get_status(run_id)
+        self.assertIn("overall run deadline elapsed", outcome["outcome"])
+        self.assertIn("input outcome uncertain", outcome["outcome"])
+        self.assertEqual(outcome["verified_steps"], 0)
+
+        self.hold = False
+        retry = await self.client.post(
+            f"{BASE}/runs/{run_id}/resume", headers=self.machine_headers, json={}
+        )
+        self.assertEqual(retry.status_code, 200, retry.text)
+        if active := self.service.runs.get(run_id):
+            await active.task
+        self.assertIn("safe retry could not be verified", (await self.get_status(run_id))["outcome"])
+        self.assertEqual(self.actions, [("open", "invoke")])
+
+    async def test_confirmation_expiry_uses_the_120_second_deadline(self):
+        run_id, run, _ = await self.prepare_lab()
+        await self.reached(run, self.confirmation_ready)
+        status = await self.get_status(run_id, self.human_headers)
+        token = status["confirmation"]["token"]
+        self.clock.advance(120)
+        await run.task
+        result = await self.client.post(f"{BASE}/runs/{run_id}/confirmation", headers=self.human_headers,
+                                        json={"token": token, "allow": True})
+        self.assertEqual(result.status_code, 409)
+        self.assertIn("confirmation expired", (await self.get_status(run_id))["outcome"])
+        self.assertNotIn(("save", "invoke"), self.actions)

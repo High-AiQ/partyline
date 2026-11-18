@@ -1,3 +1,5 @@
+import { mountDocumentEditor } from "./document-workflow";
+
 export function mountWorkflow(
   root: HTMLElement,
   scenario: string | null,
@@ -7,11 +9,15 @@ export function mountWorkflow(
   },
   trusted = (event: Event) => event.isTrusted,
 ): void {
-  const editor = root.querySelector<HTMLDialogElement>("dialog");
+  const editor = root.querySelector<HTMLDialogElement>("#record-editor");
   const form = editor?.querySelector("form");
   const notice = root.querySelector<HTMLElement>("#save-status");
   const save = root.querySelector<HTMLButtonElement>("#save");
   if (!editor || !form || !notice || !save) return;
+  const disclosure = root.querySelector<HTMLDetailsElement>("#record-lab");
+  if (disclosure && (scenario === "ambiguous" || scenario === "delayed" || scenario === "interrupted")) {
+    disclosure.open = true;
+  }
   if (scenario === "ambiguous") {
     const duplicate = save.cloneNode(true);
     if (duplicate instanceof HTMLElement) duplicate.removeAttribute("id");
@@ -42,4 +48,8 @@ export function mountWorkflow(
 }
 
 const root = document.querySelector("main");
-if (root) mountWorkflow(root, new URLSearchParams(location.search).get("scenario"));
+if (root) {
+  const scenario = new URLSearchParams(location.search).get("scenario");
+  mountWorkflow(root, scenario);
+  mountDocumentEditor(root, scenario);
+}

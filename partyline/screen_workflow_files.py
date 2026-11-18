@@ -188,6 +188,23 @@ def load(space, name):
     raise FileNotFoundError("workflow not found in this checkout")
 
 
+def current_file(space, revision):
+    for folder in space.folders():
+        path = folder / f"{revision.workflow.name}.yaml"
+        try:
+            info = _checked_path(space.root, path).lstat()
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError):
+            return False
+        return (
+            path.relative_to(space.root).as_posix() == revision.path
+            and stat.S_ISREG(info.st_mode)
+            and file_stamp(info) == revision.stamp
+        )
+    return False
+
+
 def names(space):
     found = set()
     for folder in space.folders():

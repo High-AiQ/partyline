@@ -4,14 +4,19 @@ import asyncio
 import secrets
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import replace
 
 from fastapi import HTTPException
 
 from . import screen_workflow_audit as audit
 from .screen_file_input import resolve_files
+from .screen_workflow_access import machine_can_see, machine_listing, machine_run_participant
 from .screen_workflow_evidence import StopWorkflow, WindowScreen, authorized_window
-from .screen_workflow_files import checkout, load
+from .screen_workflow_bundle import load_bundle
+from .screen_workflow_events import WorkflowRunsChanged
+from .screen_workflow_files import checkout
+from .screen_workflow_resume import RecentInputs, plan_for, plan_hash, resume
 from .screen_workflow_run import Run, configured_directory
 from .screen_workflow_skills import SkillDirectory
 
@@ -27,6 +32,7 @@ class Workflows:
         self.by_grant = {}
         self.tasks = set()
         self.skills = SkillDirectory(self)
+        self.recent_inputs = RecentInputs()
 
     def placement(self, conv_id):
         line = self.db.get_conversation(conv_id)
@@ -59,7 +65,7 @@ class Workflows:
         directory = self.directory(conv_id)
         space = await self.checkout(conv_id)
         try:
-            revision = await asyncio.to_thread(load, space, name)
+            revision = await asyncio.to_thread(load_bundle, space, name)
         except FileNotFoundError as exc:
             raise HTTPException(404, "workflow not found") from exc
         except (ValueError, OSError) as exc:
@@ -73,18 +79,33 @@ class Workflows:
             "SELECT * FROM screen_workflow_runs WHERE id=? AND conv_id=?", (run_id, conv_id)
         ).fetchone()
 
-    def get(self, principal, conv_id, run_id):
+    def get(self, principal, conv_id, run_id, *, grant_access=False):
         row = self.row(conv_id, run_id)
-        if not row or (principal.kind == "machine" and row["attachment_id"] != principal.attachment_id):
+        if not row:
             raise HTTPException(404, "workflow run not found")
+        if principal.kind == "machine":
+            visible = (
+                machine_can_see(self, principal, row) if grant_access
+                else machine_run_participant(principal, row)
+            )
+            if not visible:
+                raise HTTPException(404, "workflow run not found")
         if principal.kind == "user" and principal.user_id not in (row["owner_id"], row["actor_user_id"]):
             raise HTTPException(403, "run is available to its initiator and window owner")
         return row
 
     def status(self, principal, conv_id, run_id):
-        result = audit.view(self.get(principal, conv_id, run_id))
+        return self.run_view(principal, self.get(principal, conv_id, run_id, grant_access=True))
+
+    def run_view(self, principal, row):
+        run_id = row["id"]
+        result = audit.view(row)
+        result["needs_parameters"] = result["resumable"] and (
+            run_id not in self.recent_inputs.values
+            or (principal.kind == "machine" and principal.attachment_id != row["attachment_id"])
+        )
         run = self.runs.get(run_id)
-        if run and principal.kind == "user":
+        if run and principal.kind == "user" and principal.user_id == row["owner_id"]:
             if confirmation := run.confirmation_view():
                 result["confirmation"] = confirmation
         return result
@@ -136,28 +157,14 @@ class Workflows:
             return existing
         if not audit.approval(self.db, revision):
             raise HTTPException(403, "a person must approve this exact workflow revision")
-        try:
-            plan = revision.workflow.plan(body.parameters)
-        except (ValueError, KeyError) as exc:
-            raise HTTPException(422, str(exc)) from exc
-        grant, device = authorized_window(self.hub, principal, body.window, conv_id)
-        if body.window in self.by_grant:
-            raise HTTPException(409, "a workflow is already running on this grant")
+        plan = plan_for(revision, body.parameters)
         run_id = str(uuid.uuid4())
-        activation = (self.directory(conv_id), *((att["runtime_owner"], att["api_token"]) if att else ()))
-        runner = replace(principal, conv_id=conv_id) if principal.kind == "user" else principal
-        run = Run(self, run_id, runner, conv_id, grant, device, activation, plan, revision)
-        try:
-            run.authorize()
-        except StopWorkflow as exc:
-            raise HTTPException(409, str(exc)) from exc
-        for _, step in plan:
-            if step.inputs.files:
-                resolve_files(self.hub, principal, step.inputs.files)
+        run, grant = self.prepare(principal, conv_id, att, run_id, body.window, plan, revision)
+        self.validate_remaining(principal, run.grant_id, plan)
         self.db._exec(
             "INSERT INTO screen_workflow_runs(id,conv_id,attachment_id,actor,actor_user_id,owner_id,"
             "client_key_hash,request_hash,project,path,workflow,revision,grant_id,started_at,state,"
-            "total_steps) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "total_steps,plan_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 run_id,
                 conv_id,
@@ -175,14 +182,59 @@ class Workflows:
                 time.time(),
                 "running",
                 len(plan),
+                plan_hash(self.db, revision, body.parameters, plan),
             ),
         )
-        self.runs[run_id] = run
+        return self.launch(run, body.parameters)
+
+    def prepare(self, principal, conv_id, att, run_id, window, plan, revision):
+        grant, device = authorized_window(self.hub, principal, window, conv_id)
+        if window in self.by_grant:
+            raise HTTPException(409, "a workflow is already running on this grant")
+        activation = (self.directory(conv_id), *((att["runtime_owner"], att["api_token"]) if att else ()))
+        runner = replace(principal, conv_id=conv_id) if principal.kind == "user" else principal
+        run = Run(self, run_id, runner, conv_id, grant, device, activation, plan, revision)
+        try:
+            run.authorize()
+            run.require_current()
+        except StopWorkflow as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return run, grant
+
+    def validate_remaining(self, principal, grant_id, plan):
+        for _, step in plan:
+            if step.inputs.files:
+                resolve_files(self.hub, principal, step.inputs.files)
+
+    def launch(self, run, parameters):
+        self.recent_inputs.remember(run.id, parameters)
+        self.runs[run.id] = run
         self.by_grant[run.grant_id] = run
         run.task = asyncio.create_task(run.execute())
         self.tasks.add(run.task)
         run.task.add_done_callback(self.tasks.discard)
-        return audit.view(self.row(conv_id, run_id))
+        return audit.view(self.row(run.conv_id, run.id))
+
+    async def resume(self, principal, conv_id, run_id, parameters):
+        return await resume(self, principal, conv_id, run_id, parameters)
+
+    async def push_changed(self, run):
+        with suppress(TimeoutError):
+            async with asyncio.timeout(2):
+                event = WorkflowRunsChanged(conversation_id=run.conv_id)
+                await self.hub.runtime.broadcast(run.conv_id, event)
+
+    def list_runs(self, principal, conv_id):
+        if principal.kind == "machine":
+            clause, args = machine_listing(self, principal, conv_id)
+        else:
+            clause, args = "(owner_id=? OR actor_user_id=?)", (principal.user_id, principal.user_id)
+        rows = self.db._exec(
+            f"SELECT * FROM screen_workflow_runs WHERE conv_id=? AND {clause} "
+            "ORDER BY finished_at IS NOT NULL, started_at DESC LIMIT 20",
+            (conv_id, *args),
+        ).fetchall()
+        return [self.run_view(principal, row) for row in rows]
 
     def changed(self, grant_id):
         if run := self.by_grant.get(grant_id):

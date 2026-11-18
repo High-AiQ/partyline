@@ -12,7 +12,9 @@ from pydantic import Field, JsonValue, StringConstraints
 from . import screen_workflow_audit as audit
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
-from .screen_workflow_files import load, names
+from .screen_workflow_bundle import load_bundle
+from .screen_workflow_events import WorkflowRunsView, WorkflowRunView
+from .screen_workflow_files import names
 from .screen_workflow_parameters import Slug, Strict, WorkflowName
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -34,6 +36,10 @@ class Start(Strict):
     client_key: str = Field(min_length=1, max_length=64)
 
 
+class Resume(Strict):
+    parameters: dict[Slug, JsonValue] | None = Field(default=None, max_length=32)
+
+
 def summary(db, revision):
     approved = audit.approval(db, revision)
     return {
@@ -50,7 +56,7 @@ def catalog(db, space):
     workflows = []
     for name in names(space):
         try:
-            workflows.append(summary(db, load(space, name)))
+            workflows.append(summary(db, load_bundle(space, name)))
         except (ValueError, OSError):
             workflows.append({"name": name, "error": "workflow is invalid or unavailable"})
     return {"workflows": workflows}
@@ -89,7 +95,8 @@ def workflows_router(service):
         return {
             **summary(db, revision),
             "path": revision.path,
-            "definition": revision.workflow.model_dump(exclude_none=True),
+            "definition": revision.workflow.model_dump(exclude_none=True, by_alias=True),
+            "bundle": revision.review(),
         }
 
     @router.get("/definitions/{name}/review", dependencies=[Depends(human_only)])
@@ -100,7 +107,7 @@ def workflows_router(service):
     async def approve(conv_id: str, name: str, body: Review, request: Request):
         principal = authorize(request, conv_id, "write")
         revision = await service.revision(conv_id, name)
-        if body.revision != revision.digest:
+        if body.revision != revision.digest or not revision.current():
             raise HTTPException(409, "workflow changed. Review the current revision")
         audit.approve(db, revision, principal.user_id)
         try:
@@ -131,17 +138,27 @@ def workflows_router(service):
             )
         return {"ok": True}
 
-    @router.post("/runs")
+    @router.post("/runs", response_model=WorkflowRunView, response_model_exclude_unset=True)
     async def start(conv_id: str, body: Start, request: Request):
         principal = authorize(request, conv_id, "write")
         deny_unless(db, principal, conv_id, "read")
         return await service.start(principal, conv_id, body)
 
-    @router.get("/runs/{run_id}")
+    @router.get("/runs", response_model=WorkflowRunsView, response_model_exclude_unset=True)
+    async def list_runs(conv_id: str, request: Request):
+        return {"runs": service.list_runs(authorize(request, conv_id), conv_id)}
+
+    @router.post("/runs/{run_id}/resume", response_model=WorkflowRunView, response_model_exclude_unset=True)
+    async def resume(conv_id: str, run_id: str, body: Resume, request: Request):
+        principal = authorize(request, conv_id, "write")
+        deny_unless(db, principal, conv_id, "read")
+        return await service.resume(principal, conv_id, run_id, body.parameters)
+
+    @router.get("/runs/{run_id}", response_model=WorkflowRunView, response_model_exclude_unset=True)
     async def status(conv_id: str, run_id: str, request: Request):
         return service.status(authorize(request, conv_id), conv_id, run_id)
 
-    @router.post("/runs/{run_id}/stop")
+    @router.post("/runs/{run_id}/stop", response_model=WorkflowRunView, response_model_exclude_unset=True)
     async def stop(conv_id: str, run_id: str, request: Request):
         return service.stop(authorize(request, conv_id, "write"), conv_id, run_id)
 
@@ -160,18 +177,24 @@ def workflows_router(service):
             "actor",
             "actor_user_id",
             "attachment_id",
+            "resume_attachment_id",
             "path",
             "grant_id",
             "started_at",
             "finished_at",
         )
         events = db._exec(
-            "SELECT created_at,step,source,event,request_id,actor_user_id,outcome "
-            "FROM screen_workflow_events WHERE run_id=? ORDER BY id",
+            "SELECT created_at,step,step_index,source,event,request_id,actor_user_id,actor_attachment_id,"
+            "outcome FROM screen_workflow_events WHERE run_id=? ORDER BY id",
             (run_id,),
         ).fetchall()
+        allowance = min(row["total_steps"], audit.MAX_RUN_RETRIES)
+        retries = sum(1 for event in events if (event["outcome"] or "").startswith("retry;"))
         return {
             **audit.view(row),
+            "action_budget": row["total_steps"],
+            "retry_allowance": allowance,
+            "retries_remaining": max(0, allowance - retries),
             **{key: row[key] for key in metadata},
             "events": [dict(event) for event in events],
         }

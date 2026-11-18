@@ -11,10 +11,11 @@ chance to propose a repair when a step fails.
 
 1. Record a successful demonstration or reconstruct it from an authorized line history.
 2. Distil the run into semantic targets, typed inputs, checks, and confirmation stops.
-3. Review the plan and approve its exact revision for unattended use.
+3. Review the whole workflow bundle and approve its exact revision for unattended use.
 4. Start a run with parameters and an existing window grant. Resolve, act, and verify one step at a time.
 5. On an eligible failure, ask the small model for one proposal. Escalate unresolved failures with evidence.
-6. Post the outcome to the line and retain a run audit.
+6. Resume from the first unverified action after correcting the live view, or start a new run at step one.
+7. Post the outcome to the line and retain a run audit.
 
 ## Motivation
 
@@ -189,8 +190,11 @@ establish it.
 The person reviews a rendered action plan and the file diff, including
 parameter types, matching rules, source requirements, expected transitions,
 allowed point fallbacks, and irreversible effects. Save approval against the
-project, path, and exact file digest. Preview is read-only. The first unattended
-run and each changed revision require approval. Per-action confirmation still
+project, checkout, path, and bundle hash. The hash includes the exact file
+revision and relative path of every reachable workflow, including every enum
+branch. The review shows the call tree, confirmation effects and union of
+capabilities. Editing any piece invalidates all approvals that include it.
+The first unattended run and each changed revision require approval. Per-action confirmation still
 applies during replay. A learner or repairer may propose a revision through
 the project's ordinary write fence and review path. [Line checkouts](../hierarchy.md#the-checkout-a-line-works-in)
 
@@ -198,10 +202,10 @@ the project's ordinary write fence and review path. [Line checkouts](../hierarch
 
 Each approval publishes a thin, line-local skill where supported. It contains
 the workflow name, its description and `use_when` from YAML, the typed
-parameters, and the source and feature requirements. It instructs the model
-to call `screen_workflow_start` with the workflow name, parameters, existing
-grant ID and a stable client key, then report the outcome posted to the line.
-The workflow steps stay in the YAML and execute in the model-free runner.
+parameters, and the bundle's source and feature requirements. It points to
+`screen_workflow_start` for the approved top-level workflow with its parameters,
+existing grant ID and a stable client key. It also points to status and resume
+for a stopped run. The runner executes each component directly from the YAML.
 
 Partyline regenerates the skill on approval and withdraws it when the
 revision changes or a person revokes approval. Phase 1 installs the projection
@@ -248,14 +252,15 @@ observation may pass, but an unresolved check stops as unknown. A helper
 receipt or quiet settle interval alone cannot verify the step.
 [Helper event barriers](../screen-helper.md#uia-latency-scoped-reads-and-live-state-diagnostics)
 
-Proposed MCP tools follow the existing specialist-tool pattern. Advertise
-start when the attachment has access to a window grant. Keep status and stop
-available to the initiating attachment and authorized people for their own
-run even after the grant ends. Expose the same tools through `extras` when
-needed by clients that do not re-list. [MCP catalog](../../partyline/mcp/catalog.py)
+MCP advertises start and resume when the attachment has a window grant.
+A process on the run's line with access to the original grant can discover
+the run and resume it with the original parameters. The initiating
+attachment, latest resuming attachment, and authorized people can query
+status even after the grant ends. They can also stop an active run. Clients that do not re-list can use
+`extras`. [MCP catalog](../../partyline/mcp/catalog.py)
 
 ```text
-screen_workflow_list() -> {workflows}
+screen_workflow_list() -> {workflows, runs}
 screen_workflow_show(workflow) -> {definition, revision, approved}
 screen_workflow_start(workflow, window, parameters, client_key)
   -> {run_id, revision, state}
@@ -263,31 +268,81 @@ screen_workflow_status(run_id)
   -> {state, verified_steps, total_steps, current_step, outcome?}
 screen_workflow_stop(run_id)
   -> {state, current_step, outcome?}
+screen_workflow_resume(run_id, parameters)
+  -> {run_id, revision, state}
 ```
 
-Start returns immediately after validating and pinning the workflow and
+Start returns after validating and pinning the workflow bundle and
 principal. The same attachment and `client_key` return the original run for
 identical request data and reject conflicting reuse. Stop is idempotent and
 gates dispatch immediately. Publish a start notice, bounded progress updates
 (such as completed groups), confirmation and escalation requests, and a final
 outcome on the run's line using server events. Include the run ID, revision,
 verified count, current step, and stop reason. Confirmation notices give the
-window owner the run status and confirmation API paths. Confirmation, paused
-handoffs, and final outcomes wake the attachment that started the run.
+window owner a Confirm or Cancel prompt above the composer. The decision
+uses a single-use token and expires after 120 seconds or upon a window change.
+Confirmation, paused handoffs, and final outcomes wake the process that
+started or resumed the run.
 Start and progress notices go to the line without waking a process.
 Tool callers can query a snapshot on demand.
 
-### Phase 1 interface
+### Version 1 interface
 
 Version 1 supports `invoke`, `set_value`, `select` and CDP-only `set_files`
 with existing line-readable media IDs. Its checks are `present`, `absent`,
 `value_equals`, `notice_text`, and CDP file-count read-back
 (`file_count_equals`). A check defaults to the step target. `requires`
 supports `uia`, `cdp`, and `cdp.set_files`. For a list of records, write a
-`for_each` entry with a list parameter name and nested `steps`. Within its
-steps, `{item: field}` binds a record field and `{item: true}` binds a scalar
-list item. Ordinals use provider tree order within the named scope and
-require an exact `match_count`. Expanded runs are limited to 128 steps.
+`for_each` entry with a list parameter name and nested `steps`. It also
+accepts a binding such as `{item: rows}` or `{param: rows}`. Inside a repeat,
+`{item: field}` binds a field of the innermost record and `{item: true}`
+binds the current item. Records and lists can contain other records and lists.
+Ordinals use provider tree order within the named scope and require an exact
+`match_count`.
+
+A call step has an `id`, `use` and optional `with`. Bind the receiving
+parameters from the caller's parameters or innermost item. To choose a
+workflow using a record's enum field, use `use: {by: kind, cases: {...}}`
+and cover every declared choice. `case_bindings` adds or overrides common
+`with` bindings for a choice. Every call site is checked against the
+receiving signature, and every binding in the expanded plan is validated
+against its receiving constraints before any input is sent. Components
+inherit the same grant, approval and run journal.
+
+The runner allows four levels of calls and four nested repeats across the
+call path, enough for a module, row and cell with one extra repeat. Lists
+hold at most 32 items and may declare smaller limits. Input JSON is bounded
+to 512 KiB when serialized with ASCII escapes. Parameter declarations
+allow eight nested containers so the module, row and cell lists can each
+contain records. A bundle can reach up to 32 workflow files. Each attempt
+expands at most 4,096 actions and visits at most 16,384 entries, counting calls
+and repeats even when a branch generates no action. Seven six-column,
+ten-row modules can use several actions per cell and still fit. Each attempt
+has a 45-minute monotonic deadline so a stalled sequence of checks or
+confirmations leaves a record of where it stopped. The existing window
+grant's authorization and per-second rate still apply. Each approved run has an
+action budget equal to its expanded plan, recorded as its total steps. A safe
+resume can retry only its current unverified step: each step allows at most three
+dispatches, and the run allows up to the smaller of its plan size or 32 retries.
+These limits allow recovery from transient failures while bounding repeated input.
+The journal records retries and their remaining allowance across resumes. The separate ad-hoc grant
+cap defaults to 300 and can be configured with `PARTYLINE_CONTROL_SESSION_ACTIONS`.
+A fully populated seven-table example uses 856 actions. Generated skills describe
+each approved workflow as runnable, including workflows used as components.
+
+The audit journals each verified action with its expanded ID and one-based
+index, atomically with the resume cursor. To resume, use the original run ID,
+window grant, approved bundle and parameters. Partyline can reuse the inputs
+of the last 16 runs in server memory for the window owner or the original
+caller. Other processes supply the original parameters when resuming, as do
+callers after the cache is cleared. The audit verifies
+input identity with keyed digests. The runner captures the live window again,
+checks the pinned document and failed step's target and
+preconditions, then continues from that step. If input may have been sent
+without verification, retry requires explicit preconditions and a fresh
+observation that the intended result is still false. A confirmation step
+always asks the window owner again. If the grant has ended, start a fresh
+run on a new grant.
 
 The runner captures and validates a complete view when it needs to prove
 scope, uniqueness, or absence. It reuses a complete view from the same run
@@ -311,10 +366,12 @@ authenticates review, approval, confirmation, and audit calls.
 | `GET /definitions/{name}/review` | Read the exact review plan as a person. |
 | `PUT /definitions/{name}/approval` | Approve with `{"revision":"<sha256>"}` after review. |
 | `DELETE /definitions/{name}/approval` | Revoke that workflow's approval on this checkout. |
+| `GET /runs` | List recent runs visible to the caller, including active runs. |
 | `POST /runs` | Start with `workflow`, `window`, `parameters`, and `client_key`. |
 | `GET /runs/{run_id}` | Read run status. The window owner sees pending confirmation context and its token. |
 | `POST /runs/{run_id}/confirmation` | The window owner decides with `{"token":"<challenge>","allow":true}`. |
 | `POST /runs/{run_id}/stop` | Stop the run. |
+| `POST /runs/{run_id}/resume` | Resume the same run with `{"parameters":{…}}`. The body can be `{}` while the original parameters are cached. |
 | `GET /runs/{run_id}/audit` | Read the content-free run audit. |
 
 The [record lab definition](../../tests/fixtures/screen-workflows/edit-record.yaml)
@@ -322,6 +379,48 @@ and `/lab/window-bench/workflow.html` exercise the CDP path. The lab accepts
 `?scenario=delayed`, `?scenario=ambiguous`, and `?scenario=interrupted`. The
 UIA test runs a native-control fixture without a CDP route. Its image
 attachment counterpart requires a separately authored dialog flow.
+
+## Example · Publish rich content for a document
+
+Use the [complete workflow set](../../tests/fixtures/screen-workflows/publish-document)
+in `.partyline/workflows/` in the line's assigned checkout. Open the
+[window-bench document editor](/lab/window-bench/workflow.html) in a
+CDP-capable granted window. In the line's **Workflows** menu, review and
+approve `publish-document`. Its top-level repeat dispatches each module.
+
+```yaml
+- for_each: modules
+  steps:
+    - id: module
+      use: {by: kind, cases: {image: image-module, text: text-module, table: table-module}}
+      case_bindings:
+        image: {images: {item: images}, alt: {item: alt}}
+        text: {headline: {item: headline}, body: {item: body}}
+        table: {rows: {item: rows}}
+```
+
+1. Set **Document title**, then add each module in the supplied order.
+2. **Image** opens the module and the image file dialog. It attaches the
+   supplied line media ID, accepts the dialog, fills **Alternative text**, and
+   saves the module into the draft.
+3. **Text** adds a module, fills **Headline** and **Body text**, and saves it
+   into the draft.
+4. **Comparison table** repeats over up to ten rows. Each row has a
+   **Reference** field and up to five later columns. Those columns each have
+   an independent dropdown. **Included** and **Excluded** set the dropdown.
+   **Text** reveals a textbox in that cell, which the runner fills within
+   the matching row.
+5. **Publish document** checks that the draft is ready and no module dialog
+   is open. Confirm in chat to publish and verify **Document published**.
+
+Use the [sample parameters](../../tests/fixtures/screen-workflows/publish-document/parameters.json)
+and replace `fixture-image` with the ID of an image uploaded to the line.
+Start the top-level workflow with that JSON, the existing grant and a
+stable client key. To exercise resume, open the lab with
+`?scenario=publication-lock`. Cancel at the publish confirmation, enable
+**Block publishing**, and select **Resume**. The failed readiness check leaves
+all saved modules in place. Clear **Block publishing**, select **Resume**,
+then confirm publication. The original run records each verified action once.
 
 ## Escalation and model effort
 

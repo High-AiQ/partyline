@@ -9,6 +9,7 @@
   import InstanceBanner from "./components/InstanceBanner.svelte";
   import Rail from "./components/rail/Rail.svelte";
   import TopBar from "./components/chat/TopBar.svelte";
+  import WorkflowRunCards from "./components/chat/WorkflowRunCards.svelte";
   import Feed from "./components/chat/Feed.svelte";
   import Composer from "./components/chat/Composer.svelte";
   import Board from "./components/board/Board.svelte";
@@ -138,7 +139,6 @@
     class:board-collapsed={layout.boardCollapsed}
   >
     <Rail />
-
     <main
       id="main"
       class="flex min-w-0 flex-col overflow-hidden bg-[radial-gradient(1200px_500px_at_50%_-200px,var(--color-ink-3)_0%,var(--color-ink)_60%)]"
@@ -149,14 +149,14 @@
       <TopBar />
       <Feed />
       {#if room.conversation}
-        <!-- The approvals banner sits in the flex column directly above the
-             composer, on every width: in flow, so the feed shrinks and the
-             pending decisions are on screen without scrolling (2.20). -->
+        <!-- Pending decisions take flow space above the composer at every width. -->
         <ApprovalsBanner />
+        {#key room.conversation.id}
+          <WorkflowRunCards line={room.conversation.id} />
+        {/key}
         <Composer />
       {/if}
     </main>
-
     <Board onmention={mention} />
 
     {#if layout.drawerOpen}

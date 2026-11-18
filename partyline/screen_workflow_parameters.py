@@ -1,5 +1,7 @@
 """Bound the inputs to a workflow before the runner can dispatch any action."""
 
+from __future__ import annotations
+
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -39,16 +41,20 @@ class MediaParameter(Strict):
 Scalar = Annotated[TextParameter | EnumParameter | MediaParameter, Field(discriminator="type")]
 
 
+MAX_LIST_ITEMS = 32
+MAX_PARAMETER_DEPTH = 8
+
+
 class RecordItem(Strict):
     type: Literal["record"]
-    fields: dict[Slug, Scalar] = Field(min_length=1, max_length=16)
+    fields: dict[Slug, Parameter] = Field(min_length=1, max_length=16)
 
 
 class ListParameter(Strict):
     type: Literal["list"]
-    items: Annotated[Scalar | RecordItem, Field(discriminator="type")]
-    min_items: int = Field(default=0, ge=0, le=32)
-    max_items: int = Field(ge=1, le=32)
+    items: Parameter
+    min_items: int = Field(default=0, ge=0, le=MAX_LIST_ITEMS)
+    max_items: int = Field(ge=1, le=MAX_LIST_ITEMS)
 
     @model_validator(mode="before")
     @classmethod
@@ -64,7 +70,33 @@ class ListParameter(Strict):
         return self
 
 
-Parameter = Annotated[Scalar | ListParameter, Field(discriminator="type")]
+Parameter = Annotated[Scalar | ListParameter | RecordItem, Field(discriminator="type")]
+RecordItem.model_rebuild()
+
+
+def check_depth(spec, depth=0):
+    if depth > MAX_PARAMETER_DEPTH:
+        raise ValueError(f"parameters may nest at most {MAX_PARAMETER_DEPTH} containers")
+    if isinstance(spec, RecordItem):
+        for field in spec.fields.values():
+            check_depth(field, depth + 1)
+    if isinstance(spec, ListParameter):
+        check_depth(spec.items, depth + 1)
+
+
+def compatible(source, target):
+    """Require matching types. Each invocation validates receiving bounds and choices."""
+    if isinstance(source, (EnumParameter, TextParameter)):
+        return isinstance(target, (EnumParameter, TextParameter))
+    if type(source) is not type(target):
+        return False
+    if isinstance(target, RecordItem):
+        return source.fields.keys() == target.fields.keys() and all(
+            compatible(source.fields[name], decl) for name, decl in target.fields.items()
+        )
+    if isinstance(target, ListParameter):
+        return compatible(source.items, target.items)
+    return True
 
 
 def validate_input(spec, value):
