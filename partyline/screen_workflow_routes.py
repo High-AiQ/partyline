@@ -188,8 +188,13 @@ def workflows_router(service):
             "outcome FROM screen_workflow_events WHERE run_id=? ORDER BY id",
             (run_id,),
         ).fetchall()
+        allowance = min(row["total_steps"], audit.MAX_RUN_RETRIES)
+        retries = sum(1 for event in events if (event["outcome"] or "").startswith("retry;"))
         return {
             **audit.view(row),
+            "action_budget": row["total_steps"],
+            "retry_allowance": allowance,
+            "retries_remaining": max(0, allowance - retries),
             **{key: row[key] for key in metadata},
             "events": [dict(event) for event in events],
         }

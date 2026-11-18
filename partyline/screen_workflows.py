@@ -202,8 +202,6 @@ class Workflows:
         return run, grant
 
     def validate_remaining(self, principal, grant_id, plan):
-        if len(plan) > self.hub.window_grants.remaining_actions(grant_id):
-            raise HTTPException(409, "window grant has too few remaining actions for the expanded plan")
         for _, step in plan:
             if step.inputs.files:
                 resolve_files(self.hub, principal, step.inputs.files)

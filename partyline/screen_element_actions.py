@@ -219,7 +219,10 @@ async def perform_element_action(runtime, hub, conv_id, body, principal, workflo
                 return changing(hub.elements, grant["id"], detail + " while waiting for window lock")
             if token:
                 message["action_token"] = token
-            hub.window_grants.spend(grant)
+            if workflow:
+                hub.window_grants.spend(grant, workflow=True)
+            else:
+                hub.window_grants.spend(grant)
             dispatch = {"dispatch": workflow.dispatch} if workflow else {}
             if body.action == "set_files":
                 from .screen_file_input import ticket

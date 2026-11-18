@@ -188,17 +188,17 @@ class ControlHub:
         elif grant and grant.flusher:
             grant.flusher.cancel()
 
-    def _spend(self, grant: Grant) -> None:
+    def _spend(self, grant: Grant, *, workflow=False) -> None:
         now, limits = self.clock(), self.limits
         while grant.times and now - grant.times[0] >= 1:
             grant.times.popleft()
         if len(grant.times) >= limits.per_second:
             raise ValueError(f"rate limit: at most {limits.per_second} actions per second")
-        if grant.count >= limits.per_session:
+        if not workflow and grant.count >= limits.per_session:
             raise ValueError(f"session cap: at most {limits.per_session} actions per share; "
                              "ask the person to share again")
         grant.times.append(now)
-        grant.count += 1
+        grant.count += not workflow
 
     async def action(self, conv_id: str, agent: str, action: ControlAction):
         share, device = self.target(conv_id)

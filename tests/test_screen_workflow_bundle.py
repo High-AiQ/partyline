@@ -67,6 +67,13 @@ class WorkflowBundleTests(unittest.TestCase):
         self.assertIsNone(approval(self.db, changed))
         self.assertFalse(approved_definitions(self.db, self.space))
 
+    def test_component_skill_does_not_claim_top_level(self):
+        approve(self.db, load_bundle(self.space, ROOT), 7)
+        approve(self.db, load_bundle(self.space, "text-cell"), 7)
+        skill = approved_definitions(self.db, self.space)["workflow-text-cell"]
+        self.assertIn("may also be a component", skill)
+        self.assertNotIn("top-level", skill)
+
     def test_receiving_declaration_is_checked_before_expansion_can_run(self):
         bundle = load_bundle(self.space, ROOT)
         self.parameters["modules"][0]["images"] = []

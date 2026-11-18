@@ -10,6 +10,8 @@ from .auth_tokens import signing_secret
 ACTIVE = ("running", "awaiting_confirmation", "stopping")
 PUBLIC = ("id", "workflow", "revision", "state", "total_steps", "verified_steps", "current_step", "outcome")
 RESUMABLE = ("failed", "stopped", "paused")
+MAX_STEP_DISPATCHES = 3
+MAX_RUN_RETRIES = 32
 
 
 def fingerprint(db, data):
@@ -96,17 +98,49 @@ def journal(run, kind, *, request_id=None):
     verified = index if kind == "verified" else run.verified
     next_step = run.plan[verified][0] if verified < len(run.plan) else None
     with run.db.lock, run.db.conn:
+        outcome = None
+        if kind == "dispatch":
+            from .screen_workflow_evidence import StopWorkflow
+
+            row = run.db.conn.execute(
+                "SELECT total_steps, verified_steps, current_step FROM screen_workflow_runs WHERE id=?",
+                (run.id,),
+            ).fetchone()
+            if (index > row[0] or row[1] != run.verified or row[2] != run.step_id
+                    or run.plan[index - 1][0] != run.step_id):
+                raise StopWorkflow("workflow dispatch does not match the resume cursor", "stopped")
+            counts = run.db.conn.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT step_index), "
+                "COUNT(CASE WHEN step_index=? THEN 1 END) FROM screen_workflow_events "
+                "WHERE run_id=? AND event='dispatch'", (index, run.id)
+            ).fetchone()
+            used, distinct, step_used = counts
+            retries = used - distinct
+            allowance = min(row[0], MAX_RUN_RETRIES)
+            if step_used:
+                if not run.resuming:
+                    raise StopWorkflow("workflow retry requires a resume", "stopped")
+                if step_used >= MAX_STEP_DISPATCHES:
+                    raise StopWorkflow("workflow per-step retry cap reached", "stopped")
+                if retries >= allowance:
+                    raise StopWorkflow("workflow run retry allowance exhausted", "stopped")
+                outcome = f"retry; {allowance - retries - 1} run retries remaining"
+            if used >= row[0] + allowance:
+                raise StopWorkflow("workflow run action budget exhausted", "stopped")
         run.db.conn.execute(
             "UPDATE screen_workflow_runs SET verified_steps=?, current_step=?, input_pending=? WHERE id=?",
             (verified, next_step, int(kind == "dispatch"), run.id),
         )
         run.db.conn.execute(
-            "INSERT INTO screen_workflow_events(run_id,created_at,step,step_index,source,event,request_id)"
-            " VALUES(?,?,?,?,?,?,?)",
-            (run.id, time.time(), run.step_id, index, run.source, kind, request_id),
+            "INSERT INTO screen_workflow_events(run_id,created_at,step,step_index,source,event,"
+            "request_id,outcome)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (run.id, time.time(), run.step_id, index, run.source, kind, request_id, outcome),
         )
     run.verified = verified
     run.intent = kind == "dispatch"
+    if kind == "dispatch":
+        run.resuming = False
 
 
 def change(run, state, outcome=None):

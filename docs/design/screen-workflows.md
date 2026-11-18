@@ -320,10 +320,15 @@ and repeats even when a branch generates no action. Seven six-column,
 ten-row modules can use several actions per cell and still fit. Each attempt
 has a 45-minute monotonic deadline so a stalled sequence of checks or
 confirmations leaves a record of where it stopped. The existing window
-grant's authorization, per-second rate and action budget still apply. A
-fully populated seven-table example uses 856 actions. For a job beyond
-the default 300-action grant cap, the operator can configure
-`PARTYLINE_CONTROL_SESSION_ACTIONS` before granting the window.
+grant's authorization and per-second rate still apply. Each approved run has an
+action budget equal to its expanded plan, recorded as its total steps. A safe
+resume can retry only its current unverified step: each step allows at most three
+dispatches, and the run allows up to the smaller of its plan size or 32 retries.
+These limits allow recovery from transient failures while bounding repeated input.
+The journal records retries and their remaining allowance across resumes. The separate ad-hoc grant
+cap defaults to 300 and can be configured with `PARTYLINE_CONTROL_SESSION_ACTIONS`.
+A fully populated seven-table example uses 856 actions. Generated skills describe
+each approved workflow as runnable, including workflows used as components.
 
 The audit journals each verified action with its expanded ID and one-based
 index, atomically with the resume cursor. To resume, use the original run ID,

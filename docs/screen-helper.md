@@ -1055,10 +1055,11 @@ An action that stopped partway is audited as `(interrupted: …)`, and one the
 computer never confirmed as `(unconfirmed)`.
 
 **Limits.** By default at most 10 actions per second, 500 characters per
-`screen_type`, and 300 actions per share; the helper also enforces a hard local
+`screen_type`, and 300 ad-hoc actions per share or window grant; approved workflow runs use
+their expanded plan as a separate budget. The helper also enforces a hard local
 ceiling of 20 actions per second and 500 characters. Server operators set the
 limits with `PARTYLINE_CONTROL_RATE`, `PARTYLINE_CONTROL_MAX_TEXT` (the helper's
-500 still applies) and `PARTYLINE_CONTROL_SESSION_ACTIONS`; invalid values stop
+500 still applies) and `PARTYLINE_CONTROL_SESSION_ACTIONS` (ad-hoc actions only); invalid values stop
 the server at startup.
 
 **Permissions.**

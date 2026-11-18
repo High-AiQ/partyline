@@ -6,10 +6,14 @@ import unittest
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 from partyline.media_files import prepared_file
+from partyline.screen_control import ControlLimits
+from partyline import screen_workflow_audit as workflow_audit
 from partyline.mcp import tools_workflows
 from partyline.screen_workflow_run import RUN_SECONDS
+from partyline.screen_workflow_evidence import StopWorkflow
 from tests.test_return_path import Recorder
 from tests.window_grant_fixtures import WindowGrantFixture
 
@@ -229,6 +233,7 @@ class WorkflowTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
 
     async def approve_definition(self, name="portable"):
         shown = await self.client.get(f"{BASE}/definitions/{name}/review", headers=self.human_headers)
+        self.assertEqual(shown.status_code, 200, shown.text)
         approved = await self.client.put(
             f"{BASE}/definitions/{name}/approval",
             headers=self.human_headers,
@@ -307,6 +312,121 @@ class WorkflowTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
             path, headers=self.human_headers, json={"token": token, "allow": True}
         )
         self.assertEqual(repeated.status_code, 409)
+
+    async def test_large_plan_has_separate_budget(self):
+        self.hub.control.limits = ControlLimits(per_session=5)
+        head, steps = PORTABLE.split("steps:\n", 1)
+        entries = steps.split("  - id: ")
+        opening, closing = entries[1], entries[4]
+        expanded = "".join(
+            "  - id: " + (opening if i % 2 == 0 else closing).replace(
+                "open\n" if i % 2 == 0 else "close\n", f"step-{i}\n", 1
+            ) for i in range(8)
+        )
+        (self.workflow_dir / "portable.yaml").write_text(head + "steps:\n" + expanded)
+        await self.approve_definition()
+        run_id, run = await self.start()
+        if run:
+            await run.task
+        status = await self.get_status(run_id)
+        self.assertEqual((status["state"], status["total_steps"]), ("completed", 8))
+        self.assertEqual(len(self.actions), 8)
+        report = (await self.client.get(f"{BASE}/runs/{run_id}/audit", headers=self.human_headers)).json()
+        self.assertEqual(report["action_budget"], 8)
+        self.assertEqual(self.hub.window_grants.remaining_actions("g1"), 5)
+        for _ in range(5):
+            self.clock.advance(0.125)
+            self.hub.window_grants.spend({"id": "g1"})
+        self.clock.advance(1)
+        with self.assertRaisesRegex(ValueError, "session cap"):
+            self.hub.window_grants.spend({"id": "g1"})
+
+    async def test_budget_overrun_and_rate_limit_stop_runner(self):
+        (self.workflow_dir / "portable.yaml").write_text(PORTABLE)
+        await self.approve_definition()
+        self.hub.control.limits = ControlLimits(per_second=1)
+        self.clock.advance(2)
+        self.hub.window_grants.spend({"id": "g1"})
+        run_id, run = await self.start(key="rate-test")
+        if run:
+            await run.task
+        self.assertEqual(self.actions, [])
+        self.assertEqual((await self.get_status(run_id))["state"], "failed")
+
+    async def test_uncertain_last_step_can_be_retried(self):
+        path = self.workflow_dir / "portable.yaml"
+        path.write_text(PORTABLE.replace(
+            "action: invoke\n    confirm: false\n    postcondition: {check: absent",
+            "action: invoke\n    preconditions: [{check: present}]\n    confirm: false\n"
+            "    postcondition: {check: absent",
+        ))
+        await self.approve_definition()
+        original = self.apply_action
+        failed = False
+
+        async def uncertain(message):
+            nonlocal failed
+            if message["element_id"] == "close" and not failed:
+                failed = True
+                self.clock.advance(0.125)
+                self.hub.elements.receive(self.device, {
+                    "request_id": message["request_id"], "status": "unconfirmed", "source": self.source
+                })
+                return
+            await original(message)
+
+        self.apply_action = uncertain
+        run_id, run = await self.start()
+        if run:
+            await run.task
+        self.assertEqual((await self.get_status(run_id))["verified_steps"], 3)
+        response = await self.client.post(
+            f"{BASE}/runs/{run_id}/resume", headers=self.machine_headers, json={}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        if active := self.service.runs.get(run_id):
+            await active.task
+        self.assertEqual((await self.get_status(run_id))["state"], "completed")
+        report = (await self.client.get(f"{BASE}/runs/{run_id}/audit", headers=self.human_headers)).json()
+        self.assertEqual(report["retries_remaining"], 3)
+        self.assertIn("retry; 3 run retries remaining", [event["outcome"] for event in report["events"]])
+
+    async def test_retry_caps_and_cursor_are_persisted(self):
+        (self.workflow_dir / "portable.yaml").write_text(PORTABLE)
+        await self.approve_definition()
+        run_id, run = await self.start()
+        if run:
+            await run.task
+        revision = await self.service.revision("alpha", "portable")
+        plan = revision.plan({"text": "private text"})
+        self.db._exec("DELETE FROM screen_workflow_events WHERE run_id=?", (run_id,))
+        self.db._exec(
+            "UPDATE screen_workflow_runs SET verified_steps=0, current_step=? WHERE id=?",
+            (plan[0][0], run_id),
+        )
+        runner = SimpleNamespace(db=self.db, id=run_id, plan=plan, verified=0, step_id=plan[0][0],
+                                 source="uia", resuming=True)
+        for _ in range(3):
+            runner.resuming = True  # each dispatch is a separate resumed attempt
+            workflow_audit.journal(runner, "dispatch", request_id="test")
+        runner.resuming = True
+        with self.assertRaisesRegex(StopWorkflow, "per-step retry cap"):
+            workflow_audit.journal(runner, "dispatch", request_id="test")
+        runner.step_id = plan[1][0]
+        with self.assertRaisesRegex(StopWorkflow, "resume cursor"):
+            workflow_audit.journal(runner, "dispatch", request_id="test")
+        runner.step_id = plan[0][0]
+        workflow_audit.journal(runner, "verified")
+        runner.step_id = plan[1][0]
+        for _ in range(3):
+            runner.resuming = True
+            workflow_audit.journal(runner, "dispatch", request_id="test")
+        workflow_audit.journal(runner, "verified")
+        runner.step_id = plan[2][0]
+        workflow_audit.journal(runner, "dispatch", request_id="test")
+        runner.resuming = True
+        with self.assertRaisesRegex(StopWorkflow, "run retry allowance"):
+            workflow_audit.journal(runner, "dispatch", request_id="test")
 
     async def test_lab_page_is_available_without_a_grant(self):
         page = await self.client.get("/lab/window-bench/workflow.html")

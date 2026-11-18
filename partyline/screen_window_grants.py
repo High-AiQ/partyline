@@ -94,9 +94,9 @@ class WindowGrants:
         self.closed = ClosedWindows()
         self.approvals = ChromeApprovals(hub)  # which of the grants wait on Chrome's Allow prompt
 
-    def spend(self, grant):
+    def spend(self, grant, *, workflow=False):
         counter = self.actions.setdefault(grant["id"], SimpleNamespace(times=deque(), count=0))
-        self.hub.control._spend(counter)
+        self.hub.control._spend(counter, workflow=workflow)
 
     def remaining_actions(self, grant_id):
         counter = self.actions.get(grant_id)

@@ -35,8 +35,8 @@ def render(revision):
     return (
         f"---\nname: {skill_name(workflow)}\ndescription: {description}\n---\n\n"
         f"```json\n{metadata}\n```\n\n"
-        f"Call `screen_workflow_start` (or its `extras` entry) for `{workflow.name}`, the top-level "
-        "workflow, with the "
+        f"Call `screen_workflow_start` (or its `extras` entry) for `{workflow.name}`, an approved "
+        "workflow which may also be a component, with the "
         "parameters, existing window grant ID, and a stable client key, then report the outcome "
         "when it arrives on the line. The runner invokes all component workflows. "
         "If it stops, use `screen_workflow_status` and `screen_workflow_resume` with the same "
