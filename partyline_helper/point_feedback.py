@@ -2,6 +2,7 @@
 import asyncio
 
 from .point_delta import compact, row
+from .timing import Timing
 
 PRE_READ, POST_READ, INPUT_RESERVE = 0.5, 0.5, 1.0
 CDP_SETTLE, UIA_SETTLE = 2.0, 0.2
@@ -14,6 +15,13 @@ class Feedback:
         self.grant, self.generation = access.grant, access.gate.generation
         self.reader = page.snapshot if page else access.snapshot
         self.before = None
+        self.timing = Timing()
+
+    def merge_timing(self, result):
+        for name, value in result.get("timing", {}).items():
+            if (name not in {"total_ms", "ax_nodes", "mapped_nodes"}
+                    and type(value) in (int, float)):
+                self.timing.values[name] = self.timing.values.get(name, 0) + value
 
     def live(self):
         return (self.access.grant is self.grant and not self.access.gate.revoked.is_set()
@@ -33,6 +41,7 @@ class Feedback:
         try:
             async with asyncio.timeout(remaining):
                 first = await self.reader()
+                self.merge_timing(first)
                 if "elements" not in first:
                     return first
                 result = {**first, "elements": [row(item) for item in first["elements"]]}
@@ -41,6 +50,7 @@ class Feedback:
                     if not cursor or len(result["elements"]) >= 60_000:
                         break
                     part = await self.reader({"cursor": cursor, "tolerate_events": True})
+                    self.merge_timing(part)
                     if "elements" not in part or part.get("snapshot_id") != first.get("snapshot_id"):
                         result["truncated"] = True
                         break
@@ -83,9 +93,11 @@ class Feedback:
             reserve = min(POST_READ, remaining / 2)
             wait = min(settle_budget, remaining - reserve)
             if self.page:
-                settle = await self.page.quiet.wait(deadline=wait)
+                with self.timing.phase("point_settle_ms"):
+                    settle = await self.page.quiet.wait(deadline=wait)
             else:
-                settle = await asyncio.to_thread(self.access.event_state.settle, self.since, budget=wait)
+                with self.timing.phase("point_settle_ms"):
+                    settle = await asyncio.to_thread(self.access.event_state.settle, self.since, budget=wait)
             counter = self.counter()
             after = await self.snapshot(min(POST_READ, max(0, stop - self.clock())))
             if settle == "deadline" or self.clock() >= stop:
@@ -97,7 +109,9 @@ class Feedback:
         if not self.live():
             return result  # no content after revocation
         result.update(settle=settle, settled_event_counter=self.counter(),
-                      point_observation=compact(self.before, after))
+                      point_observation=compact(self.before, after),
+                      timing={**self.timing.values,
+                              "point_total_ms": self.timing.elapsed(self.timing.started)})
         if settle == "changing":
             elapsed = max(0, round((self.clock() - self.started) * 1000))
             result["settle_note"] = f"still changing after {elapsed} ms"

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from partyline_helper.cdp import Chrome
-from partyline_helper.cdp_recipes import DISPATCH
+from partyline_helper.cdp_recipes import ACTION_STATE, DISPATCH
 from partyline_helper.cdp_transport import BrowserConnection
 from partyline_helper.status import Status
 from partyline_helper.uia_access import WindowAccess
@@ -91,6 +91,8 @@ class Socket:
                      "bounds": [0, 0, 100, 40], **self.states.get(backend, {})}
             if "non_element" in state:  # a text or document node answers only its node type
                 return {"result": {"value": {"non_element": state["non_element"]}}}
+            if p["functionDeclaration"] == ACTION_STATE:
+                state["hidden"] = self.states.get(backend, {}).get("hidden", False)
             if p["functionDeclaration"] == DISPATCH:
                 left, top, right, bottom = state["bounds"]
                 state.update(x=(left + right) / 2, y=(top + bottom) / 2)

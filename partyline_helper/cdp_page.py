@@ -2,15 +2,16 @@
 import hashlib
 import uuid
 
-from .cdp_recipes import OBSERVER, STATE, WIDGET_ROLES, normalize, value
+from .cdp_recipes import OBSERVER, STATE, normalize
 from .cdp_ax import exposed
 from .cdp_dom_nodes import DETAIL, discover
 from .cdp_settle import Quiet
 from .cdp_page_dialogs import Dialogs
 from .cdp_transport import CDPError, DocumentChanged, ExtensionRefused, PageUnavailable
 from .cdp_recovery import Recovery
-from .cdp_identity import (CHILD_FRAME, UNRESOLVED, TargetChanged, identity, reprove,
-                           token as identity_token, unactionable)
+from .cdp_identity import TargetChanged, reprove
+from .cdp_page_mapping import map_nodes
+from .timing import Timing
 
 
 class Page(Dialogs, Recovery):
@@ -31,6 +32,8 @@ class Page(Dialogs, Recovery):
         self.action_proof = None
         self.action_point = None
         self.quiet = Quiet()
+        self.operation_timing = None
+        self.defer_object_releases = False
         self.browser.listeners.add(self.event)
 
     def guard(self, document=True, healthy=True):
@@ -48,15 +51,25 @@ class Page(Dialogs, Recovery):
         self.dialog_guard()
         if method.startswith("Input.") or method == "DOM.setFileInputFiles":
             if not self.dispatched and self.action_proof is not None:
-                self.action_point = await reprove(self, self.action_proof,
-                                                 mouse=method == "Input.dispatchMouseEvent")
+                if self.operation_timing:
+                    with self.operation_timing.phase("dispatch_proof_ms"):
+                        self.action_point = await reprove(self, self.action_proof,
+                                                         mouse=method == "Input.dispatchMouseEvent")
+                else:
+                    self.action_point = await reprove(self, self.action_proof,
+                                                     mouse=method == "Input.dispatchMouseEvent")
                 self.guard()
             if (method == "Input.dispatchMouseEvent" and self.action_proof is not None
                     and self.action_point is not None):
                 params = {**params, **self.action_point}
             self.dispatched = True
         try:
-            return await self.browser.call(method, params, self.session, self.dialog_guard)
+            if self.operation_timing is None:
+                return await self.browser.call(method, params, self.session, self.dialog_guard)
+            values = self.operation_timing.values
+            values["cdp_commands"] = values.get("cdp_commands", 0) + 1
+            with self.operation_timing.phase("cdp_roundtrip_sum_ms"):
+                return await self.browser.call(method, params, self.session, self.dialog_guard)
         except PageUnavailable as exc:
             self.unavailable(exc.state)
             raise
@@ -105,6 +118,7 @@ class Page(Dialogs, Recovery):
         self.initialized = True
 
     async def function(self, backend, recipe, arguments=(), release=True, proof=False):
+        release = release and not self.defer_object_releases
         try:
             resolved = await self.call("DOM.resolveNode", {
                 "backendNodeId": backend, "objectGroup": "partyline"})
@@ -137,6 +151,18 @@ class Page(Dialogs, Recovery):
         return result.get("result", {}).get("value") is True
 
     async def snapshot(self, options=None):
+        timing = Timing()
+        previous, self.operation_timing = self.operation_timing, timing
+        try:
+            result = await self._snapshot(options, timing)
+        finally:
+            self.operation_timing = previous
+        if isinstance(result, dict):
+            timing.values["total_ms"] = timing.elapsed(timing.started)
+            result.setdefault("timing", {}).update(timing.values)
+        return result
+
+    async def _snapshot(self, options, timing):
         self.dialog_guard()
         options = options or {}
         before = self.access.event_status()["event_counter"]
@@ -175,65 +201,27 @@ class Page(Dialogs, Recovery):
             self.actionable.clear()
             self.ax_frames.clear()
             epoch = self.epoch
-            raw = (await self.call("Accessibility.getFullAXTree"))["nodes"]
-            nodes = exposed(raw)
-            # Keep upload targets in the first chunk, before a large AX tree reaches the server cap.
-            nodes[1:1] = await discover(self, raw)
+            with timing.phase("ax_tree_ms"):
+                raw = (await self.call("Accessibility.getFullAXTree"))["nodes"]
+            timing.values["ax_nodes"] = len(raw)
+            with timing.phase("ax_mapping_ms"):
+                nodes = exposed(raw)
+                # Keep upload targets in the first chunk, before a large AX tree reaches the server cap.
+                nodes[1:1] = await discover(self, raw)
             index = 0
         ids = {n["nodeId"]: hashlib.blake2b(
             f'{self.access.session.window_grant_id}:{self.identity}:{self.target}:{epoch}:'
             f'{n.get("backendDOMNodeId", n["nodeId"])}'
             .encode(), digest_size=8).hexdigest() for n in nodes}
-        elements, parents, actionable = [], self.parents, self.actionable
         try:
-            for node in nodes[index:index + 2000]:
-                ident = ids[node["nodeId"]]
-                dom, unreachable = {}, None
-                # A frame id on the node or its nearest ancestor in this read is the only frame evidence.
-                above = self.ax_frames.get(ids.get(node.get("parentId")))
-                frame = self.ax_frames[ident] = node.get("frameId") or above
-                if node.get("backendDOMNodeId"):
-                    try:
-                        dom = await self.function(node["backendDOMNodeId"], STATE, release=False)
-                    except CDPError as exc:
-                        if not getattr(exc, "unresolved", False):
-                            raise
-                        self.guard()  # revocation or document loss keeps its own refusal
-                        unreachable = (CHILD_FRAME if frame and self.main_frame and frame != self.main_frame
-                                       else UNRESOLVED)
-                named = value(node.get("name")) or dom.get("aria_label") or dom.get("title")
-                if not unreachable and not node.get("file_input_discovered") and (
-                        node.get("dom_discovered") or not named
-                        and (dom.get("focusable") or dom.get("role") in WIDGET_ROLES | {"gridcell"})):
-                    dom.update(await self.function(node["backendDOMNodeId"], DETAIL, release=False))
-                    # AX can expose zero-size controls activated through their visible labels.
-                    if node.get("dom_discovered") and dom.get("hidden"):
-                        continue
-                item = normalize(node, ident, ids.get(node.get("parentId")), dom)
-                proof = identity(self, dom)
-                item["action_token"] = identity_token(ident, proof)
-                parents[ident] = item["parent"]
-                extra = {}
-                if why := unactionable(node, dom, unreachable):
-                    above = item["parent"]
-                    for _ in range(64):  # the parent chain is already in this read
-                        if above is None or above in actionable:
-                            break
-                        above = parents.get(above)
-                    item.update(actionable=False, why=why)
-                    if above in actionable:
-                        item["act_on"] = above
-                    extra = {"not_actionable": why, "act_on": item.get("act_on")}
-                else:
-                    actionable.add(ident)
-                elements.append(item)
-                self.nodes[ident] = {**node, "action_identity": proof, "action_token": item["action_token"],
-                                     **extra}
+            with timing.phase("dom_mapping_ms"):
+                elements = await map_nodes(self, nodes, ids, epoch, index)
         finally:
             if (self.live and self.page_state == "alive" and self.access.grant is self.grant
                     and not self.access.gate.revoked.is_set() and not self.page_dialog):
                 await self.call("Runtime.releaseObjectGroup", {"objectGroup": "partyline"})
-        await self.call("Runtime.evaluate", {"expression": "0", "returnByValue": True})  # renderer fence
+        with timing.phase("renderer_fence_ms"):
+            await self.call("Runtime.evaluate", {"expression": "0", "returnByValue": True})  # renderer fence
         result = {"source": "cdp", "action_identity_supported": True,
                   "elements": elements, "snapshot_id": uuid.uuid4().hex,
                   "captured_event_counter": before, **self.access.event_status()}
@@ -243,6 +231,7 @@ class Page(Dialogs, Recovery):
             self.access.walks[token] = {"nodes": nodes, "index": index + 2000,
                                         "counter": before, "epoch": epoch}
             result.update(next_cursor=token, truncated=True)
+        timing.values["mapped_nodes"] = len(elements)
         return result
 
     def stop(self):

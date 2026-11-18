@@ -91,6 +91,7 @@ class WindowSnapshots:
         if message.get("type") == "look_window":
             from .window_look import read
             look, requested = await read(entry, message)
+            timing.values.update(look.get("timing", {}))
             if look["source"] == "cdp" and grant.get("target_id"):
                 page = await self.shares.chrome.page(access)
                 if not page or not await page.visible():
@@ -138,6 +139,7 @@ class WindowSnapshots:
             except OSError as exc:  # the person's record comes first: no entry, no image
                 raise GrabError("the helper could not write its audit log") from exc
         chunks = [binary[i:i + CHUNK] for i in range(0, len(binary), CHUNK)]
+        timing.values["total_ms"] = timing.elapsed(timing.started)
         await self.reply(request_id, chunks, gate, ok=True, mime=mime, width=image.width,
                          height=image.height, media=True, chunks=len(chunks),
                          timing=timing.values, **metadata,

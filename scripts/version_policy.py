@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 
 SUBJECT_RE = re.compile(
-    r"^(?P<type>feat|fix|docs|refactor|test|chore)"
+    r"^(?P<type>feat|fix|perf|docs|refactor|test|chore)"
     r"(?:\([a-z0-9_.-]+\))?(?P<breaking>!)?: .+"
 )
 VERSION_RE = re.compile(r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)$")
@@ -65,7 +65,7 @@ def required_bump(subjects: list[str]) -> str | None:
             candidate = "major"
         elif match["type"] == "feat":
             candidate = "minor"
-        elif match["type"] == "fix":
+        elif match["type"] in ("fix", "perf"):
             candidate = "patch"
         else:
             candidate = None

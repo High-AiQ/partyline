@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import json
+import uuid
 
 from websockets.exceptions import ConnectionClosed
 
@@ -32,7 +33,17 @@ class SessionTransport:
             if timing:
                 # Preparation through the writer lock; a packet cannot report its own completed send.
                 timing.values["reply_ms"] = timing.elapsed(timing.started)
-            await self.socket.send(json.dumps(dict(type=kind, **fields)))
+                sentinel = uuid.uuid4().hex
+                timing.values["serialize_ms"] = sentinel
+                started = timing.clock()
+                packet = json.dumps(dict(type=kind, **fields))
+                measured = timing.elapsed(started)
+                timing.values["serialize_ms"] = measured
+                marker = f'"serialize_ms": "{sentinel}"'
+                packet = packet.replace(marker, f'"serialize_ms":{measured}', 1)
+            else:
+                packet = json.dumps(dict(type=kind, **fields))
+            await self.socket.send(packet)
             for chunk in ([] if binary is None else binary if isinstance(binary, list) else [binary]):
                 await self.socket.send(chunk)
 

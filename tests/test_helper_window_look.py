@@ -36,6 +36,8 @@ class HelperLookTests(unittest.IsolatedAsyncioTestCase):
         else:
             self.worker.session.chrome = SimpleNamespace(read=read, metadata=lambda access: {}, reasons={})
             self.part["source"] = "cdp"
+            self.part["timing"] = {"ax_tree_ms": 3, "cdp_commands": 5,
+                                   "total_ms": 100, "ax_nodes": 4, "mapped_nodes": 4}
         grab = type(self.backend).grab
         def capture(hwnd):
             self.assertTrue(self.worker.operation_lock.locked())
@@ -67,6 +69,12 @@ class HelperLookTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([800, 600], record["geometry"]["size"])
             self.assertEqual(reply["look"]["generation"], record["look_generation"])
             self.assertEqual(self.raw, reply["look"]["elements"])
+            if source == "cdp":
+                self.assertEqual(3, reply["timing"]["ax_tree_ms"])
+                self.assertEqual(5, reply["timing"]["cdp_commands"])
+                self.assertNotEqual(100, reply["timing"]["total_ms"])
+                self.assertNotIn("ax_nodes", reply["timing"])
+                self.assertNotIn("mapped_nodes", reply["timing"])
 
     async def test_thumb_budget_and_mapping_cdp_viewport_bounds(self):
         self.prepare(size=(4000, 3000))

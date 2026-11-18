@@ -10,7 +10,10 @@ SERVER = ('server_total_ms', 'window_lock_ms', 'target_ms', 'send_ms', 'helper_r
 HELPER = ('total_ms', 'action_total_ms', 'task_queue_ms', 'worker_queue_ms', 'initialize_ms',
           'target_ms', 'foreground_ms', 'uia_ms', 'gate_lock_ms', 'post_read_ms', 'barrier_ms',
           'walk_ms', 'nodes', 'com_calls', 'read_ms', 'process_start_ms', 'child_read_ms',
-          'reply_ms', 'audit_ms', 'window_check_ms', 'capture_ms', 'encode_ms')
+          'reply_ms', 'audit_ms', 'window_check_ms', 'capture_ms', 'encode_ms',
+          'cdp_roundtrip_sum_ms', 'cdp_commands', 'ax_tree_ms', 'ax_nodes', 'ax_mapping_ms',
+          'dom_mapping_ms', 'renderer_fence_ms', 'mapped_nodes', 'target_proof_ms',
+          'dispatch_proof_ms', 'settle_wait_ms', 'point_settle_ms', 'point_total_ms', 'serialize_ms')
 KEYS = (*SERVER, *('helper_' + key for key in HELPER), 'helper_barrier_stop')
 STOP = ('quiet', 'unchanged', 'unsupported', 'deadline')
 TimingKey = Literal[*KEYS]

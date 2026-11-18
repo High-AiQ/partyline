@@ -46,6 +46,9 @@ class RequiredBumpTest(unittest.TestCase):
     def test_breaking_marker_requires_major(self):
         self.assertEqual(required_bump(["feat(api)!: replace wire envelope"]), "major")
 
+    def test_performance_commit_requires_a_patch_bump(self):
+        self.assertEqual(required_bump(["perf(screen): reduce interaction latency"]), "patch")
+
     def test_breaking_beats_feature_and_fix(self):
         subjects = ["fix(db): close race", "feat(ui): add search", "fix(api)!: remove v1"]
         self.assertEqual(required_bump(subjects), "major")

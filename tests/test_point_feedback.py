@@ -111,6 +111,21 @@ class BarrierTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("quiet", result["settle"])
         self.assertEqual(2, result["settled_event_counter"])
 
+    async def test_cdp_read_and_settle_phases_reach_point_action_reply(self):
+        feedback = self.fixture()
+        measured = {**rows(), "timing": {"ax_tree_ms": 3, "cdp_commands": 7,
+                                          "total_ms": 100, "ax_nodes": 4, "mapped_nodes": 4}}
+        feedback.reader = AsyncMock(return_value=measured)
+        await feedback.start()
+        result = await feedback.finish({"status": "completed"})
+        self.assertEqual(6, result["timing"]["ax_tree_ms"])
+        self.assertEqual(14, result["timing"]["cdp_commands"])
+        self.assertNotIn("total_ms", result["timing"])
+        self.assertNotIn("ax_nodes", result["timing"])
+        self.assertNotIn("mapped_nodes", result["timing"])
+        self.assertGreaterEqual(result["timing"]["point_settle_ms"], 0)
+        self.assertGreater(result["timing"]["point_total_ms"], 0)
+
     async def test_event_during_final_capture_restarts_quiet_wait_without_polling(self):
         feedback = self.fixture()
         await feedback.start()
