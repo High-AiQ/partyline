@@ -112,9 +112,9 @@ class Page(Dialogs, Recovery):
             if proof and type(exc) is CDPError:
                 self.guard()  # revocation or document loss must retain its own refusal
                 raise TargetChanged("backend node no longer resolves") from exc
-            # A read may keep a node that did not resolve (plain CDP failure or the extension's command
-            # failure); runtime failures after it resolved are never labelled this way.
-            exc.unresolved = type(exc) is CDPError or (
+            # A read may keep a node Chrome (or the extension) explicitly refused to resolve; timeouts,
+            # socket errors and runtime failures after it resolved are never labelled this way.
+            exc.unresolved = getattr(exc, "rejected", False) or (
                 isinstance(exc, ExtensionRefused) and exc.code == "debugger_command_failed")
             raise
         obj = resolved["object"]["objectId"]

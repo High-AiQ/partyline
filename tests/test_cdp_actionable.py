@@ -135,6 +135,22 @@ class ActionableTests(unittest.IsolatedAsyncioTestCase):
                     await self.f.read()
                 self.assertFalse(getattr(caught.exception, "unresolved", False))
 
+    async def test_transport_interruptions_during_resolution_fail_the_read_unmarked(self):
+        socket, send = self.f.socket, self.f.socket.send
+        for interruption in (TimeoutError(), OSError("socket closed")):
+            with self.subTest(error=type(interruption).__name__):
+                async def interrupt(raw, send=send, interruption=interruption):
+                    message = json.loads(raw)
+                    if message["method"] == "DOM.resolveNode" and message["params"]["backendNodeId"] == 2:
+                        raise interruption
+                    await send(raw)
+                self.failing = set()
+                with patch.object(socket, "send", side_effect=interrupt):
+                    with self.assertRaisesRegex(CDPError, "interrupted") as caught:
+                        await self.f.read()
+                self.assertFalse(getattr(caught.exception, "unresolved", False))
+                self.assertFalse(getattr(caught.exception, "rejected", False))
+
     async def test_unreachable_frame_refusal_names_the_cause(self):
         await self.f.read()
         page = self.f.chrome.pages[self.f.access]["a"]
