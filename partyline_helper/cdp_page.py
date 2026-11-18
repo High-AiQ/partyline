@@ -19,7 +19,7 @@ class Page(Dialogs, Recovery):
         self.grant, self.generation = access.grant, access.gate.generation
         self.changed = changed
         self.epoch, self.nodes = 0, {}
-        self.parents, self.actionable, self.frames = {}, set(), {}  # this read's links, ids and frames
+        self.parents, self.actionable, self.ax_frames = {}, set(), {}  # this read: links, ids, AX frame ids
         self.main_frame = None
         self.navigations = 0
         self.identity = uuid.uuid4().hex[:8]
@@ -173,7 +173,7 @@ class Page(Dialogs, Recovery):
             self.nodes.clear()
             self.parents.clear()
             self.actionable.clear()
-            self.frames.clear()
+            self.ax_frames.clear()
             epoch = self.epoch
             raw = (await self.call("Accessibility.getFullAXTree"))["nodes"]
             nodes = exposed(raw)
@@ -190,8 +190,8 @@ class Page(Dialogs, Recovery):
                 ident = ids[node["nodeId"]]
                 dom, unreachable = {}, None
                 # A frame id on the node or its nearest ancestor in this read is the only frame evidence.
-                above = self.frames.get(ids.get(node.get("parentId")))
-                frame = self.frames[ident] = node.get("frameId") or above
+                above = self.ax_frames.get(ids.get(node.get("parentId")))
+                frame = self.ax_frames[ident] = node.get("frameId") or above
                 if node.get("backendDOMNodeId"):
                     try:
                         dom = await self.function(node["backendDOMNodeId"], STATE, release=False)
