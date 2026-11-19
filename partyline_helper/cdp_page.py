@@ -4,6 +4,7 @@ import uuid
 
 from .cdp_recipes import OBSERVER, STATE, normalize
 from .cdp_ax import exposed
+from .cdp_control_details import CONTROL_DETAILS, needs_details
 from .cdp_dom_nodes import DETAIL, discover
 from .cdp_settle import Quiet
 from .cdp_page_dialogs import Dialogs
@@ -122,7 +123,7 @@ class Page(Dialogs, Recovery):
         await observe(frames["frameTree"])
         self.initialized = True
 
-    async def function(self, backend, recipe, arguments=(), release=True, proof=False):
+    async def function(self, backend, recipe, arguments=(), release=True, proof=False, objects=None):
         release = release and not self.defer_object_releases
         try:
             resolved = await self.call("DOM.resolveNode", {
@@ -137,6 +138,8 @@ class Page(Dialogs, Recovery):
                 isinstance(exc, ExtensionRefused) and exc.code == "debugger_command_failed")
             raise
         obj = resolved["object"]["objectId"]
+        if objects is not None:
+            objects[backend] = obj  # snapshot releases these together with the object group
         try:
             result = await self.call("Runtime.callFunctionOn", {
                 "objectId": obj, "functionDeclaration": recipe,
@@ -183,10 +186,12 @@ class Page(Dialogs, Recovery):
             if node.get("ignored") and not node.get("dom_discovered"):
                 return {"error": "element is no longer exposed in Chrome accessibility"}
             dom = await self.function(node["backendDOMNodeId"], STATE)
-            if node.get("dom_discovered"):
+            if needs_details(node, dom):
+                dom.update((await self.function(node["backendDOMNodeId"], CONTROL_DETAILS))[0])
+            elif node.get("dom_discovered"):
                 dom.update(await self.function(node["backendDOMNodeId"], DETAIL))
-                if dom.get("hidden"):
-                    return {"error": "element is no longer visible"}
+            if node.get("dom_discovered") and dom.get("hidden"):
+                return {"error": "element is no longer visible"}
             if node.get("file_input_discovered") and (dom.get("tag"), dom.get("type")) != ("INPUT", "file"):
                 return {"error": "element is no longer a file input"}
             item = normalize(node, ident, None, dom)
@@ -212,7 +217,7 @@ class Page(Dialogs, Recovery):
             with timing.phase("ax_mapping_ms"):
                 nodes = exposed(raw)
                 # Keep upload targets in the first chunk, before a large AX tree reaches the server cap.
-                nodes[1:1] = await discover(self, raw)
+                nodes[1:1] = await discover(self, raw, nodes)
             index = 0
         ids = {n["nodeId"]: hashlib.blake2b(
             f'{self.access.session.window_grant_id}:{self.identity}:{self.target}:{epoch}:'

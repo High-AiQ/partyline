@@ -1,7 +1,7 @@
 """Small answers about a stored window tree: summary, ls, find and text."""
 from collections import Counter
 
-from .screen_tree import clip, fit
+from .screen_tree import clean, clip, fit
 from .screen_tree_patterns import MIN_ROWS, describe, shape
 from .screen_tree_query import matcher
 
@@ -121,8 +121,11 @@ def find(tree, query, control_type, root, offset, bounds, value=None):
     rows = []
     for ident in ids:
         node = tree.nodes[ident]
-        if (kind and node.type.lower() != kind or by_name and not by_name(node.name)
-                or by_value and not by_value(node.value)):
+        if (kind and node.type.lower() != kind or by_value and not by_value(node.value)):
+            continue
+        if by_name and not by_name(node.name) and not any(
+                by_name(clean(node.cached[key], 240)) for key in ("row_label", "column_header")
+                if node.cached.get(key)):
             continue
         rows.append(node)
     last = [None]

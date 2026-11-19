@@ -4,6 +4,7 @@ import subprocess
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, patch
 
+from partyline_helper.cdp_control_details import CONTROL_DETAILS
 from partyline_helper.cdp_dom_nodes import DETAIL, candidate, interactive_nodes
 from partyline_helper.cdp_recipes import DISPATCH, HIT, STATE, normalize
 from tests.cdp_fakes import Fixture
@@ -154,7 +155,11 @@ class Reads(IsolatedAsyncioTestCase):
         details = [m['params']['objectId'] for m in self.f.socket.calls
                    if m['method'] == 'Runtime.callFunctionOn'
                    and m['params']['functionDeclaration'] == DETAIL]
-        self.assertEqual(set(details), {'7', '8'})
+        self.assertEqual(set(details), {'8'})
+        batched = [m['params']['objectId'] for m in self.f.socket.calls
+                   if m['method'] == 'Runtime.callFunctionOn'
+                   and m['params']['functionDeclaration'] == CONTROL_DETAILS]
+        self.assertEqual(batched, ['7'])
         self.assertTrue({'Named action', 'Label', 'Title', 'Fallback', 'Discovered', 'Named option'}
                         <= {n['name'] for n in elements})
 
