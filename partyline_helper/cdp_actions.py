@@ -89,7 +89,11 @@ async def _act(page, message, timing):
                 await page.call("Input.dispatchMouseEvent", {"type": kind, **point})
         elif action == "set_value":
             await key(page, "a", 65, 2)  # select existing text using real keyboard input
-            await page.call("Input.insertText", {"text": message.get("value", "")})
+            value = message.get("value", "")
+            if value == "":
+                await key(page, "Delete", 46)
+            else:
+                await page.call("Input.insertText", {"text": value})
         elif action == "scroll_into_view":
             extra = {"hit": await page.function(backend, HIT)}
         elif action == "press":

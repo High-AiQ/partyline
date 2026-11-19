@@ -16,7 +16,8 @@ LINE_NAME = 240  # characters of a name shown on a line
 LINE_VALUE = 80
 STATE_FIELDS = ("enabled", "value", "toggle", "selected", "expand_state", "name", "aria_properties",
                 "source", "provider_identity", "disabled_provenance", "readonly", "inert", "viewport_bounds",
-                "hidden", "file_count", "semantic_role", "action_token", "actionable", "why", "act_on")
+                "hidden", "file_count", "semantic_role", "action_token", "actionable", "why", "act_on",
+                "row_label", "column_header", "popup_hint")
 
 
 def clean(value, limit=NAME_FIELD):
@@ -163,6 +164,9 @@ class Snapshot:
             parts.append("#" + node.auto)
         if node.value:
             parts.append('="' + (node.value if full else clip(node.value, min(limit, LINE_VALUE))) + '"')
+        for key, label in (("row_label", "row"), ("column_header", "column"), ("popup_hint", "popup")):
+            if hint := clean(node.cached.get(key), 240):
+                parts.append(f'{label}="{hint if full else clip(hint, 80)}"')
         if node.actions and node.actions != ("scroll_into_view",):
             parts.append("[" + ",".join(node.actions) + "]")
         if node.toggle in TOGGLE:

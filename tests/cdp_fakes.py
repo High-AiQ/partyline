@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from partyline_helper.cdp import Chrome
+from partyline_helper.cdp_control_details import CONTROL_DETAILS
 from partyline_helper.cdp_recipes import ACTION_STATE, DISPATCH
 from partyline_helper.cdp_transport import BrowserConnection
 from partyline_helper.status import Status
@@ -85,6 +86,9 @@ class Socket:
             return {"object": {"objectId": str(p["backendNodeId"])}}
         if method == "Runtime.callFunctionOn":
             backend = int(p["objectId"])
+            if p["functionDeclaration"] == CONTROL_DETAILS:
+                controls = [backend, *(int(arg["objectId"]) for arg in p["arguments"])]
+                return {"result": {"value": [self.states.get(node, {}) for node in controls]}}
             if p["arguments"] or p["functionDeclaration"] == self.native_select.blur:
                 return {"result": {"value": self.native_select.function(backend, p)}}
             state = {"connected": backend in self.states, "document_identity": "document",

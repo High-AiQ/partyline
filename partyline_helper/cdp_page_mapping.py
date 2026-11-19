@@ -1,7 +1,9 @@
 """Map a captured accessibility tree to proven CDP element records."""
 import asyncio
+from collections import defaultdict
 from itertools import islice
 
+from .cdp_control_details import may_need_details, needs_details, read_controls
 from .cdp_dom_nodes import DETAIL
 from .cdp_identity import CHILD_FRAME, UNRESOLVED, identity, token, unactionable
 from .cdp_recipes import STATE, WIDGET_ROLES, normalize, value
@@ -11,7 +13,7 @@ MAP_CONCURRENCY = 16
 
 
 async def map_nodes(page, nodes, ids, epoch, index, limit):
-    elements = []
+    observations, objects, by_document = [], {}, defaultdict(list)
     pending = iter(nodes[index:index + limit])
     while batch := list(islice(pending, MAP_CONCURRENCY)):
         frames = {}
@@ -20,18 +22,24 @@ async def map_nodes(page, nodes, ids, epoch, index, limit):
             above = page.ax_frames.get(ids.get(node.get("parentId")))
             frames[ident] = page.ax_frames[ident] = node.get("frameId") or above
         states = await asyncio.gather(*(
-            _read_state(page, node, frames[ids[node["nodeId"]]]) for node in batch),
+            _read_state(page, node, frames[ids[node["nodeId"]]], objects) for node in batch),
             return_exceptions=True)
         _raise_first(states)
         details = await asyncio.gather(*(
             _read_detail(page, node, state[0], state[1])
             for node, state in zip(batch, states, strict=True)), return_exceptions=True)
         _raise_first(details)
-        for node, state, detail in zip(batch, states, details, strict=True):
-            item = _map_node(page, node, ids, epoch, state[0], state[1], detail)
-            if item is not None:
-                elements.append(item)
-    return elements
+        for node, (dom, unreachable), detail in zip(batch, states, details, strict=True):
+            if not unreachable and needs_details(node, dom):
+                by_document[dom["document_identity"]].append((objects[node["backendDOMNodeId"]], detail))
+            observations.append((node, dom, unreachable, detail))
+    # Runtime requires object arguments in the same JS world.
+    for entries in by_document.values():
+        details = await read_controls(page, [obj for obj, _ in entries])
+        for (_, detail), observed in zip(entries, details, strict=True):
+            detail.update(observed)
+    return [item for node, dom, unreachable, detail in observations
+            if (item := _map_node(page, node, ids, epoch, dom, unreachable, detail)) is not None]
 
 
 def _raise_first(results):
@@ -40,11 +48,12 @@ def _raise_first(results):
         raise error
 
 
-async def _read_state(page, node, frame):
+async def _read_state(page, node, frame, objects):
     if not node.get("backendDOMNodeId"):
         return {}, None
     try:
-        return await page.function(node["backendDOMNodeId"], STATE, release=False), None
+        return await page.function(node["backendDOMNodeId"], STATE, release=False,
+                                   objects=objects if may_need_details(node) else None), None
     except CDPError as exc:
         if not getattr(exc, "unresolved", False):
             raise
@@ -56,6 +65,7 @@ async def _read_state(page, node, frame):
 async def _read_detail(page, node, dom, unreachable):
     named = value(node.get("name")) or dom.get("aria_label") or dom.get("title")
     if (unreachable or not node.get("backendDOMNodeId") or node.get("file_input_discovered")
+            or needs_details(node, dom)
             or not (node.get("dom_discovered") or not named and (dom.get("focusable")
                  or dom.get("role") in WIDGET_ROLES | {"gridcell"}))):
         return {}
@@ -69,6 +79,9 @@ def _map_node(page, node, ids, epoch, dom, unreachable, detail):
     if node.get("dom_discovered") and dom.get("hidden"):
         return None
     item = normalize(node, ident, ids.get(node.get("parentId")), dom)
+    for key in ("row_label", "column_header", "popup_hint"):
+        if hint := detail.get(key):
+            item[key] = hint
     if page.epoch != epoch:
         return item  # don't seed the new document's action cache from an older AX capture
     proof = identity(page, dom)

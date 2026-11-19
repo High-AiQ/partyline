@@ -1,0 +1,46 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Comparison controls</title>
+<style>
+  th, td, .layout > * { width: 120px; height: 28px; padding: 0; text-align: left; }
+  .empty { min-height: 20px; }
+  .empty > i::before { content: "(none)"; }
+  .hidden { display: none; }
+  #geometry > span:last-child::after { content: " now" / "Alternate text"; }
+  [role="row"], .layout { display: grid; grid-template-columns: repeat(3, 120px); }
+  .layout > * { display: block; }
+</style>
+<table>
+  <thead><tr><th>Measure</th><th scope="col">Period A</th><th scope="col">Period B</th></tr></thead>
+  <tbody>
+    <tr><th scope="row">Temperature</th><td><div id="empty" class="empty" tabindex="0"><i></i></div></td>
+      <td><input id="selected" type="search" placeholder="Enter a reading" value="Warm"></td></tr>
+    <tr><th scope="row">Air flow</th>
+      <td><div id="named" tabindex="0" aria-label="Named control" aria-haspopup="dialog"><i></i></div></td>
+      <td><div id="explicit" role="button" tabindex="0" class="empty"><i></i></div></td></tr>
+  </tbody>
+</table>
+<div role="grid">
+  <div role="row"><div role="columnheader">Measure</div><div role="columnheader">Actual</div></div>
+  <div role="row"><div role="rowheader">Rainfall</div><div role="gridcell">
+    <div id="aria" class="empty" tabindex="0" aria-haspopup="dialog"><i></i></div>
+  </div></div>
+</div>
+<div class="layout">
+  <span>Measure</span><span>Morning</span><span>Afternoon</span>
+  <span>Humidity</span><div id="geometry" tabindex="0" aria-controls="choices">
+    <span class="hidden">Hidden label</span><span>Choose</span>
+  </div><div class="empty" tabindex="0"><i></i></div>
+  <span>Wind speed</span><span>Steady</span><span>Moderate</span>
+  <span>Air pressure</span><span>Recorded</span><div class="empty" tabindex="0"><i></i></div>
+</div>
+<div id="choices" popover>Choices</div>
+<div>
+  <table>
+    <tr><td>Measure</td><td>Estimate</td><td>Reading</td></tr>
+    <tr><td>Water level</td><td>Low</td><td><div class="empty" tabindex="0"><i></i></div></td></tr>
+  </table>
+</div>
+<div style="opacity: 0" tabindex="0" aria-hidden="true">
+  Transparent control <span style="opacity: 0">Hidden caption</span>
+</div>

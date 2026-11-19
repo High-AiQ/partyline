@@ -424,7 +424,7 @@ no new read:
 | Question | Arguments |
 | --- | --- |
 | `ls` | `root=<id>`, `depth` 1 to 3: the children, each with its child count |
-| `find` | `query` matches the **name**, `value` the value (both given: both must match), and/or `control_type`; `root` limits it to a subtree. Terms: `a|b` either; `=x` or `^x$` the whole text; `^x` starts, `x$` ends; otherwise a case-insensitive substring. Matches are grouped under an `in: Document > List Pagination` line that is repeated only when the ancestors change; unnamed `Group`/`Pane`/`Custom` wrappers are left out of the path |
+| `find` | `query` matches the **name** or a CDP control’s row or column label. Use `value` to match the value and `control_type` to match the type. `root` limits it to a subtree. Terms: `a|b` either; `=x` or `^x$` the whole text; `^x` starts, `x$` ends; otherwise a case-insensitive substring. Matches are grouped under an `in: Document > List Pagination` line that is repeated only when the ancestors change; unnamed `Group`/`Pane`/`Custom` wrappers are left out of the path |
 | `text` | `text=true`: what a person reads, in reading order. `Text` nodes, leaf names, `Edit` values, and the accessible name of an item (`DataItem`, `ListItem`, `Button`, `Hyperlink`, ...) whose own text below does not already say it (a row named "Book in Series Title" holding only "Series"). `query` greps it (same terms) with `context` lines around each hit; `root` scopes it (default: the first `Document`) |
 | `id` | `id=<id>`: one element whole, like `cat`: its full name (up to 1,000 characters) and value (600), actions, child count and `in:` path |
 | `changes` | `changes=true`: what the last `refresh=true` added (the topmost new elements) with a `+added -gone` count; `offset` pages it |
@@ -1797,8 +1797,21 @@ its newly visible options and select an option by its element ID. Hidden options
 omitted. `tests/test_cdp_focusable.py` covers a role-less focusable shadow trigger and
 custom option elements.
 
+Helper **1.9.1** reads unnamed, role-less interactive elements in one batch per
+document in each CDP snapshot part. The displayed name can include visible descendant
+text and literal CSS `::before` or `::after` content, with placeholder and title
+attributes as fallback sources. Table and ARIA grid semantics supply `row="…"`
+and `column="…"` when available. A native table can also get column labels from
+plain text cells in its first row. For layouts without table or grid semantics,
+the helper looks for the leftmost and topmost aligned labels in a nearby container. Search for
+the row label, then use the ID on the line with the intended column. A
+`popup="…"` hint comes from attributes such as `aria-haspopup` or a reference to
+a popover or popup widget.
+
 `screen_element_action` sends page-scoped mouse/keyboard input, focuses the actual DOM node,
-and edits through `Input.insertText`. `select value=<label or value>` reads the native options,
+and inserts non-empty values through `Input.insertText`. To clear a field,
+`set_value` with an empty string selects the existing text and sends a trusted Delete key.
+The response includes the observed value after the edit. `select value=<label or value>` reads the native options,
 then uses trusted `Input.dispatchKeyEvent` navigation from the **current** option. For a
 native dropdown it opens the picker with Alt+Down, moves with arrow keys, and commits with
 Enter. `selection_mode: keyboard_popup` should commit only the requested option once. If the
