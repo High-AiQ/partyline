@@ -2,7 +2,8 @@
 import unittest
 from unittest.mock import patch
 
-from partyline.screen_audit import publish, record, record_window_access, recover
+from partyline.notice_policy import digest_candidates
+from partyline.screen_audit import record, record_window_access
 from partyline.screen_standing import update_mirror
 from tests.window_grant_fixtures import WindowGrantFixture
 
@@ -43,18 +44,43 @@ class WindowAccessAuditTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCas
                                    "window list", "listed 1", self.device)
         self.assertEqual(2, len(self.db.list_messages("alpha")))
 
-    async def test_recovery_never_publishes_window_rows_and_pixel_audit_is_unchanged(self):
+    async def test_restart_keeps_pending_and_published_entries_in_the_log_only(self):
+        record(self.db, "share-1", "alpha", "worker", "type `private` (7 chars) (interrupted: private)")
+        published = self.db.add_message("alpha", "system", "system", "Agent control audit — legacy")
+        self.db._exec("UPDATE screen_control_audit SET message_id=?", (published["id"],))
+        record(self.db, "share-1", "alpha", "peer", "click left (1,2)")
+        record(self.db, "share-1", "beta", "b", "move (3,4)")
         record(self.db, "window-access:alpha", "alpha", "worker", "list: windows — window list (listed 1)")
-        record(self.db, "share-1", "alpha", "worker", "click left (1,2)")
-        self.assertIsNone(publish(self.db, "window-access:alpha"))
-        recover(self.db)
-        recover(self.db)
-        messages = self.db.list_messages("alpha")
-        self.assertEqual(1, len(messages))
-        self.assertTrue(messages[0]["body"].startswith("Agent control audit — worker: click left (1,2)"))
-        rows = self.db._exec("SELECT share_id,message_id FROM screen_control_audit ORDER BY id").fetchall()
-        self.assertIsNone(rows[0]["message_id"])
-        self.assertIsNotNone(rows[1]["message_id"])
+        notice = self.db.add_message("alpha", "system", "system", "@a Agent control was not granted.")
+        similar = self.db.add_message("alpha", "system", "system", "Agent control audit — status changed")
+        rows = self.db._exec("SELECT * FROM screen_control_audit ORDER BY id").fetchall()
+
+        await self.restart_server()
+        self.assertEqual(rows, self.db._exec("SELECT * FROM screen_control_audit ORDER BY id").fetchall())
+        self.assertEqual(3, self.db._exec("SELECT count(*) FROM messages").fetchone()[0])
+        visible = [notice["id"], similar["id"]]
+        for history in (self.db.list_messages("alpha"), self.db.message_page("alpha", after_id=0)[0],
+                        digest_candidates(self.db, "alpha", 0, "a", "a"),
+                        self.db.messages_by_ids("alpha", [published["id"], *visible])):
+            self.assertEqual(visible, [message["id"] for message in history])
+        self.assertIsNone(self.db.message_by_id("alpha", published["id"]))
+
+        path = "/api/conversations/alpha/screen-access-audit"
+        for credential in (self.machine("a"), self.machine("b")):
+            self.assertEqual(403, (await self.client.get(path, headers=credential)).status_code)
+        headers = self.human(self.other_user)
+        first = (await self.client.get(path, params={"limit": 2}, headers=headers)).json()
+        self.assertEqual(["window-access:alpha", "share-1"], [row["chain_id"] for row in first["entries"]])
+        self.assertEqual(["worker", "peer"], [row["agent"] for row in first["entries"]])
+        older = (await self.client.get(path, params={"before": first["next_before"]}, headers=headers)).json()
+        self.assertIsNone(older["next_before"])
+        self.assertEqual(1, len(older["entries"]))
+        typed = older["entries"][0]
+        self.assertEqual("type (7 chars) (interrupted)", typed["detail"])
+        self.assertEqual(rows[0]["entry_hash"], typed["entry_hash"])
+        self.assertEqual(typed["entry_hash"], first["entries"][1]["previous_hash"])
+        beta = await self.client.get("/api/conversations/beta/screen-access-audit", headers=headers)
+        self.assertEqual(["move (3,4)"], [row["detail"] for row in beta.json()["entries"]])
 
     async def test_person_route_auth_order_limit_fields_and_chain_head(self):
         with patch("partyline.screen_audit.time") as clock:

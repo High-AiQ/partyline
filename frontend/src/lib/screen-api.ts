@@ -29,20 +29,45 @@ const HelperInstallerSchema = z.object({
 export type HelperInstaller = z.infer<typeof HelperInstallerSchema>;
 const PairClaimSchema = z.object({ device_id: z.string(), token: z.string() });
 const StartSchema = z.object({ share_id: z.string(), status: z.string() });
-const WindowAccessEntrySchema = z.object({
+const ScreenAccessEntrySchema = z.object({
+  chain_id: z.string(),
   agent: z.string(),
-  call: z.string(),
-  app: z.string(),
-  title: z.string(),
-  result: z.string(),
+  detail: z.string(),
   time: z.number(),
+  previous_hash: z.string(),
   entry_hash: z.string(),
 });
-const WindowAccessAuditSchema = z.object({
-  entries: z.array(WindowAccessEntrySchema),
-  chain_head: z.string().nullable(),
+const ScreenAccessAuditSchema = z.object({
+  entries: z.array(ScreenAccessEntrySchema),
+  next_before: z.number().int().positive().nullable(),
 });
-export type WindowAccessEntry = z.infer<typeof WindowAccessEntrySchema>;
+export type ScreenAccessEntry = z.infer<typeof ScreenAccessEntrySchema>;
+const ScreenAccessMetadataSchema = z
+  .object({ operation: z.string(), grant: z.string(), line: z.string().nullable(), process: z.string() })
+  .catchall(z.json());
+
+export function formatScreenAccessDetail(detail: string): string {
+  if (!detail.startsWith("{")) return detail;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(detail);
+  } catch {
+    return detail;
+  }
+  const metadata = ScreenAccessMetadataSchema.safeParse(raw);
+  if (!metadata.success) return detail;
+  const fields = Object.entries(metadata.data).filter(
+    ([key]) => !["operation", "grant", "line", "process"].includes(key),
+  );
+  return [
+    metadata.data.operation,
+    ...fields.map(
+      ([key, value]) =>
+        key.replaceAll("_", " ") + " " + (typeof value === "string" ? value : JSON.stringify(value)),
+    ),
+  ].join(" · ");
+}
+
 const PreviewSchema = z.object({
   out_width: z.number().int().positive(),
   out_height: z.number().int().positive(),
@@ -110,10 +135,14 @@ export const screenApi = {
       method: "PUT",
       body: { conv_ids: convIds },
     }),
-  windowAccessAudit: (convId: string) =>
-    request("/api/conversations/" + encodeURIComponent(convId) + "/window-access-audit?limit=50", {
-      schema: WindowAccessAuditSchema,
-    }),
+  screenAccessAudit: (convId: string, before: number | null) =>
+    request(
+      "/api/conversations/" +
+        encodeURIComponent(convId) +
+        "/screen-access-audit" +
+        (before === null ? "" : "?before=" + String(before)),
+      { schema: ScreenAccessAuditSchema },
+    ),
   preview: (deviceId: string, monitorId: string | number) =>
     request(
       "/api/screen/preview?device_id=" +

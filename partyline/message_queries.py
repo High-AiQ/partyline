@@ -5,8 +5,12 @@ from .message_visibility import REACTION_NOTICE_LIKE, hide_reaction_notices_clau
 
 # Every read joins the line a message was said on, so a cross-line copy can
 # be attributed ("via «Princess»") without a second query per message.
+# Legacy screen audit copies stay stored. Their durable audit links identify
+# them for every reader, including process wake digests and queued deliveries.
 MESSAGE_SELECT = (
-    "SELECT m.*, c.name AS source_conv_name FROM messages m"
+    "SELECT m.*, c.name AS source_conv_name FROM ("
+    "SELECT * FROM messages stored WHERE stored.sender_type!='system' OR NOT EXISTS ("
+    "SELECT 1 FROM screen_control_audit a WHERE a.message_id=stored.id)) m"
     " LEFT JOIN conversations c ON c.id = m.source_conv_id"
 )
 

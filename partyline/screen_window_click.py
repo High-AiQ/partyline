@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .auth_guard import request_principal
 from .machine_scope import deny_unless
 from .point_geometry import GeometryError, locate
-from .screen_audit import publish, record, record_standing_window_access
+from .screen_audit import record, record_standing_window_access
 from .screen_grants import resolve_window
 from .screen_failure_snapshot import attach, failed
 from .screen_point_landing import unavailable
@@ -74,7 +74,7 @@ class WindowClick(PointInput):
                 "point": [self.x, self.y]}
 
 
-async def audit(runtime, grant, principal, body, route, result, points=()):
+def audit(runtime, grant, principal, body, route, result, points=()):
     """Grant, line, process, operation, route, point and result: never pixels, never typed text."""
     info = {"grant": grant["id"], "line": principal.conv_id or grant["conv_id"], "process": principal.name,
             "operation": f"screen_window_{body.operation}", "route": route, **body.detail(),
@@ -83,10 +83,6 @@ async def audit(runtime, grant, principal, body, route, result, points=()):
             "result": result}
     record(runtime.db, grant["id"], principal.conv_id or grant["conv_id"], principal.name,
            json.dumps(info, separators=(",", ":")))
-    if message := publish(runtime.db, grant["id"]):
-        from .contracts import MessageEvent, MessageResponse
-        await runtime.broadcast(grant["conv_id"],
-                                MessageEvent(message=MessageResponse.model_validate(message)))
 
 
 async def point_operation(runtime, hub, store, conv_id, body: PointInput, request: Request,
@@ -127,7 +123,7 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
                 look, _, _ = hub.snapshots.looks.target(principal, grant, mark)
                 if look["generation"] != generation:
                     raise HTTPException(409, "stale mark; take a fresh screen_window_look")
-            await audit(runtime, grant, principal, body, "pending", "requested", points)
+            audit(runtime, grant, principal, body, "pending", "requested", points)
             await record_standing_window_access(
                 runtime, hub, principal, conv_id, name, body.window, None, "started")
             hub.window_grants.spend(grant)
@@ -152,7 +148,7 @@ async def point_operation(runtime, hub, store, conv_id, body: PointInput, reques
                   "Do not retry automatically."}
     result.setdefault("landing", unavailable(body, geometry, points))
     status = result.get("status", "failed")
-    await audit(runtime, grant, principal, body, result.get("route", "none"), status, points)
+    audit(runtime, grant, principal, body, result.get("route", "none"), status, points)
     await record_standing_window_access(runtime, hub, principal, conv_id, name, body.window, None, status)
     if status in ("completed", "no_effect") and not result.get("grant_ended"):
         hub.elements.action_completed(grant["id"], retain_snapshot=retained)

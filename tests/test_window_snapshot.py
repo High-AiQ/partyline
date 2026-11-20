@@ -175,14 +175,15 @@ class WindowSnapshotTests(SnapshotFixture, unittest.IsolatedAsyncioTestCase):
         entries = [row["entry"] for row in self.db._exec("SELECT entry FROM screen_control_audit")]
         self.assertTrue(entries[-1].startswith("window screenshot withheld"), entries)
 
-    async def test_a_grant_that_ends_while_the_line_is_notified_leaves_no_media_and_no_answer(self):
+    async def test_a_grant_that_ends_during_the_device_update_leaves_no_media_and_no_answer(self):
         await self.grant("a")
-        broadcast = self.runtime.broadcast
+        changed = self.hub.window_grants.changed
 
-        async def revoking(*args, **kwargs):
-            await broadcast(*args, **kwargs)
-            await self.hub.window_grants.revoke("g1")  # consent ends during the audit notification
-        with patch.object(self.runtime, "broadcast", revoking):
+        async def revoking(device_id):
+            if self.hub.snapshots.last_screenshot("g1"):
+                await self.hub.window_grants.revoke("g1")
+            await changed(device_id)
+        with patch.object(self.hub.window_grants, "changed", revoking):
             response = await self.shot("a")
         self.assertEqual(403, response.status_code)
         self.assertNotIn("file", response.json())
@@ -259,7 +260,7 @@ class WindowSnapshotTests(SnapshotFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual({"g1"}, {row["share_id"] for row in rows})
         self.assertIn("window screenshot of «Editor» (400x300", rows[0]["entry"])
         notes = [m for m in self.db.list_messages(rows[0]["conv_id"]) if "window screenshot" in m["body"]]
-        self.assertEqual(2, len(notes))
+        self.assertEqual([], notes)
 
     async def test_the_owner_sees_when_and_by_whom_the_last_screenshot_was_taken(self):
         from partyline.screen_snapshot import owner_devices

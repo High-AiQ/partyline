@@ -1,4 +1,4 @@
-"""Server half of agent control: grants, limits, helper actions and batched audit notes."""
+"""Server half of agent control: grants, limits, helper actions and durable audit."""
 
 import asyncio
 import os
@@ -7,8 +7,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 
-from .contracts import MessageEvent, MessageResponse
-from .screen_audit import publish, record
+from .screen_audit import record
 from .screen_connections import notice
 from .screen_control_actions import ControlAction, command, describe
 from .op_timing import pushed
@@ -19,12 +18,6 @@ CONTROL_MESSAGES = ("control_granted", "control_revoked", "action_result")
 TOO_OLD = "helper too old for control: update partyline-helper on that computer and restart it"
 ACTION_TIMEOUT = 5
 FRAME_TIMEOUT = 3
-AUDIT_DELAY = 60
-AUDIT_BATCH = 100
-
-
-def plain_move(entry: str) -> bool:
-    return entry.startswith("move (") and entry.endswith(")") and entry.count("(") == 1
 
 
 @dataclass(frozen=True)
@@ -57,17 +50,14 @@ class Grant:
     reason: str = ""
     times: deque = field(default_factory=deque)
     count: int = 0
-    audit: list = field(default_factory=list)
-    audit_count: int = 0
-    flusher: asyncio.Task | None = None
     last_actor: str | None = None
 
 
 class ControlHub:
-    def __init__(self, hub, limits=None, clock=time.monotonic, sleep=asyncio.sleep):
+    def __init__(self, hub, limits=None, clock=time.monotonic):
         self.hub = hub
         self.limits = limits or ControlLimits.from_env()
-        self.clock, self.sleep = clock, sleep
+        self.clock = clock
         self.grants: dict[str, Grant] = {}
         self.waiters: dict[str, tuple[str, str, asyncio.Future]] = {}
 
@@ -158,7 +148,6 @@ class ControlHub:
         if status == "active":
             from .capability_versions import bump_runtime
             bump_runtime(self.hub.runtime)
-        await self.flush(grant, share.conv_id)
         device = self.hub.devices.get(share.device_id)
         if tell_helper and device:
             try:
@@ -183,10 +172,8 @@ class ControlHub:
                 future.cancel()
         grant = self.grants.pop(share.share_id, None)
         if grant and grant.status == "active":
-            await self.flush(grant, share.conv_id)
-            await self._note(share.conv_id, f"Agent control ended with the share ({reason}).")
-        elif grant and grant.flusher:
-            grant.flusher.cancel()
+            await self.hub.runtime.post_message(
+                share.conv_id, "system", "system", f"Agent control ended with the share ({reason}).")
 
     def _spend(self, grant: Grant, *, workflow=False) -> None:
         now, limits = self.clock(), self.limits
@@ -213,6 +200,7 @@ class ControlHub:
         cmd = command(action, share.frames[-1], self.limits.max_text, device.get("os", ""))
         self._spend(grant)
         await self._changed(share)  # viewers' badges show the live action count
+        detail = f"type ({len(cmd['text'])} chars)" if cmd["kind"] == "type" else describe(cmd)
         request_id = str(uuid.uuid4())
         loop = asyncio.get_running_loop()
         result, settled = loop.create_future(), loop.create_future()
@@ -228,18 +216,19 @@ class ControlHub:
             except (TimeoutError, asyncio.CancelledError):
                 if asyncio.current_task().cancelling():
                     raise
-                await self._audit(grant, share.conv_id, agent, f"{describe(cmd)} (unconfirmed)")
+                self._audit(grant, share.conv_id, agent, f"{detail} (unconfirmed)")
                 if share.status != "active":
                     raise ValueError("screen sharing has stopped") from None
                 raise ValueError("the sharing computer did not answer the action") from None
             if not answer.get("ok"):
                 error = str(answer.get("error"))[:200]
                 if answer.get("started"):  # partly injected before it stopped: still audited
-                    entry = f"{describe(cmd)} (interrupted: {error[:80]})"
-                    await self._audit(grant, share.conv_id, agent, entry)
+                    entry = (f"{detail} (interrupted)" if cmd["kind"] == "type"
+                             else f"{detail} (interrupted: {error[:80]})")
+                    self._audit(grant, share.conv_id, agent, entry)
                     raise ValueError(f"the action was interrupted: {error}")
                 raise ValueError(f"the computer refused the action: {error}")
-            await self._audit(grant, share.conv_id, agent, describe(cmd))
+            self._audit(grant, share.conv_id, agent, detail)
             try:
                 async with asyncio.timeout(FRAME_TIMEOUT):
                     return share, await settled, cmd, False
@@ -254,45 +243,9 @@ class ControlHub:
                 if not future.done():
                     future.cancel()
 
-    async def _audit(self, grant: Grant, conv_id: str, agent: str, entry: str) -> None:
+    def _audit(self, grant: Grant, conv_id: str, agent: str, entry: str) -> None:
         record(self.hub.runtime.db, grant.share_id, conv_id, agent, entry)
         grant.last_actor = agent
-        grant.audit_count += 1
-        last = grant.audit[-1] if grant.audit else None
-        if last and last[0] == agent and plain_move(last[1]) and plain_move(entry):
-            last[1], last[2] = entry, last[2] + 1  # coalesce pointer moves
-        else:
-            grant.audit.append([agent, entry, 1])
-        # Late entries (after a revoke or the share's end) post at once rather than by timer.
-        if grant.audit_count >= AUDIT_BATCH or self.grants.get(grant.share_id) is not grant \
-                or grant.status == "revoked":
-            await self.flush(grant, conv_id)
-        elif grant.flusher is None:
-            grant.flusher = asyncio.create_task(self._flush_later(grant, conv_id))
-
-    async def _flush_later(self, grant: Grant, conv_id: str) -> None:
-        await self.sleep(AUDIT_DELAY)
-        grant.flusher = None
-        await self.flush(grant, conv_id)
-
-    async def flush(self, grant: Grant, conv_id: str) -> None:
-        flusher, grant.flusher = grant.flusher, None
-        if flusher and flusher is not asyncio.current_task():
-            flusher.cancel()
-        try:
-            message = publish(self.hub.runtime.db, grant.share_id)
-        except Exception:
-            if self.grants.get(grant.share_id) is grant and grant.status == "active":
-                grant.flusher = asyncio.create_task(self._flush_later(grant, conv_id))
-            raise
-        if message:
-            grant.audit, grant.audit_count = [], 0
-            await self.hub.runtime.broadcast(
-                conv_id, MessageEvent(message=MessageResponse.model_validate(message)))
-
-    async def _note(self, conv_id: str, text: str) -> None:
-        # Audit notes inform people; they deliberately wake no process.
-        await self.hub.runtime.post_message(conv_id, "system", "system", text)
 
     async def _changed(self, share) -> None:
         device = self.hub.devices.get(share.device_id)

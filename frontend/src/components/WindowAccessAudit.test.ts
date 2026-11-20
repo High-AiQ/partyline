@@ -8,32 +8,60 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-it("loads the selected line's newest audit entries on demand and hides them", async () => {
-  const audit = vi.spyOn(screenApi, "windowAccessAudit").mockResolvedValue({
-    chain_head: "abc123",
-    entries: [
-      {
-        agent: "worker",
-        call: "uia_read",
-        app: "editor.exe",
-        title: "Catalog",
-        result: "read",
-        time: 1,
-        entry_hash: "abc123",
-      },
-    ],
-  });
+it("loads the current line on demand, pages through its audit and switches lines", async () => {
+  const audit = vi
+    .spyOn(screenApi, "screenAccessAudit")
+    .mockResolvedValueOnce({
+      next_before: 10,
+      entries: [
+        {
+          chain_id: "window-grant",
+          agent: "worker",
+          detail: "window screenshot of «Catalog»",
+          time: 1,
+          entry_hash: "abc123",
+          previous_hash: "def456",
+        },
+      ],
+    })
+    .mockResolvedValueOnce({
+      next_before: null,
+      entries: [
+        {
+          chain_id: "monitor-share",
+          agent: "worker",
+          detail: "click left (1,2)",
+          time: 1,
+          entry_hash: "789abc",
+          previous_hash: "",
+        },
+        {
+          chain_id: "window-grant",
+          agent: "worker",
+          detail: JSON.stringify({
+            operation: "screen_window_click",
+            grant: "window-grant",
+            line: "beta",
+            process: "worker",
+            route: "cdp",
+            point: [100, 100],
+            result: "completed",
+          }),
+          time: 1,
+          entry_hash: "012def",
+          previous_hash: "",
+        },
+      ],
+    })
+    .mockResolvedValueOnce({ next_before: null, entries: [] });
   const component = mount(WindowAccessAudit, {
     target: document.body,
     props: {
-      device: {
-        id: "computer",
-        name: "Desk",
-        os: "test",
-        online: true,
-        monitors: [],
-        window_access_line: "alpha",
-      },
+      lines: [
+        { id: "alpha", name: "Alpha" },
+        { id: "beta", name: "Beta" },
+      ],
+      currentLine: "beta",
     },
   });
   expect(audit).not.toHaveBeenCalled();
@@ -43,12 +71,36 @@ it("loads the selected line's newest audit entries on demand and hides them", as
   button.click();
   await tick();
   await tick();
-  expect(audit).toHaveBeenCalledWith("alpha");
-  expect(document.body.textContent).toContain("uia_read");
+  expect(audit).toHaveBeenLastCalledWith("beta", null);
+  expect(document.body.textContent).toContain("window screenshot of «Catalog»");
+  expect(document.body.textContent).toContain("window-grant");
+  expect(document.body.textContent).toContain("def456");
+
+  const older = Array.from(document.querySelectorAll("button")).find((item) =>
+    item.textContent.includes("Load older entries"),
+  );
+  if (!older) throw new Error("Missing older entries button");
+  older.click();
+  await tick();
+  await tick();
+  expect(audit).toHaveBeenLastCalledWith("beta", 10);
+  expect(document.body.textContent).toContain("click left (1,2)");
+  expect(document.body.textContent).toContain(
+    "screen_window_click · route cdp · point [100,100] · result completed",
+  );
   expect(document.body.textContent).toContain("Catalog");
-  expect(document.body.textContent).toContain("Chain head: abc123");
+
+  const line = document.querySelector("select");
+  if (!line) throw new Error("Missing line picker");
+  line.value = "alpha";
+  line.dispatchEvent(new Event("change", { bubbles: true }));
+  await tick();
+  await tick();
+  expect(audit).toHaveBeenLastCalledWith("alpha", null);
+  expect(document.body.textContent).toContain("No screen access recorded for this line.");
+  expect(document.body.textContent).not.toContain("Catalog");
   button.click();
   await tick();
-  expect(document.body.textContent).not.toContain("uia_read");
+  expect(document.body.textContent).not.toContain("Screen and window access log");
   await unmount(component);
 });

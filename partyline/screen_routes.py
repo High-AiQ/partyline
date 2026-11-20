@@ -12,7 +12,6 @@ from PIL import Image, ImageDraw
 from .auth_guard import bearer_token, request_principal
 from .machine_scope import deny_unless, is_human
 from .media import MediaError, MediaStore
-from .screen_audit import recover
 from .screen_connections import revoke as revoke_device
 from .screen_errors import screen_error
 from .local_tools_audit import recover as recover_tools
@@ -39,7 +38,6 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
     runtime.db._exec("DELETE FROM screen_line_window_grants WHERE device_id NOT IN "
                      "(SELECT device_id FROM screen_helper_updates)")
     runtime.window_access_notices = set()
-    recover(runtime.db)
     recover_tools(runtime.db)
     hub = ScreenHub(runtime)
     hub.media_store = store
