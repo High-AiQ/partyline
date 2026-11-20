@@ -1,8 +1,9 @@
-import { mount, unmount } from "svelte";
+import { mount, tick, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Message from "./Message.svelte";
 import type { ChatMessage } from "../../lib/contracts";
 import { renderMessage } from "../../lib/markdown";
+import { clearStoredTokens, storeTokens } from "../../lib/http";
 import { room } from "../../state/room.svelte.js";
 import { session } from "../../state/session.svelte.js";
 
@@ -82,6 +83,7 @@ function blobText(blob: Blob): Promise<string> {
 
 afterEach(() => {
   setClipboard(undefined);
+  clearStoredTokens();
   session.user = null;
   session.authReady = false;
   room.pins.clear();
@@ -191,6 +193,36 @@ describe("agent message enhancements", () => {
       expect(document.querySelector("code .hljs-keyword")?.textContent).toBe("const");
     } finally {
       await unmount(message);
+    }
+  });
+});
+
+describe("message links", () => {
+  it("adds credentials to a same-origin service link only at navigation time", async () => {
+    storeTokens("access+/=", "refresh-token");
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const href = "/api/media/media-123/slim?download=1#preview";
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: agentMessage(`[media](${href})`) },
+    });
+    try {
+      const link = document.querySelector<HTMLAnchorElement>(".body a");
+      expect(link?.getAttribute("href")).toBe(href);
+      expect(link?.getAttribute("href")).not.toContain("token=");
+      await tick();
+
+      const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+      link?.dispatchEvent(click);
+
+      const expected = new URL(href, window.location.href);
+      expected.searchParams.set("token", "access+/=");
+      expect(click.defaultPrevented).toBe(true);
+      expect(open).toHaveBeenCalledWith(expected.href, "_blank", "noopener,noreferrer");
+      expect(link?.getAttribute("href")).toBe(href);
+    } finally {
+      await unmount(message);
+      open.mockRestore();
     }
   });
 });

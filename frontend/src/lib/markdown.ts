@@ -116,12 +116,15 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (!(node instanceof Element)) return;
   if (node.tagName === "A" && node.hasAttribute("href")) {
     const href = node.getAttribute("href") ?? "";
-    if (href.startsWith("/")) {
-      // A leading slash is not enough: `//host`, `/\\host`, and whitespace
-      // variants can resolve to another origin under browser URL parsing.
+    if (!/^(?:(?:https?|mailto):|#\/c\/)/i.test(href)) {
+      // DOMPurify strips controls before its URI check, so the raw attribute
+      // need not start with the slash it had during that check. Parse every
+      // other destination as the browser will, rather than trusting its shape.
       let sameOrigin = false;
       try {
-        sameOrigin = new URL(href, document.baseURI).origin === window.location.origin;
+        const url = new URL(href, document.baseURI);
+        sameOrigin =
+          (url.protocol === "http:" || url.protocol === "https:") && url.origin === window.location.origin;
       } catch {
         // Keep the link text when the browser cannot parse its destination.
       }
@@ -154,6 +157,8 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (kept.length) node.setAttribute("class", kept.join(" "));
   else node.removeAttribute("class");
 });
+
+const FILE_URI_REGEXP = /^(?:(?:https?|mailto):|#\/c\/[^\s"<>]+$)/i;
 
 const PURIFY_CONFIG = {
   ALLOWED_TAGS: [
@@ -245,6 +250,9 @@ export function renderFileMarkdown(body: string): string {
   if (typeof parsed !== "string") throw new Error("Markdown must render synchronously");
   const fragment = DOMPurify.sanitize(parsed, {
     ...PURIFY_CONFIG,
+    // Chat gained host-relative navigation; uploaded documents keep their
+    // existing remote-only link and image URI policy.
+    ALLOWED_URI_REGEXP: FILE_URI_REGEXP,
     ALLOWED_TAGS: [...PURIFY_CONFIG.ALLOWED_TAGS, "img"],
     ALLOWED_ATTR: [...PURIFY_CONFIG.ALLOWED_ATTR, "src", "alt", "title"],
   });

@@ -42,6 +42,17 @@ describe("file viewer", () => {
     expect(host.querySelector("script")).toBeNull();
     expect(host.querySelector('[href^="javascript:"]')).toBeNull();
   });
+  it("keeps uploaded document image sources on the existing remote-only policy", () => {
+    const host = document.createElement("div");
+    host.innerHTML = renderFileMarkdown(
+      "![local](/api/media/file/original)\n\n![protocol relative](//example.test/a.png)\n\n![remote](https://example.test/a.png)",
+    );
+    const images = host.querySelectorAll("img");
+    expect(images).toHaveLength(3);
+    expect(images[0]?.hasAttribute("src")).toBe(false);
+    expect(images[1]?.hasAttribute("src")).toBe(false);
+    expect(images[2]?.getAttribute("src")).toBe("https://example.test/a.png");
+  });
   it("loads text through the bounded file transport and preserves whitespace", async () => {
     const blob = new Blob();
     Object.defineProperty(blob, "text", { value: () => Promise.resolve("first\n  second") });

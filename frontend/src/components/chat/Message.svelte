@@ -8,6 +8,7 @@
    */
   import { renderMessage, senderColor } from "../../lib/markdown";
   import { enhanceMarkdown } from "../../lib/message-enhancers";
+  import { authenticateResourceLinks } from "../../lib/socket-auth";
   import { visibleMessageBody, isWalkthrough, visibleWalkthroughBody } from "../../lib/files";
   import ImageGrid from "./ImageGrid.svelte";
   import FileAttachments from "./FileAttachments.svelte";
@@ -93,7 +94,7 @@
   {:else}
     <MessageActions {message} {isSystem} />
   {/if}
-  <div class="body {bodyClass}" use:enhanceMarkdown={body}>
+  <div class="body {bodyClass}" use:enhanceMarkdown={body} use:authenticateResourceLinks>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMessage -->
     {@html body}
   </div>

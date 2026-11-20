@@ -49,18 +49,18 @@ describe("renderMessage", () => {
       }
     });
 
-    it.each(["//example.test/x", "/\t/example.test/x"])(
-      "drops a root-relative-looking link that resolves to another origin: %s",
-      (destination) => {
-        const html = renderMessage(`[click me](${destination})`, true);
-        expect(html).not.toContain("href=");
-        expect(html).not.toContain("target=");
-        expect(html).toContain("click me");
-      },
-    );
+    it("drops a protocol-relative Markdown link, keeping its text", () => {
+      const html = renderMessage("[click me](//example.test/x)", true);
+      expect(html).not.toContain("href=");
+      expect(html).not.toContain("target=");
+      expect(html).toContain("click me");
+    });
 
-    it("uses browser URL parsing to reject a backslash host-confusion link", () => {
-      const html = DOMPurify.sanitize('<a href="/\\example.test/x">click me</a>');
+    it.each([
+      ["backslash", "/\\example.test/x"],
+      ["control character", "\u0001//example.test/x"],
+    ])("uses browser URL parsing to reject %s host confusion", (_kind, destination) => {
+      const html = DOMPurify.sanitize(`<a href="${destination}">click me</a>`);
       expect(html).not.toContain("href=");
       expect(html).not.toContain("target=");
       expect(html).toContain("click me");
