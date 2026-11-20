@@ -38,7 +38,6 @@ class ElementsHub(ElementState, ChangeEvents):
         self.clock = clock
         ChangeEvents.__init__(self)
         self.after_action = set()
-
     async def exchange(self, principal, grant, device, kind, wait=35, dispatch=None, **fields):
         require_window(self.hub, principal, grant["id"])
         ident = str(uuid.uuid4())
@@ -119,19 +118,25 @@ class ElementsHub(ElementState, ChangeEvents):
                 query = {key: options[key] for key in ("query", "control_type") if options.get(key)}
                 scoped = bool(query and not any(options.get(key) for key in
                                                ("text", "root", "id", "value", "more")))
+                dependency = options.get("dependency_scope")
                 if tree is not None and tree.scope and tree.scope != (query if scoped else None):
                     tree = None
                 continuation = options.get("more") and tree and tree.cursor
                 forced = grant["id"] in self.after_action and not continuation
                 captured = bool(options.get("refresh") or tree is None or forced or continuation)
                 if options.get("refresh") or tree is None or forced:
-                    if not scoped:
+                    if not (scoped or dependency):
                         self.forget(grant["id"])  # only a full capture resets helper IDs
                     space = self.spaces.setdefault(grant["id"], IdSpace())
                     space.renew()
                     tree = Snapshot(None, self.clock(), space)
                     tree.scope = query if scoped else None
-                    if scoped:
+                    if dependency:
+                        ident = dependency["root"]
+                        old = (previous.nodes.get(ident) or previous.nodes.get(
+                            previous.by_helper.get(ident))) if previous else None
+                        tree.dependency_scope = {**dependency, "root": old.helper if old else ident}
+                    if scoped or dependency:
                         tree.retain_actions(previous)
                     tree.event_version = self.change_versions.get(grant["id"], 0)
                     tree = await self.capture(principal, grant, device, tree)

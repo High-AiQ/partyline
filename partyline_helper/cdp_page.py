@@ -181,6 +181,9 @@ class Page(Dialogs, Recovery):
         self.dialog_guard()
         options = options or {}
         before = self.access.event_status()["event_counter"]
+        if scope := options.get("dependency_scope"):
+            from .cdp_dependency import snapshot
+            return await snapshot(self, scope["root"])
         if ident := options.get("inspect"):
             node = self.nodes.get(ident)
             if not node or not node.get("backendDOMNodeId"):

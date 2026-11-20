@@ -95,6 +95,8 @@ async def _act(page, message, timing):
         raise CDPError("element is read-only or a password field")
     if action not in ("invoke", "toggle", "select", "set_value", "set_files", "press", "scroll_into_view"):
         raise CDPError("action unavailable for CDP page element")
+    if message.get("fill_only") and action == "select" and state.get("tag") != "SELECT":
+        raise CDPError("grouped form select requires a native SELECT; no click was dispatched")
     if action != "set_files":
         await page.call("DOM.scrollIntoViewIfNeeded", {"backendNodeId": backend})
         await page.call("DOM.focus", {"backendNodeId": backend})

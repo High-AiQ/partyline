@@ -74,6 +74,7 @@ class ElementAction(BaseModel):
     width: int | None = Field(default=None, ge=1, le=16384)
     height: int | None = Field(default=None, ge=1, le=16384)
     assignments: list[Assignment] | None = Field(default=None, min_length=1, max_length=8)
+    fill_only: bool = False  # internal grouped-action guard; not a public tool parameter
     then: Then | None = None
 
     @model_validator(mode="after")
@@ -123,7 +124,8 @@ class ElementAction(BaseModel):
             raise ValueError(f"{self.action} requires {', '.join(missing)}")
         if extra := sorted(given - wanted):
             raise ValueError(f"{self.action} does not take {', '.join(extra)}")
-        excluded = {"window", "then", "mark"} | ({"force"} if not self.force else set())
+        excluded = ({"window", "then", "mark"} | ({"force"} if not self.force else set())
+                    | ({"fill_only"} if not self.fill_only else set()))
         return self.model_dump(exclude_none=True, exclude=excluded)
 
 

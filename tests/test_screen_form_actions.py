@@ -177,6 +177,9 @@ class FormFixture(unittest.IsolatedAsyncioTestCase):
         self.combo(disabled=True)
         _, ids = await self.initial()
         waiting = self.elements.wait_changed
+        full_before = sum(call["method"] == "Accessibility.getFullAXTree" for call in self.f.socket.calls)
+        partial_before = sum(call["method"] == "Accessibility.getPartialAXTree"
+                             for call in self.f.socket.calls)
 
         async def update(grant_id, version, delay):
             def arrive():
@@ -197,6 +200,69 @@ class FormFixture(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, self.probes)
         self.assertEqual("New", self.f.socket.states[6]["value"])
         self.assertEqual(3, self.actions)  # two edits and one select, with no model-mediated handback
+        full = sum(call["method"] == "Accessibility.getFullAXTree"
+                   for call in self.f.socket.calls) - full_before
+        partial = sum(call["method"] == "Accessibility.getPartialAXTree"
+                      for call in self.f.socket.calls) - partial_before
+        # Only the final ordinary then read; neither dependency recheck used a full tree.
+        self.assertEqual(1, full)
+        self.assertGreaterEqual(partial, 2)
+        print("DEPENDENCY_READ_METRICS " + json.dumps({
+            "dependency_full_tree_reads_measured": full - 1,
+            "dependency_partial_ax_calls_measured": partial,
+            "model_handbacks_measured": 0}))
+
+    async def test_partial_dependency_capture_cannot_establish_uniqueness_or_dispatch(self):
+        self.combo()
+        _, ids = await self.initial()
+        reading = self.elements.read
+
+        async def partial(*args, **kwargs):
+            reply = await reading(*args, **kwargs)
+            self.elements.snapshots["g"].cursor = "unread"
+            return reply
+
+        with patch.object(self.elements, "read", side_effect=partial):
+            result = await form_action(self.runtime, self.outer, "line", self.dependent_body(ids),
+                                       self.principal, GRANT, self.device)
+        self.assertEqual(("partial", 1, 1), (result["status"], result["completed"], result["remaining"]))
+        self.assertEqual("condition_unavailable", result["results"][1]["reason"])
+        self.assertEqual((1, 0), (self.actions, self.probes))
+
+    async def test_raced_dependency_capture_cannot_establish_uniqueness_or_dispatch(self):
+        self.combo()
+        _, ids = await self.initial()
+        reading = self.elements.read
+
+        async def raced(*args, **kwargs):
+            reply = await reading(*args, **kwargs)
+            self.elements.snapshots["g"].moved = True
+            return reply
+
+        with patch.object(self.elements, "read", side_effect=raced):
+            result = await form_action(self.runtime, self.outer, "line", self.dependent_body(ids),
+                                       self.principal, GRANT, self.device)
+        self.assertEqual(("partial", 1, 1), (result["status"], result["completed"], result["remaining"]))
+        self.assertEqual("condition_unavailable", result["results"][1]["reason"])
+        self.assertEqual((1, 0), (self.actions, self.probes))
+
+    async def test_dependency_deadline_bounds_the_read_and_prevents_late_dispatch(self):
+        self.combo()
+        _, ids = await self.initial()
+        reading = self.elements.read
+
+        async def slow(*args, **kwargs):
+            await asyncio.sleep(0.02)
+            return await reading(*args, **kwargs)
+
+        body = self.dependent_body(ids, timeout_ms=1)
+        with patch.object(self.elements, "read", side_effect=slow):
+            result = await form_action(self.runtime, self.outer, "line", body,
+                                       self.principal, GRANT, self.device)
+        self.assertEqual(("partial", 1, 1), (result["status"], result["completed"], result["remaining"]))
+        self.assertEqual("condition_timeout", result["results"][1]["reason"])
+        self.assertEqual((1, 0), (self.actions, self.probes))
+        self.assertEqual("old", self.f.socket.states[5]["value"])
 
     async def test_missing_condition_times_out_with_partial_progress_and_never_dispatches_select(self):
         self.combo(disabled=True)
@@ -257,6 +323,41 @@ class FormFixture(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("completed", result["status"])
         self.assertEqual(("Ada", "New"), (self.f.socket.states[3]["value"],
                                          self.f.socket.states[5]["value"]))
+
+    async def test_grouped_select_cannot_click_a_non_native_button(self):
+        self.combo()
+        self.f.socket.states[5]["tag"] = "BUTTON"
+        _, ids = await self.initial()
+        body = ElementAction(action="set_values", window="g", assignments=[
+            {"element_id": ids["City"], "value": "New", "action": "select"},
+            {"element_id": ids["First name"], "value": "Ada"},
+        ], then={"root": ids["Details"]})
+        result = await form_action(self.runtime, self.outer, "line", body, self.principal, GRANT)
+        self.assertEqual(("failed", 0, 1), (result["status"], result["completed"], result["remaining"]))
+        self.assertIn("native SELECT", result["results"][0]["error"])
+        self.assertFalse(any(call["method"].startswith("Input.") or call["method"] == "DOM.focus"
+                             for call in self.f.socket.calls))
+
+    async def test_settled_select_readback_rejects_a_selection_reverted_during_settle(self):
+        self.combo()
+        _, ids = await self.initial()
+        page = self.f.chrome.pages[self.f.access]["a"]
+
+        async def revert():
+            self.f.socket.states[5].update(value="old", selected_index=0, selected_count=1)
+            return "quiet"
+
+        page.quiet.wait = revert
+        body = ElementAction(action="set_values", window="g", assignments=[
+            {"element_id": ids["City"], "value": "New", "action": "select"},
+            {"element_id": ids["First name"], "value": "Ada"},
+        ], then={"root": ids["Details"]})
+        result = await form_action(self.runtime, self.outer, "line", body, self.principal, GRANT)
+        self.assertEqual(("unconfirmed", 0, 1),
+                         (result["status"], result["completed"], result["remaining"]))
+        self.assertEqual(1, self.actions)
+        self.assertEqual("old", self.f.socket.states[5]["value"])
+        self.assertIn("settled", result["results"][0]["state_unavailable"])
 
     async def test_single_stale_action_also_carries_the_requested_scoped_read(self):
         _, ids = await self.initial()

@@ -85,7 +85,12 @@ async ({ token, line }) => {
       element.dispatchEvent(new Event("change", { bubbles: true }));
     }
     changed();
-    return { value: element.value };
+    return {
+      value: element.value,
+      selected_count: element.tagName === "SELECT" ? element.selectedOptions.length : null,
+      selected_option: element.tagName === "SELECT" && element.selectedOptions.length === 1 ?
+        element.selectedOptions[0].label : null,
+    };
   }
 
   await new Promise((resolve, reject) => {

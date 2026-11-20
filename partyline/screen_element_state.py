@@ -119,8 +119,10 @@ class ElementState(EventScope):
                 return tree
             tree.space.renew()
             scope, prior_helpers, action_ids = tree.scope, tree.prior_helpers, tree.action_ids
+            dependency = tree.dependency_scope
             tree = Snapshot(None, self.clock(), tree.space)
             tree.scope, tree.prior_helpers, tree.action_ids = scope, prior_helpers, action_ids
+            tree.dependency_scope = dependency
             tree.event_version = self.change_versions.get(grant["id"], 0)
         return tree
 
@@ -133,6 +135,8 @@ class ElementState(EventScope):
                 fields["workflow_read"] = True
             if tree.scope:
                 fields["query_scope"] = tree.scope
+            if tree.dependency_scope:
+                fields["dependency_scope"] = tree.dependency_scope
             if tree.cursor and tree.sources:
                 fields["tolerate_events"] = True  # events are judged by where they came from, at the end
             try:
@@ -169,6 +173,7 @@ class ElementState(EventScope):
             tree.snapshot_id = tree.snapshot_id or response.get("snapshot_id")
             started = True
             tree.scoped = response.get("scoped", False)
+            tree.dependency_complete = response.get("dependency_complete") is True
             if tree.scope and not tree.scoped:
                 tree.scope = None  # legacy helper returns a complete snapshot
                 tree.action_ids.clear()

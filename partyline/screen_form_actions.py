@@ -39,9 +39,14 @@ def verify(item, outcome):
     """CDP read-back must prove this value before another independent field is attempted."""
     if outcome.get("status") not in ("completed", "no_effect") or outcome.get("source") != "cdp":
         return
-    observed = outcome.get("element", {}).get("value")
-    if observed != item.value and (item.action != "select" or outcome.get("selected_option") != item.value):
-        outcome["state_unavailable"] = "action read-back did not confirm the assigned value"
+    element = outcome.get("element", {})
+    if item.action == "select":
+        confirmed = (element.get("selected_count") == 1 and
+                     item.value in (element.get("value"), element.get("selected_option")))
+    else:
+        confirmed = element.get("value") == item.value
+    if not confirmed:
+        outcome["state_unavailable"] = "settled action read-back did not confirm the assigned value"
 
 
 async def act(runtime, hub, conv_id, body, principal, grant, device=None):
@@ -58,7 +63,7 @@ async def act(runtime, hub, conv_id, body, principal, grant, device=None):
                 results.append(compact(item, failure))
                 break
         single = ElementAction(element_id=current_id, action=item.action,
-                               value=item.value, window=grant["id"])
+                               value=item.value, window=grant["id"], fill_only=True)
         audit_call(hub, principal, grant, "screen_element_action", len(item.value))
         await record_standing_window_access(runtime, hub, principal, conv_id, "uia_action",
                                             grant["id"], None, "started")

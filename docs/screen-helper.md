@@ -729,13 +729,19 @@ that scope and requires one current visible control supporting the planned actio
 condition probe to require an enabled, writable control and, for `select`, exactly one enabled option matching the
 assignment's option name or value. The probe proves the current backend identity but never focuses, cues, clicks,
 or types. A duplicate control or option stops with `condition_ambiguous`; it is never resolved by position.
+Grouped `select` is fill-only and requires a native `SELECT`: a custom combobox or button is refused before focus
+or input, rather than clicked. Standalone `select` retains its existing custom-control behavior.
 
 If the condition is not ready, the executor waits on the existing window-change signal, recaptures the scoped
-controls, and resolves the current replacement by label. There is no fixed sleep on a step and no timer-driven
-fetch. At most eight event-triggered rechecks run within `timeout_ms` (0–10,000; default 2,000). An immediate
-update takes no wait; a delayed replacement can therefore finish in the same executor call without returning to
-the model. Timeout returns `condition_timeout`; an unreadable condition returns `condition_unavailable`. These are
-pre-input outcomes with no action audit/rate-limit spend for that field. `condition` reports the observed label,
+controls, and resolves the current replacement by label. The helper reads only the root's accessibility subtree,
+in batches of 16, capped at 256 nodes total; it does not fetch the full window for a dependency recheck. A cursor, truncation,
+unreadable descendant, non-CDP fallback, or capture race cannot prove scoped uniqueness and returns
+`condition_unavailable` without input. There is no fixed sleep on a step and no timer-driven fetch. At most eight
+event-triggered rechecks run within `timeout_ms` (0–10,000; default 2,000), and that deadline covers the scoped
+read and condition probe as well as the event wait. An immediate update takes no wait; a delayed replacement can
+therefore finish in the same executor call without returning to the model. Timeout returns `condition_timeout`;
+an unreadable condition returns `condition_unavailable`. These are pre-input outcomes with no action
+audit/rate-limit spend for that field. `condition` reports the observed label,
 last current ID when available, and reason; `after` supplies the current scoped evidence for a model resume.
 Dependent conditions require helper 1.11.0 / `chrome_dom=6`; an older helper refuses the whole plan before any
 assignment. Basic independent groups still use older helpers.
@@ -756,8 +762,9 @@ helper capability.
 
 The response contains one compact entry per **attempted** assignment (ID and outcome, without repeating the input
 value), `completed`, and `remaining`, the count not attempted. A resolved replacement adds `current_element_id`.
-CDP value/selected-option read-back must confirm each assignment before the next one starts; unavailable or
-mismatched read-back is not counted as completed. Success is `status:"completed"`. A known failure before any
+Settled CDP value/selected-option read-back must confirm each assignment before the next one starts; the earlier
+select planner's option is not accepted as evidence. Unavailable, reverted, or mismatched read-back is not counted
+as completed. Success is `status:"completed"`. A known failure before any
 assignment succeeds is `failed`; after earlier success it is `partial` with `partial:true`. An unconfirmed helper
 outcome or unverifiable effect is always top-level `unconfirmed` (also with `partial:true` when earlier fields
 succeeded). The group stops immediately on a failed condition or action, an unconfirmed/unverifiable outcome,
@@ -783,6 +790,11 @@ its end values: before `Ada` / `Lovelace` / `London`, after `Grace` / `Hopper` /
 | Model decisions | 3 | 1 | inferred from the equivalent call sequence |
 | Response bytes | 3412 | 1575 | measured JSON encoding |
 | Elapsed milliseconds | 42.893 | 26.550 | measured locally |
+
+The delayed-dependency regression separately measured zero full-tree reads and eight bounded partial-AX calls
+across its immediate check and event-triggered recheck, with zero model handbacks. Its only full-tree read was the
+final ordinary `then` recovery answer. Partial/raced-capture and over-deadline read regressions verify that no
+late or uniqueness-unproven select is dispatched.
 
 A separate actual model-driven local browser demonstration, not a fixture/executor test, supplied only “fill this
 form with my JSON; do not submit”, JSON, and a generic form whose labels were chosen at runtime. The attached CLI
