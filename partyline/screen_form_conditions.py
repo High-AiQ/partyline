@@ -8,13 +8,15 @@ from .machine_scope import deny_unless
 from .screen_element_actions import action_token
 from .screen_eval import audit_call
 
+IMMEDIATE_CHECK_SECONDS = 35  # timeout_ms=0 still permits one ordinary bounded read/probe, but no event wait
+
 
 def failed(reason, error, condition):
     return {"status": "failed", "reason": reason, "error": error, "condition": condition}
 
 
 def timeout(condition, error="dependency condition exceeded its deadline"):
-    return None, failed("condition_timeout", error, condition)
+    return None, failed("condition_timeout", error, condition), None
 
 
 async def probe(runtime, hub, conv_id, item, node_id, principal, grant, device):
@@ -51,10 +53,17 @@ def incomplete(tree, reply):
     return None
 
 
+def evidence(tree):
+    """Existing helper dispatch fields fence this exact scoped observation through input."""
+    return {"workflow_source": "cdp", "workflow_document": tree.document,
+            "workflow_counter": tree.event_counter}
+
+
 async def resolve(runtime, hub, conv_id, item, principal, grant, device):
-    """Return a current unambiguous element id, or a truthful pre-input condition failure."""
+    """Return a current unambiguous element id and dispatch evidence, or a pre-input failure."""
     condition = {"name": item.when.name}
     deadline = monotonic() + item.when.timeout_ms / 1000
+    io_deadline = deadline + (IMMEDIATE_CHECK_SECONDS if item.when.timeout_ms == 0 else 0)
     scope = {"root": item.when.root, "name": item.when.name, "action": item.action}
     if item.when.control_type:
         scope["control_type"] = item.when.control_type
@@ -62,18 +71,18 @@ async def resolve(runtime, hub, conv_id, item, principal, grant, device):
         for _ in range(9):  # immediate check plus at most eight change-triggered rechecks
             version = hub.elements.change_versions.get(grant["id"], 0)
             deny_unless(runtime.db, principal, conv_id, "read")
-            remaining = deadline - monotonic()
+            remaining = io_deadline - monotonic()
             if remaining <= 0:
                 return timeout(condition)
             async with asyncio.timeout(remaining):
                 reply = await hub.elements.read(principal, None, grant["id"], {
                     "root": item.when.root, "depth": 3, "refresh": True, "include_root": True,
                     "dependency_scope": scope})
-            if monotonic() >= deadline:
+            if monotonic() >= io_deadline:
                 return timeout(condition)
             tree = hub.elements.snapshots.get(grant["id"])
             if error := incomplete(tree, reply):
-                return None, failed("condition_unavailable", error, condition)
+                return None, failed("condition_unavailable", error, condition), None
             root = tree.by_helper.get(item.when.root, item.when.root)
             ids = tree.subtree(root) or []
             wanted_type = (item.when.control_type or "").lower()
@@ -85,29 +94,31 @@ async def resolve(runtime, hub, conv_id, item, principal, grant, device):
                         and "off" not in node.flags):
                     matches.append(node)
             if len(matches) > 1:
-                return None, failed("condition_ambiguous", "more than one current control matches", condition)
+                failure = failed("condition_ambiguous", "more than one current control matches", condition)
+                return None, failure, None
             if matches:
                 node = matches[0]
                 condition["element_id"] = node.id
                 if "disabled" in node.flags or node.cached.get("enabled") is False:
                     condition["error"] = "control is disabled"
                 else:
-                    remaining = deadline - monotonic()
+                    remaining = io_deadline - monotonic()
                     if remaining <= 0:
                         return timeout(condition)
                     async with asyncio.timeout(remaining):
                         observed = await probe(runtime, hub, conv_id, item, node.id, principal, grant, device)
-                    if monotonic() >= deadline:
+                    if monotonic() >= io_deadline:
                         return timeout(condition)
                     current = observed.get("condition", {})
                     if current.get("ready"):
-                        return node.id, None
+                        return node.id, None, evidence(tree)
                     if current.get("ambiguous"):
-                        return None, failed("condition_ambiguous", "requested option is ambiguous", condition)
+                        failure = failed("condition_ambiguous", "requested option is ambiguous", condition)
+                        return None, failure, None
                     if observed.get("status") != "completed":
                         if observed.get("reason") != "target_changed":
                             error = observed.get("error", "condition could not be verified")
-                            return None, failed("condition_unavailable", error, condition)
+                            return None, failed("condition_unavailable", error, condition), None
                     condition["error"] = current.get("error", observed.get("error", "target changed"))
             else:
                 condition["error"] = "no current actionable control matches"
@@ -117,7 +128,7 @@ async def resolve(runtime, hub, conv_id, item, principal, grant, device):
     except TimeoutError:
         return timeout(condition)
     except HTTPException as exc:
-        return None, failed("condition_unavailable", str(exc.detail), condition)
+        return None, failed("condition_unavailable", str(exc.detail), condition), None
     except (OSError, RuntimeError):
-        return None, failed("condition_unavailable", "condition could not be verified", condition)
+        return None, failed("condition_unavailable", "condition could not be verified", condition), None
     return timeout(condition, "condition kept changing; recheck limit reached")

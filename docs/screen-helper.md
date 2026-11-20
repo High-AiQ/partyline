@@ -728,7 +728,9 @@ to the group:
 that scope and requires one current visible control supporting the planned action. It then uses a read-only CDP
 condition probe to require an enabled, writable control and, for `select`, exactly one enabled option matching the
 assignment's option name or value. The probe proves the current backend identity but never focuses, cues, clicks,
-or types. A duplicate control or option stops with `condition_ambiguous`; it is never resolved by position.
+or types. A duplicate control or option stops with `condition_ambiguous`; it is never resolved by position. A
+successful resolution carries its source, document, and event counter into the action dispatch; a post-probe scope
+change fails with `workflow_evidence` before input instead of using the stale uniqueness proof.
 Grouped `select` is fill-only and requires a native `SELECT`: a custom combobox or button is refused before focus
 or input, rather than clicked. Standalone `select` retains its existing custom-control behavior.
 
@@ -738,13 +740,15 @@ in batches of 16, capped at 256 nodes total; it does not fetch the full window f
 unreadable descendant, non-CDP fallback, or capture race cannot prove scoped uniqueness and returns
 `condition_unavailable` without input. There is no fixed sleep on a step and no timer-driven fetch. At most eight
 event-triggered rechecks run within `timeout_ms` (0–10,000; default 2,000), and that deadline covers the scoped
-read and condition probe as well as the event wait. An immediate update takes no wait; a delayed replacement can
-therefore finish in the same executor call without returning to the model. Timeout returns `condition_timeout`;
+read and condition probe as well as the event wait. `timeout_ms=0` still permits one immediate read/probe bounded
+by the ordinary 35-second helper operation limit, but never waits for an event. An immediate update takes no wait;
+a delayed replacement can therefore finish in the same executor call without returning to the model. Timeout
+returns `condition_timeout`;
 an unreadable condition returns `condition_unavailable`. These are pre-input outcomes with no action
 audit/rate-limit spend for that field. `condition` reports the observed label,
 last current ID when available, and reason; `after` supplies the current scoped evidence for a model resume.
-Dependent conditions require helper 1.11.0 / `chrome_dom=6`; an older helper refuses the whole plan before any
-assignment. Basic independent groups still use older helpers.
+Dependent conditions and every grouped `select` require helper 1.11.0 / `chrome_dom=6`; an older helper refuses
+the whole plan before any assignment. Independent `set_value`-only groups still use older helpers.
 
 `action` defaults to `set_value`; `select` takes the same option name or value as a single select. Use IDs from
 one current stable section and do not repeat an ID in a group. The normal entry point is the same
@@ -757,14 +761,14 @@ field gets its own write authorization, stale-target/identity checks, rate-limit
 and visible target cue. Read permission for `then` is checked before the first assignment. Between assignments a
 stable CDP page reuses the retained proof without an intermediate full-tree capture; the helper still proves the
 original backend node immediately before input. The next ordinary caller retains the usual forced post-action
-refresh. Older single-action callers and workflow steps are unchanged, and this server-side grouping needs no new
-helper capability.
+refresh. Older single-action callers and workflow steps are unchanged, and `set_value`-only server-side grouping
+needs no new helper capability.
 
 The response contains one compact entry per **attempted** assignment (ID and outcome, without repeating the input
 value), `completed`, and `remaining`, the count not attempted. A resolved replacement adds `current_element_id`.
 Settled CDP value/selected-option read-back must confirm each assignment before the next one starts; the earlier
-select planner's option is not accepted as evidence. Unavailable, reverted, or mismatched read-back is not counted
-as completed. Success is `status:"completed"`. A known failure before any
+select planner's option is not accepted as evidence. The observed node must still be connected; unavailable,
+disconnected, reverted, or mismatched read-back is not counted as completed. Success is `status:"completed"`. A known failure before any
 assignment succeeds is `failed`; after earlier success it is `partial` with `partial:true`. An unconfirmed helper
 outcome or unverifiable effect is always top-level `unconfirmed` (also with `partial:true` when earlier fields
 succeeded). The group stops immediately on a failed condition or action, an unconfirmed/unverifiable outcome,

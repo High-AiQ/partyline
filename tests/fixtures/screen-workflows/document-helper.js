@@ -86,6 +86,7 @@ async ({ token, line }) => {
     }
     changed();
     return {
+      connected: element.isConnected,
       value: element.value,
       selected_count: element.tagName === "SELECT" ? element.selectedOptions.length : null,
       selected_option: element.tagName === "SELECT" && element.selectedOptions.length === 1 ?
@@ -97,8 +98,8 @@ async ({ token, line }) => {
     socket.addEventListener("error", reject, { once: true });
     socket.addEventListener("open", () => {
       send({
-        type: "hello", protocol: 1, device_name: "Lab window", os: "test", helper_version: "1.9.0",
-        monitors: [], windows: 2, chrome_dom: 2, window_access: true, workflow_actions: true,
+        type: "hello", protocol: 1, device_name: "Lab window", os: "test", helper_version: "1.11.0",
+        monitors: [], windows: 2, chrome_dom: 6, window_access: true, workflow_actions: true,
       });
       send({ type: "list_share_targets", request_id: "targets" });
     });

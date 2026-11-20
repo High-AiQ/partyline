@@ -55,8 +55,9 @@ def elements_router(runtime, hub, store=None):
         if body.action == "set_values":
             if body.then:
                 core.deny_unless(runtime.db, principal, conv_id, "read")
-            if any(item.when for item in body.assignments) and device.get("chrome_dom", 0) < 6:
-                raise HTTPException(409, "update the Partyline helper to use dependent form conditions")
+            needs_fill_guard = any(item.when or item.action == "select" for item in body.assignments)
+            if needs_fill_guard and device.get("chrome_dom", 0) < 6:
+                raise HTTPException(409, "update the Partyline helper to use guarded grouped form filling")
             from .screen_form_actions import act as form_action
             return await form_action(runtime, hub, conv_id, body, principal, grant, device)
         core.audit_call(hub, principal, grant, "screen_element_action", len(body.value or body.key or ""))

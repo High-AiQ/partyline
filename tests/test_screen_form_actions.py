@@ -84,7 +84,8 @@ class FormFixture(unittest.IsolatedAsyncioTestCase):
             return await self.f.chrome.action(self.f.access, {**fields, "type": kind})
         if kind == "window_element_action":
             self.actions += 1
-            return await self.f.chrome.action(self.f.access, fields)
+            request = {"request_id": "request"} if fields.get("workflow_source") else {}
+            return await self.f.chrome.action(self.f.access, {**fields, **request})
         if fields.get("event_status"):
             return self.f.chrome.status(self.f.access)
         self.reads += 1
@@ -173,6 +174,17 @@ class FormFixture(unittest.IsolatedAsyncioTestCase):
         waiting.assert_not_awaited()
         self.assertEqual("New", self.f.socket.states[5]["value"])
 
+    async def test_zero_timeout_still_performs_one_immediate_ready_check_without_event_wait(self):
+        self.combo()
+        _, ids = await self.initial()
+        body = self.dependent_body(ids, timeout_ms=0)
+        with patch.object(self.elements, "wait_changed", new=AsyncMock()) as waiting:
+            result = await form_action(self.runtime, self.outer, "line", body,
+                                       self.principal, GRANT, self.device)
+        self.assertEqual("completed", result["status"])
+        self.assertEqual(1, self.probes)
+        waiting.assert_not_awaited()
+
     async def test_delayed_replacement_resolves_from_event_and_completes_inside_one_executor_call(self):
         self.combo(disabled=True)
         _, ids = await self.initial()
@@ -211,6 +223,29 @@ class FormFixture(unittest.IsolatedAsyncioTestCase):
             "dependency_full_tree_reads_measured": full - 1,
             "dependency_partial_ax_calls_measured": partial,
             "model_handbacks_measured": 0}))
+
+    async def test_scope_change_after_probe_is_refused_by_action_dispatch_evidence(self):
+        self.combo()
+        _, ids = await self.initial()
+        from partyline.screen_form_conditions import probe as checking
+
+        async def change_after_probe(*args):
+            observed = await checking(*args)
+            self.f.socket.nodes.append(dict(nodeId="6", parentId="2", backendDOMNodeId=6,
+                                            role={"value": "combobox"}, name={"value": "City"}))
+            self.f.socket.states[6] = dict(tag="SELECT", value="old", selected_index=0,
+                                           selected_count=1, hit=True)
+            self.f.state.changed()
+            self.elements.changed("g")
+            return observed
+
+        with patch("partyline.screen_form_conditions.probe", side_effect=change_after_probe):
+            result = await form_action(self.runtime, self.outer, "line", self.dependent_body(ids),
+                                       self.principal, GRANT, self.device)
+        self.assertEqual(("partial", 1, 1), (result["status"], result["completed"], result["remaining"]))
+        self.assertEqual("workflow_evidence", result["results"][1]["reason"])
+        self.assertEqual([(3, "Ada")], self.inserts)
+        self.assertEqual("old", self.f.socket.states[5]["value"])
 
     async def test_partial_dependency_capture_cannot_establish_uniqueness_or_dispatch(self):
         self.combo()
@@ -372,9 +407,25 @@ class FormFixture(unittest.IsolatedAsyncioTestCase):
         self.assertIn("after", result)
         self.assertIn("Last name updated", result["after"]["lines"])
 
+    async def test_disconnected_settled_readback_is_unverified_and_stops_later_input(self):
+        _, ids = await self.initial()
+
+        def detach(backend, text):
+            self.f.socket.states[backend]["connected"] = False
+
+        self.on_insert = detach
+        result = await form_action(self.runtime, self.outer, "line",
+                                   self.body(ids, ("A", "B", "C")), self.principal, GRANT)
+        self.assertEqual(("unconfirmed", 0, 2),
+                         (result["status"], result["completed"], result["remaining"]))
+        self.assertEqual(1, self.actions)
+        self.assertEqual([(3, "A")], self.inserts)
+        self.assertIn("connected", result["results"][0]["state_unavailable"])
+
     async def test_mismatched_readback_is_unverified_and_stops_before_later_input(self):
         _, ids = await self.initial()
-        outcomes = [{"status": "completed", "source": "cdp", "element": {"value": "different"}}]
+        outcomes = [{"status": "completed", "source": "cdp",
+                     "element": {"connected": True, "value": "different"}}]
         with patch("partyline.screen_form_actions.perform_element_action",
                    new=AsyncMock(side_effect=outcomes)) as perform:
             result = await form_action(self.runtime, self.outer, "line", self.body(ids, ("A", "B", "C")),
@@ -431,6 +482,10 @@ class ContractTests(unittest.IsolatedAsyncioTestCase):
                 "action": "set_values", "assignments": [{"element_id": "a", "value": "1",
                     "when": {"root": "section", "name": "Field"}}], "then": {"root": "section"}})
             self.assertEqual(409, dependent.status_code)  # older helpers cannot probe conditions
+            selected = client.post("/api/conversations/line/screen-control/element-action", json={
+                "action": "set_values", "assignments": [{"element_id": "a", "value": "1",
+                    "action": "select"}], "then": {"root": "section"}})
+            self.assertEqual(409, selected.status_code)  # older helpers ignore the fill-only click guard
             grouped.assert_awaited_once()
 
     async def test_http_refusal_becomes_a_bounded_partial_result(self):

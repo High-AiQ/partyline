@@ -186,7 +186,7 @@ async def element_action(runtime, hub, conv_id: str, body: ElementAction, reques
     return result
 
 
-async def perform_element_action(runtime, hub, conv_id, body, principal, workflow=None):
+async def perform_element_action(runtime, hub, conv_id, body, principal, workflow=None, evidence=None):
     deny_unless(runtime.db, principal, conv_id, "write")
     if body.then:
         deny_unless(runtime.db, principal, conv_id, "read")
@@ -213,6 +213,8 @@ async def perform_element_action(runtime, hub, conv_id, body, principal, workflo
             audit_files(hub, principal, grant, body.files or [], total, include_ids=workflow is None)
         if workflow:
             message.update(workflow.fields())
+        if evidence:
+            message.update(evidence)
         with phase("target_ms"):
             target = True
             if body.action not in ("reload", "dialog"):

@@ -40,6 +40,9 @@ def verify(item, outcome):
     if outcome.get("status") not in ("completed", "no_effect") or outcome.get("source") != "cdp":
         return
     element = outcome.get("element", {})
+    if element.get("connected") is not True:
+        outcome["state_unavailable"] = "settled action read-back was not from a connected element"
+        return
     if item.action == "select":
         confirmed = (element.get("selected_count") == 1 and
                      item.value in (element.get("value"), element.get("selected_option")))
@@ -55,10 +58,11 @@ async def act(runtime, hub, conv_id, body, principal, grant, device=None):
 
     results, completed, acted = [], 0, False
     for item in body.assignments:
-        current_id = item.element_id
+        current_id, evidence = item.element_id, None
         if item.when:
             from .screen_form_conditions import resolve
-            current_id, failure = await resolve(runtime, hub, conv_id, item, principal, grant, device)
+            current_id, failure, evidence = await resolve(
+                runtime, hub, conv_id, item, principal, grant, device)
             if failure:
                 results.append(compact(item, failure))
                 break
@@ -69,7 +73,8 @@ async def act(runtime, hub, conv_id, body, principal, grant, device=None):
                                             grant["id"], None, "started")
         retained = hub.elements.snapshots.get(grant["id"])
         try:
-            outcome = await perform_element_action(runtime, hub, conv_id, single, principal)
+            outcome = await perform_element_action(
+                runtime, hub, conv_id, single, principal, evidence=evidence)
         except HTTPException as exc:
             outcome = {"status": "failed", "error": str(exc.detail)}
         verify(item, outcome)
