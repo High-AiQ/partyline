@@ -4,7 +4,8 @@
 def label(message):
     """The audit name of a window call."""
     return {"snapshot_window": "screenshot", "look_window": "screenshot", "read_window_elements": "uia_read",
-            "window_click": "point_click", "window_point": "point_input"}.get(message["type"], "uia_action")
+            "window_element_condition": "uia_read", "window_click": "point_click",
+            "window_point": "point_input"}.get(message["type"], "uia_action")
 
 
 async def dispatch(shares, message):

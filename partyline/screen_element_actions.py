@@ -7,16 +7,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .auth_guard import request_principal
 from .capability_versions import WINDOW_PRESS_VERSION
 from .machine_scope import deny_unless
+from .screen_form_schema import Assignment
 from .screen_grants import resolve_window
 from .screen_tree import OUT_BYTES
 from .screen_tree_answer import size
 from .screen_timing import timed, phase
 
 
-ACTIONS = Literal["click", "invoke", "toggle", "set_value", "press", "select", "add_to_selection",
-                  "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent",
-                  "scroll_into_view", "set_range_value", "window_close", "window_minimize", "window_maximize",
-                  "window_restore", "window_move", "window_resize", "set_files", "reload", "dialog"]
+ACTIONS = Literal["click", "invoke", "toggle", "set_value", "set_values", "press", "select",
+                  "add_to_selection", "remove_from_selection", "expand", "collapse", "scroll",
+                  "set_scroll_percent", "scroll_into_view", "set_range_value", "window_close",
+                  "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize",
+                  "set_files", "reload", "dialog"]
 # Parameters each action takes; "set_scroll_percent" needs at least one of its two.
 PARAMS = {"dialog": ("accept", "prompt_text"), "set_files": ("files", "paths"), "press": ("key",),
           "select": ("value",), "set_value": ("value",),
@@ -71,10 +73,27 @@ class ElementAction(BaseModel):
     y: int | None = Field(default=None, ge=-32768, le=32767)
     width: int | None = Field(default=None, ge=1, le=16384)
     height: int | None = Field(default=None, ge=1, le=16384)
+    assignments: list[Assignment] | None = Field(default=None, min_length=1, max_length=8)
+    fill_only: bool = False  # internal grouped-action guard; not a public tool parameter
     then: Then | None = None
 
     @model_validator(mode="after")
     def target(self):
+        if self.action == "set_values":
+            if self.element_id is not None or self.mark is not None or not self.assignments:
+                raise ValueError("set_values takes assignments, not element_id or mark")
+            if self.force or any(getattr(self, key) is not None for key in ALL_PARAMS):
+                raise ValueError("set_values takes parameters on each assignment, without force")
+            if self.then and self.then.snapshot:
+                raise ValueError("set_values takes a compact then read, not a snapshot")
+            if any(item.when for item in self.assignments) and not (self.then and self.then.root):
+                raise ValueError("dependent assignments require a scoped then.root recovery read")
+            ids = [item.element_id for item in self.assignments]
+            if len(set(ids)) != len(ids):
+                raise ValueError("set_values assignments must name independent elements")
+            return self
+        if self.assignments is not None:
+            raise ValueError("assignments require action=set_values")
         if (self.element_id is None) == (self.mark is None):
             raise ValueError("give exactly one of element_id or mark")
         if self.action == "click" and self.mark is None:
@@ -105,7 +124,8 @@ class ElementAction(BaseModel):
             raise ValueError(f"{self.action} requires {', '.join(missing)}")
         if extra := sorted(given - wanted):
             raise ValueError(f"{self.action} does not take {', '.join(extra)}")
-        excluded = {"window", "then", "mark"} | ({"force"} if not self.force else set())
+        excluded = ({"window", "then", "mark"} | ({"force"} if not self.force else set())
+                    | ({"fill_only"} if not self.fill_only else set()))
         return self.model_dump(exclude_none=True, exclude=excluded)
 
 
@@ -156,10 +176,17 @@ async def after(hub, principal, grant, then, result):
 
 @timed
 async def element_action(runtime, hub, conv_id: str, body: ElementAction, request: Request):
-    return await perform_element_action(runtime, hub, conv_id, body, request_principal(request))
+    principal = request_principal(request)
+    result = await perform_element_action(runtime, hub, conv_id, body, principal)
+    if body.then and body.then.reads() and result.get("status") not in ("completed", "no_effect"):
+        from .screen_action_recovery import attach, needed
+        if needed(result):
+            grant, _ = resolve_window(hub, principal, body.window)
+            result = await attach(hub, principal, grant, body.then, result)
+    return result
 
 
-async def perform_element_action(runtime, hub, conv_id, body, principal, workflow=None):
+async def perform_element_action(runtime, hub, conv_id, body, principal, workflow=None, evidence=None):
     deny_unless(runtime.db, principal, conv_id, "write")
     if body.then:
         deny_unless(runtime.db, principal, conv_id, "read")
@@ -186,6 +213,8 @@ async def perform_element_action(runtime, hub, conv_id, body, principal, workflo
             audit_files(hub, principal, grant, body.files or [], total, include_ids=workflow is None)
         if workflow:
             message.update(workflow.fields())
+        if evidence:
+            message.update(evidence)
         with phase("target_ms"):
             target = True
             if body.action not in ("reload", "dialog"):

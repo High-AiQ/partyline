@@ -1,5 +1,5 @@
 """Chrome action routing, including page-level recovery and modal responses."""
-from .cdp_actions import act, evaluate
+from .cdp_actions import act, evaluate, probe
 from .cdp_identity import failure
 from .cdp_page_dialogs import PageDialog
 from .cdp_recovery import HINT, reload
@@ -8,10 +8,11 @@ from .workflow_dispatch import changed, document
 
 
 async def action(self, access, message):
-    self.audit(access, message, "screen_eval" if message.get("type") == "window_eval" else
-               "screen_element_action")
+    operation = {"window_eval": "screen_eval", "window_element_condition": "screen_element_condition"}.get(
+        message.get("type"), "screen_element_action")
+    self.audit(access, message, operation)
     if (message.get("action") not in ("reload", "dialog", "set_files")
-            and message.get("type") != "window_eval"
+            and message.get("type") not in ("window_eval", "window_element_condition")
             and self.sources.get(access) == "uia" and message.get("element_id") in access.elements):
         return None
     if message.get("action") == "reload" and not self.browser_of(access).socket:
@@ -62,6 +63,8 @@ async def action(self, access, message):
                     "error": self.fallback.reason(exc) or str(exc)}
     if page and page.page_state != "alive":
         return {"status": "failed", **self.metadata(access), "error": HINT}
+    if not page and message.get("type") == "window_element_condition":
+        return {"status": "failed", "source": "uia", "error": "condition probe needs a mapped Chrome page"}
     if not page:
         metadata = self.metadata(access)
         if self.sources.get(access) == "cdp" or metadata:
@@ -70,9 +73,12 @@ async def action(self, access, message):
         return None
     page.dispatched = False
     page.operation_epoch = page.epoch
+    page.dependency_message = message if message.get("workflow_dependency") else None
     try:
         if message.get("type") == "window_eval":
             return await evaluate(page, message["expression"])
+        if message.get("type") == "window_element_condition":
+            return await probe(page, message)
         return await act(page, message)
     except PageDialog as exc:
         page.guard(document=False)
@@ -85,5 +91,5 @@ async def action(self, access, message):
         result["timing"] = getattr(exc, "screen_timing", {})
         return result
     finally:
-        page.operation_epoch, page.action_proof = None, None
+        page.operation_epoch, page.action_proof, page.dependency_message = None, None, None
 

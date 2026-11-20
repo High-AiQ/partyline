@@ -99,6 +99,19 @@ class ActiveSelect(IsolatedAsyncioTestCase):
         self.assertEqual(self.f.socket.native_select.committed_values, ["C"])
         self.assertFalse(self.f.socket.native_select.open)
 
+    async def test_closed_or_unfocused_picker_never_sends_enter(self):
+        for mode in ("closed", "focus_stolen"):
+            with self.subTest(mode=mode):
+                self.f.socket.native_select.mode = mode
+                result = await self.select(1, "C")
+                self.assertEqual("unconfirmed", result["status"])
+                self.assertIn("before Enter", result["error"])
+                self.assertEqual([], self.f.socket.native_select.committed_values)
+                self.assertFalse(any(m["method"] == "Input.dispatchKeyEvent"
+                                     and m["params"]["key"] == "Enter" for m in self.f.socket.calls))
+                self.f.socket.calls.clear()
+                self.f.socket.input_events.clear()
+
     async def test_premature_commit_cancels_picker_and_removes_event_watch(self):
         self.f.socket.native_select.mode = "premature"
         result = await self.select(1, "C")

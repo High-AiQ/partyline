@@ -8,6 +8,10 @@ from .cdp_transport import CDPError
 _active = ContextVar("workflow_action_cancelled", default=None)
 
 
+class WorkflowEvidence(CDPError):
+    """The scoped condition changed after helper entry but before trusted input."""
+
+
 def document(page):
     return f"{page.identity}:{page.epoch}"
 

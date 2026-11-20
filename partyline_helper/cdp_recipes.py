@@ -31,6 +31,8 @@ STATE = r"""function() {
    selected:'selected' in e?e.selected:(ariaSelected==null?null:ariaSelected==='true'),
    selected_index:e.tagName==='SELECT'?e.selectedIndex:null,
    selected_count:e.tagName==='SELECT'?e.selectedOptions.length:null,
+   selected_option:e.tagName==='SELECT'&&e.selectedOptions.length===1?
+     e.selectedOptions[0].label.slice(0,160):null,
    tag:e.tagName, type:e.type, focused: (()=>{let a=e.ownerDocument.activeElement;
      for(let i=0;a&&a.shadowRoot&&a.shadowRoot.activeElement&&i<32;i++) a=a.shadowRoot.activeElement;
      return a===e;})(),
@@ -82,7 +84,7 @@ SELECT_PLAN = r"""function(value) {
  const enabled=options.filter(o=>!o.matches(':disabled') && !o.hidden
    && getComputedStyle(o).display!=='none');
  if(matches.length!==1 || !enabled.includes(matches[0]))
-   return {error:'option missing, disabled or ambiguous'};
+   return {error:'option missing, disabled or ambiguous',matches:matches.length};
  const target=matches[0], index=options.indexOf(target), current=this.selectedIndex;
  const down=index>current;
  const steps=enabled.filter(o=>{const i=options.indexOf(o);

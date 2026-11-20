@@ -17,6 +17,12 @@ def read_options(message):
     """The only fields of a read request the helper honours."""
     if isinstance(message.get("inspect"), str):
         return {"inspect": message["inspect"][:128]}
+    dependency = message.get("dependency_scope")
+    if isinstance(dependency, dict):
+        scope = {key: dependency[key][:200] for key in ("root", "name", "control_type", "action")
+                 if isinstance(dependency.get(key), str)}
+        if all(scope.get(key) for key in ("root", "name", "action")):
+            return {"dependency_scope": scope}
     scope = message.get("query_scope")
     if isinstance(scope, dict):
         return {"query_scope": {key: value[:200] for key, value in scope.items()

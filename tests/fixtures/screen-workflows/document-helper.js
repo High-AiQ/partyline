@@ -58,8 +58,13 @@ async ({ token, line }) => {
 
   async function action(message) {
     const element = document.getElementById(message.element_id);
-    if (!element || message.action_token !== `token-${element.id}` ||
-        message.workflow_document !== "document:1" || message.workflow_counter !== counter) {
+    if (!element || message.action_token !== `token-${element.id}`) {
+      const error = new Error("Element action target changed");
+      error.reason = "target_changed";
+      throw error;
+    }
+    if ("workflow_document" in message &&
+        (message.workflow_document !== "document:1" || message.workflow_counter !== counter)) {
       throw new Error("Workflow action did not use current evidence");
     }
     if (message.action === "invoke") element.click();
@@ -80,14 +85,21 @@ async ({ token, line }) => {
       element.dispatchEvent(new Event("change", { bubbles: true }));
     }
     changed();
+    return {
+      connected: element.isConnected,
+      value: element.value,
+      selected_count: element.tagName === "SELECT" ? element.selectedOptions.length : null,
+      selected_option: element.tagName === "SELECT" && element.selectedOptions.length === 1 ?
+        element.selectedOptions[0].label : null,
+    };
   }
 
   await new Promise((resolve, reject) => {
     socket.addEventListener("error", reject, { once: true });
     socket.addEventListener("open", () => {
       send({
-        type: "hello", protocol: 1, device_name: "Lab window", os: "test", helper_version: "1.9.0",
-        monitors: [], windows: 2, chrome_dom: 2, window_access: true, workflow_actions: true,
+        type: "hello", protocol: 1, device_name: "Lab window", os: "test", helper_version: "1.11.0",
+        monitors: [], windows: 2, chrome_dom: 6, window_access: true, workflow_actions: true,
       });
       send({ type: "list_share_targets", request_id: "targets" });
     });
@@ -119,13 +131,16 @@ async ({ token, line }) => {
         }
         case "window_element_action": {
           let status = "completed";
+          let failure = {};
+          let element;
           try {
-            await action(message);
+            element = await action(message);
           } catch (error) {
             status = "failed";
+            failure = { reason: error.reason, error: error.message };
             console.error(error);
           }
-          send({ ...reply, type: "window_element_result", status });
+          send({ ...reply, type: "window_element_result", status, element, ...failure });
           break;
         }
         case "ping":

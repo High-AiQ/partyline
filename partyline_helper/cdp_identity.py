@@ -2,6 +2,7 @@
 import hashlib
 
 from .cdp_transport import CDPError
+from .workflow_dispatch import WorkflowEvidence
 
 TARGET_CHANGED = ("read it again, or use "
                   "screen_window_snapshot + screen_window_click")
@@ -93,4 +94,5 @@ def failure(page, exc, error):
     return {"status": "unconfirmed" if page.dispatched else "failed", "source": "cdp",
             "error": error, "revoked_during": not page.live,
             **({"reason": "target_changed"} if isinstance(exc, TargetChanged) else
+               {"reason": "workflow_evidence"} if isinstance(exc, WorkflowEvidence) else
                {"reason": "not_actionable", "act_on": exc.act_on} if isinstance(exc, NotActionable) else {})}

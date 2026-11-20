@@ -1,7 +1,7 @@
 """Page input dispatched through a consent-guarded CDP session."""
 import json
 
-from .cdp_recipes import ACTION_STATE, HIT, STATE
+from .cdp_recipes import ACTION_STATE, HIT, SELECT_PLAN, STATE
 from .cdp_input import key
 from .cdp_select import select_option
 from .cdp_transport import CDPError, DocumentChanged
@@ -44,6 +44,34 @@ async def act(page, message):
     return result
 
 
+async def probe(page, message):
+    """Read a precondition without input; a false condition is not an action failure."""
+    node = page.nodes.get(message.get("element_id"))
+    if not node or not node.get("backendDOMNodeId"):
+        raise TargetChanged("backend node unavailable")
+    if message.get("action_token", node.get("action_token")) != node.get("action_token"):
+        raise TargetChanged("document identity token changed")
+    state = await page.function(node["backendDOMNodeId"], STATE, proof=True)
+    prove(page, node, state)
+    disabled = any(state.get(key) for key in ("native_disabled", "aria_disabled", "inert"))
+    condition = {"ready": not disabled}
+    if disabled:
+        condition["error"] = "element reports disabled (DOM/ARIA/inert)"
+    action = message["action"]
+    if action == "set_value" and (state.get("readonly") or state.get("password")):
+        condition.update(ready=False, error="element is read-only or a password field")
+    if action == "select" and condition["ready"]:
+        plan = await page.function(node["backendDOMNodeId"], SELECT_PLAN, (message.get("value"),))
+        condition["ready"] = not plan.get("error")
+        if plan.get("error"):
+            condition["error"] = plan["error"]
+        if plan.get("matches", 0) > 1:
+            condition["ambiguous"] = True
+    if action not in ("set_value", "select"):
+        raise CDPError("condition supports only set_value or select")
+    return {"status": "completed", "source": "cdp", "condition": condition}
+
+
 async def _act(page, message, timing):
     node = page.nodes.get(message.get("element_id"))
     if node and node.get("not_actionable"):
@@ -67,6 +95,8 @@ async def _act(page, message, timing):
         raise CDPError("element is read-only or a password field")
     if action not in ("invoke", "toggle", "select", "set_value", "set_files", "press", "scroll_into_view"):
         raise CDPError("action unavailable for CDP page element")
+    if message.get("fill_only") and action == "select" and state.get("tag") != "SELECT":
+        raise CDPError("grouped form select requires a native SELECT; no click was dispatched")
     if action != "set_files":
         await page.call("DOM.scrollIntoViewIfNeeded", {"backendNodeId": backend})
         await page.call("DOM.focus", {"backendNodeId": backend})

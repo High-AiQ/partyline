@@ -23,7 +23,7 @@ class NativeSelect:
         if recipe == SELECT_PLAN:
             matches = [i for i, o in enumerate(self.socket.options) if token in (o["label"], o["value"])]
             if len(matches) != 1 or matches[0] not in self.enabled():
-                return {"error": "option missing, disabled or ambiguous"}
+                return {"error": "option missing, disabled or ambiguous", "matches": len(matches)}
             index, current = matches[0], state["selected_index"]
             down = index > current
             steps = len([i for i in self.enabled() if current < i <= index or index <= i < current])
@@ -37,6 +37,7 @@ class NativeSelect:
         elif recipe == STATUS:
             events = self.socket.input_events[self.watches[token]:]
             return dict(index=state["selected_index"], count=state["selected_count"], open=self.open,
+                        focused=self.socket.focused == backend,
                         trusted_input_events=events.count(("input", True)),
                         trusted_change_events=events.count(("change", True)))
         elif recipe == BLUR:
@@ -75,6 +76,10 @@ class NativeSelect:
                     self.highlight = min(choices) if name == "ArrowDown" else max(choices)
                     if self.mode == "premature":
                         self.commit(state, self.highlight)
+                    elif self.mode in ("closed", "focus_stolen"):
+                        self.open = False
+                        if self.mode == "focus_stolen":
+                            self.socket.focused = 2
         elif name in ("ArrowDown", "ArrowUp"):
             choices = [i for i in self.enabled() if i > state["selected_index"]] if name == "ArrowDown" else [
                 i for i in self.enabled() if i < state["selected_index"]]

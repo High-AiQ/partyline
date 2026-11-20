@@ -15,7 +15,7 @@ WATCH = r"""function(token) {
 }"""
 STATUS = r"""function(token) {
  return {index:this.selectedIndex,count:this.selectedOptions.length,open:this.matches(':open'),
-   ...this[token].counts};
+   focused:this.matches(':focus'),...this[token].counts};
 }"""
 UNWATCH = r"""function(token) {
  const watch=this[token]; if(!watch) return {};
@@ -58,6 +58,9 @@ async def popup(page, backend, plan, status):
         current = await status()
         if current["trusted_change_events"]:
             raise CDPError("Native popup committed before Enter; inspect the page before continuing")
+        if not current["open"] or not current["focused"]:
+            raise CDPError("Native picker closed or focus moved before Enter; outcome uncertain; "
+                           "inspect the page before continuing")
         await key(page, "Enter", 13)
         current = await status()
         if selected(current, plan):

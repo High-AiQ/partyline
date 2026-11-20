@@ -73,6 +73,8 @@ class Snapshot:
         self.changed = False  # a resumed read found the page different: elements may be missing or repeated
         self.counts = None
         self.scope, self.scoped = None, False
+        self.dependency_scope = None
+        self.dependency_complete = False
         self.sources = False  # the helper can say which elements events came from
         self.action_identity = False  # CDP re-proves backend identity and bounds at input dispatch
         self.moved = False  # events arrived while the parts were read

@@ -99,6 +99,15 @@ class Socket:
             return {"executionContextId": 1}
         if method == "Accessibility.getFullAXTree":
             return {"nodes": self.nodes}
+        if method == "Accessibility.getPartialAXTree":
+            root = next((node for node in self.nodes
+                         if node.get("backendDOMNodeId") == p["backendNodeId"]), None)
+            if not root:
+                return {"nodes": []}
+            children = [node for node in self.nodes if node.get("parentId") == root["nodeId"]]
+            root = {**root, "childIds": [node["nodeId"] for node in children]}
+            children = [{**node, "childIds": []} for node in children]
+            return {"nodes": [root, *([] if p.get("fetchRelatives") is False else children)]}
         if method == "DOM.getDocument":
             return {"root": self.document}
         if method == "DOM.resolveNode":
@@ -112,6 +121,8 @@ class Socket:
                 return {"result": {"value": self.native_select.function(backend, p)}}
             state = {"connected": backend in self.states, "document_identity": "document",
                      "bounds": [0, 0, 100, 40], **self.states.get(backend, {})}
+            if state.get("tag") == "SELECT" and state.get("selected_count") == 1:
+                state["selected_option"] = self.options[state["selected_index"]]["label"]
             if "non_element" in state:  # a text or document node answers only its node type
                 return {"result": {"value": {"non_element": state["non_element"]}}}
             if p["functionDeclaration"] == ACTION_STATE:
