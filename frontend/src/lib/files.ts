@@ -14,6 +14,20 @@ export interface FileIntake {
   files: File[];
 }
 
+/** Return the file only for a supported, same-origin Partyline media link.
+ * Ordinary paths must keep native browser navigation and never receive tokens. */
+export function partylineMediaId(href: string): string | null {
+  if (!href.startsWith("/")) return null;
+  try {
+    const url = new URL(href, window.location.href);
+    if (url.origin !== window.location.origin) return null;
+    const match = /^\/api\/media\/([^/]+)\/(?:original|thumb|slim|readable)$/.exec(url.pathname);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The durable digest lines an agent reads, one per file, by kind prefix. */
 const DIGEST_PREFIXES = ["📷 ", "🎵 ", "🎬 ", "🧊 ", "📎 "];
 

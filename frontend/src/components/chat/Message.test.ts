@@ -1,11 +1,15 @@
 import { mount, tick, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Message from "./Message.svelte";
-import type { ChatMessage } from "../../lib/contracts";
+import ImageViewer from "./ImageViewer.svelte";
+import type { ChatMessage, FileRef } from "../../lib/contracts";
 import { renderMessage } from "../../lib/markdown";
-import { clearStoredTokens, storeTokens } from "../../lib/http";
+import { clearStoredTokens, readAccessToken, storeTokens } from "../../lib/http";
+import * as mediaApi from "../../lib/file-api";
+import * as fileActions from "../../lib/files";
 import { room } from "../../state/room.svelte.js";
 import { session } from "../../state/session.svelte.js";
+import { dialogs } from "../../state/dialogs.svelte.js";
 
 function systemMessage(body: string): ChatMessage {
   return {
@@ -39,6 +43,41 @@ function humanMessage(body: string): ChatMessage {
     sender_type: "human",
   };
 }
+
+const linkedImage: FileRef = {
+  id: "media-123",
+  kind: "image",
+  filename: "photo.png",
+  title: "Photo",
+  description: null,
+  mime: "image/png",
+  bytes: 123,
+  width: 20,
+  height: 10,
+  thumb: null,
+  slim: null,
+  urls: {
+    original: "/api/media/media-123/original",
+    thumb: "/api/media/media-123/thumb",
+    slim: "/api/media/media-123/slim",
+  },
+};
+
+const activeDocument: FileRef = {
+  ...linkedImage,
+  id: "active-123",
+  kind: "file",
+  filename: "active.html",
+  title: "Active document",
+  mime: "text/html",
+  width: null,
+  height: null,
+  urls: {
+    original: "/api/media/active-123/original",
+    thumb: "/api/media/active-123/thumb",
+    slim: "/api/media/active-123/slim",
+  },
+};
 
 function setClipboard(clipboard: unknown): void {
   Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
@@ -82,6 +121,9 @@ function blobText(blob: Blob): Promise<string> {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  dialogs.closeAll();
   setClipboard(undefined);
   clearStoredTokens();
   session.user = null;
@@ -198,9 +240,55 @@ describe("agent message enhancements", () => {
 });
 
 describe("message links", () => {
-  it("adds credentials to a same-origin service link only at navigation time", async () => {
-    storeTokens("access+/=", "refresh-token");
+  it.each([false, true])("keeps ordinary public navigation native (modified: %s)", async (modified) => {
+    storeTokens("access-token", "refresh-token");
+    const listFiles = vi.spyOn(mediaApi, "listFiles");
     const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const href = "/documents/editor";
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: agentMessage(`[editor](${href})`) },
+    });
+    let preventedByMessage: boolean | null = null;
+    const observeNativeDefault = (event: MouseEvent): void => {
+      preventedByMessage = event.defaultPrevented;
+      event.preventDefault(); // keep jsdom from attempting the intentional native navigation
+    };
+    window.addEventListener("click", observeNativeDefault, { once: true });
+    try {
+      const link = document.querySelector<HTMLAnchorElement>(".body a");
+      await tick();
+      link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: modified }));
+
+      expect(preventedByMessage).toBe(false);
+      expect(listFiles).not.toHaveBeenCalled();
+      expect(open).not.toHaveBeenCalled();
+      expect(link?.getAttribute("href")).toBe(href);
+    } finally {
+      window.removeEventListener("click", observeNativeDefault);
+      await unmount(message);
+    }
+  });
+
+  it("refreshes an expired session before opening protected media in the safe viewer", async () => {
+    storeTokens("access-expired", "refresh-old");
+    const openDialog = vi.spyOn(dialogs, "open").mockReturnValue(() => undefined);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({ detail: "expired" }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            access_token: "access-new",
+            refresh_token: "refresh-new",
+            token_type: "bearer",
+            user: { id: 1, email: "greg@example.com", handle: "greg" },
+          }),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve([linkedImage]) });
+    vi.stubGlobal("fetch", fetchMock);
     const href = "/api/media/media-123/slim?download=1#preview";
     const message = mount(Message, {
       target: document.body,
@@ -209,20 +297,48 @@ describe("message links", () => {
     try {
       const link = document.querySelector<HTMLAnchorElement>(".body a");
       expect(link?.getAttribute("href")).toBe(href);
-      expect(link?.getAttribute("href")).not.toContain("token=");
       await tick();
-
       const click = new MouseEvent("click", { bubbles: true, cancelable: true });
       link?.dispatchEvent(click);
 
-      const expected = new URL(href, window.location.href);
-      expected.searchParams.set("token", "access+/=");
+      await vi.waitFor(() => {
+        expect(openDialog).toHaveBeenCalledWith(ImageViewer, { images: [linkedImage], initialIndex: 0 });
+      });
       expect(click.defaultPrevented).toBe(true);
-      expect(open).toHaveBeenCalledWith(expected.href, "_blank", "noopener,noreferrer");
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/conversations/line-1/files");
+      expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/conversations/line-1/files");
+      expect(fetchMock.mock.calls[2]?.[1]).toEqual({
+        method: "GET",
+        headers: { Authorization: "Bearer access-new" },
+      });
+      expect(readAccessToken()).toBe("access-new");
       expect(link?.getAttribute("href")).toBe(href);
     } finally {
       await unmount(message);
-      open.mockRestore();
+    }
+  });
+
+  it("downloads untrusted active media instead of navigating to it", async () => {
+    const listFiles = vi.spyOn(mediaApi, "listFiles").mockResolvedValue([activeDocument]);
+    const download = vi.spyOn(fileActions, "downloadFile").mockResolvedValue(undefined);
+    const openDialog = vi.spyOn(dialogs, "open");
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: agentMessage("[document](/api/media/active-123/original)") },
+    });
+    try {
+      const link = document.querySelector<HTMLAnchorElement>(".body a");
+      await tick();
+      link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      await vi.waitFor(() => {
+        expect(download).toHaveBeenCalledWith(activeDocument);
+      });
+      expect(listFiles).toHaveBeenCalledWith("line-1");
+      expect(openDialog).not.toHaveBeenCalled();
+    } finally {
+      await unmount(message);
     }
   });
 });
