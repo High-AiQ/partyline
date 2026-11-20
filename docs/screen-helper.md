@@ -1734,6 +1734,71 @@ and 1–30 ms detach** on a warm desktop Chrome as an engineering estimate, not 
 promise; busy renderers and security software can take longer. Run against real Windows
 Chrome before making a latency claim.
 
+#### Visible action cue (helper 1.10.0)
+
+When the helper acts in a granted Chrome tab (extension or direct CDP), the person sees where:
+a magenta pointer at the point the agent used, a **blue click ring** (then the pointer) when a
+mouse press was actually dispatched, and a pink-bordered **target box** on the element for input
+that has no pointer click: `set_value`, `press`, `set_files`, a native select, and keyboard
+`type`/`key` (the box is on the element the pre-input check proved had the keyboard focus, even if
+the page then moves it; a Tab key shows the field it moved to, read after the key's reply). That
+element is the one the password check already read before the keys went out, so the cue adds no
+read to the input path and cannot delay or block it; when the element is not proven, nothing is
+drawn. Nothing is drawn for input that was
+refused or never sent (a missing select option, a password field), and a cue that would draw nothing
+(no focused element, a point outside the viewport, a hidden tab) still hides the previous cue at once.
+
+The cue is Chrome's own inspector overlay (`Overlay.highlight*`), drawn by the browser over the
+page's pixels. It adds no DOM node and takes no pointer or keyboard event. It changes no hit
+test, accessibility tree, mutation or `settle` result, so a page needs no cooperation and cannot
+see it. It is sent only by the code that dispatches agent input, after the input went out, on
+tasks of its own with no pacing: a slow, refused or lost overlay call never delays, retries or
+changes the action, and three refusals in a row stop cues for that page. A page's cue commands go
+out one at a time, each after the reply (or failure, or transport timeout) of the one before, so a
+hide never overtakes the paint it follows; the hide timer is armed when the cue is dispatched, and a
+cue whose time ran out before its paint went out is never painted; a paint whose answer was lost
+still counts as painted until a hide succeeds, and a failed hide is tried once more. A cue belongs
+to the page the input was dispatched into: if the page navigated before the input's reply (a click on
+a link for example, to a new document or to a fragment of the same one), nothing is drawn on the destination. Reading a page, a human
+using the mouse, and page events draw nothing. Detach clears it: a revoked grant, a navigation, a changed
+document or a same-document (fragment or history) navigation of the main frame takes it down at once; an ordinary cue hides itself after about 2.5 s (targets 2 s)
+by one-shot timers, no polling. The extension keeps the tab attached for up to 4 s while a cue
+shows, then detaches as before. It uses the existing `debugger` permission and adds no host permission.
+
+Placement: the overlay maps coordinates differently from input at a device scale above 1 (it
+scales by the ratio squared). The first cue at each pixel ratio takes a screenshot clipped to the
+viewport origin, draws one probe square in the colour furthest from the page's brightness, takes a
+second and finds the probe by what changed between them, so the page's own colours (any accent)
+cannot hide or fake it. A cue that cannot be measured is not drawn; an unreadable probe (an animating
+page) is retried up to three times per pixel ratio, then given up for that ratio. Evidence on an unmodified page (Chromium on Linux, device scale 1, 1.5 and browser
+zoom 1.2) put the pointer tip on the dispatched point at each.
+
+Where the person sees it: the overlay is composited by the browser into the real window, so it is
+in the screen framebuffer and in `Page.captureScreenshot`, not only in a captured image.
+
+Limits:
+
+- Only the visible tab of the granted session is drawn on. A background tab and a pinch-zoomed page
+  (input and overlay map differently there) get no cue.
+- Chrome pages that refuse the debugger (`chrome://`, the Web Store, the built-in PDF viewer, other
+  extensions' pages) are not controlled, so not cued.
+- The pointer and ring are fixed to the viewport for their 2.5 s: a scroll in that window moves the
+  page under them (target boxes follow their element); a fragment navigation hides them.
+- Only one highlight exists at a time, so the ring and pointer alternate (ring about 0.8 s, then the
+  pointer) and a new action replaces the old cue. The ring is a translucent square, not a circle.
+- A target box inside a cross-origin frame whose node Chrome cannot resolve is skipped; a pointer
+  or ring is placed in the main frame's viewport coordinates, as the input was.
+- The UI Automation and cursor routes move or show the real cursor already and get no overlay.
+- The cue says where the agent acted. It is not a physical cursor and cannot show a point
+  outside the viewport.
+- Evidence was taken on Linux. Windows OS display scaling reaches the page as the same device
+  pixel ratio, so the same calibration applies, but it has not been captured there.
+
+Covered by `tests/test_cdp_cue.py` (draw order, ring and pointer, target and focus boxes,
+silent or refusing overlay, one-at-a-time ordering, hide retry, calibration, hidden and detached
+tabs, navigation, same-document navigation, revoke) and
+`partyline_chrome/relay.test.js` (cue linger).
+
 #### Chrome remote debugging (fallback)
 
 In an already running **Chrome 144 or newer**, open `chrome://inspect/#remote-debugging`

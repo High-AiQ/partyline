@@ -107,6 +107,7 @@ class FakePage:
         self.shown, self.on_input = True, None
         self.access = SimpleNamespace(event_status=lambda: {"event_counter": 4})
         self.fail = None
+        self.cue = Mock()  # the visible cue has its own tests (test_cdp_cue)
 
     def dialog_guard(self):
         pass

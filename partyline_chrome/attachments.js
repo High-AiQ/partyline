@@ -2,6 +2,9 @@
 import { chromeFailure, refuse } from './refusal.js';
 
 export const IDLE_LINGER_MS = 300;
+// A cue (Chrome's own overlay) lives only while the tab stays attached; the helper hides it by itself, so this
+// is only the longest the attachment is kept for a helper that went away without hiding it.
+export const CUE_LINGER_MS = 4000;
 export const safeURL = (url) => /^https?:/i.test(url || '');
 
 export class Attachments {
@@ -102,13 +105,20 @@ export class Attachments {
   idle(entry) {
     this.clock.clearTimeout(entry.timer);
     if (entry.attached && !this.held.has(entry.grant) && !entry.busy && !entry.dialogs.size) {
-      // no-poll (b): one-shot idle deadline, reset by actual operations.
-      entry.timer = this.clock.setTimeout(() => { void this.detach(entry).catch(() => {}); }, IDLE_LINGER_MS);
+      // no-poll (b): one-shot idle deadline, reset by actual operations. A showing cue waits for its own hide.
+      entry.timer = this.clock.setTimeout(() => { void this.detach(entry).catch(() => {}); },
+        entry.cue ? CUE_LINGER_MS : IDLE_LINGER_MS);
     }
+  }
+  // The overlay methods that draw or clear a cue; a drawing keeps its tab attached until it is hidden.
+  cue(entry, method) {
+    if (method === 'Overlay.hideHighlight') entry.cue = false;
+    else if (/^Overlay\.highlight(Quad|Rect|Node)$/.test(method)) entry.cue = true;
   }
   async detach(entry) {
     if (entry.closing) return entry.closing;
     this.clock.clearTimeout(entry.timer);
+    entry.cue = false;
     entry.children.clear();
     entry.dialogs.clear();
     if (!entry.attached) return;

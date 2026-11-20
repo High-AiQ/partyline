@@ -6,13 +6,29 @@ from unittest.mock import AsyncMock, Mock
 
 from partyline_helper.cdp import Chrome
 from partyline_helper.cdp_control_details import CONTROL_DETAILS
+from partyline_helper.cdp_cue_js import FOCUSED
 from partyline_helper.cdp_recipes import ACTION_STATE, DISPATCH
+from partyline_helper.point_cdp_ops import FOCUS
 from partyline_helper.cdp_transport import BrowserConnection
 from partyline_helper.status import Status
 from partyline_helper.uia_access import WindowAccess
 from partyline_helper.uia_event_state import EventState
 from partyline_helper.window_shares import WindowSession, WindowShares
 from tests.cdp_select_fake import NativeSelect
+
+
+def probe_png(scale, page="white", probe=None, size=16):
+    """A clipped screenshot: the page's colour, and the probe square where Chrome would draw it."""
+    import base64
+    import io
+    from PIL import Image, ImageDraw
+    image = Image.new("RGB", (160, 160), page)
+    left = round(size * scale) if scale and probe else None
+    if left:
+        ImageDraw.Draw(image).rectangle([left, left, left * 2 - 1, left * 2 - 1], fill=probe)
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return base64.b64encode(out.getvalue()).decode()
 
 
 class Socket:
@@ -40,6 +56,9 @@ class Socket:
         self.focused = None
         self.input_events = []
         self.native_select = NativeSelect(self)
+        self.focus_object, self.focus_state = None, "none"  # the focused element, or the word for why not
+        self.overlay_probe, self.page_color = None, "white"
+        self.ratio, self.overlay_scale = 1, 1  # device pixel ratio; screenshot pixels per overlay unit
 
     def __aiter__(self):
         return self
@@ -107,6 +126,20 @@ class Socket:
             self.focused = p["backendNodeId"]
         if method == "Input.dispatchKeyEvent" and p["type"] == "keyDown":
             self.native_select.key(p)
+        if method == "Overlay.highlightRect" and p.get("width") == 16:
+            color = p["color"]
+            self.overlay_probe = (color["r"], color["g"], color["b"])
+        if method == "Overlay.hideHighlight":
+            self.overlay_probe = None
+        if method == "Page.captureScreenshot":  # the overlay probe: a square where Chrome draws it
+            return {"data": probe_png(self.overlay_scale, self.page_color, self.overlay_probe)}
+        if method == "Runtime.evaluate" and p["expression"] in (FOCUS, FOCUSED):  # an element, or why none
+            if self.focus_object:
+                return {"result": {"type": "object", "subtype": "node", "objectId": self.focus_object}}
+            return {"result": {"type": "string", "value": self.focus_state}}
+        if method == "Runtime.evaluate" and "devicePixelRatio" in p["expression"]:
+            visible = self.visible.get(m.get("sessionId"))
+            return {"result": {"value": json.dumps([visible, self.ratio, 1, 800, 600])}}
         if method == "Runtime.evaluate":
             value = self.visible.get(m.get("sessionId")) if "visibilityState" in p["expression"] \
                 else self.eval_value
@@ -126,7 +159,7 @@ class Socket:
 
 
 class Fixture:
-    def __init__(self):
+    def __init__(self, cues=False):  # a cue sends its own overlay calls: only its tests want them
         self.socket = Socket()
         self.connector = AsyncMock(return_value=self.socket)
         self.browser = BrowserConnection(discovery=lambda: "ws://fake", connector=self.connector)
@@ -134,7 +167,7 @@ class Fixture:
                                        share=None, accepted=False)
         self.shares = WindowShares(self.session)
         self.chrome = Chrome(self.shares, self.browser, bounds=lambda hwnd: (10, 20, 800, 600),
-                             dialogs=lambda grant: None)
+                             dialogs=lambda grant: None, cues=cues)
         self.shares.chrome = self.chrome
         self.browser.changed = self.chrome.report
         self.window = dict(hwnd=1, pid=12, title="Lab - Google Chrome", process="chrome.exe")

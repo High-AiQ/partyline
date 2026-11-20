@@ -17,8 +17,8 @@ from .chrome_operations import audit, chrome_label, operation, preferred, status
 
 
 class Chrome:
-    def __init__(self, shares, connection=None, bounds=frame, dialogs=dialog_pointer):
-        self.shares, self.session, self.bounds = shares, shares.session, bounds
+    def __init__(self, shares, connection=None, bounds=frame, dialogs=dialog_pointer, cues=True):
+        self.shares, self.session, self.bounds, self.cues = shares, shares.session, bounds, cues
         self.auto_transport, self.browser = connection is None, connection or preferred(self.report)
         self.pages, self.reasons, self.selected, self.sources = {}, {}, {}, {}
         self.extension_watch = None  # chrome_operations.watch_windows owns it
@@ -114,7 +114,9 @@ class Chrome:
                 self.shares.spawn(self.detach(session, browser))
                 return
             # Own the session before waking the waiting command: revoke can now always find it.
-            pages[target] = Page(browser, access, target, session, lambda: self.changed(access, target))
+            page = pages[target] = Page(browser, access, target, session,
+                                        lambda: self.changed(access, target))
+            page.cue.enabled = self.cues
         await browser.call("Target.attachToTarget", {"targetId": target, "flatten": True},
                                 guard=guard, on_result=arrived)
         return pages[target]

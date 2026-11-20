@@ -30,19 +30,26 @@ FOCUS = """(() => {
  const style = getComputedStyle(a);
  if ((a.tagName === 'INPUT' && String(a.type).toLowerCase() === 'password')
      || (style.webkitTextSecurity && style.webkitTextSecurity !== 'none')) return 'password';
- return 'ok';
+ return a;
 })()"""
 
 
 async def password_check(page, typing=True):
     """Typing is refused (CDPError) unless the focused field can be seen and is not a password field.
-    Keys that only move or edit (tab, arrows, backspace) are not typing."""
-    result = await page.call("Runtime.evaluate", {"expression": FOCUS, "returnByValue": True})
-    state = result.get("result", {}).get("value") if isinstance(result, dict) else None
+    Keys that only move or edit (tab, arrows, backspace) are not typing. The page answers with the focused
+    element (acceptable) or a word for why not, so acceptable is exactly "an element came back"; its id is
+    what the keys go to, proven before they are sent."""
+    result = await page.call("Runtime.evaluate", {"expression": FOCUS})
+    remote = result.get("result", {}) if isinstance(result, dict) else {}
+    ident = remote.get("objectId") if remote.get("subtype") == "node" else None
+    state = "ok" if ident or remote.get("value") == "ok" else remote.get("value")
     if typing and state == "password":
+        page.cue.release(ident)
         raise CDPError(PASSWORD)
     if typing and state != "ok":
+        page.cue.release(ident)
         raise CDPError(UNKNOWN)
+    return ident
 
 
 async def wheel(page, frame, point, dx, dy, guard):
