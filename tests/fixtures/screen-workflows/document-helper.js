@@ -85,6 +85,7 @@ async ({ token, line }) => {
       element.dispatchEvent(new Event("change", { bubbles: true }));
     }
     changed();
+    return { value: element.value };
   }
 
   await new Promise((resolve, reject) => {
@@ -125,14 +126,15 @@ async ({ token, line }) => {
         case "window_element_action": {
           let status = "completed";
           let failure = {};
+          let element;
           try {
-            await action(message);
+            element = await action(message);
           } catch (error) {
             status = "failed";
             failure = { reason: error.reason, error: error.message };
             console.error(error);
           }
-          send({ ...reply, type: "window_element_result", status, ...failure });
+          send({ ...reply, type: "window_element_result", status, element, ...failure });
           break;
         }
         case "ping":

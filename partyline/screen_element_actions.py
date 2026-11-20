@@ -85,6 +85,8 @@ class ElementAction(BaseModel):
                 raise ValueError("set_values takes parameters on each assignment, without force")
             if self.then and self.then.snapshot:
                 raise ValueError("set_values takes a compact then read, not a snapshot")
+            if any(item.when for item in self.assignments) and not (self.then and self.then.root):
+                raise ValueError("dependent assignments require a scoped then.root recovery read")
             ids = [item.element_id for item in self.assignments]
             if len(set(ids)) != len(ids):
                 raise ValueError("set_values assignments must name independent elements")

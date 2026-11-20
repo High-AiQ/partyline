@@ -706,6 +706,40 @@ too. A scoped `then.root` therefore supplies the current IDs for recovery instea
 }
 ```
 
+**One-line operator, attached-CLI planner.** A person can say only “fill this form with my JSON; do not submit”
+and supply the data (and any files) plus an unfamiliar shared page. The attached CLI is the planner: it first uses
+`screen_elements` to observe the current section, infers a visit-local mapping from JSON keys to the exact observed
+labels, and constructs the assignments above. There is no stored field map, hosted planner, site rule, workflow, or
+per-field instruction from the person. If a label is missing or ambiguous, or a new value needs judgment, the
+planner does not send a guessed plan. Files remain explicit `set_files` steps in that plan. Filling never implies
+submission: only a separate, explicit submit intent may lead to an `invoke` or Enter action after the filled values
+have been reviewed.
+
+Once supplied, the plan is deterministic executor input. No model call or model-mediated tool call is needed for
+its individual assignments. For an anticipated dependency, add `when` to that assignment and a scoped `then.root`
+to the group:
+
+```json
+{"element_id": "old-city-id", "action": "select", "value": "London",
+ "when": {"root": "section-id", "name": "City", "control_type": "ComboBox", "timeout_ms": 2000}}
+```
+
+`name` is an exact accessible-label match below `root`; `control_type` is optional. The executor immediately reads
+that scope and requires one current visible control supporting the planned action. It then uses a read-only CDP
+condition probe to require an enabled, writable control and, for `select`, exactly one enabled option matching the
+assignment's option name or value. The probe proves the current backend identity but never focuses, cues, clicks,
+or types. A duplicate control or option stops with `condition_ambiguous`; it is never resolved by position.
+
+If the condition is not ready, the executor waits on the existing window-change signal, recaptures the scoped
+controls, and resolves the current replacement by label. There is no fixed sleep on a step and no timer-driven
+fetch. At most eight event-triggered rechecks run within `timeout_ms` (0–10,000; default 2,000). An immediate
+update takes no wait; a delayed replacement can therefore finish in the same executor call without returning to
+the model. Timeout returns `condition_timeout`; an unreadable condition returns `condition_unavailable`. These are
+pre-input outcomes with no action audit/rate-limit spend for that field. `condition` reports the observed label,
+last current ID when available, and reason; `after` supplies the current scoped evidence for a model resume.
+Dependent conditions require helper 1.11.0 / `chrome_dom=6`; an older helper refuses the whole plan before any
+assignment. Basic independent groups still use older helpers.
+
 `action` defaults to `set_value`; `select` takes the same option name or value as a single select. Use IDs from
 one current stable section and do not repeat an ID in a group. The normal entry point is the same
 `screen_element_action` tool and endpoint as a single action, not a workflow or a JavaScript evaluation. It never
@@ -721,18 +755,45 @@ refresh. Older single-action callers and workflow steps are unchanged, and this 
 helper capability.
 
 The response contains one compact entry per **attempted** assignment (ID and outcome, without repeating the input
-value), `completed`, and `remaining`, the count not attempted. Success is `status:"completed"`. A known failure
-before any assignment succeeds is `failed`; after earlier success it is `partial` with `partial:true`. An
-unconfirmed helper outcome is always top-level `unconfirmed` (also with `partial:true` when earlier fields
-succeeded). The group stops immediately on a failure, an unconfirmed outcome, navigation, revocation, or grant
-loss. It never retries an uncertain action or continues to later fields. Reissue only a field known to have been
-refused before dispatch, using the newly returned ID; never repeat an unconfirmed one automatically.
+value), `completed`, and `remaining`, the count not attempted. A resolved replacement adds `current_element_id`.
+CDP value/selected-option read-back must confirm each assignment before the next one starts; unavailable or
+mismatched read-back is not counted as completed. Success is `status:"completed"`. A known failure before any
+assignment succeeds is `failed`; after earlier success it is `partial` with `partial:true`. An unconfirmed helper
+outcome or unverifiable effect is always top-level `unconfirmed` (also with `partial:true` when earlier fields
+succeeded). The group stops immediately on a failed condition or action, an unconfirmed/unverifiable outcome,
+navigation, revocation, or grant loss. It never retries an uncertain action or continues to later fields. A resume
+plan excludes completed fields and uses freshly observed IDs for fields still needed. Reissue only a field known
+to have been refused before dispatch; never repeat an unconfirmed or unverifiable one automatically.
 
 One final `then` read runs after success or failure, not after every field. Prefer `then.root` for the stable
 section: its bounded lines directly list current actionable control IDs, labels, values, enabled/disabled state,
 and available actions, including replacements exposed by a dependent-field rerender. Empty `then` keeps the
 ordinary delta form. The whole action/read answer retains the existing 4 KB budget and long helper errors are
 compacted; no prior trees, markup, or screenshots are accumulated.
+
+**Local worked evidence.** The equivalent three-field fixture scenario used fresh input for each run and verified
+its end values: before `Ada` / `Lovelace` / `London`, after `Grace` / `Hopper` / `New York`. One recorded run
+(the elapsed figures are observations, not a benchmark guarantee) produced:
+
+| Metric | Before | Grouped | Evidence |
+| --- | ---: | ---: | --- |
+| Operator tool calls | 4 | 2 | measured |
+| Helper reads | 4 | 2 | measured |
+| Helper field actions | 3 | 3 | measured |
+| Model decisions | 3 | 1 | inferred from the equivalent call sequence |
+| Response bytes | 3412 | 1575 | measured JSON encoding |
+| Elapsed milliseconds | 42.893 | 26.550 | measured locally |
+
+A separate actual model-driven local browser demonstration, not a fixture/executor test, supplied only “fill this
+form with my JSON; do not submit”, JSON, and a generic form whose labels were chosen at runtime. The attached CLI
+inferred the visit-local mapping from the emitted controls. The stable visit completed three fields in one
+executor call with zero remaining and the expected DOM values. A second unfamiliar visit unexpectedly replaced
+its second field after the first edit: the result was `partial`, with one completed, one `target_changed`, one
+unattempted, and current replacement controls. The model's resume plan excluded the completed edit and completed
+only the two remaining fields. Both visits left the saved-record count at zero. Demonstrated model handbacks were
+zero for the stable visit, zero for the delayed-dependency executor regression, and one for the unexpected
+replacement before its explicit resume; internal reads, condition probes, and browser input operations are not
+model handbacks. No live human tab was used.
 
 The helper rechecks the window, element identity, containment, enabled state and supported pattern
 before dispatch, and refuses an element that lacks the pattern with an error naming the actions

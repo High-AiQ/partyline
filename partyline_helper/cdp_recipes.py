@@ -82,7 +82,7 @@ SELECT_PLAN = r"""function(value) {
  const enabled=options.filter(o=>!o.matches(':disabled') && !o.hidden
    && getComputedStyle(o).display!=='none');
  if(matches.length!==1 || !enabled.includes(matches[0]))
-   return {error:'option missing, disabled or ambiguous'};
+   return {error:'option missing, disabled or ambiguous',matches:matches.length};
  const target=matches[0], index=options.indexOf(target), current=this.selectedIndex;
  const down=index>current;
  const steps=enabled.filter(o=>{const i=options.indexOf(o);

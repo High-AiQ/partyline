@@ -23,7 +23,7 @@ class NativeSelect:
         if recipe == SELECT_PLAN:
             matches = [i for i, o in enumerate(self.socket.options) if token in (o["label"], o["value"])]
             if len(matches) != 1 or matches[0] not in self.enabled():
-                return {"error": "option missing, disabled or ambiguous"}
+                return {"error": "option missing, disabled or ambiguous", "matches": len(matches)}
             index, current = matches[0], state["selected_index"]
             down = index > current
             steps = len([i for i in self.enabled() if current < i <= index or index <= i < current])

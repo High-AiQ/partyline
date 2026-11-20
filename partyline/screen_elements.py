@@ -13,6 +13,7 @@ from .screen_element_actions import ElementAction, element_action  # noqa: F401
 from .screen_eval import ScreenEval, audit_call, screen_eval  # noqa: F401
 from .screen_grants import require_window, resolve_window
 from .screen_closed_windows import ended_answer
+from .screen_change_events import ChangeEvents
 from .screen_tree import OUT_BYTES, Snapshot
 from .screen_element_state import ElementState, compare
 from .screen_event_scope import busy_note
@@ -27,7 +28,7 @@ MAX_SNAPSHOTS = 16
 MAX_STORED = 300_000  # nodes all stored trees together keep; the least recently used go first
 
 
-class ElementsHub(ElementState):
+class ElementsHub(ElementState, ChangeEvents):
     def __init__(self, hub, clock=time.monotonic):
         self.hub = hub
         self.waiters = {}
@@ -35,7 +36,7 @@ class ElementsHub(ElementState):
         self.snapshots = OrderedDict()  # window grant id -> its latest captured tree
         self.locks = {}
         self.clock = clock
-        self.change_versions = {}
+        ChangeEvents.__init__(self)
         self.after_action = set()
 
     async def exchange(self, principal, grant, device, kind, wait=35, dispatch=None, **fields):
@@ -92,7 +93,7 @@ class ElementsHub(ElementState):
         """The grant is over: its tree and its ids go."""
         self.forget(grant_id)
         self.spaces.pop(grant_id, None)
-        self.change_versions.pop(grant_id, None)
+        self.end_changes(grant_id)
         self.after_action.discard(grant_id)
 
     def forget(self, grant_id):
@@ -184,10 +185,6 @@ class ElementsHub(ElementState):
         if tree and self.clock() - tree.created > SNAPSHOT_TTL and not (more and tree.cursor):
             return None
         return tree
-
-    def changed(self, grant_id):
-        """A helper UIA event invalidates this grant's tree without resetting its stable ids."""
-        self.change_versions[grant_id] = self.change_versions.get(grant_id, 0) + 1
 
     def action_completed(self, grant_id, retain_snapshot=False):
         """The next read must be fresh, including after a `then` snapshot taken too soon."""

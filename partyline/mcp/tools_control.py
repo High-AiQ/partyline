@@ -54,7 +54,22 @@ ELEMENT_ACTION_PROPERTIES = {
                 "element_id": {"type": "string", "minLength": 1, "maxLength": 128},
                 "value": {"type": "string", "maxLength": 500},
                 "action": {"type": "string", "enum": ["set_value", "select"],
-                           "description": "Defaults to set_value."}}}},
+                           "description": "Defaults to set_value."},
+                "when": {
+                    "type": "object", "additionalProperties": False,
+                    "description": ("Resolve this exact current label; wait on changes until enabled and, "
+                                    "for select, the value names one enabled option. Requires then.root."),
+                    "required": ["root", "name"], "properties": {
+                        "root": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "name": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "control_type": {"type": "string", "minLength": 1, "maxLength": 40},
+                        "timeout_ms": {"type": "integer", "minimum": 0, "maximum": 10000,
+                                       "default": 2000}
+                    }
+                }
+            }
+        }
+    },
     "accept": {"type": "boolean", "description": "Required for dialog; explicit accept or dismiss."},
     "prompt_text": {"type": "string", "maxLength": 500, "description": "Optional dialog prompt text."},
     "key": {"type": "string", "enum": ["enter", "tab", "escape"], "description": "For press; no modifiers."},

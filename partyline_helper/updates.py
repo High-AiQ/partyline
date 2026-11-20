@@ -36,6 +36,7 @@ class Updates:
     async def paused_request(self, message):
         replies = {"read_window_elements": "window_elements",
                    "window_element_action": "window_element_result",
+                   "window_element_condition": "window_element_result",
                    "window_eval": "window_element_result", "window_click": "window_element_result",
                    "snapshot_window": "window_snapshot", "action": "action_result",
                    "snap": "error", "get_preview": "error", "start_share": "share_declined",

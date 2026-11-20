@@ -46,7 +46,7 @@ def elements_router(runtime, hub, store=None):
         principal = core.request_principal(request)
         core.deny_unless(runtime.db, principal, conv_id, "write")
         try:
-            grant, _ = core.resolve_window(hub, principal, body.window)
+            grant, device = core.resolve_window(hub, principal, body.window)
         except HTTPException as exc:
             if body.action == "set_files":
                 raise HTTPException(exc.status_code, str(exc.detail) +
@@ -55,8 +55,10 @@ def elements_router(runtime, hub, store=None):
         if body.action == "set_values":
             if body.then:
                 core.deny_unless(runtime.db, principal, conv_id, "read")
+            if any(item.when for item in body.assignments) and device.get("chrome_dom", 0) < 6:
+                raise HTTPException(409, "update the Partyline helper to use dependent form conditions")
             from .screen_form_actions import act as form_action
-            return await form_action(runtime, hub, conv_id, body, principal, grant)
+            return await form_action(runtime, hub, conv_id, body, principal, grant, device)
         core.audit_call(hub, principal, grant, "screen_element_action", len(body.value or body.key or ""))
         if body.then:
             core.deny_unless(runtime.db, principal, conv_id, "read")
