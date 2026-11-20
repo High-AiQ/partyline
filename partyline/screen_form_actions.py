@@ -41,6 +41,7 @@ def verify(item, outcome):
         return
     element = outcome.get("element", {})
     if element.get("connected") is not True:
+        outcome["status"] = "unconfirmed"
         outcome["state_unavailable"] = "settled action read-back was not from a connected element"
         return
     if item.action == "select":
@@ -49,6 +50,7 @@ def verify(item, outcome):
     else:
         confirmed = element.get("value") == item.value
     if not confirmed:
+        outcome["status"] = "unconfirmed"
         outcome["state_unavailable"] = "settled action read-back did not confirm the assigned value"
 
 

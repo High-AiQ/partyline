@@ -9,7 +9,7 @@ from .cdp_control_details import CONTROL_DETAILS, needs_details
 from .cdp_dom_nodes import DETAIL, discover
 from .cdp_settle import Quiet
 from .cdp_page_dialogs import Dialogs
-from .workflow_dispatch import cdp_guard, document
+from .workflow_dispatch import WorkflowEvidence, cdp_guard, changed, document
 from .cdp_transport import CDPError, DocumentChanged, ExtensionRefused, PageUnavailable
 from .cdp_recovery import Recovery
 from .cdp_identity import TargetChanged, reprove
@@ -37,6 +37,7 @@ class Page(Dialogs, Recovery):
         self.operation_epoch = None
         self.action_proof = None
         self.action_point = None
+        self.workflow_message = None
         self.quiet = Quiet()
         self.operation_timing = None
         self.defer_object_releases = False
@@ -67,6 +68,10 @@ class Page(Dialogs, Recovery):
                     self.action_point = await reprove(self, self.action_proof,
                                                      mouse=method == "Input.dispatchMouseEvent")
                 self.guard()
+                if (self.workflow_message and
+                        (self.workflow_message.get("workflow_document") != document(self) or
+                         changed(self.workflow_message, self.access.event_status))):
+                    raise WorkflowEvidence("workflow condition evidence changed before input")
             if (method == "Input.dispatchMouseEvent" and self.action_proof is not None
                     and self.action_point is not None):
                 params = {**params, **self.action_point}

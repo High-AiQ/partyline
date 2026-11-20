@@ -247,6 +247,30 @@ class FormFixture(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(3, "Ada")], self.inserts)
         self.assertEqual("old", self.f.socket.states[5]["value"])
 
+    async def test_scope_change_on_focus_is_refused_at_first_input(self):
+        self.combo()
+        _, ids = await self.initial()
+
+        def duplicate_on_focus(message):
+            self.edited(message)
+            if message["method"] != "DOM.focus" or message["params"]["backendNodeId"] != 5:
+                return
+            self.f.socket.nodes.append(dict(nodeId="6", parentId="2", backendDOMNodeId=6,
+                                            role={"value": "combobox"}, name={"value": "City"}))
+            self.f.socket.states[6] = dict(tag="SELECT", value="old", selected_index=0,
+                                           selected_count=1, hit=True)
+            self.f.state.changed()
+            self.elements.changed("g")
+
+        self.f.socket.hook = duplicate_on_focus
+        result = await form_action(self.runtime, self.outer, "line", self.dependent_body(ids),
+                                   self.principal, GRANT, self.device)
+        self.assertEqual(("partial", 1, 1), (result["status"], result["completed"], result["remaining"]))
+        self.assertEqual("workflow_evidence", result["results"][1]["reason"])
+        self.assertEqual([(3, "Ada")], self.inserts)
+        self.assertEqual("old", self.f.socket.states[5]["value"])
+        self.assertEqual([], self.f.socket.native_select.committed_values)
+
     async def test_partial_dependency_capture_cannot_establish_uniqueness_or_dispatch(self):
         self.combo()
         _, ids = await self.initial()
@@ -420,6 +444,7 @@ class FormFixture(unittest.IsolatedAsyncioTestCase):
                          (result["status"], result["completed"], result["remaining"]))
         self.assertEqual(1, self.actions)
         self.assertEqual([(3, "A")], self.inserts)
+        self.assertEqual("unconfirmed", result["results"][0]["status"])
         self.assertIn("connected", result["results"][0]["state_unavailable"])
 
     async def test_mismatched_readback_is_unverified_and_stops_before_later_input(self):
@@ -432,6 +457,7 @@ class FormFixture(unittest.IsolatedAsyncioTestCase):
                                        self.principal, GRANT)
         self.assertEqual(1, perform.await_count)
         self.assertEqual(("unconfirmed", 0, 2), (result["status"], result["completed"], result["remaining"]))
+        self.assertEqual("unconfirmed", result["results"][0]["status"])
         self.assertIn("did not confirm", result["results"][0]["state_unavailable"])
 
     async def test_unconfirmed_assignment_is_not_retried_and_later_fields_are_not_attempted(self):

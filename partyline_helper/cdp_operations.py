@@ -73,6 +73,7 @@ async def action(self, access, message):
         return None
     page.dispatched = False
     page.operation_epoch = page.epoch
+    page.workflow_message = message if message.get("workflow_source") else None
     try:
         if message.get("type") == "window_eval":
             return await evaluate(page, message["expression"])
@@ -90,5 +91,5 @@ async def action(self, access, message):
         result["timing"] = getattr(exc, "screen_timing", {})
         return result
     finally:
-        page.operation_epoch, page.action_proof = None, None
+        page.operation_epoch, page.action_proof, page.workflow_message = None, None, None
 
