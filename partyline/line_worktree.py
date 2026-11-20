@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 
 from .hierarchy import lead_attachment, parent_id_of
+from .preset_traits import is_emitter
 from .worktree_paths import branch_name, managed_root
 from .worktree_recovery import add_worktree
 
@@ -78,23 +79,21 @@ def repo_root(path: str | None) -> str | None:
 
 
 def line_cwd(db, conv_id: str) -> str | None:
-    """Where a line works: its own directory, else its captain's, else any
-    process's, else its parent line's. Never the server's own directory: a
-    child born before placement existed put its first workers in the deployed
-    checkout that way."""
+    """Find the line workspace without falling back to the deployed checkout."""
     conv = db.get_conversation(conv_id) or {}
     if conv.get("cwd"):
         return conv["cwd"]
     lead = lead_attachment(db, conv_id)
     if lead is not None and lead.get("cwd"):
         return lead["cwd"]
-    rows = db.list_attachments(conv_id)
+    attachments = db.list_attachments(conv_id)
+    rows = [att for att in attachments if not is_emitter(att)]
     live = [att for att in rows if att["status"] in ("starting", "running")]
     for att in live + rows:
         if att.get("cwd"):
             return att["cwd"]
-    parent = parent_id_of(conv)
-    return line_cwd(db, parent) if parent else None
+    inherited = line_cwd(db, parent) if (parent := parent_id_of(conv)) else None
+    return inherited or next((att["cwd"] for att in attachments if att.get("cwd")), None)
 
 
 def ensure_placed(db, conv_id: str, *, ignore_attachment_id: str | None = None) -> dict | None:
@@ -102,7 +101,8 @@ def ensure_placed(db, conv_id: str, *, ignore_attachment_id: str | None = None) 
     first machine attach; returns the placement when one was made."""
     conv = db.get_conversation(conv_id) or {}
     parent = parent_id_of(conv)
-    attachments = [att for att in db.list_attachments(conv_id) if att["id"] != ignore_attachment_id]
+    attachments = [att for att in db.list_attachments(conv_id)
+                   if att["id"] != ignore_attachment_id and not is_emitter(att)]
     if conv.get("cwd") or not parent or attachments:
         return None
     return place_child(db, parent, conv_id)

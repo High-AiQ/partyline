@@ -65,10 +65,10 @@
 
   <PinsAccordion />
 
-  {#if !line?.task_status}
-    <h3 class="font-serif italic font-normal text-[17px] text-cream-dim px-[18px] pt-5 pb-2.5">
-      patch in a process
-    </h3>
-    <AttachForm />
-  {/if}
+  <h3 class="font-serif italic font-normal text-[17px] text-cream-dim px-[18px] pt-5 pb-2.5">
+    {line?.task_status ? "patch in an emitter" : "patch in a process"}
+  </h3>
+  {#key Boolean(line?.task_status)}
+    <AttachForm emitterOnly={Boolean(line?.task_status)} />
+  {/key}
 </aside>

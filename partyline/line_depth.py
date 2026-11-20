@@ -22,6 +22,7 @@ and staffed a second copy of the same preset there, leaving the first idle.
 from __future__ import annotations
 
 from .hierarchy import ancestors, child_ids
+from .preset_traits import is_emitter
 
 MAX_CAPTAIN_DEPTH = 2
 
@@ -37,7 +38,7 @@ def may_create_children(db, conv_id: str) -> bool:
 def live_workers(db, conv_id: str) -> list[dict]:
     """Processes on this line that are not its captain and could take work."""
     return [att for att in db.list_attachments(conv_id)
-            if not att.get("is_lead") and not att.get("is_successor")
+            if not att.get("is_lead") and not att.get("is_successor") and not is_emitter(att)
             and att["status"] in ("starting", "running")]
 
 

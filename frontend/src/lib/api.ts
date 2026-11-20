@@ -75,6 +75,7 @@ export interface PresetDraft {
   reads_images?: boolean;
   can_manage?: boolean;
   implements?: boolean;
+  emitter?: boolean | undefined;
   max_compactions?: number | null | undefined;
 }
 

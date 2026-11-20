@@ -34,7 +34,7 @@ class ReplaceAttachmentTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.db = Db(f"{self.directory.name}/test.db")
-        self.db.save_preset("fixture", "Fixture", "fixture", "raw", "sh", can_manage=True)
+        self.db.save_preset("fixture", "Fixture", "fixture", "fake", "fake", can_manage=True)
         self.runtime = ChatRuntime(self.db)
         self.runtime.broadcast = AsyncMock()
         self.spawned = []
@@ -52,7 +52,7 @@ class ReplaceAttachmentTest(unittest.TestCase):
         token = auth_tokens.create_access_token(auth_tokens.signing_secret(self.db), user["id"])
         self.human = {"Authorization": f"Bearer {token}"}
         self.client.headers.update(self.human)
-        self.db.add_attachment("old", "line", "worker", "raw", ["sh"],
+        self.db.add_attachment("old", "line", "worker", "fake", ["fake"],
                                self.directory.name, "owner-old")
         self.db.set_attachment_status("old", "detached", "owner-old")
         self.captain_token = self.lead("cap", "sol")
@@ -60,7 +60,7 @@ class ReplaceAttachmentTest(unittest.TestCase):
         self.runtime.live["cap"] = self.captain_recorder
 
     def lead(self, att_id, name):
-        self.db.add_attachment(att_id, "line", name, "raw", ["sh"], self.directory.name)
+        self.db.add_attachment(att_id, "line", name, "fake", ["fake"], self.directory.name)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id=?", (att_id,))
         return {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, att_id)}
 

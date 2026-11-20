@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 from .adapter_update import apply_update, requested_update_argv
 from .attachment_commands import validated_attachment_command
+from .attachment_staffing import resolve_command, resolve_staffing
 from .auth_guard import request_principal
 from .auth_store import handle_taken
 from .conversation_archive import register_archive_route
@@ -34,7 +35,7 @@ from .runtime import NAME_RE, RESERVED_NAMES
 from .resource_budget import reserve_new_attachment
 from .attachment_lifecycle import remove_stopped_record
 from .system_notice import post_system_notice
-from .preset_overrides import attachment_command, save_attachment_override
+from .preset_overrides import save_attachment_override
 
 
 def _server():
@@ -180,29 +181,14 @@ def register_conversation_routes(
         runtime = s.runtime
         db = runtime.db
         principal = request_principal(request)
-        deny_unless(db, principal, conv_id, "attach")
+        # Check the captain's line scope before resolving a command or preset.
+        deny_unless(db, principal, conv_id, "attach_emitter")
         conv = db.get_conversation(conv_id)
         if conv["archived_at"]:
             raise HTTPException(409, "restore the line before attaching to it")
-        from .orchestrator_store import refuse_task_attach
-        refuse_task_attach(db, conv_id)
         if body.successor and not (principal.kind == "machine" and principal.is_lead
                                    and principal.conv_id == conv_id):
             raise HTTPException(403, "only the line captain may attach its own successor")
-        if not body.successor:
-            deny_sideways_attach(db, principal, conv_id)
-        # Finding 2.14: a second implementer on a captained, staffed line puts
-        # two slices on one branch, which accepts all-or-nothing. A machine
-        # captain must name the override; a person is never refused — their
-        # line, their call — but the shared branch is flagged on the line.
-        shared_branch = body.allow_shared_branch
-        if not body.successor and parallel_worker_reason(db, conv_id):
-            if is_human(principal):
-                shared_branch = True
-            elif not shared_branch:
-                hint = (" To staff a handover successor on your line, attach with successor=true."
-                        if principal.is_lead and principal.conv_id == conv_id else "")
-                raise HTTPException(409, PARALLEL_WORKERS_REFUSAL + hint)
         if not NAME_RE.match(body.name):
             raise HTTPException(
                 400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)"
@@ -214,7 +200,7 @@ def register_conversation_routes(
         name = unique_handle(db, conv_id, body.name)
         if body.adapter != "raw" and body.counts_toward_total is not None:
             raise HTTPException(400, "counts_toward_total is only available for raw adapters")
-        raw_command, selected_base = attachment_command(db, body)
+        raw_command, selected_base = resolve_command(db, body)
         try:
             command = validated_attachment_command(
                 body.adapter, raw_command, s.ADAPTERS, s.ADAPTER_METADATA
@@ -224,27 +210,27 @@ def register_conversation_routes(
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        role = 'captain' if body.successor else body.staffing_role
-        auto_lead = not is_human(principal) and role == 'captain' and not body.successor
+        default_command = list(s.ADAPTER_METADATA[body.adapter].get("command") or [])
+        role, traits, selected = resolve_staffing(
+            db, body, principal, command, selected_base, default_command,
+        )
+        deny_unless(db, principal, conv_id, "attach_emitter" if role == "emitter" else "attach")
+        shared_branch = body.allow_shared_branch
+        if role != "emitter":
+            from .orchestrator_store import refuse_task_attach
+            refuse_task_attach(db, conv_id)
+            if not body.successor:
+                deny_sideways_attach(db, principal, conv_id)
+            if not body.successor and parallel_worker_reason(db, conv_id):
+                if is_human(principal):
+                    shared_branch = True
+                elif not shared_branch:
+                    hint = (" To staff a handover successor on your line, attach with successor=true."
+                            if principal.is_lead and principal.conv_id == conv_id else "")
+                    raise HTTPException(409, PARALLEL_WORKERS_REFUSAL + hint)
+        auto_lead = not is_human(principal) and role == "captain" and not body.successor
         if auto_lead:
-            deny_unless(db, principal, conv_id, 'appoint_lead')
-        if not is_human(principal):
-            from .preset_roles import require_attachment_role, require_named_role, require_role
-            selected = (require_named_role(db, body.preset_name, role) if body.preset_name else
-                        require_attachment_role(db, {'name': body.name, 'adapter': body.adapter,
-                                                     'command': command}, role))
-            if body.preset_name:
-                import shlex
-                try:
-                    expected = raw_command if selected_base else selected['command']
-                    matches = selected['adapter'] == body.adapter and shlex.split(expected) == command
-                except ValueError:
-                    matches = False
-                if not matches:
-                    raise HTTPException(400, f"preset '{body.preset_name}' does not match the command")
-            require_role(selected, role, name=body.preset_name or body.name)
-        else:
-            selected = selected_base if (body.model is not None or body.effort is not None) else None
+            deny_unless(db, principal, conv_id, "appoint_lead")
         # A machine works where its line works; a person may choose.
         chosen = "" if not is_human(principal) else body.cwd.strip()
         cwd = os.path.abspath(os.path.expanduser(
@@ -257,7 +243,7 @@ def register_conversation_routes(
             db, att_id=att_id, conv_id=conv_id, name=name, adapter=body.adapter,
             command=command, cwd=cwd, runtime_owner=runtime_owner,
             start_after_history=True, counts_toward_total=bool(body.counts_toward_total),
-            successor=body.successor,
+            successor=body.successor, process_traits=traits,
         )
         if selected:
             save_attachment_override(db, att, selected, body, principal, role)
@@ -279,7 +265,7 @@ def register_conversation_routes(
             raise
         if update_argv:
             await apply_update(runtime.post_message, conv_id, name, update_argv)
-        if not body.successor and shared_branch and parallel_worker_reason(db, conv_id):
+        if role != "emitter" and not body.successor and shared_branch and parallel_worker_reason(db, conv_id):
             await post_system_notice(
                 runtime, conv_id,
                 f"⚠ @{name} joins a shared branch (attached by @{principal.name}): parallel "

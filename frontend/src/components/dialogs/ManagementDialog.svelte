@@ -7,6 +7,7 @@
   import { hierarchyApi } from "../../lib/hierarchy-api";
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte";
+  import { isEmitter } from "../../lib/preset-traits";
   import { isLive } from "../../lib/attachments";
 
   interface Props {
@@ -132,7 +133,7 @@
         <label for="captain">captain</label>
         <select id="captain" bind:value={captainId} disabled={appointing}>
           <option value="">none · no captain on this line</option>
-          {#each room.attachments.filter(isLive) as process (process.id)}
+          {#each room.attachments.filter((process) => isLive(process) && (!isEmitter(process) || process.id === appointedId)) as process (process.id)}
             <option value={process.id}>{process.name} · {process.adapter}</option>
           {/each}
         </select>

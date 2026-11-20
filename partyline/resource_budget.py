@@ -218,7 +218,7 @@ def reject_if_full(db, requested_lease: int, *, exclude_id: str | None = None) -
 
 async def reserve_new_attachment(db, *, att_id, conv_id, name, adapter, command,
                                 cwd, runtime_owner, start_after_history=False,
-                                counts_toward_total=False, successor=False, lease=None):
+                                counts_toward_total=False, successor=False, lease=None, process_traits=None):
     """Atomically admit and persist a starting row before any spawn work."""
     async with db._runtime_serialized_async():
         if successor and any(a.get("is_successor") and a["status"] in LIVE
@@ -230,7 +230,7 @@ async def reserve_new_attachment(db, *, att_id, conv_id, name, adapter, command,
         return db.add_attachment(
             att_id, conv_id, name, adapter, command, cwd, runtime_owner,
             start_after_history=start_after_history, memory_limit=format_limit(lease),
-            counts_toward_total=counts_toward_total, successor=successor,
+            counts_toward_total=counts_toward_total, successor=successor, process_traits=process_traits,
         )
 
 

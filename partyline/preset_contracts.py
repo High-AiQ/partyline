@@ -3,14 +3,18 @@
 from pydantic import BaseModel, Field
 
 
-class PresetIn(BaseModel):
+class StaffingTraits(BaseModel):
+    reads_images: bool = False
+    can_manage: bool = False
+    implements: bool = True
+    emitter: bool = False
+
+
+class PresetIn(StaffingTraits):
     title: str
     name: str
     adapter: str = "opencode"
     command: str = ""
-    reads_images: bool = False
-    can_manage: bool = False
-    implements: bool = True
     # 5.3: how many instances of this preset may run at once. 0 means
     # unlimited — a captain preset can hold a live instance per line, the
     # same as a worker preset always could.
@@ -23,25 +27,16 @@ class PresetIn(BaseModel):
     max_compactions: int | None = Field(default=None, ge=0, le=20)
 
 
-class PresetResponse(BaseModel):
+class PresetResponse(StaffingTraits):
     id: str
     title: str
     name: str
     adapter: str
     command: str
     created_at: float
-    reads_images: bool = False
-    can_manage: bool = False
-    implements: bool = True
     max_instances: int = 0
     auto_compact_tokens: int = 0
     max_compactions: int | None = None
-
-
-class StaffingTraits(BaseModel):
-    reads_images: bool
-    can_manage: bool
-    implements: bool
 
 
 class StaffingPreset(StaffingTraits):
@@ -75,6 +70,7 @@ class StaffingLine(BaseModel):
 
 
 class StaffingQueued(BaseModel):
+    emitter: bool = False
     line_id: str
     handle: str
     adapter: str

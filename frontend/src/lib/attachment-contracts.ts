@@ -2,6 +2,13 @@
 
 import { z } from "zod";
 
+const traits = {
+  reads_images: z.boolean().optional(),
+  can_manage: z.boolean().optional(),
+  implements: z.boolean().optional(),
+  emitter: z.boolean().optional(),
+};
+
 export const AttachmentStatusSchema = z.enum(["starting", "running", "exited", "detached"]);
 export type AttachmentStatus = z.infer<typeof AttachmentStatusSchema>;
 
@@ -17,6 +24,7 @@ export const AttachmentCreateRequestSchema = z.object({
   command: z.string(),
   cwd: z.string(),
   update: z.boolean().optional(),
+  ...traits,
 });
 export type AttachmentCreateRequest = z.infer<typeof AttachmentCreateRequestSchema>;
 
@@ -41,6 +49,7 @@ export const AttachmentSchema = z.object({
   command: z.array(z.string()),
   cwd: z.string(),
   status: AttachmentStatusSchema,
+  ...traits,
   last_seen: z.number().int(),
   created_at: z.number(),
   cli_session: z.string().nullable().default(null),

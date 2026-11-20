@@ -13,11 +13,12 @@ from .line_depth import (
     MAX_CAPTAIN_DEPTH, depth, has_captain, live_workers, may_split, sideways_attach_reason,
     staffed_split_reason,
 )
+from .preset_traits import is_emitter
 
 Capability = Literal[
     "read", "write", "upload",
     "assign",
-    "attach",
+    "attach", "attach_emitter",
     "close",
     "accept",
     "create_child",
@@ -113,6 +114,8 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
         # levels, and a captain cannot accept its parent's branch either.
         parent = parent_id_of(conv)
         return principal.is_lead and home in (conv_id, parent or "")
+    if capability == "attach_emitter":
+        return _home_lead_tree(db, principal, conv_id)
     if capability == "link_parent":
         return False
     if capability == "appoint_lead":
@@ -201,8 +204,8 @@ def deny_unless(
     if not allows(db, principal, conv_id, capability):
         raise HTTPException(403, "this credential cannot act on that line")
     if (conv_id in getattr(db, "retiring_lines", set())
-            and capability in ("attach", "create_child", "accept", "assign", "write", "appoint_lead",
-                               "link_parent", "upload", "chapter")):
+            and capability in ("attach", "attach_emitter", "create_child", "accept", "assign", "write",
+                               "appoint_lead", "link_parent", "upload", "chapter")):
         raise HTTPException(409, "retirement is in progress; this line cannot change")
 
 
@@ -267,7 +270,8 @@ def capability_state(db: Db, principal: Principal, conv_id: str | None = None) -
         role = "lead"
     else:
         att = db.get_attachment(principal.attachment_id) if principal.attachment_id else None
-        role = "attachment" if att and att.get("is_successor") else "implementer"
+        role = ("emitter" if att and is_emitter(att) else
+                "attachment" if att and att.get("is_successor") else "implementer")
     from .orchestrator_store import task
     task_row = task(db, principal.conv_id) if principal.conv_id else None
     if task_row and task_row["reviewer_id"] == principal.attachment_id:

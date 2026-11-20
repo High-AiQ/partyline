@@ -4,6 +4,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from .preset_contracts import StaffingTraits
+from .preset_traits import coerce_traits
+
 
 class CwdGitState(BaseModel):
     """Git identity observed from an attachment's exact working directory."""
@@ -22,7 +25,7 @@ class BridgeRef(BaseModel):
     peer_conv_name: str
 
 
-class AttachmentResponse(BaseModel):
+class AttachmentResponse(StaffingTraits):
     id: str
     conv_id: str
     name: str
@@ -45,13 +48,15 @@ class AttachmentResponse(BaseModel):
     bridge: BridgeRef | None = None
 
     @model_validator(mode="after")
-    def count_non_raw(self):
+    def effective_metadata(self):
+        for key, value in coerce_traits(self.model_dump()).items():
+            setattr(self, key, value)
         if self.adapter != "raw":
             self.counts_toward_total = True
         return self
 
 
-class AttachIn(BaseModel):
+class AttachIn(StaffingTraits):
     name: str
     adapter: str = "opencode"
     command: str = ""
@@ -64,4 +69,4 @@ class AttachIn(BaseModel):
     preset_name: str | None = None
     model: str | None = None
     effort: str | None = None
-    staffing_role: Literal["implementer", "captain"] = "implementer"
+    staffing_role: Literal["implementer", "captain", "emitter"] = "implementer"

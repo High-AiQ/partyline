@@ -1,5 +1,12 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-20 — Task staffing is enforced in SQLite as well as the API
+
+Allowing an auxiliary attach through the HTTP guard still hit the database trigger that
+restricted each task to its implementer and reviewer. Update both guards when changing
+allowed attachments. `tests/test_emitter_attachments.py` verifies that task lines admit
+emitters and reject extra worker and captain seats at the database boundary.
+
 ## 2026-11-18 — Wrapper tool labels hide Codex screen calls
 
 The false assumption was that every adapter's response labels identify screen operations. A Codex

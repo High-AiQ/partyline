@@ -109,6 +109,7 @@ export { PresetSchema } from "./preset-contracts";
 export type { Preset } from "./preset-contracts";
 
 export const RunningProcessSchema = z.object({
+  emitter: z.boolean().optional(),
   name: z.string(),
   adapter: z.string(),
   conversation: z.string(),

@@ -6,6 +6,7 @@ import re
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from .preset_traits import is_emitter
 from .op_timing import pushed
 from .adapter_capabilities import claims_transcript, transcript_claimed
 from .adapters import Adapter
@@ -83,7 +84,7 @@ class ChatRuntime(DeliveryCreditMixin):
                     and att["status"] in ("starting", "running")
                 ):
                     found.append({"name": att["name"], "adapter": att["adapter"],
-                                  "conversation": conv["name"]})
+                                  "conversation": conv["name"], "emitter": is_emitter(att)})
         return found
 
     async def shutdown(self):

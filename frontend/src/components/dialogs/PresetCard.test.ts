@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 describe("PresetCard process traits", () => {
-  it("shows the three trait checkboxes on a manage card", () => {
+  it("shows the four trait checkboxes on a manage card", () => {
     session.adapters = [adapter];
     const card = mount(PresetCard, { target: document.body, props: { preset } });
     try {
@@ -44,12 +44,13 @@ describe("PresetCard process traits", () => {
       expect(document.body.textContent).toContain("Reads images");
       expect(document.body.textContent).toContain("Can manage a line");
       expect(document.body.textContent).toContain("Fast implementer");
+      expect(document.body.textContent).toContain("Emitter");
     } finally {
       void unmount(card);
     }
   });
 
-  it("includes the three trait flags on the save payload", async () => {
+  it("includes all four trait flags on the save payload", async () => {
     session.adapters = [adapter];
     const savePreset = vi.spyOn(api, "savePreset").mockResolvedValue(preset);
     vi.spyOn(session, "loadPresets").mockResolvedValue();
@@ -66,11 +67,38 @@ describe("PresetCard process traits", () => {
           reads_images: true,
           can_manage: true,
           implements: false,
+          emitter: false,
           max_compactions: null,
         });
       });
     } finally {
       void unmount(card);
+    }
+  });
+
+  it("locks and saves effective emitter traits on a legacy raw preset", async () => {
+    const raw = { ...preset, adapter: "raw", implements: true };
+    session.adapters = [{ ...adapter, id: "raw" }];
+    const savePreset = vi.spyOn(api, "savePreset").mockResolvedValue(raw);
+    vi.spyOn(session, "loadPresets").mockResolvedValue();
+    const card = mount(PresetCard, { target: document.body, props: { preset: raw } });
+    try {
+      const emitter = document.querySelector<HTMLInputElement>("#pTrait-preset-1-emitter");
+      expect(emitter?.checked).toBe(true);
+      expect(emitter?.disabled).toBe(true);
+      document.querySelector<HTMLButtonElement>("button.save")?.click();
+      await vi.waitFor(() => {
+        expect(savePreset).toHaveBeenCalledWith(
+          expect.objectContaining({
+            emitter: true,
+            implements: false,
+            reads_images: false,
+            can_manage: false,
+          }),
+        );
+      });
+    } finally {
+      await unmount(card);
     }
   });
 });

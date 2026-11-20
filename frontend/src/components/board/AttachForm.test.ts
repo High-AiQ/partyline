@@ -68,7 +68,7 @@ describe("AttachForm process traits", () => {
     }
   });
 
-  it("shows the three trait labels once the accordion is opened", async () => {
+  it("shows the four trait labels once the accordion is opened", async () => {
     session.adapters = [adapter];
     const form = mount(AttachForm, { target: document.body });
     try {
@@ -79,8 +79,58 @@ describe("AttachForm process traits", () => {
       expect(details.textContent).toContain("Reads images");
       expect(details.textContent).toContain("Can manage a line");
       expect(details.textContent).toContain("Fast implementer");
+      expect(details.textContent).toContain("Emitter");
     } finally {
       void unmount(form);
+    }
+  });
+
+  it.each(["codex", "raw"])("submits exclusive emitter traits for %s", async (adapterId) => {
+    session.adapters = [{ ...adapter, id: adapterId }];
+    room.conversation = {
+      id: "line",
+      name: "Line",
+      topic: "",
+      created_at: 1,
+      archived_at: null,
+      live_count: 0,
+    };
+    const attach = vi.spyOn(api, "attach").mockRejectedValue(new ApiError("Test response", 409));
+    const form = mount(AttachForm, { target: document.body });
+    try {
+      await tick();
+      const emitter = document.querySelector<HTMLInputElement>("#attach-trait-emitter");
+      const name = document.querySelector<HTMLInputElement>("#aName");
+      if (!emitter || !name) throw new Error("missing attach inputs");
+      if (adapterId === "raw") {
+        expect(emitter.checked).toBe(true);
+        expect(emitter.disabled).toBe(true);
+      } else {
+        document.querySelector<HTMLInputElement>("#attach-trait-reads_images")?.click();
+        emitter.click();
+        await tick();
+      }
+      expect(document.querySelector<HTMLInputElement>("#attach-trait-implements")?.checked).toBe(false);
+      expect(document.querySelector<HTMLInputElement>("#attach-trait-reads_images")?.disabled).toBe(true);
+      name.value = "monitor";
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+      document
+        .querySelector("#attach")
+        ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => {
+        expect(attach).toHaveBeenCalledWith(
+          "line",
+          expect.objectContaining({
+            adapter: adapterId,
+            emitter: true,
+            implements: false,
+            can_manage: false,
+            reads_images: false,
+          }),
+        );
+      });
+    } finally {
+      await unmount(form);
     }
   });
 

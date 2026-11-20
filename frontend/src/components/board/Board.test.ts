@@ -22,7 +22,7 @@ const attachment = {
   id: "captain-attachment",
   conv_id: "line",
   name: "worker",
-  adapter: "raw",
+  adapter: "codex",
   command: ["worker"],
   cwd: "/tmp",
   status: "running" as const,
@@ -104,7 +104,7 @@ describe("Board captain status", () => {
   });
 });
 
-it("hides task staffing controls using refreshed rail metadata", async () => {
+it("offers only emitter attachment on a task using refreshed rail metadata", async () => {
   vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: null });
   room.conversation = conversation;
   room.conversations = [conversation];
@@ -115,10 +115,11 @@ it("hides task staffing controls using refreshed rail metadata", async () => {
     });
     room.conversations = [{ ...conversation, task_status: "blocked" }];
     await vi.waitFor(() => {
-      expect(document.body.textContent).not.toContain("patch in a process");
+      expect(document.body.textContent).toContain("patch in an emitter");
     });
     expect(document.querySelector("#jacks")).not.toBeNull();
-    expect(document.querySelector("#attach")).toBeNull();
+    expect(document.querySelector<HTMLInputElement>("#attach-trait-emitter")?.checked).toBe(true);
+    expect(document.querySelector<HTMLInputElement>("#attach-trait-emitter")?.disabled).toBe(true);
     room.conversations = [conversation];
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain("patch in a process");

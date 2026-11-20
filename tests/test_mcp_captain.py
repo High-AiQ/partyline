@@ -1,6 +1,7 @@
 import io
 import json
 import unittest
+from unittest.mock import Mock
 
 from partyline.mcp.client import ApiError, PartylineClient
 from partyline.mcp.server import MCPServer
@@ -51,6 +52,7 @@ class CaptainToolTests(unittest.TestCase):
 
     def test_attach_worker_forwards_raw_count_flag(self):
         client = Client()
+        client.target["actions"] = ["attach_emitter", "close"]
         for value in (True, False):
             tools_captain.call(client, "attach_worker", {
                 "conv_id": "child", "name": "helper", "adapter": "raw",
@@ -59,6 +61,27 @@ class CaptainToolTests(unittest.TestCase):
                 "POST", "/api/conversations/child/attachments",
                 {"name": "helper", "adapter": "raw", "command": "cat",
                  "counts_toward_total": value}))
+
+    def test_emitter_operations_are_available_when_ordinary_staffing_is_unavailable(self):
+        client = Client()
+        client.target["actions"] = ["attach_emitter", "close"]
+        self.assertIn("attach_worker", tools_captain.permitted(client.target))
+        client.request = Mock(side_effect=[
+            [{"name": "monitor", "adapter": "fake", "command": "run", "emitter": True}],
+            {"id": "aux", "emitter": True, "command": ["run"]},
+            {"attachments": [{"id": "aux", "status": "detached", "emitter": True}]},
+            {"id": "aux", "emitter": True, "command": ["run"]},
+        ])
+        attach = tools_captain.call(client, "attach_worker", {
+            "conv_id": "child", "name": "events", "adapter": "fake", "preset_name": "monitor",
+            "staffing_role": "emitter",
+        }, client.state)
+        self.assertEqual(attach, {"id": "aux", "emitter": True})
+        resumed = tools_captain.call(client, "captain", {"op": "resume_worker", "args": {
+            "conv_id": "child", "attachment_id": "aux",
+        }}, client.state)
+        self.assertEqual(resumed, attach)
+        client.request.assert_called_with("POST", "/api/attachments/aux/resume")
 
     def test_new_chapter_runs_through_the_captain_door_on_the_home_line(self):
         client = Client()

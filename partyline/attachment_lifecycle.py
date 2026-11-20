@@ -156,12 +156,12 @@ async def create_fresh_record(db, expected, body):
             db.conn.execute(
                 "INSERT INTO attachments(id,conv_id,name,adapter,command,cwd,status,"
                 "runtime_owner,last_seen,created_at,runtime_started_at,memory_limit,counts_toward_total,"
-                "preset,is_successor,model_override,effort_override) "
-                "VALUES(?,?,?,?,?,?,'starting',?,?,?,?,?,?,?,?,?,?)",
+                "preset,is_successor,model_override,effort_override,process_traits) "
+                "VALUES(?,?,?,?,?,?,'starting',?,?,?,?,?,?,?,?,?,?,?)",
                 (ident, att["conv_id"], att["name"], att["adapter"], json.dumps(att["command"]),
                  att["cwd"], owner, cursor, started_at, started_at, memory_limit,
                  att["counts_toward_total"], att.get("preset"), att.get("is_successor", 0),
-                 att.get("model_override"), att.get("effort_override")),
+                 att.get("model_override"), att.get("effort_override"), att.get("process_traits")),
             )
         return db.get_attachment(ident)
 

@@ -198,9 +198,9 @@ def preflight(runtime, att: dict) -> tuple[str, str | None] | None:
     from . import server
     from .attachment_commands import validated_attachment_command
     from .orchestrator_store import attachment_task
-    from .preset_roles import is_helper
+    from .preset_traits import is_emitter
 
-    if is_helper(att):
+    if is_emitter(att):
         return None
     row = attachment_task(runtime.db, att["id"])
     role = (("reviewer" if row["reviewer_id"] == att["id"] else "implementer")

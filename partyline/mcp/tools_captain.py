@@ -7,6 +7,7 @@ _ACTION = {
     "review_env": "assign", "resources": "assign", "staffing": "assign",
     "review_hold": "assign",
     "attach_worker": "attach", "detach_worker": "close",
+    "resume_worker": "close",
     "create_child": "create_child", "new_chapter": "chapter",
     "appoint_lead": "appoint_lead", "retire_child": "assign",
     "accept": "accept", "review_worktree": "write", "share_ref": "message_task",
@@ -30,6 +31,7 @@ def permitted(state):
     return tuple(op for op in OPERATIONS if op in {"list_presets", "docs_read"}
                  or (op == "kernel_log" and state.get("parent_id", "unknown") is None)
                  or (op == "reports" and bool({"read_reports", "report", "notify"} & actions))
+                 or (op == "attach_worker" and "attach_emitter" in actions)
                  or _ACTION.get(op) in actions)
 
 
@@ -57,7 +59,10 @@ def guide(state):
                 {"need": "Change active task goal", "operation": "set_task_goal(conv_id, goal)"},
                 {"need": "New work on approved/done task", "operation": "reopen_task(conv_id, goal)"},
                 {"need": "Sub-captain line", "operation": "create_child(parent_conv_id, name, goal); "
-                              "later set_goal(child_conv_id, goal)"}],
+                              "later set_goal(child_conv_id, goal)"},
+                {"need": "Auxiliary process on this line or a managed line",
+                 "operation": "attach_worker(conv_id, name, adapter, preset_name, staffing_role=emitter) "
+                              "or resume_worker(conv_id, attachment_id)"}],
             "suite_rule": "Before every batch PR run suite on the merged accepted batch; never ask task "
                           "sublines for full suites. After a pass the captain pushes and opens the PR.",
             "goal_context": ("Task participants receive the goal in their joining pack and on wakes until "
@@ -89,9 +94,13 @@ def tool_list(state: dict) -> list[dict]:
                 "goal, notes and captain style; nothing moves or is deleted). A person appoints its captain.",
             "attach_worker": "Staff an implementer with Fast implementer checked; model and effort may "
                 "override a Claude or Codex preset. "
-                "for visual work prefer Reads images. Set staffing_role=captain for a sub-captain. "
+                "For visual work prefer Reads images. Set staffing_role=captain for a sub-captain. "
+                "Use staffing_role=emitter with an Emitter preset on your own or a managed line, "
+                "including task lines and lines with active workers or children. "
                 "For handover, attach on your own line with successor=true, "
                 "wait 60 seconds, then use offer_handover to offer captainship.",
+            "resume_worker": "Resume a stopped process by attachment ID on your own or a managed line. "
+                "For a stopped task implementer or reviewer, use the corresponding task restart operation.",
             "process_overview": "Inspect lines and live processes, including every task workspace's real and "
                 "mirror tips. The mirror tip is where the worker's commits live until accept.",
             "retirement_preview": "Inspect bounded retirement evidence and obtain a principal-bound token. "

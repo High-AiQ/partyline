@@ -1325,23 +1325,19 @@ set a root's `default_review_policy` using `PUT /api/conversations/<root>/captai
 it defaults to `captain` and may also be `none` or an exact reviewer preset name.
 A task's mode (full, express or suite) is chosen separately at creation.
 
-Preset role traits govern agent staffing: implementers need **Fast implementer**; captains,
-sub-captains and reviewers need **Can manage a line**. Choose a free Fast implementer
-for implementation. A person may attach, resume, replace or appoint a process directly
-without those role traits; agents cannot staff presets with neither role trait. Helper processes (raw
-adapters, counted in the worker total or not, such as the idle-check and rotate-captain helpers) hold no staffed role:
-they need no role trait, and a captain can restart one with delete, edit command and resume. An agent
-resuming any other process that is not a task worker, captain or helper still needs Fast implementer. When attaching a sub-captain, select the captain role; the server appoints it on a
-vacant line. **Reads images** is advisory; prefer it for image and screenshot work. Existing
-processes are not stopped when traits change, but subsequent staffing checks the current
-preset. A named default review policy must satisfy the reviewer requirement; `captain`
-and `none` remain available.
+Preset role traits govern agent staffing. Implementers need **Fast implementer**. Captains,
+successors and reviewers need **Can manage a line**. A preset can combine either or both
+with **Reads images**. A person can directly attach, resume, replace or appoint ordinary
+processes. Agents check the current preset for subsequent staffing. When attaching a
+sub-captain, select the captain role to appoint it on a line without a captain. A named
+default review policy must satisfy the reviewer requirement. The built-in `captain` policy
+uses the orchestrator itself.
 
 An orchestrator creates tasks through `create_task(name, goal, implementer, review)`.
 The task goal is capped at 20,000 characters; longer briefs live in a committed file
 that the goal names: see `docs/task-briefs.md`.
 The server creates each task line in a managed worktree, attaches exactly one
-implementer from the named preset and briefs it. Direct attach, including the
+implementer from the named preset and briefs it. Direct staffing of workers, including the
 shared-branch override, cannot add an implementer. Task lines have no subcaptain
 and cannot split further. `tasks()` returns every task's policy, status, round,
 assigned attachment IDs, SHA, checkout path and merge state without reading chat.
@@ -1489,8 +1485,8 @@ gates and commit, and an unchanged workspace names `blocked(reason)` and
 cannot be read falls back to the generic text. If the turn consuming that
 reminder also returns without either, the server sends one `stalled` report to
 the root. Duplicate turn receipts and restarts do not repeat the reminder or
-escalation. The rail shows blocked tasks, and task lines hide manual staffing
-controls because staffing is owned by the server. Notify reports follow the
+escalation. The rail shows blocked tasks. Task lines offer manual attach for emitters.
+The server owns task staffing. Notify reports follow the
 existing inbox coalescing and acknowledgement rules: a new task state updates
 an outstanding report rather than ringing again.
 
@@ -1526,6 +1522,25 @@ sends an informational message without setting the hold. The hold clears when th
 requests review at a new SHA, or the root captain releases it with
 `captain(op="review_hold", args={conv_id, hold: false})`. An approval while held returns 409;
 a request-changes verdict remains available.
+
+
+## Emitter presets
+
+Use **Emitter** for an auxiliary process that publishes events or reminders. Emitter
+is exclusive of **Reads images**, **Can manage a line**, and **Fast implementer**.
+Partyline enables Emitter automatically for every raw adapter preset and attachment.
+For other adapters, enable it in Settings → Presets or in the attach form.
+
+Captains can use `list_presets` to find an Emitter preset, then call
+`attach_worker(conv_id, name, adapter, preset_name, staffing_role="emitter")`.
+This works on a captain's own line and any line they manage, including lines with
+children, existing workers or active task staffing. A captain attaches from a
+person-configured preset. To resume an existing emitter, call
+`captain(op="resume_worker", args={conv_id, attachment_id})`.
+
+Emitters have their own staffing category and leave task worker and captain seats
+available. Non-raw emitters count toward the process budget. Raw emitters use the
+existing `counts_toward_total` setting.
 
 ## Task modes: full, express and suite
 

@@ -46,6 +46,16 @@ class PresetRolesTest(unittest.TestCase):
         self.assertEqual(error.exception.status_code, 403)
         self.assertIn('Fast implementer', error.exception.detail)
 
+    def test_emitters_cannot_staff_any_work_role(self):
+        for adapter in ('raw', 'fake'):
+            preset = {'name': 'sample', 'adapter': adapter, 'can_manage': True, 'implements': True}
+            if adapter == 'fake':
+                preset['emitter'] = True
+            self.assertIs(require_role(preset, 'emitter'), preset)
+            for role in ('implementer', 'reviewer', 'captain'):
+                with self.subTest(adapter=adapter, role=role), self.assertRaises(HTTPException):
+                    require_role(preset, role)
+
     def test_missing_or_ambiguous_named_preset_is_actionable(self):
         for rows in ([], [{'name': 'sample'}, {'name': 'sample'}]):
             with self.subTest(rows=rows), self.assertRaises(HTTPException) as error:
@@ -131,7 +141,8 @@ class PresetRolesTest(unittest.TestCase):
             'orchestrator_revive.py': {'restart_implementer': {'require_named_role'}},
             'hierarchy_routes.py': {'appoint_lead': {'require_captain_assignment'}},
             'captain_handover.py': {'accept': {'require_attachment_role'}},
-            'conversation_routes.py': {'attach': {'require_role', 'start_staffed'}},
+            'conversation_routes.py': {'attach': {'resolve_staffing', 'start_staffed'}},
+            'attachment_staffing.py': {'resolve_staffing': {'require_role'}},
             'server.py': {'resume_attachment': {'require_resume'}},
             'attachment_lifecycle_routes.py': {'_start_replacement': {'require_resume'},
                                                 'replace_attachment': {'require_resume'}},

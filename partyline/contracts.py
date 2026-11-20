@@ -56,6 +56,7 @@ class RunningProcessResponse(BaseModel):
     name: str
     adapter: str
     conversation: str
+    emitter: bool = False
 
 
 class FeatureFlagResponse(BaseModel):
