@@ -271,6 +271,25 @@ class FormFixture(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("old", self.f.socket.states[5]["value"])
         self.assertEqual([], self.f.socket.native_select.committed_values)
 
+    async def test_legacy_workflow_scroll_event_keeps_its_existing_dispatch_contract(self):
+        _, ids = await self.initial()
+        tree = self.elements.snapshots["g"]
+        node = tree.nodes[ids["First name"]]
+
+        def observed_scroll(message):
+            self.edited(message)
+            if message["method"] == "DOM.scrollIntoViewIfNeeded":
+                self.f.state.changed()
+
+        self.f.socket.hook = observed_scroll
+        result = await self.f.chrome.action(self.f.access, {
+            "action": "set_value", "element_id": node.helper, "value": "Ada", "request_id": "legacy",
+            "action_token": node.cached["action_token"], "workflow_source": "cdp",
+            "workflow_document": tree.document, "workflow_counter": tree.event_counter,
+        })
+        self.assertEqual("completed", result["status"])
+        self.assertEqual("Ada", self.f.socket.states[3]["value"])
+
     async def test_partial_dependency_capture_cannot_establish_uniqueness_or_dispatch(self):
         self.combo()
         _, ids = await self.initial()

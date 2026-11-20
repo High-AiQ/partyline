@@ -56,7 +56,7 @@ def incomplete(tree, reply):
 def evidence(tree):
     """Existing helper dispatch fields fence this exact scoped observation through input."""
     return {"workflow_source": "cdp", "workflow_document": tree.document,
-            "workflow_counter": tree.event_counter}
+            "workflow_counter": tree.event_counter, "workflow_dependency": True}
 
 
 async def resolve(runtime, hub, conv_id, item, principal, grant, device):

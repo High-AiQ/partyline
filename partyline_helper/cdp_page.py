@@ -37,7 +37,7 @@ class Page(Dialogs, Recovery):
         self.operation_epoch = None
         self.action_proof = None
         self.action_point = None
-        self.workflow_message = None
+        self.dependency_message = None
         self.quiet = Quiet()
         self.operation_timing = None
         self.defer_object_releases = False
@@ -68,9 +68,9 @@ class Page(Dialogs, Recovery):
                     self.action_point = await reprove(self, self.action_proof,
                                                      mouse=method == "Input.dispatchMouseEvent")
                 self.guard()
-                if (self.workflow_message and
-                        (self.workflow_message.get("workflow_document") != document(self) or
-                         changed(self.workflow_message, self.access.event_status))):
+                if (self.dependency_message and
+                        (self.dependency_message.get("workflow_document") != document(self) or
+                         changed(self.dependency_message, self.access.event_status))):
                     raise WorkflowEvidence("workflow condition evidence changed before input")
             if (method == "Input.dispatchMouseEvent" and self.action_proof is not None
                     and self.action_point is not None):
