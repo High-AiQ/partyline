@@ -12,11 +12,10 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 
 from .auth_guard import request_principal
-from .contracts import MessageEvent, MessageResponse
 from .machine_scope import deny_unless
 from .local_tools_media import decodes
 from .media import MAX_IMAGE_BYTES, MediaError
-from .screen_audit import publish, record
+from .screen_audit import record
 from .screen_errors import screen_error
 from .screen_frame_store import frame_reference
 from .screen_grants import require_window, resolve_window
@@ -148,11 +147,11 @@ class WindowSnapshots:
         try:
             await self.audit(principal, grant, ref)
             require_window(self.hub, principal, grant["id"])  # the one gate: nothing awaits before the return
-        except HTTPException:  # the grant ended while it was stored or announced: nothing leaves or stays
+        except HTTPException:  # the grant ended during storage or the device update
             if not unchanged:
                 share.agent_frames.pop(sender, None)
                 await asyncio.to_thread(store.delete_file, ref.id)
-            record(self.hub.runtime.db, grant["id"], grant["conv_id"], principal.name,
+            record(self.hub.runtime.db, grant["id"], principal.conv_id or grant["conv_id"], principal.name,
                    f"window screenshot withheld: {grant['process']} — {grant['title']} "
                    "(result=withheld; the grant ended before delivery)")
             raise
@@ -184,12 +183,8 @@ class WindowSnapshots:
         db = self.hub.runtime.db
         detail = (f"({ref.width}x{ref.height}, {ref.bytes // 1024} KB; "
                   f"app={grant['process']}; result=completed)")
-        record(db, grant["id"], grant["conv_id"], principal.name,
+        record(db, grant["id"], principal.conv_id or grant["conv_id"], principal.name,
                f"window screenshot of «{grant['title']}» {detail}")
-        message = publish(db, grant["id"])
-        if message:
-            await self.hub.runtime.broadcast(
-                grant["conv_id"], MessageEvent(message=MessageResponse.model_validate(message)))
         await self.hub.window_grants.changed(grant["device_id"])
 
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   /** Computers paired with this account for screen sharing. */
   import { screenApi } from "../../../lib/screen-api";
+  import { room } from "../../../state/room.svelte";
   import { screenStatus } from "../../../state/screen-status.svelte.js";
   import SettingsSection from "../SettingsSection.svelte";
   import SettingRow from "../SettingRow.svelte";
@@ -43,8 +44,11 @@
       </p>
       <AutoUpdateSetting {device} />
       <WindowAccessLine {device} />
-      <WindowAccessAudit {device} />
     {/each}
+    <WindowAccessAudit
+      lines={[...room.conversations, ...room.archived]}
+      currentLine={room.conversation?.id ?? null}
+    />
     {#if devices.length}<small
         >Selected lines and their sublines can see and use windows while the computer's window access toggle
         is on.</small

@@ -74,13 +74,15 @@ type, app, title and result without contents. Individual calls do not post chat 
 call on a line for each computer posts one short note pointing to **Settings → Computers → View log**; it is
 not repeated unless access is revoked and re-granted (or the server restarts).
 
-People can read the newest 50 entries under the computer's selected line with **View log**, including each
-entry hash and the current chain head. The equivalent person-only API is
-`GET /api/conversations/{conv_id}/window-access-audit?limit=50` (limit 1–200, default 50). It returns
-`entries` newest first, each with `agent`, `call`, `app`, `title`, `result`, `time` and `entry_hash`, plus the
-overall `chain_head`. Agent credentials cannot read this route. Window-access rows deliberately remain
-unpublished, and restart recovery never turns them into chat messages; live-consented pixel-control audits
-keep their existing chat behavior.
+People can open **Settings → Computers → View log**, choose a line, and page through its window
+access, shared-window input and screenshot, and live screen-control records. Each record shows the actor,
+available timestamp, and audit details. Its chain ID and hashes identify the standing-access chain, grant,
+or screen share that recorded it. Previously posted audit copies are retained in storage and omitted
+from chat history and process wakes. Pending records are available in the log as soon as the server starts.
+
+The person-only API is `GET /api/conversations/{conv_id}/screen-access-audit` with an optional
+`limit` (1–200, default 50) and a `before` cursor from the previous page's `next_before`.
+The standing-access-only API remains available at `GET /api/conversations/{conv_id}/window-access-audit`.
 
 Each granted window has a thin blue outline just outside its visible frame. It follows the window and
 hides while the window is minimized or on another virtual desktop. It is click-through, does not take
@@ -584,15 +586,16 @@ window grant never has to ask for the whole screen.
   and a click discard the stored tree, so read again before asking for boxes. Every snapshot returns a
   `snapshot` id and its `coordinates` note; the helper records the picture's window rectangle, per-axis
   scale, DPI, client areas and grant generation under that id, for `screen_window_click`.
-- **Audit.** Each capture is recorded in the screen control audit (who asked, the grant, the size) and noted in the
-  line; the helper's local audit records it too. The tray's window label reads "last screenshot HH:MM by @handle"
+- **Audit.** Each capture is recorded in the screen access log (who asked, the grant, the size) and the helper's
+  local audit. The tray's window label reads "last screenshot HH:MM by @handle"
   and the web window-grant list carries `last_screenshot` for the grant.
 - **Protocol.** The server sends `snapshot_window` (`request_id`, `grant_id`, `agent`); the helper
   answers `window_snapshot` with the same `request_id`, `ok`, and either `error` or `mime`, `width`, `height` and
   `media: true` and `chunks: n`, followed by n binary messages that join into the image.
   The helper checks consent once more under its writer lock immediately before the first byte leaves, and the
-  server checks once more after it has stored and announced the capture, immediately before it answers; if the
-  grant ended in between, nothing is sent or returned, the new media is deleted, and the audit gains a "withheld" entry. Only a helper whose hello says `windows: 2` is asked; an older
+  server checks once more after it stores the capture and updates the computer's share status, immediately before
+  it answers. If the grant ended in between, nothing is returned, the new media is deleted, and the audit gains a
+  "withheld" entry. Only a helper whose hello says `windows: 2` is asked; an older
   one is told "update the Partyline helper to use window screenshots" at once, never left to time out.
 
 ### Act on elements in the chosen window
@@ -854,9 +857,8 @@ leave the granted window.
 - **Audit.** Each operation writes the grant, line, process, operation (`screen_window_click`, `_scroll`,
   `_drag`, `_type`, `_key`), route (`cdp` or `cursor`), the point (image and screen pixels; both ends of a
   drag) and the result to the helper's tool audit before any input is sent (a log that cannot be written
-  refuses it), and again with the outcome; the server's screen control audit and the line notice carry the
-  same, and the helper's recent-activity log lists `point_<op>`. Typed text is never recorded, only its
-  length, and no pixels are.
+  refuses it), and again with the outcome. The same details appear in **View log**, and the helper's
+  recent-activity log lists `point_<op>`. The audit records the length of typed text and the coordinates.
 - **Deadline.** The server tells the helper how long it may take to *start* the click (`budget`, 40 s from
   arrival) and waits 70 s for the answer, so a click never goes through after the server has reported it
   `unconfirmed`. A consent answer that arrives after the budget is discarded and nothing is sent.
@@ -1045,14 +1047,10 @@ Ctrl+Alt+Backspace, Ctrl+Alt+F1–F12, Ctrl+Alt+Esc, Win+L (Windows), Super+L an
 Ctrl+Alt+L (Linux), and Ctrl+Cmd+Q, Cmd+Alt+Esc and Cmd+Shift+Q (macOS), including
 any of them with extra modifiers.
 
-**Audit.** Actions are posted to the line as compact system notes, batched every
-60 seconds (or every 100 actions) with repeated pointer moves folded together,
-and flushed when control ends. Each action is recorded durably before it is
-acknowledged; pending batches are posted after a server restart. Audit entries
-are retained in a hash chain, with the final hash included in each note. Typed
-text appears as its first 40 characters.
-An action that stopped partway is audited as `(interrupted: …)`, and one the
-computer never confirmed as `(unconfirmed)`.
+**Audit.** Each action is recorded durably in the share's hash chain before it
+is acknowledged. Open **Settings → Computers → View log** to see actions,
+including individual pointer moves, partial interruptions, and unconfirmed
+outcomes. The log displays the length of typed text, including for older entries.
 
 **Limits.** By default at most 10 actions per second, 500 characters per
 `screen_type`, and 300 ad-hoc actions per share or window grant; approved workflow runs use

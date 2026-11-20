@@ -11,3 +11,9 @@ MIGRATIONS = [
     """CREATE TRIGGER IF NOT EXISTS delete_screen_audit AFTER DELETE ON conversations
         BEGIN DELETE FROM screen_control_audit WHERE conv_id=OLD.id; END""",
 ]
+
+READ_LOG_MIGRATIONS = [
+    "CREATE INDEX IF NOT EXISTS idx_screen_audit_line ON screen_control_audit(conv_id, id)",
+    "CREATE INDEX IF NOT EXISTS idx_screen_audit_message ON screen_control_audit(message_id) "
+    "WHERE message_id IS NOT NULL",
+]

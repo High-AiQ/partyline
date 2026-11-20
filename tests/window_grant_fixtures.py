@@ -17,13 +17,7 @@ from partyline.screen_routes import register_screen_routes
 class WindowGrantFixture:
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = Db(str(Path(self.tmp.name) / "test.db"))
-        self.runtime = ChatRuntime(self.db)
-        app = FastAPI()
-        install_auth_guard(app, self.db)
-        self.store = MediaStore(self.db, Path(self.tmp.name) / "media")
-        self.hub = register_screen_routes(app, self.runtime, self.store)
-        self.client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        self.open_server()
         self.owner = auth_store.create_user(self.db, "owner@example.test", "owner", "unused")
         self.other_user = auth_store.create_user(self.db, "other@example.test", "other", "unused")
         for line in ("paired", "alpha", "beta", "empty"):
@@ -40,6 +34,20 @@ class WindowGrantFixture:
         self.db._exec("INSERT INTO screen_device_window_access(device_id,enabled) VALUES(?,1) "
                       "ON CONFLICT(device_id) DO UPDATE SET enabled=1", (device_id,))
         self.hub.devices[device_id] = self.device
+
+    def open_server(self):
+        self.db = Db(str(Path(self.tmp.name) / "test.db"))
+        self.runtime = ChatRuntime(self.db)
+        app = FastAPI()
+        install_auth_guard(app, self.db)
+        self.store = MediaStore(self.db, Path(self.tmp.name) / "media")
+        self.hub = register_screen_routes(app, self.runtime, self.store)
+        self.client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+    async def restart_server(self):
+        await self.client.aclose()
+        self.db.close()
+        self.open_server()
 
     async def asyncTearDown(self):
         await self.client.aclose()

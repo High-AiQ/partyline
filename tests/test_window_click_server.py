@@ -176,6 +176,51 @@ class WindowClickTests(ClickFixture, unittest.IsolatedAsyncioTestCase):
                          (last["grant"], last["process"], last["point"], last["screen"]))
         self.assertNotIn("data", json.dumps(rows))  # metadata only, never pixels
 
+    async def test_two_clicks_and_their_snapshots_are_available_only_in_the_log(self):
+        def chat_bodies():
+            return [m["body"] for m in self.db._exec(
+                "SELECT body FROM messages WHERE conv_id='alpha' ORDER BY id").fetchall()]
+
+        await self.grant("a")
+        initial_chat = chat_bodies()
+        self.assertTrue(any("shared «Editor»" in body for body in initial_chat))
+        self.assertEqual(200, (await self.read("a")).status_code)
+        for index, route in enumerate(("cursor", "cdp")):
+            self.answer["snapshot_id"] = f"snapshot-{index}"
+            snapshot = await self.shot("a")
+            self.assertEqual(200, snapshot.status_code, snapshot.text)
+            self.click_answer["route"] = route
+            click = await self.click(snapshot=snapshot.json()["snapshot"])
+            self.assertEqual("completed", click.json()["status"])
+
+        async def read_log():
+            response = await self.client.get("/api/conversations/alpha/screen-access-audit",
+                                             headers=self.human(self.owner))
+            self.assertEqual(200, response.status_code, response.text)
+            return response.json()["entries"]
+
+        self.assertEqual(initial_chat, chat_bodies())
+        entries = await read_log()
+        self.assertTrue(any(row["detail"].startswith("uia_read:") for row in entries))
+        self.assertEqual({"window-access:alpha", "g1"}, {row["chain_id"] for row in entries})
+        grant = [row for row in reversed(entries) if row["chain_id"] == "g1"]
+        self.assertEqual(7, len(grant))
+        self.assertEqual({"a"}, {row["agent"] for row in grant})
+        self.assertEqual("", grant[0]["previous_hash"])
+        self.assertEqual("screen_elements", json.loads(grant[0]["detail"])["operation"])
+        for prior, row in zip(grant[:-1], grant[1:], strict=True):
+            self.assertEqual(prior["entry_hash"], row["previous_hash"])
+        for offset, route in ((1, "cursor"), (4, "cdp")):
+            self.assertIn("window screenshot of «Editor»", grant[offset]["detail"])
+            request, result = [json.loads(row["detail"]) for row in grant[offset + 1:offset + 3]]
+            self.assertEqual(("requested", "pending"), (request["result"], request["route"]))
+            self.assertEqual(("completed", route, [200, 150]),
+                             (result["result"], result["route"], result["screen"]))
+
+        await self.restart_server()
+        self.assertEqual(initial_chat, chat_bodies())
+        self.assertEqual(entries, await read_log())
+
     async def test_recording_keeps_point_observation_before_delta_rendering_consumes_it(self):
         await self.grant("a")
         await self.snapshot()

@@ -116,8 +116,6 @@ class ControlFlowTest(unittest.IsolatedAsyncioTestCase):
         install_auth_guard(app, self.db)
         self.hub = register_screen_routes(app, self.runtime,
                                           MediaStore(self.db, Path(self.tmp.name) / "media"))
-        self.audit_time = ManualTime()
-        self.hub.control.sleep = self.audit_time.sleep
         self.user = auth_store.create_user(
             self.db, "person@example.com", "person", auth_tokens.hash_password("password1"))
         token = auth_tokens.create_access_token(auth_tokens.signing_secret(self.db), self.user["id"])
@@ -205,13 +203,15 @@ class ControlFlowTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(refused.status_code, 409)
             self.assertIn(detail, refused.json()["detail"])
         self.assertEqual((await self.act(kind="click", x="1", y=1)).status_code, 422)
-        self.assertFalse(any("audit" in body for body in self.bodies()))
-        self.audit_time.advance(60)
-        await until(lambda: any("audit" in body for body in self.bodies()))
-        audit = next(body for body in self.bodies() if "audit" in body)
-        self.assertTrue(audit.startswith(
-            "Agent control audit — person: click left (-90,20) · move (-50,50) ×3 · "
-            "type `hi 'there'` (10 chars)"))
+        response = await self.client.get("/api/conversations/line/screen-access-audit")
+        self.assertEqual(200, response.status_code, response.text)
+        entries = list(reversed(response.json()["entries"]))
+        self.assertEqual(["click left (-90,20)", *["move (-50,50)"] * 3, "type (10 chars)"],
+                         [entry["detail"] for entry in entries])
+        self.assertEqual({"person"}, {entry["agent"] for entry in entries})
+        self.assertEqual({share.share_id}, {entry["chain_id"] for entry in entries})
+        self.assertNotIn("hi", self.db._exec(
+            "SELECT entry FROM screen_control_audit ORDER BY id DESC LIMIT 1").fetchone()[0])
         self.desktop.position = (90, 90)  # the person grabs the mouse
         self.inputs.on_move()
         await until(lambda: self.grant().status == "revoked")
@@ -223,6 +223,8 @@ class ControlFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("start a new share", again.json()["detail"])
         await self.client.delete(f"/api/screen/shares/{share.share_id}")
         self.assertEqual(self.hub.control.grants, {})
+        self.assertEqual(0, self.db._exec(
+            "SELECT count(*) FROM messages WHERE body LIKE 'Agent control audit%'").fetchone()[0])
 
     async def test_frame_choices_and_deduplication(self):
         await self.connect()
@@ -293,7 +295,12 @@ class ControlFlowTest(unittest.IsolatedAsyncioTestCase):
         await until(lambda: self.inputs.stopped)
         self.assertFalse(self.session.control.granted)
         self.assertIn("Agent control ended with the share (device disconnected).", self.bodies())
-        self.assertIn("person: move (-100,0)", " ".join(self.bodies()))
+        self.assertNotIn("move (-100,0)", " ".join(self.bodies()))
+        audit = await self.client.get("/api/conversations/line/screen-access-audit")
+        self.assertEqual(200, audit.status_code, audit.text)
+        entries = audit.json()["entries"]
+        self.assertEqual([("person", "move (-100,0)")],
+                         [(entry["agent"], entry["detail"]) for entry in entries])
         self.assertEqual(self.hub.control.grants, {})
         self.assertEqual(share.status, "stopped")
 
@@ -383,6 +390,10 @@ class ControlUnitTest(unittest.IsolatedAsyncioTestCase):
         self.db.close()
         self.tmp.cleanup()
 
+    def audit_entries(self):
+        return [row["entry"] for row in self.db._exec(
+            "SELECT entry FROM screen_control_audit ORDER BY id").fetchall()]
+
     async def test_old_helpers_get_a_clear_error(self):
         self.device.pop("control")
         with self.assertRaisesRegex(ValueError, "helper too old for control"):
@@ -436,11 +447,11 @@ class ControlUnitTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "refused the action: outside"):
             await asyncio.gather(control.action("line", "agent-a", move), answer(ok=False))
         grant = control.grants["share"]
-        self.assertEqual([entry[1] for entry in grant.audit], ["move (-97,3)"])  # refusals: no entry
+        self.assertEqual(self.audit_entries(), ["move (-97,3)"])  # refusals: no entry
         drag = ControlAction(kind="drag", x1=0, y1=0, x2=9, y2=9)
         with self.assertRaisesRegex(ValueError, "interrupted: outside"):  # partly injected: audited
             await asyncio.gather(control.action("line", "agent-a", drag), answer(ok=False, started=True))
-        self.assertEqual(grant.audit[-1][1], "drag (-99,1)→(-81,19) (interrupted: outside)")
+        self.assertEqual(self.audit_entries()[-1], "drag (-99,1)→(-81,19) (interrupted: outside)")
         with unittest.mock.patch("partyline.screen_control.FRAME_TIMEOUT", 0):
             result = await asyncio.gather(control.action("line", "agent-a", move), answer(frame=False))
         self.assertTrue(result[0][3])
@@ -449,10 +460,11 @@ class ControlUnitTest(unittest.IsolatedAsyncioTestCase):
         with unittest.mock.patch("partyline.screen_control.ACTION_TIMEOUT", 0):
             with self.assertRaisesRegex(ValueError, "did not answer"):
                 await control.action("line", "agent-a", move)
-        self.assertEqual(grant.audit[-1][1], "move (-97,3) (unconfirmed)")
-        grant.status = "revoked"  # late entries after a revoke post at once
-        await control._audit(grant, "line", "agent-a", "click left (1,1) (interrupted: x)")
-        self.assertIn("click left (1,1) (interrupted: x)", self.db.list_messages("line")[-1]["body"])
+        self.assertEqual(self.audit_entries()[-1], "move (-97,3) (unconfirmed)")
+        grant.status = "revoked"
+        control._audit(grant, "line", "agent-a", "click left (1,1) (interrupted: x)")
+        self.assertEqual("click left (1,1) (interrupted: x)", self.audit_entries()[-1])
+        self.assertEqual([], self.db.list_messages("line"))
         grant.status = "active"
         task = asyncio.create_task(control.action("line", "agent-a", move))
         await until(lambda: control.waiters)
@@ -485,58 +497,6 @@ class ControlUnitTest(unittest.IsolatedAsyncioTestCase):
         frame = BufferedFrame(b"", 0, dict(REGION), 200, 100, None, "image/png")
         with self.assertRaisesRegex(ValueError, "5 characters"):
             command(ControlAction(kind="type", text="toolong"), frame, 5, "Linux")
-
-    async def test_audit_batches_and_flushes_on_end(self):
-        control = self.hub.control
-        grant = control.grants["share"] = Grant("share", "a", "a", status="active")
-        for index in range(105):
-            await control._audit(grant, "line", "a" if index < 102 else "b", f"click left ({index},0)")
-        bodies = [row["body"] for row in self.db.list_messages("line")]
-        self.assertEqual(len(bodies), 1)
-        self.assertTrue(bodies[0].startswith("Agent control audit — a: click left (0,0) · click left (1,0)"))
-        self.assertEqual(len(grant.audit), 5)
-        await self.hub.stop_share("share", "stopped")
-        bodies = [row["body"] for row in self.db.list_messages("line")]
-        self.assertIn("· b: click left (102,0)", bodies[-3])
-        self.assertEqual(bodies[-2], "Agent control ended with the share (stopped).")
-
-    async def test_folded_moves_still_trigger_audit_batch(self):
-        control = self.hub.control
-        grant = control.grants["share"] = Grant("share", "a", "a", status="active")
-        for index in range(100):
-            await control._audit(grant, "line", "a", f"move ({index},0)")
-        self.assertEqual(grant.audit, [])
-        bodies = [row["body"] for row in self.db.list_messages("line")]
-        self.assertTrue(bodies[-1].startswith("Agent control audit — a: move (99,0) ×100"))
-
-    async def test_audit_recovery_and_failed_publish(self):
-        from partyline.screen_audit import recover
-        control = self.hub.control
-        grant = control.grants["share"] = Grant("share", "a", "a", status="active")
-        for index in range(3):
-            await control._audit(grant, "line", "a", f"click left ({index},0)")
-        with unittest.mock.patch("partyline.screen_audit._body", side_effect=RuntimeError("failed")):
-            with self.assertRaisesRegex(RuntimeError, "failed"):
-                await control.flush(grant, "line")
-        self.assertEqual(len(grant.audit), 3)
-        self.assertIsNotNone(grant.flusher)
-        self.assertEqual(self.db._exec("SELECT count(*) FROM screen_control_audit "
-                                       "WHERE message_id IS NULL").fetchone()[0], 3)
-        register_screen_routes(FastAPI(), self.runtime,
-                               MediaStore(self.db, Path(self.tmp.name) / "media"))
-        recover(self.db)  # recovery is idempotent
-        bodies = [row["body"] for row in self.db.list_messages("line")]
-        self.assertEqual(len(bodies), 1)
-        self.assertIn("click left (0,0)", bodies[0])
-        self.assertIn("click left (2,0)", bodies[0])
-        self.assertIn("audit sha256:", bodies[0])
-        entries = self.db._exec("SELECT * FROM screen_control_audit ORDER BY id").fetchall()
-        self.assertEqual(entries[0]["previous_hash"], "")
-        self.assertEqual(entries[1]["previous_hash"], entries[0]["entry_hash"])
-        self.assertEqual(entries[2]["previous_hash"], entries[1]["entry_hash"])
-        self.assertIn(entries[2]["entry_hash"], bodies[0])
-        self.assertEqual(self.db._exec("SELECT count(*) FROM screen_control_audit "
-                                       "WHERE message_id IS NULL").fetchone()[0], 0)
 
     async def test_revoke_paths(self):
         control = self.hub.control
