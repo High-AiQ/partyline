@@ -83,6 +83,20 @@ class CaptainToolTests(unittest.TestCase):
         self.assertEqual(resumed, attach)
         client.request.assert_called_with("POST", "/api/attachments/aux/resume")
 
+    def test_resume_worker_checks_target_scope_and_roster_before_resuming(self):
+        client = Client()
+        client.target["actions"] = ["read"]
+        args = {"op": "resume_worker", "args": {"conv_id": "child", "attachment_id": "other-line-id"}}
+        with self.assertRaisesRegex(ApiError, "not authorized for that target line"):
+            tools_captain.call(client, "captain", args, client.state)
+        self.assertEqual(client.calls, [])
+
+        client.target["actions"] = ["read", "close", "attach_emitter"]
+        client.request = Mock(return_value={"attachments": [{"id": "child-id", "emitter": True}]})
+        with self.assertRaisesRegex(ApiError, "attachment id is not on the target line"):
+            tools_captain.call(client, "captain", args, client.state)
+        client.request.assert_called_once_with("GET", "/api/conversations/child")
+
     def test_new_chapter_runs_through_the_captain_door_on_the_home_line(self):
         client = Client()
         self.assertIn("new_chapter", {t["name"] for t in tools_captain.tool_list(client.state)})

@@ -63,7 +63,15 @@ class EmitterAttachmentsTest(TaskFixture):
 
         self.runtime.live.pop(ident)
         self.db.set_attachment_status(ident, "detached", self.db.get_attachment(ident)["runtime_owner"])
-        resumed = self.client.post(f"/api/attachments/{ident}/resume")
+        resume_path = f"/api/attachments/{ident}/resume"
+        for non_captain in (self.worker, self.principal(root.json()["id"])):
+            self.actor = non_captain
+            refused = self.client.post(resume_path)
+            self.assertEqual(refused.status_code, 403, refused.text)
+        self.actor = self.captain
+        staff = self.client.post(f"/api/attachments/{task['implementer_id']}/resume")
+        self.assertEqual(staff.status_code, 403, staff.text)
+        resumed = self.client.post(resume_path)
         self.assertEqual(resumed.status_code, 200, resumed.text)
         self.assertTrue(resumed.json()["emitter"])
         next_task = await self.create()
@@ -84,8 +92,20 @@ class EmitterAttachmentsTest(TaskFixture):
         self.assertEqual(nested.status_code, 201, nested.text)
         again = self.attach(conv, name="aux", adapter="fake", preset_name="events")
         self.assertEqual(again.status_code, 200, again.text)
+        descendant = self.attach(nested.json()["conversation"]["id"], name="aux", adapter="raw",
+                                 preset_name="monitor")
+        self.assertEqual(descendant.status_code, 200, descendant.text)
+        ident = descendant.json()["id"]
+        self.runtime.live.pop(ident)
+        self.db.set_attachment_status(ident, "detached", self.db.get_attachment(ident)["runtime_owner"])
+        resumed = self.client.post(f"/api/attachments/{ident}/resume")
+        self.assertEqual(resumed.status_code, 200, resumed.text)
+        self.assertTrue(resumed.json()["emitter"])
         outside = self.attach("root", name="monitor", adapter="raw", preset_name="monitor")
         self.assertEqual(outside.status_code, 403, outside.text)
+        outside = self.client.post("/api/attachments/captain/resume")
+        self.assertEqual(outside.status_code, 403, outside.text)
+        self.assertIn("this credential cannot act on that line", outside.text)
         self.actor = self.principal(attach.json()["id"])
         blocked = self.attach(conv, name="other", adapter="raw", preset_name="monitor")
         self.assertEqual(blocked.status_code, 403, blocked.text)

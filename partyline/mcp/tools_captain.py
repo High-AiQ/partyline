@@ -51,18 +51,23 @@ DOORS = {
 
 
 def guide(state):
+    operations = permitted(state)
+    decisions = [
+        {"need": "New task",
+         "operation": "create_task(name, goal, implementer, mode=full|express|suite, repository?, batch?)"},
+        {"need": "Change active task goal", "operation": "set_task_goal(conv_id, goal)"},
+        {"need": "New work on approved/done task", "operation": "reopen_task(conv_id, goal)"},
+        {"need": "Sub-captain line", "operation": "create_child(parent_conv_id, name, goal); "
+                      "later set_goal(child_conv_id, goal)"},
+    ]
+    if "attach_worker" in operations and "resume_worker" in operations:
+        decisions.append({
+            "need": "Auxiliary process on this line or a managed line",
+            "operation": "attach_worker(conv_id, name, adapter, preset_name, staffing_role=emitter) "
+                         'or captain(op="resume_worker", args={conv_id, attachment_id})',
+        })
     return {"doors": DOORS,
-            "goal_decisions": [
-                {"need": "New task",
-                 "operation": "create_task(name, goal, implementer, mode=full|express|suite, "
-                              "repository?, batch?)"},
-                {"need": "Change active task goal", "operation": "set_task_goal(conv_id, goal)"},
-                {"need": "New work on approved/done task", "operation": "reopen_task(conv_id, goal)"},
-                {"need": "Sub-captain line", "operation": "create_child(parent_conv_id, name, goal); "
-                              "later set_goal(child_conv_id, goal)"},
-                {"need": "Auxiliary process on this line or a managed line",
-                 "operation": "attach_worker(conv_id, name, adapter, preset_name, staffing_role=emitter) "
-                              "or resume_worker(conv_id, attachment_id)"}],
+            "goal_decisions": decisions,
             "suite_rule": "Before every batch PR run suite on the merged accepted batch; never ask task "
                           "sublines for full suites. After a pass the captain pushes and opens the PR.",
             "goal_context": ("Task participants receive the goal in their joining pack and on wakes until "
@@ -71,7 +76,7 @@ def guide(state):
                              "Ordinary workers get assignments from their captain, not captain goal framing. "
                              "Use the child's line id for task operations; never park briefs in /tmp files."),
             "operations": [{"name": name, "inputSchema": schema(name)}
-                            for name in permitted(state)],
+                            for name in operations],
             "fallback": {"name": "captain", "inputSchema": {
                 "type": "object", "properties": {
                     "op": {"type": "string", "enum": [*OPERATIONS, *tools_tasks.OPERATIONS]},

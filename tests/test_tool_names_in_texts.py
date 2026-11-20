@@ -13,10 +13,11 @@ import re
 import unittest
 from pathlib import Path
 
-from partyline.mcp import catalog, tools_captain
+from partyline.mcp import catalog
+from partyline.mcp import tools_captain
 
 ROOT = Path(__file__).resolve().parent.parent / "partyline"
-MATRIX = json.loads((Path(__file__).parent / "fixtures" / "mcp_role_matrix.json").read_text())
+MATRIX = json.loads((ROOT.parent / "tests/fixtures/mcp_role_matrix.json").read_text())
 # The modules whose strings are pasted or returned to a process.
 TEXTS = (
     "captain_docs.py", "captain_handover.py", "captain_idle.py", "line_process_routes.py",

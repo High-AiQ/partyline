@@ -1,5 +1,12 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-20 — Callable tool changes reach the MCP role matrix
+
+The task gate mapper missed the role matrix because the captain tools were the second name
+in a combined import. Keep catalog dependencies explicit in the contract tests and verify
+their selection with `tests/test_task_gates.py`. When a tool is added, update the matrix for
+each authorized role and exercise the advertised dispatcher.
+
 ## 2026-11-20 — Task staffing is enforced in SQLite as well as the API
 
 Allowing an auxiliary attach through the HTTP guard still hit the database trigger that
