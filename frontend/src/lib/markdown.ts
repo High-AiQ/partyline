@@ -115,6 +115,20 @@ function parseHumanSource(source: string, parser: Marked): string {
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (!(node instanceof Element)) return;
   if (node.tagName === "A" && node.hasAttribute("href")) {
+    const href = node.getAttribute("href") ?? "";
+    if (href.startsWith("/")) {
+      // A leading slash is not enough: `//host`, `/\\host`, and whitespace
+      // variants can resolve to another origin under browser URL parsing.
+      let sameOrigin = false;
+      try {
+        sameOrigin = new URL(href, document.baseURI).origin === window.location.origin;
+      } catch {
+        // Keep the link text when the browser cannot parse its destination.
+      }
+      if (!sameOrigin) node.removeAttribute("href");
+    }
+  }
+  if (node.tagName === "A" && node.hasAttribute("href")) {
     // A line link (`#/c/<id>`, as "continued in" notices carry) opens in this tab.
     if (!node.getAttribute("href")?.startsWith("#/c/")) {
       node.setAttribute("target", "_blank");
@@ -169,8 +183,9 @@ const PURIFY_CONFIG = {
     "td",
   ],
   ALLOWED_ATTR: ["href", "class", "target", "rel", "data-code-language", "data-code-source", "data-math"],
+  // Root-relative destinations get a browser-parsed same-origin check above.
   // `#/c/<id>` is a line link: chapter notices point at lines this way.
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|#\/c\/[^\s"<>]+$)/i,
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|\/|#\/c\/[^\s"<>]+$)/i,
   RETURN_DOM_FRAGMENT: true,
 } as const satisfies DomPurifyConfig;
 

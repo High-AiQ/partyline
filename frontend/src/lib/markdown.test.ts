@@ -40,6 +40,32 @@ describe("renderMessage", () => {
       expect(html).toContain('target="_blank"');
     });
 
+    it("keeps host-relative service links clickable for agents and people", () => {
+      for (const rich of [true, "human"] as const) {
+        const html = renderMessage("[media](/api/media/media-123/slim?download=1#preview)", rich);
+        expect(html).toContain('href="/api/media/media-123/slim?download=1#preview"');
+        expect(html).toContain('rel="noopener noreferrer"');
+        expect(html).toContain('target="_blank"');
+      }
+    });
+
+    it.each(["//example.test/x", "/\t/example.test/x"])(
+      "drops a root-relative-looking link that resolves to another origin: %s",
+      (destination) => {
+        const html = renderMessage(`[click me](${destination})`, true);
+        expect(html).not.toContain("href=");
+        expect(html).not.toContain("target=");
+        expect(html).toContain("click me");
+      },
+    );
+
+    it("uses browser URL parsing to reject a backslash host-confusion link", () => {
+      const html = DOMPurify.sanitize('<a href="/\\example.test/x">click me</a>');
+      expect(html).not.toContain("href=");
+      expect(html).not.toContain("target=");
+      expect(html).toContain("click me");
+    });
+
     it("opens a line link in this tab, where chapter notices point", () => {
       const html = renderMessage("☏ continued in [Plan · ch 2](#/c/abc-123)", true);
       expect(html).toContain('href="#/c/abc-123"');
