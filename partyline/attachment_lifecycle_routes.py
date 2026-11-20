@@ -24,6 +24,7 @@ from .line_process_routes import detach_attachment
 from .attachment_tmp import reap_tmp_dir
 from .system_notice import post_system_notice
 from .mention_relay import post_private
+from .preset_traits import is_emitter
 
 
 def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
@@ -133,7 +134,7 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
         # line's live captain once with the assignment ask. Skipped when the
         # replaced process was itself the captain — its fresh instance already
         # holds the role and needs no ring.
-        if not stopped.get("is_lead"):
+        if not stopped.get("is_lead") and not is_emitter(stopped):
             captain = live_manager(runtime, stopped["conv_id"])
             if captain is not None:
                 await post_private(

@@ -11,6 +11,7 @@
   import ConfirmForm from "./ConfirmForm.svelte";
   import { api } from "../../lib/api";
   import type { RunningProcess } from "../../lib/contracts";
+  import { isEmitter } from "../../lib/preset-traits";
   import { canResume, isLive, latestJacks } from "../../lib/attachments";
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
@@ -94,7 +95,7 @@
         {#each running as process, index (index)}
           <div class="live-item">
             <span class="led running"></span>
-            <span>@{process.name}</span>
+            <span>@{process.name}{isEmitter(process) ? " · emitter" : ""}</span>
             <span class="on">on {process.conversation}</span>
           </div>
         {/each}

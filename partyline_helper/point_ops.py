@@ -58,20 +58,34 @@ def path(points):
     return [(a, b), *middle, (c, d)]
 
 
+POINT_ROUTES = {
+    "click": lambda page, frame, points, args, guard: cdp_click(page, frame, points[0], args["button"],
+                                                                 args["clicks"], guard),
+    "scroll": lambda page, frame, points, args, guard: wheel(page, frame, points[0], args["dx"], args["dy"],
+                                                              guard),
+    "drag": lambda page, frame, points, args, guard: drag(page, frame, path(points), guard),
+}
+
+
 async def by_cdp(op, page, frame, points, args, guard):
     """What the page is sent for `op`; the result goes into the answer."""
-    if op == "click":
-        return await cdp_click(page, frame, points[0], args["button"], args["clicks"], guard)
-    if op == "scroll":
-        return await wheel(page, frame, points[0], args["dx"], args["dy"], guard)
-    if op == "drag":
-        return await drag(page, frame, path(points), guard)
-    if op == "type":
-        await password_check(page)
-        return await insert(page, args["text"], guard)
-    names = args["names"]
-    await password_check(page, typing=inserts_text(names))
-    return await press(page, names, guard)
+    mark = page.cue.mark()  # the page the input is dispatched into: a cue never outlives it
+    if op in POINTED:
+        result = await POINT_ROUTES[op](page, frame, points, args, guard)
+        spot = (result.get("page_points") or [result["page_point"]])[-1] if result else None
+        if spot:  # sent: say where; never before, and never for a refusal
+            (page.cue.click if op == "click" else page.cue.move)(*spot, mark=mark)
+        return result
+    names = args.get("names")
+    ident = await password_check(page, typing=op == "type" or inserts_text(names))
+    try:
+        result = await (insert(page, args["text"], guard) if op == "type" else press(page, names, guard))
+    except BaseException:
+        page.cue.release(ident)
+        raise
+    # Tab goes to a new field on purpose; otherwise show where the keys went, as proven before they were sent
+    page.cue.focus(ident, op != "type" and any(str(name).lower() == "tab" for name in names), mark)
+    return result
 
 
 def password(api):

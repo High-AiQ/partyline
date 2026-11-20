@@ -2034,7 +2034,8 @@ class ShutdownTest(ServerTest):
 
         running = self.arun(server.running(self.principal_request()))
 
-        self.assertEqual(running, [{"name": "worker", "adapter": "fake", "conversation": "Line"}])
+        self.assertEqual(running, [{"name": "worker", "adapter": "fake", "conversation": "Line",
+                                    "emitter": False}])
 
     def test_a_detached_attachment_is_not_reported_as_running(self):
         server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")

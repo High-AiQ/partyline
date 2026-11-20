@@ -17,7 +17,7 @@ SHORT = {
                    "suite=per-repo batches, all suites + combined e2e.",
     "set_task_goal": "CHANGE the direction of an existing active task (conv_id = task line id).",
     "reopen_task": "CONTINUE an approved or done task with a new goal (conv_id = task line id).",
-    "attach_worker": "Staff from a preset; model and effort optionally override Claude or Codex settings.",
+    "attach_worker": "Staff from a preset. Use staffing_role=emitter on any managed line.",
     "retire_child": "Retire a child line; guarded by default. Run retirement_preview first.",
     "retirement_preview": "Preview what retiring a line would discard; returns the preview_token.",
     "process_overview": "Live processes and workspace tips per line; the mirror tip holds commits.",

@@ -3,7 +3,7 @@
   import { adapterLabel, overrideExplanation } from "../../lib/attachments";
   import { tooltip } from "../../lib/tooltip";
   import { ApiError, api } from "../../lib/api";
-  import { defaultPresetTraits, traitsFrom } from "../../lib/preset-traits";
+  import { defaultPresetTraits, isEmitter, traitsFrom } from "../../lib/preset-traits";
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
   import { dialogs } from "../../state/dialogs.svelte.js";
@@ -12,6 +12,11 @@
   import PresetsDialog from "../dialogs/PresetsDialog.svelte";
   import ImportAdaptersDialog from "../dialogs/ImportAdaptersDialog.svelte";
 
+  interface Props {
+    emitterOnly?: boolean;
+  }
+
+  let { emitterOnly = false }: Props = $props();
   let presetId = $state("");
   let name = $state("");
   let adapter = $state("");
@@ -22,6 +27,8 @@
   let attaching = $state(false);
   let attachError = $state("");
 
+  const effectiveTraits = $derived(traitsFrom(emitterOnly ? { emitter: true } : traits, adapter));
+  const availablePresets = $derived(emitterOnly ? session.presets.filter(isEmitter) : session.presets);
   const selectedAdapter = $derived(session.adapters.find((option) => option.id === adapter));
   const updateCommand = $derived(selectedAdapter?.update_command ?? null);
   const canUpdate = $derived(Boolean(updateCommand && updateCommand.length > 0));
@@ -44,12 +51,12 @@
   }
 
   function applyPreset(): void {
-    const preset = session.presets.find((p) => p.id === presetId);
+    const preset = availablePresets.find((p) => p.id === presetId);
     if (!preset) return;
     name = preset.name;
     adapter = preset.adapter;
     command = preset.command;
-    traits = traitsFrom(preset);
+    traits = traitsFrom(preset.adapter === "raw" ? undefined : preset);
     if (!adapterCanUpdate(adapter)) updateCli = false;
   }
 
@@ -76,6 +83,7 @@
         adapter,
         command: command.trim(),
         cwd: cwd.trim(),
+        ...effectiveTraits,
         ...(updateCli ? { update: true } : {}),
       });
       // The socket normally announces this too, and `upsertAttachment` is keyed
@@ -100,8 +108,8 @@
   <div id="presetRow" class="flex items-center gap-1.5">
     <select id="aPreset" class="min-w-0 flex-1" bind:value={presetId} onchange={applyPreset}>
       <option value="">— none —</option>
-      {#each session.presets as preset (preset.id)}
-        <option value={preset.id}>{preset.title}</option>
+      {#each availablePresets as preset (preset.id)}
+        <option value={preset.id}>{preset.title}{isEmitter(preset) ? " · emitter" : ""}</option>
       {/each}
     </select>
     <button
@@ -116,7 +124,7 @@
             name: name.trim(),
             adapter,
             command: command.trim(),
-            ...traits,
+            ...effectiveTraits,
           },
         })}>save</button
     >
@@ -188,7 +196,7 @@
 
   <details id="processTraits">
     <summary class="cursor-pointer text-[10px] tracking-[0.05em] text-cream-faint">process traits</summary>
-    <ProcessTraits bind:traits idPrefix="attach-trait" />
+    <ProcessTraits bind:traits {adapter} {emitterOnly} idPrefix="attach-trait" />
   </details>
 
   <button class="primary" type="submit" disabled={attaching}>{attaching ? "attaching…" : "attach"}</button>

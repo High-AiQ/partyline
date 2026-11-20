@@ -12,6 +12,7 @@
   import { restartApi } from "../../lib/restart-api";
   import { restart } from "../../state/restart.svelte.js";
   import type { RunningProcess } from "../../lib/contracts";
+  import { isEmitter } from "../../lib/preset-traits";
   import { wire } from "../../state/wire.svelte.js";
 
   interface Props {
@@ -84,7 +85,9 @@
         <div class="dialog-note">{running.length} live process{running.length === 1 ? "" : "es"}</div>
         {#each running as process (process.name + process.conversation)}
           <div class="live-item">
-            <span class="led running"></span><span>@{process.name} · {process.conversation}</span>
+            <span class="led running"></span><span
+              >@{process.name}{isEmitter(process) ? " · emitter" : ""} · {process.conversation}</span
+            >
           </div>
         {/each}
       {:else}

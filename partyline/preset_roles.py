@@ -4,13 +4,14 @@ import shlex
 
 from fastapi import HTTPException
 
-from .preset_traits import coerce_traits, match_preset
+from .preset_traits import coerce_traits, is_emitter, match_preset
 
 
 ROLE_TRAITS = {
     'implementer': ('implements', 'Fast implementer'),
     'reviewer': ('can_manage', 'Can manage a line'),
     'captain': ('can_manage', 'Can manage a line'),
+    'emitter': ('emitter', 'Emitter'),
 }
 
 
@@ -44,7 +45,8 @@ def require_named_role(db, name, role):
 def attachment_preset(db, att, presets=None):
     presets = db.list_presets() if presets is None else presets
     if recorded := att.get('preset'):
-        matches = [preset for preset in presets if preset['name'].lower() == recorded.lower()]
+        matches = [preset for preset in presets if preset['name'].lower() == recorded.lower()
+                   and preset['adapter'] == att['adapter']]
         return matches[0] if len(matches) == 1 else None
     matched = match_preset(att, presets)
     if matched:
@@ -63,6 +65,8 @@ def attachment_preset(db, att, presets=None):
 
 
 def require_attachment_role(db, att, role, presets=None):
+    if is_emitter(att) and role != 'emitter':
+        raise HTTPException(403, f'Emitter processes cannot be staffed as {role}')
     presets = db.list_presets() if presets is None else presets
     preset = attachment_preset(db, att, presets)
     if preset is None:
@@ -86,27 +90,26 @@ def require_attachment_role(db, att, role, presets=None):
 
 
 def require_captain_assignment(db, conv_id, ident, before, *, person=False):
-    if not person and ident and (not before or before['id'] != ident):
+    if ident and (not before or before['id'] != ident):
         target = db.get_attachment(ident)
         if target and target['conv_id'] == conv_id:
-            require_attachment_role(db, target, 'captain')
+            if is_emitter(target):
+                raise HTTPException(403, 'Emitter processes cannot be appointed captain')
+            if not person:
+                require_attachment_role(db, target, 'captain')
 
 
-def is_helper(att):
-    """Raw processes (idle-check, rotate-captain) hold no staffed role, counted or not.
-
-    Counting toward the worker total is memory accounting: the captain that may delete a raw
-    process and re-point its command may resume it too, trait or no trait."""
-    return att['adapter'] == 'raw'
-
-
-def require_resume(db, ident, *, person=False):
+def require_resume(db, ident, *, person=False, principal=None):
     from .orchestrator_store import attachment_task
-    if person:
-        return None
     att = db.get_attachment(ident)
-    if not att:
-        return
+    if principal is not None:
+        from .machine_scope import deny_unless, is_human
+        if att is None:
+            raise HTTPException(404)
+        deny_unless(db, principal, att["conv_id"], "attach_emitter" if is_emitter(att) else "attach")
+        person = is_human(principal)
+    if person or att is None:
+        return None
     task = attachment_task(db, ident)
     if task:
         reviewer = task['reviewer_id'] == ident
@@ -117,11 +120,15 @@ def require_resume(db, ident, *, person=False):
     else:
         if att.get('is_lead') or att.get('is_successor'):
             role = 'captain'
-        elif is_helper(att):
+        elif att['adapter'] == 'raw':
+            # Existing raw attachments can be resumed even if their command
+            # has no matching preset.
             return None
+        elif is_emitter(att):
+            role = 'emitter'
         else:
             # No row records whether an agent or a person attached it, so a
-            # non-task, non-helper process fails closed: an agent resuming it
+            # non-task worker fails closed: an agent resuming it
             # needs the same Fast implementer preset it would to attach one.
             role = 'implementer'
         require_attachment_role(db, att, role)

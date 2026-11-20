@@ -115,6 +115,23 @@ function parseHumanSource(source: string, parser: Marked): string {
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (!(node instanceof Element)) return;
   if (node.tagName === "A" && node.hasAttribute("href")) {
+    const href = node.getAttribute("href") ?? "";
+    if (!/^(?:(?:https?|mailto):|#\/c\/)/i.test(href)) {
+      // DOMPurify strips controls before its URI check, so the raw attribute
+      // need not start with the slash it had during that check. Parse every
+      // other destination as the browser will, rather than trusting its shape.
+      let sameOrigin = false;
+      try {
+        const url = new URL(href, document.baseURI);
+        sameOrigin =
+          (url.protocol === "http:" || url.protocol === "https:") && url.origin === window.location.origin;
+      } catch {
+        // Keep the link text when the browser cannot parse its destination.
+      }
+      if (!sameOrigin) node.removeAttribute("href");
+    }
+  }
+  if (node.tagName === "A" && node.hasAttribute("href")) {
     // A line link (`#/c/<id>`, as "continued in" notices carry) opens in this tab.
     if (!node.getAttribute("href")?.startsWith("#/c/")) {
       node.setAttribute("target", "_blank");
@@ -140,6 +157,8 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (kept.length) node.setAttribute("class", kept.join(" "));
   else node.removeAttribute("class");
 });
+
+const FILE_URI_REGEXP = /^(?:(?:https?|mailto):|#\/c\/[^\s"<>]+$)/i;
 
 const PURIFY_CONFIG = {
   ALLOWED_TAGS: [
@@ -169,8 +188,9 @@ const PURIFY_CONFIG = {
     "td",
   ],
   ALLOWED_ATTR: ["href", "class", "target", "rel", "data-code-language", "data-code-source", "data-math"],
+  // Root-relative destinations get a browser-parsed same-origin check above.
   // `#/c/<id>` is a line link: chapter notices point at lines this way.
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|#\/c\/[^\s"<>]+$)/i,
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|\/|#\/c\/[^\s"<>]+$)/i,
   RETURN_DOM_FRAGMENT: true,
 } as const satisfies DomPurifyConfig;
 
@@ -230,6 +250,9 @@ export function renderFileMarkdown(body: string): string {
   if (typeof parsed !== "string") throw new Error("Markdown must render synchronously");
   const fragment = DOMPurify.sanitize(parsed, {
     ...PURIFY_CONFIG,
+    // Chat gained host-relative navigation; uploaded documents keep their
+    // existing remote-only link and image URI policy.
+    ALLOWED_URI_REGEXP: FILE_URI_REGEXP,
     ALLOWED_TAGS: [...PURIFY_CONFIG.ALLOWED_TAGS, "img"],
     ALLOWED_ATTR: [...PURIFY_CONFIG.ALLOWED_ATTR, "src", "alt", "title"],
   });

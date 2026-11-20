@@ -11,7 +11,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from partyline.mcp import catalog, tools_captain
+from partyline.mcp import captain_ops
+from partyline.mcp import catalog
+from partyline.mcp import tools_captain
 from partyline.mcp.client import ApiError
 
 MATRIX = json.loads((Path(__file__).parent / "fixtures" / "mcp_role_matrix.json").read_text())
@@ -29,7 +31,7 @@ def run(state, name, args):
              for module in catalog.DISPATCH}
     with patch.object(catalog, "validate_arguments", lambda *args: None), \
             patch.multiple(tools_captain, validate=lambda op, operation_args: operation_args), \
-            patch.object(tools_captain.captain_ops, "execute",
+            patch.object(captain_ops, "execute",
                          lambda client, op, operation_args, op_state: ("captain_ops", op)):
         for module, stub in stubs.items():
             if module is not tools_captain:
@@ -78,6 +80,25 @@ class RoleMatrixTest(unittest.TestCase):
             run(state, catalog.EXTRAS, {"op": catalog.EXTRAS, "args": {}})
         with self.assertRaisesRegex(ValueError, "exactly op and args"):
             run(state, catalog.EXTRAS, {"op": "render_check"})
+
+    def test_resume_guide_and_dispatch_require_captain_authority(self):
+        states = {role: entry["state"] for role, entry in MATRIX.items()}
+        states["emitter"] = {**states["participant"], "role": "emitter"}
+        args = {"conv_id": "home", "attachment_id": "stopped"}
+        operation = {"op": "resume_worker", "args": args}
+        for role, state in states.items():
+            with self.subTest(role=role):
+                decisions = [entry["operation"] for entry in tools_captain.guide(state)["goal_decisions"]]
+                if role in ("root_captain", "sub_captain"):
+                    self.assertTrue(any('captain(op="resume_worker", args=' in item for item in decisions))
+                    self.assertEqual(run(state, catalog.CAPTAIN, operation), ("captain_ops", "resume_worker"))
+                else:
+                    self.assertIsNone(catalog.guide_entry(state, "resume_worker"))
+                    self.assertTrue(all("resume_worker" not in item for item in decisions))
+                    with self.assertRaisesRegex(ValueError, "not currently available"):
+                        run(state, "resume_worker", args)
+                    with self.assertRaisesRegex(ApiError, "not a line captain"):
+                        run(state, catalog.CAPTAIN, operation)
 
     def test_a_tool_the_role_cannot_call_is_refused_through_the_door_too(self):
         reader = MATRIX["participant_read_only"]["state"]

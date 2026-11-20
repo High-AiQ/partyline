@@ -2,6 +2,7 @@
 
 from urllib.parse import quote, urlencode
 
+from .captain_attach import attach_request
 from .client import ApiError
 from .captain_schemas import OPERATIONS
 
@@ -117,28 +118,18 @@ def execute(client, op, args, state):
             "grants_truncated": len(rows) > _MAX_WRITE_SET_GRANTS,
         }
     if op == "attach_worker":
-        conv = _target(client, state, conv, ("attach",))
-        body = {key: args[key] for key in ("name", "adapter")}
-        body["command"] = args.get("command", "")
-        if "counts_toward_total" in args:
-            body["counts_toward_total"] = args["counts_toward_total"]
-        if args.get("allow_shared_branch") is True:
-            body["allow_shared_branch"] = True
-        if args.get("successor") is True:
-            body["successor"] = True
-        if args.get("staffing_role"):
-            body["staffing_role"] = args["staffing_role"]
-        body.update({key: args[key] for key in ("model", "effort") if key in args})
-        preset_name = args.get("preset_name")
-        if preset_name:
-            body["preset_name"] = preset_name
-            presets = client.request("GET", "/api/presets")
-            matches = [item for item in presets if item.get("name") == preset_name]
-            if len(matches) != 1 or matches[0].get("adapter") != body["adapter"]:
-                raise ValueError("preset_name must exactly match one preset with this adapter")
-            if not args.get("command"):
-                body["command"] = matches[0].get("command", "")
+        body, capability = attach_request(client, args)
+        conv = _target(client, state, conv, (capability,))
         result = client.request("POST", _path(conv, "attachments"), body)
+        if isinstance(result, dict):
+            result.pop("command", None)
+        return result
+    if op == "resume_worker":
+        conv = _target(client, state, conv, ("close",))
+        ident = args["attachment_id"]
+        if not any(row["id"] == ident for row in _attachment_rows(client, conv)):
+            raise ApiError("attachment id is not on the target line")
+        result = client.request("POST", f"/api/attachments/{quote(ident, safe='')}/resume")
         if isinstance(result, dict):
             result.pop("command", None)
         return result

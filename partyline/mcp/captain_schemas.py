@@ -32,18 +32,20 @@ def schema(name):
         "list_presets": obj(),
         "kernel_log": obj({"boot": {"type": "string", "enum": ["previous", "current"]},
                            "lines": {"type": "integer", "minimum": 1, "maximum": 300}}),
-        "attach_worker": obj({**line, "name": text("Exact worker handle.", 32, 1),
+        "attach_worker": obj({**line, "name": text("Requested process handle.", 32, 1),
             "adapter": text("Exact adapter id.", 80, 1), "command": text("Optional command.", 2000),
             "preset_name": text("Optional exact preset name; read-only match.", 32),
             "model": text("Optional preset model override.", 80),
             "effort": text("Optional preset reasoning effort override.", 20),
-            "staffing_role": {"type": "string", "enum": ["implementer", "captain"],
-                              "description": "Role to staff; defaults to implementer."},
+            "staffing_role": {"type": "string", "enum": ["implementer", "captain", "emitter"],
+                              "description": "Emitters can join managed lines, including task lines."},
             "counts_toward_total": {"type": "boolean"},
             "allow_shared_branch": {"type": "boolean"},
             "successor": {"type": "boolean", "description": "Staff a handover successor on your own line; "
                 "after 60 seconds use offer_handover to offer captainship."}},
             ["conv_id", "name", "adapter"]),
+        "resume_worker": obj({**line, "attachment_id": text("Stopped process attachment ID.", 80, 1)},
+                             ["conv_id", "attachment_id"]),
         "detach_worker": obj({**line, "attachment_id": text(
             "Attachment id, or a process handle on that line such as impl-48da9d. A worker already "
             "detached returns already_detached: true.", 80)},
@@ -107,7 +109,7 @@ def schema(name):
 
 OPERATIONS = tuple(schema_name for schema_name in (
     "review_env", "resources", "staffing", "write_set_requests", "list_presets",
-    "attach_worker", "detach_worker",
+    "attach_worker", "resume_worker", "detach_worker",
     "create_child", "new_chapter", "appoint_lead", "retire_child", "retirement_preview", "accept",
     "review_worktree",
     "share_ref", "review_hold", "request_write_set",

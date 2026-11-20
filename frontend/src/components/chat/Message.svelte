@@ -8,9 +8,19 @@
    */
   import { renderMessage, senderColor } from "../../lib/markdown";
   import { enhanceMarkdown } from "../../lib/message-enhancers";
-  import { visibleMessageBody, isWalkthrough, visibleWalkthroughBody } from "../../lib/files";
+  import {
+    downloadFile,
+    isWalkthrough,
+    partylineMediaId,
+    viewableFileType,
+    visibleMessageBody,
+    visibleWalkthroughBody,
+  } from "../../lib/files";
+  import { listFiles } from "../../lib/file-api";
   import ImageGrid from "./ImageGrid.svelte";
+  import ImageViewer from "./ImageViewer.svelte";
   import FileAttachments from "./FileAttachments.svelte";
+  import FileViewerDialog from "../dialogs/FileViewerDialog.svelte";
   import Reactions from "./Reactions.svelte";
   import MessageActions from "./MessageActions.svelte";
   import PinIcon from "../PinIcon.svelte";
@@ -18,6 +28,7 @@
   import { tooltip } from "../../lib/tooltip";
   import { clock } from "../../state/clock.svelte.js";
   import { room } from "../../state/room.svelte.js";
+  import { dialogs } from "../../state/dialogs.svelte.js";
   import type { ReactionEmoji } from "../../lib/reaction-contracts";
   import type { ChatMessage } from "../../lib/contracts";
   import "../../styles/message.css";
@@ -56,6 +67,59 @@
     message.source_conv_id && message.source_conv_id !== message.conv_id ? message.source_conv_name : null,
   );
   const isPrivate = $derived(Boolean(message.audience_attachment_id));
+
+  let openingMedia = false;
+
+  function mediaLinkActivation(node: HTMLElement): { destroy: () => void } {
+    node.addEventListener("click", openMediaOnPrimaryClick);
+    return {
+      destroy: () => {
+        node.removeEventListener("click", openMediaOnPrimaryClick);
+      },
+    };
+  }
+
+  function openMediaOnPrimaryClick(event: MouseEvent): void {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      !(event.target instanceof Element)
+    )
+      return;
+    const href = event.target.closest<HTMLAnchorElement>("a[href]")?.getAttribute("href");
+    const fileId = href ? partylineMediaId(href) : null;
+    if (!fileId) return;
+
+    event.preventDefault();
+    if (!openingMedia) {
+      openingMedia = true;
+      void openLinkedMedia(fileId).finally(() => {
+        openingMedia = false;
+      });
+    }
+  }
+
+  async function openLinkedMedia(fileId: string): Promise<void> {
+    try {
+      const attached = message.files.find((file) => file.id === fileId);
+      const file = attached ?? (await listFiles(message.conv_id)).find((entry) => entry.id === fileId);
+      if (!file) throw new Error("linked media is not on this line");
+      if (file.kind === "image") {
+        dialogs.open(ImageViewer, { images: [file], initialIndex: 0 });
+      } else if (viewableFileType(file)) {
+        dialogs.open(FileViewerDialog, { file });
+      } else {
+        // Untrusted active content stays a download, never a same-origin page.
+        await downloadFile(file);
+      }
+    } catch {
+      room.showNotice("could not open linked media", "error");
+    }
+  }
 </script>
 
 <div
@@ -93,7 +157,7 @@
   {:else}
     <MessageActions {message} {isSystem} />
   {/if}
-  <div class="body {bodyClass}" use:enhanceMarkdown={body}>
+  <div class="body {bodyClass}" use:enhanceMarkdown={body} use:mediaLinkActivation>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMessage -->
     {@html body}
   </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isEmitter } from "../../lib/preset-traits";
   import { hue } from "../../lib/markdown";
   import { memoryLabel } from "../../lib/memory";
   import { tooltip } from "../../lib/tooltip";
@@ -106,7 +107,7 @@
     >
     <span
       class="tag flex-none whitespace-nowrap rounded-[3px] border border-copper/35 px-[5px] text-[9.5px] tracking-[0.05em] text-copper"
-      >{attachment.adapter}</span
+      >{attachment.adapter}{isEmitter(attachment) ? " · emitter" : ""}</span
     >
     {#if captain}
       <span

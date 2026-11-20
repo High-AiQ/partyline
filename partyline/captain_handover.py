@@ -15,6 +15,7 @@ from .bridge_pack import pack_for
 from .contracts import MessageEvent, MessageResponse
 from .mention_relay import post_private, ring_workers
 from .message_queries import as_message
+from .preset_traits import attachment_row, is_emitter
 from .role_delivery import _instructions, current_role
 
 MIN_ATTACHMENT_SECONDS = 60
@@ -56,6 +57,8 @@ def _validate(conn, conv_id, old_id, target_id, live, pending, now):
     target = conn.execute("SELECT * FROM attachments WHERE id=?", (target_id,)).fetchone()
     if not target or target['conv_id'] != conv_id:
         raise HTTPException(404, "Target attachment must be on this same line")
+    if is_emitter(attachment_row(target)):
+        raise HTTPException(403, "Emitter processes cannot be offered captainship")
     if target['status'] != 'running' or target_id not in live:
         raise HTTPException(409, "Target attachment must be currently attached and live")
     if conn.execute("SELECT 1 FROM captain_handovers WHERE state='completed' AND detach_finished_at IS NULL "
@@ -140,9 +143,8 @@ def accept(db, conv, caller, ident, live, pending=None, now=None):
                 raise HTTPException(403, 'Only the offered attachment may accept')
             old, target = _validate(db.conn, conv, row['from_attachment_id'], caller, live, pending, now)
             from .preset_roles import require_attachment_role
-            from .db import _att_row
             presets = [dict(p) for p in db.conn.execute('SELECT * FROM presets').fetchall()]
-            require_attachment_role(db, _att_row(target), 'captain', presets)
+            require_attachment_role(db, attachment_row(target), 'captain', presets)
             db.conn.execute("UPDATE attachments SET is_lead=0 WHERE id=?", (old['id'],))
             db.conn.execute("UPDATE attachments SET is_lead=1,is_successor=0 WHERE id=?", (caller,))
             for side in ('a', 'b'):

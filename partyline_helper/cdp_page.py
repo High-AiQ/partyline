@@ -2,6 +2,7 @@
 import hashlib
 import uuid
 
+from .cdp_cue import Cue
 from .cdp_recipes import OBSERVER, STATE, normalize
 from .cdp_ax import exposed
 from .cdp_control_details import CONTROL_DETAILS, needs_details
@@ -39,6 +40,7 @@ class Page(Dialogs, Recovery):
         self.quiet = Quiet()
         self.operation_timing = None
         self.defer_object_releases = False
+        self.cue = Cue(self)
         self.browser.listeners.add(self.event)
 
     def guard(self, document=True, healthy=True):
@@ -96,9 +98,14 @@ class Page(Dialogs, Recovery):
             if main_navigation:
                 self.navigations += 1
                 self.url = frame.get("url") or self.url
+                self.main_frame = frame.get("id") or self.main_frame
+            if method == "Page.navigatedWithinDocument" and (
+                    not self.main_frame or message.get("params", {}).get("frameId") == self.main_frame):
+                self.cue.dismiss()  # the page moved under a cue; the epoch stands
             if method == "DOM.documentUpdated" or main_navigation:
                 self.epoch += 1
                 self.nodes.clear()
+                self.cue.dismiss()  # the page it pointed into is gone
             self.quiet.changed()
             self.changed()
 
@@ -246,6 +253,7 @@ class Page(Dialogs, Recovery):
 
     def stop(self):
         self.live = False
+        self.cue.cancel()
         self.browser.listeners.discard(self.event)
         self.nodes.clear()
 

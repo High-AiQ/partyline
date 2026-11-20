@@ -144,7 +144,7 @@ def task_pack(db, conv_id, role):
 
 def task_rebrief(db, att):
     row = task(db, att['conv_id'])
-    if row is None:
+    if row is None or att['id'] not in (row['implementer_id'], row['reviewer_id']):
         return ''
     role = 'reviewer' if row['reviewer_id'] == att['id'] else 'implementer'
     return task_pack(db, att['conv_id'], role)

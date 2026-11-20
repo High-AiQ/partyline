@@ -121,6 +121,18 @@ class StaffingApiTest(unittest.TestCase):
 
 
 class StaffingLineTest(unittest.TestCase):
+    def test_unmatched_emitter_is_visible_without_a_preset_catalog(self):
+        from partyline.staffing import staffing_line
+
+        with tempfile.TemporaryDirectory() as directory:
+            db = Db(f"{directory}/test.db")
+            try:
+                db.create_conversation("root", "Root")
+                db.add_attachment("aux", "root", "aux", "raw", ["run"], directory)
+                self.assertIn("in use: aux «Root» emitter", staffing_line(db, "root"))
+            finally:
+                db.close()
+
     def test_invalid_default_reviewer_is_visible(self):
         from partyline.staffing import staffing_line
         with tempfile.TemporaryDirectory() as directory:
@@ -166,7 +178,7 @@ class StaffingLineTest(unittest.TestCase):
         self.assertEqual(
             line,
             "(staffing — in use: opus «Kid» captain; luna «Kid». "
-            "free captains/reviewers: astra, opus. free implementers: none)",
+            "free captains/reviewers: astra, opus. free implementers: none. free emitters: none)",
         )
 
 
@@ -184,13 +196,13 @@ class CaptainInstancesTest(unittest.TestCase):
         self.db.create_conversation("a", "Alpha", captain_mode="orchestrator")
         self.db.create_conversation("b", "Beta", captain_mode="orchestrator")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id IN ('a','b')")
-        self.db.save_preset("astra", "Astra", "astra", "raw", "raw --x",
+        self.db.save_preset("astra", "Astra", "astra", "fake", "fake --x",
                             can_manage=True, implements=False, max_instances=3)
-        self.db.save_preset("luna", "Luna", "luna", "raw", "raw --x",
+        self.db.save_preset("luna", "Luna", "luna", "fake", "fake --x",
                             can_manage=False, implements=True)
 
     def seat(self, conv_id, att_id, handle):
-        self.db.add_attachment(att_id, conv_id, handle, "raw", ["raw", "--x"], "/tmp",
+        self.db.add_attachment(att_id, conv_id, handle, "fake", ["fake", "--x"], "/tmp",
                                counts_toward_total=True)
         self.db._exec("UPDATE attachments SET status='running' WHERE id=?", (att_id,))
 
@@ -202,13 +214,22 @@ class CaptainInstancesTest(unittest.TestCase):
     def captains(self, line):
         return line.split("free captains/reviewers: ", 1)[1].split(".")[0]
 
-    def test_uncounted_raw_does_not_occupy_preset(self):
-        self.db.add_attachment("helper", "a", "astra", "raw", ["raw", "--x"], "/tmp")
-        self.assertIn("in use: nobody", self.staffing())
-        self.assertEqual(self.captains(self.staffing()), "astra (3 more)")
-        self.db._exec("UPDATE attachments SET counts_toward_total=1 WHERE id='helper'")
-        self.assertIn("in use: astra «Alpha»", self.staffing())
-        self.assertEqual(self.captains(self.staffing()), "astra (2 more)")
+    def test_uncounted_raw_is_visible_as_an_emitter(self):
+        from partyline.staffing import staffing_report
+        self.db.save_preset("monitor", "Monitor", "monitor", "raw", "run", max_instances=2)
+        self.db.add_attachment("helper", "a", "monitor", "raw", ["run"], "/tmp")
+        self.db.add_attachment("unmatched", "a", "unmatched", "raw", ["other"], "/tmp")
+        line = self.staffing()
+        self.assertIn("monitor «Alpha» emitter", line)
+        self.assertIn("unmatched «Alpha» emitter", line)
+        self.assertEqual(self.captains(line), "astra (3 more)")
+        self.assertIn("free emitters: monitor", line)
+        report = staffing_report(self.db, "root")
+        unmatched = next(p for p in report["processes"] if p["handle"] == "unmatched")
+        self.assertIsNone(unmatched["matched_preset"])
+        self.assertEqual(unmatched["traits"], {
+            "reads_images": False, "can_manage": False, "implements": False, "emitter": True,
+        })
 
     def test_two_lines_appoint_instances_of_the_same_captain_preset(self):
         from partyline.hierarchy import set_lead
@@ -223,7 +244,7 @@ class CaptainInstancesTest(unittest.TestCase):
         # one seat left: shown plain — the "(N more)" count only appears when
         # more than one instance is still available
         self.assertEqual(self.captains(line), "astra")
-        self.db.save_preset("astra", "Astra", "astra", "raw", "raw --x",
+        self.db.save_preset("astra", "Astra", "astra", "fake", "fake --x",
                             can_manage=True, implements=False, max_instances=4)
         self.assertEqual(self.captains(self.staffing()), "astra (2 more)")
         self.assertNotIn("free captains/reviewers: none", line)
@@ -248,10 +269,10 @@ class CaptainInstancesTest(unittest.TestCase):
 
         runtime = ChatRuntime(self.db)
         app = FastAPI()
-        app.include_router(presets_router(runtime, {"raw"}))
+        app.include_router(presets_router(runtime, {"fake"}))
         client = TestClient(app)
         made = client.post("/api/presets", json={
-            "title": "Astra", "name": "astra", "adapter": "raw", "command": "raw --x",
+            "title": "Astra", "name": "astra", "adapter": "fake", "command": "fake --x",
             "can_manage": True, "implements": False, "max_instances": 3})
         self.assertEqual(made.status_code, 200, made.text)
         self.assertEqual(made.json()["max_instances"], 3)

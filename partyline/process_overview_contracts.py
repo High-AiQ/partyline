@@ -14,6 +14,7 @@ class ProcessOverviewAttachment(BaseModel):
     id: str
     handle: str
     adapter: str
+    emitter: bool = False
     counts_toward_total: bool = True
     pid: int | None = None
     phase: Literal["working", "speaking", "idle"] = "idle"

@@ -21,6 +21,7 @@ from .orchestrator_store import task
 from .line_resources import report
 from .presence import IDLE
 from .process_counts import counts
+from .preset_traits import is_emitter
 from .turn_usage_routes import turn_usage_router
 from .workspace_visibility import workspace_visibility
 from .process_overview_contracts import (
@@ -65,6 +66,7 @@ def _attachment(runtime, att: dict) -> ProcessOverviewAttachment:
         id=att["id"],
         handle=att["name"],
         adapter=att["adapter"],
+        emitter=is_emitter(att),
         counts_toward_total=counts(att),
         pid=pid,
         phase=_phase(runtime, att["id"]),

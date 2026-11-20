@@ -6,6 +6,7 @@ export const PresetTraitFieldsSchema = z.object({
   reads_images: z.boolean().optional().default(false),
   can_manage: z.boolean().optional().default(false),
   implements: z.boolean().optional().default(true),
+  emitter: z.boolean().optional(),
 });
 
 export const PresetSchema = z
@@ -26,6 +27,7 @@ export const StaffingTraitsSchema = z.object({
   reads_images: z.boolean(),
   can_manage: z.boolean(),
   implements: z.boolean(),
+  emitter: z.boolean().optional(),
 });
 
 export const StaffingPresetSchema = z

@@ -28,7 +28,7 @@
   /* svelte-ignore state_referenced_locally */
   let command = $state(preset.command);
   /* svelte-ignore state_referenced_locally */
-  let traits = $state(traitsFrom(preset));
+  let traits = $state(traitsFrom(preset.adapter === "raw" ? undefined : preset));
   /* svelte-ignore state_referenced_locally */
   let maxCompactions = $state<number | null>(preset.max_compactions ?? null);
   let error = $state("");
@@ -43,7 +43,7 @@
         name: name.trim(),
         adapter,
         command: command.trim(),
-        ...traits,
+        ...traitsFrom(traits, adapter),
         max_compactions: maxCompactions,
       };
       if (preset.id) draft.id = preset.id;
@@ -115,7 +115,7 @@
     />
   </div>
 
-  <ProcessTraits bind:traits idPrefix={"pTrait-" + (preset.id ?? "new")} />
+  <ProcessTraits bind:traits {adapter} idPrefix={"pTrait-" + (preset.id ?? "new")} />
 
   {#if error}<div class="line-status error">{error}</div>{/if}
 

@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from .contracts import OkResponse
 from .preset_contracts import PresetIn, PresetResponse
-from .preset_traits import coerce_preset
+from .preset_traits import TRAIT_DEFAULTS, coerce_preset, requested_traits
 from .runtime import NAME_RE, RESERVED_NAMES
 
 
@@ -41,16 +41,23 @@ def presets_router(runtime, adapters) -> APIRouter:
             raise HTTPException(400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)")
         if body.name.lower() in RESERVED_NAMES:
             raise HTTPException(400, f"'{body.name}' is a reserved handle")
-        if body.adapter not in adapters:
+        stored = runtime.db.get_preset(preset_id) or {}
+        adapter = body.adapter if "adapter" in body.model_fields_set else stored.get("adapter", body.adapter)
+        command = body.command if "command" in body.model_fields_set else stored.get("command", body.command)
+        if adapter not in adapters:
             raise HTTPException(400, f"adapter must be one of {sorted(adapters)}")
         # A field the client left out keeps its stored value: the form does not
         # send every knob, and an edit must not reset what it never showed.
-        stored = runtime.db.get_preset(preset_id) or {}
+        supplied = {key: getattr(body, key) for key in TRAIT_DEFAULTS if key in body.model_fields_set}
+        base = stored if stored.get("adapter") != "raw" else None
+        try:
+            flags = requested_traits(adapter, supplied, base=base)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         keep = {key: (getattr(body, key) if key in body.model_fields_set
                       else stored.get(key, getattr(body, key)))
                 for key in ("max_instances", "auto_compact_tokens", "max_compactions")}
         return runtime.db.save_preset(
-            preset_id, body.title.strip(), body.name, body.adapter, body.command.strip(),
-            reads_images=body.reads_images, can_manage=body.can_manage,
-            implements=body.implements, **keep)
+            preset_id, body.title.strip(), body.name, adapter, command.strip(),
+            **flags, **keep)
     return router

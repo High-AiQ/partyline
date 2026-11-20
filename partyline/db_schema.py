@@ -1,6 +1,7 @@
 """The SQLite schema and its append-only migration history; append idempotent entries, never edit."""
 from .db_schema_base import SCHEMA  # noqa: F401
 from .db_schema_extensions import MIGRATIONS as EXTENSIONS, PRESET_OVERRIDES
+from .orchestrator_schema import PROCESS_TRAIT_MIGRATIONS
 from .captain_style_schema import MIGRATIONS as RETIRE_MANAGER_TREE
 from .review_env_schema import MIGRATIONS as REVIEW_ENVIRONMENTS
 from .tool_telemetry_schema import MIGRATIONS as TOOL_TELEMETRY
@@ -199,13 +200,9 @@ MIGRATIONS = [
     "DROP TABLE IF EXISTS tasks",
     "DROP INDEX IF EXISTS idx_claims_conv",
     "DROP TABLE IF EXISTS claims",
-    # Process traits on attach presets. Append-only; omitted writes use these
-    # defaults so old clients stay compatible.
     "ALTER TABLE presets ADD COLUMN reads_images INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE presets ADD COLUMN can_manage INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE presets ADD COLUMN implements INTEGER NOT NULL DEFAULT 1",
-    # 5.3: numbered captain instances. 0 means the preset runs in as many
-    # instances as handles allow; a positive value caps the live count.
     "ALTER TABLE presets ADD COLUMN max_instances INTEGER NOT NULL DEFAULT 0",
     """CREATE TABLE IF NOT EXISTS reactions(
         message_id INTEGER NOT NULL,
@@ -298,3 +295,4 @@ MIGRATIONS += ["UPDATE task_reviews SET mode='full' WHERE mode='light'",
     "ALTER TABLE task_reviews ADD COLUMN suite_batch TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE task_reviews ADD COLUMN suite_repositories TEXT NOT NULL DEFAULT '[]'",
 ] + PRESET_OVERRIDES + WORKFLOW_MIGRATIONS + WORKFLOW_RESUME_MIGRATIONS + WORKFLOW_LEARNING_MIGRATIONS
+MIGRATIONS += PROCESS_TRAIT_MIGRATIONS

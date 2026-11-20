@@ -10,6 +10,7 @@ import time
 import uuid
 from typing import Literal, TypedDict
 
+from .preset_traits import attachment_row as _att_row
 from .db_schema import MIGRATIONS, SCHEMA
 from .db_sidecars import ensure as ensure_db_sidecars
 from .query_result import materialize
@@ -47,10 +48,6 @@ class RestartPlan(TypedDict):
     debrief: str
     skipped: list[str]
     created_at: float
-
-
-def _att_row(row):
-    return {**dict(row), "command": json.loads(row["command"])}
 
 
 def _restart_plan_row(row) -> RestartPlan:
@@ -330,14 +327,14 @@ class Db:
 
     def add_attachment(self, att_id, conv_id, name, adapter, command, cwd, runtime_owner=None, *,
                        start_after_history=False, memory_limit=None, counts_toward_total=False,
-                       successor=False):
+                       successor=False, process_traits=None):
         ts = time.time()
         self._exec(
             "INSERT INTO attachments("
             "id,conv_id,name,adapter,command,cwd,status,runtime_owner,last_seen,created_at,"
-            "runtime_started_at,memory_limit,counts_toward_total,is_successor)"
+            "runtime_started_at,memory_limit,counts_toward_total,is_successor,process_traits)"
             " VALUES(?,?,?,?,?,?,?,?,CASE WHEN ? THEN COALESCE((SELECT MAX(id) "
-            "FROM messages WHERE conv_id=?),0) ELSE 0 END,?,?,?,?,?)",
+            "FROM messages WHERE conv_id=?),0) ELSE 0 END,?,?,?,?,?,?)",
             (
                 att_id,
                 conv_id,
@@ -352,6 +349,7 @@ class Db:
                 ts,
                 ts,
                 memory_limit, int(counts_toward_total), int(successor),
+                None if process_traits is None else json.dumps(process_traits),
             ),
         )
         return self.get_attachment(att_id)

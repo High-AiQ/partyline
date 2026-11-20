@@ -137,3 +137,23 @@ MIGRATIONS += [
     "CREATE TABLE IF NOT EXISTS task_review_repins(conv_id TEXT NOT NULL, old TEXT NOT NULL, "
     "new TEXT NOT NULL, created_at REAL NOT NULL)",
 ]
+
+_EMITTER = "(NEW.adapter='raw' OR COALESCE(json_extract(NEW.process_traits, '$.emitter'), 0)=1)"
+_INVALID_TASK_PROCESS = f"""EXISTS(SELECT 1 FROM task_reviews t WHERE t.conv_id=NEW.conv_id
+    AND (NEW.is_lead!=0 OR NEW.is_successor!=0
+         OR (NEW.id!=t.implementer_id AND NEW.id IS NOT t.reviewer_id)!={_EMITTER}))"""
+
+PROCESS_TRAIT_MIGRATIONS = [
+    "ALTER TABLE presets ADD COLUMN emitter INTEGER NOT NULL DEFAULT 0",
+    "UPDATE presets SET emitter=1, reads_images=0, can_manage=0, implements=0 WHERE adapter='raw'",
+    "ALTER TABLE attachments ADD COLUMN process_traits TEXT",
+    "DROP TRIGGER IF EXISTS task_attachment_insert",
+    f"""CREATE TRIGGER IF NOT EXISTS task_attachment_insert BEFORE INSERT ON attachments
+        WHEN {_INVALID_TASK_PROCESS}
+        BEGIN SELECT RAISE(ABORT, 'task lines have exactly one implementer'); END""",
+    "DROP TRIGGER IF EXISTS task_attachment_update",
+    f"""CREATE TRIGGER IF NOT EXISTS task_attachment_update
+        BEFORE UPDATE OF conv_id,id,is_lead,is_successor,adapter,process_traits ON attachments
+        WHEN {_INVALID_TASK_PROCESS}
+        BEGIN SELECT RAISE(ABORT, 'task attachment identity is server-owned'); END""",
+]

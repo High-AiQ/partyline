@@ -5,9 +5,8 @@ from __future__ import annotations
 from .approval_bubble import pending_approvals
 from .compaction_events import compaction_counts
 from .hierarchy import descendants, subtree_conversation_ids
-from .process_counts import counts
 from .reattach_queue import queue_label, queued_attachments, queued_ids
-from .preset_traits import coerce_preset, coerce_traits, match_preset
+from .preset_traits import attachment_traits, coerce_preset, coerce_traits, is_emitter, match_preset
 from .resource_leases import describe_leases
 
 LIVE = ("starting", "running")
@@ -46,7 +45,7 @@ def staffing_report(db, conv_id: str, *, runtime=None, lines_limit: int = LINES_
                 "retired": bool(conv.get("archived_at")),
             })
         for att in db.list_attachments(line_id):
-            if att["status"] not in LIVE or not counts(att) or att["id"] in queued:
+            if att["status"] not in LIVE or att["id"] in queued:
                 continue
             matched = match_preset(att, presets)
             if matched is not None:
@@ -62,7 +61,7 @@ def staffing_report(db, conv_id: str, *, runtime=None, lines_limit: int = LINES_
                     "name": matched["name"],
                     "title": matched["title"],
                 },
-                "traits": None if matched is None else coerce_traits(matched),
+                "traits": attachment_traits(att, matched),
             })
     # Live lines first: a long-lived root has hundreds of retired ones, and a captain acts on the rest.
     lines.sort(key=lambda row: row["retired"])
@@ -77,7 +76,8 @@ def staffing_report(db, conv_id: str, *, runtime=None, lines_limit: int = LINES_
         "lines_next_offset": lines_offset + len(page) if more else None,
         # Not gone: a restart plan is bringing these back one at a time.
         "reattaching": [
-            {"line_id": att["conv_id"], "handle": att["name"], "adapter": att["adapter"]}
+            {"line_id": att["conv_id"], "handle": att["name"], "adapter": att["adapter"],
+             "emitter": is_emitter(att)}
             for att in (queued_attachments(runtime, set(scope)) if runtime is not None else [])
         ],
     }
@@ -99,7 +99,7 @@ def _free_presets(presets: list[dict], counts: dict[str, int]) -> list[dict]:
         count = counts.get(preset["id"], 0)
         max_instances = int(preset.get("max_instances") or 0)
         remaining = None if max_instances == 0 else max_instances - count
-        if traits["can_manage"]:
+        if traits["can_manage"] or traits["emitter"]:
             if remaining is None or remaining > 0:
                 display = preset["name"] + (
                     f" ({remaining} more)" if remaining is not None and remaining > 1
@@ -121,27 +121,30 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     approvals across the subtree ride it too, so a captain (at the root, the
     person's own captain) sees a child stopped on a gate without peeking.
     """
+    if not hasattr(db, "list_conversations"):
+        return ""
     presets = [row for row in (coerce_preset(p) for p in db.list_presets()) if row]
     pending = pending_approvals(db, conv_id, runtime=runtime)
     queued = queued_ids(runtime) if runtime is not None else set()
     root = db.get_conversation(conv_id)
     policy = (root or {}).get('default_review_policy')
-    if not presets and not pending and not queued and policy in (None, 'none', 'captain'):
-        return ""
+    emitter_in_use = False
     in_use: list[str] = []
     matched_counts: dict[str, int] = {}
     subtree = set(subtree_conversation_ids(db, conv_id))
     compacted = compaction_counts(db)
     for conv in db.list_conversations():
         for att in db.list_attachments(conv["id"]):
-            if att["status"] not in LIVE or not counts(att) or att["id"] in queued:
+            if att["status"] not in LIVE or att["id"] in queued:
                 continue
             matched = match_preset(att, presets)
             if matched is not None:
                 matched_counts[matched["id"]] = matched_counts.get(matched["id"], 0) + 1
             if conv["id"] not in subtree:
                 continue
-            role = " captain" if att.get("is_lead") else ""
+            emitter = is_emitter(att)
+            emitter_in_use |= emitter
+            role = " captain" if att.get("is_lead") else " emitter" if emitter else ""
             from .preset_overrides import label as preset_label
             override = ""
             if matched and (att.get("model_override") or att.get("effort_override")):
@@ -152,6 +155,8 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
             if compactions:
                 label += f" ×{compactions} compactions"
             in_use.append(label)
+    if not (presets or pending or queued or emitter_in_use) and policy in (None, 'none', 'captain'):
+        return ""
     free = _free_presets(presets, matched_counts)
     captains = ", ".join(
         entry["display"] for entry in free if entry["traits"]["can_manage"]
@@ -159,9 +164,12 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     workers = ", ".join(
         entry["display"] for entry in free if entry["traits"]["implements"]
     ) or "none"
+    emitters = ", ".join(
+        entry["display"] for entry in free if entry["traits"]["emitter"]
+    ) or "none"
     busy = "; ".join(in_use) or "nobody"
     parts = [f"in use: {busy}", f"free captains/reviewers: {captains}",
-             f"free implementers: {workers}"]
+             f"free implementers: {workers}", f"free emitters: {emitters}"]
     if policy and policy not in ('none', 'captain'):
         from .preset_roles import require_role
         from fastapi import HTTPException

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { fixture } from './fakes.test.js';
 import { Relay } from './relay.js';
-import { IDLE_LINGER_MS } from './attachments.js';
+import { IDLE_LINGER_MS, CUE_LINGER_MS } from './attachments.js';
 
 function setup() {
   const f = fixture();
@@ -262,4 +262,35 @@ test('JavaScript dialogs relay events and explicit responses, hold attachment un
   f.api.debugger.onEvent.fire({ tabId: 1 }, 'Page.javascriptDialogClosed', { result: true });
   assert.equal(f.calls.length, calls);
   assert.equal(f.messages.length, messages);
+});
+
+test('a cue keeps its tab attached until it is hidden, then idles as usual; permissions do not grow', async () => {
+  const f = setup(), session = await f.attach();
+  const detaches = () => f.calls.filter(c => c[0] === 'detach').length;
+  for (const method of ['Overlay.enable', 'Overlay.highlightQuad', 'Overlay.highlightRect',
+    'Overlay.highlightNode', 'Overlay.hideHighlight']) await f.command(method, {}, session);
+  f.clock.advance(IDLE_LINGER_MS); await Promise.resolve();
+  assert.equal(detaches(), 1); // hidden last: the idle deadline is the ordinary one
+  await f.command('Partyline.resume', { sessionId: session });
+  await f.command('Overlay.highlightRect', {}, session);
+  f.clock.advance(IDLE_LINGER_MS + 1); await Promise.resolve();
+  assert.equal(detaches(), 1); // a showing cue holds the tab
+  await f.command('Overlay.hideHighlight', {}, session);
+  f.clock.advance(IDLE_LINGER_MS); await Promise.resolve();
+  assert.equal(detaches(), 2);
+  await f.command('Partyline.resume', { sessionId: session });
+  await f.command('Overlay.highlightQuad', {}, session);
+  f.clock.advance(CUE_LINGER_MS); await Promise.resolve();
+  assert.equal(detaches(), 3); // a helper that never hid it cannot hold the debugger for good
+});
+
+test('only the cue methods of the overlay domain pass, and revoke still detaches a showing cue at once', async () => {
+  const f = setup(), session = await f.attach();
+  for (const method of ['Overlay.setInspectMode', 'Overlay.highlightFrame', 'Overlay.disable']) {
+    await assert.rejects(f.command(method, {}, session), { code: 'domain_refused' });
+  }
+  await f.command('Overlay.highlightRect', {}, session);
+  await f.relay.attachments.revoke('g');
+  assert.equal(f.calls.filter(c => c[0] === 'detach').length, 1);
+  await assert.rejects(f.command('Overlay.hideHighlight', {}, session));
 });

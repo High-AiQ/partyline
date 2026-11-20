@@ -1,18 +1,28 @@
 <script lang="ts">
-  /** Shared checkboxes for the three editable process-trait flags. */
-  import { PRESET_TRAITS, type PresetTraitKey, type PresetTraitValues } from "../lib/preset-traits";
+  /** Shared process-trait checkboxes. */
+  import {
+    PRESET_TRAITS,
+    traitsFrom,
+    type PresetTraitKey,
+    type PresetTraitValues,
+  } from "../lib/preset-traits";
 
   interface Props {
     traits: PresetTraitValues;
     idPrefix?: string;
+    adapter?: string;
+    emitterOnly?: boolean;
   }
 
   // `$bindable()` marks the prop for parent binding; it is not a fallback.
   // eslint-disable-next-line @typescript-eslint/no-useless-default-assignment -- Svelte bindable marker
-  let { traits = $bindable(), idPrefix = "trait" }: Props = $props();
+  let { traits = $bindable(), idPrefix = "trait", adapter = "", emitterOnly = false }: Props = $props();
+
+  const locked = $derived(emitterOnly || adapter === "raw");
+  const effective = $derived(traitsFrom(locked ? { emitter: true } : traits, adapter));
 
   function setTrait(key: PresetTraitKey, checked: boolean): void {
-    traits = { ...traits, [key]: checked };
+    traits = traitsFrom({ ...traits, [key]: checked });
   }
 </script>
 
@@ -27,7 +37,8 @@
         id="{idPrefix}-{trait.key}"
         class="h-[15px] w-[15px] flex-none p-0 accent-copper"
         type="checkbox"
-        checked={traits[trait.key]}
+        checked={effective[trait.key]}
+        disabled={locked || (effective.emitter && trait.key !== "emitter")}
         onchange={(event) => {
           setTrait(trait.key, event.currentTarget.checked);
         }}

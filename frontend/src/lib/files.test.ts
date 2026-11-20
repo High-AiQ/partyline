@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileLabel, humanSize, visibleMessageBody } from "./files";
+import { fileLabel, humanSize, partylineMediaId, visibleMessageBody } from "./files";
 import type { ChatMessage, FileRef } from "./contracts";
 
 const image: FileRef = {
@@ -99,5 +99,21 @@ describe("file message presentation", () => {
     expect(humanSize(1200)).toBe("1.2 KB");
     expect(humanSize(1_200_000)).toBe("1.2 MB");
     expect(humanSize(2_400_000_000)).toBe("2.4 GB");
+  });
+});
+
+describe("Partyline media links", () => {
+  it.each(["original", "thumb", "slim", "readable"])("recognizes the %s variant", (variant) => {
+    expect(partylineMediaId(`/api/media/media-123/${variant}?download=1#preview`)).toBe("media-123");
+  });
+
+  it.each([
+    "/documents/editor",
+    "/api/media/media-123/unknown",
+    "/api/media/media-123/slim/extra",
+    "//example.test/api/media/media-123/slim",
+    "https://example.test/api/media/media-123/slim",
+  ])("does not claim an ordinary or unsafe destination: %s", (href) => {
+    expect(partylineMediaId(href)).toBeNull();
   });
 });

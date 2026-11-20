@@ -72,6 +72,8 @@ def _instructions(state: RoleState, db=None) -> str:
     from .orchestrator_pack import task_pack
     if state.role == "attachment":
         return "You are the captain handover successor. Wait for the offer and accept it when ready."
+    if state.role == "emitter":
+        return f"Your own line id is {state.conv_id}. You are attached as an auxiliary emitter."
     pack = task_pack(db, state.conv_id, state.role) or role_instructions(
         state.actions, state.conv_id, state.parent_id, state.depth, state.staffed
     ) or worker_instructions(state.captained)
@@ -151,8 +153,9 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
             (previous.role == "lead") != (current.role == "lead")
         )
         worker_transition = previous is None or previous.captained != current.captained
-        worker_now = current.role != "lead" and current.captained
-        worker_was = previous is not None and previous.role != "lead" and previous.captained
+        non_worker_roles = ("lead", "attachment", "emitter")
+        worker_now = current.captained and current.role not in non_worker_roles
+        worker_was = previous is not None and previous.captained and previous.role not in non_worker_roles
         if current.role != "lead":
             last_staffing = last_handoff = None
         if current != previous:
@@ -191,7 +194,7 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
               and is_task_participant(db, att["id"], current.conv_id)):
             current_goal = task_goal_rider(db, current.conv_id)
             goal = task_goal_delivery(current_goal)
-        elif current.captained and current.role != "attachment":
+        elif worker_now:
             if not worker_reminder_sent or (worker_now and not worker_was):
                 worker = WORKER_REMINDER
             worker_reminder_sent = True

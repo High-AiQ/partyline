@@ -1,6 +1,10 @@
 import { Attachments, safeURL } from './attachments.js';
 import { chromeFailure, codeOf, refuse } from './refusal.js';
 
+// Chrome's own overlay draws the cue for the person (a pointer, a click ring, a target box); never the whole domain.
+const CUE_METHODS = ['Overlay.enable', 'Overlay.highlightQuad', 'Overlay.highlightRect', 'Overlay.highlightNode',
+  'Overlay.hideHighlight'];
+
 export class Relay {
   constructor(api, emit, clock) {
     this.api = api;
@@ -71,6 +75,7 @@ export class Relay {
     if (method === 'Page.navigate' && !safeURL(params.url)) throw refuse('restricted_navigation');
     // Browser/Target commands cannot escape the tab capability via a granted root session.
     if (!/^(Page|DOM|Accessibility|Runtime|Input|Inspector)\./.test(method) &&
+        !CUE_METHODS.includes(method) &&
         !['Target.setAutoAttach', 'Target.detachFromTarget'].includes(method)) throw refuse('domain_refused');
     if (method === 'Target.setAutoAttach') {
       params = { ...params, flatten: true, filter: [{ type: 'iframe', exclude: false }, { exclude: true }] };
@@ -88,8 +93,10 @@ export class Relay {
         debuggee.sessionId = sessionId;
       }
       if (!a.valid(entry)) throw refuse('revoked');
-      return await this.api.debugger.sendCommand(debuggee, method, params)
+      const answer = await this.api.debugger.sendCommand(debuggee, method, params)
         .catch(error => { throw chromeFailure(error, 'debugger_command_failed'); });
+      a.cue(entry, method);
+      return answer;
     } finally {
       entry.busy--;
       a.idle(entry);

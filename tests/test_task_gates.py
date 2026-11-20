@@ -75,6 +75,15 @@ class GatesTest(unittest.TestCase):
         self.assertIn('tests.test_orchestrator_express', gates[1])
         self.assertIn('tests.test_orchestrator_reopen', gates[1])
 
+    def test_captain_tool_and_fixture_changes_select_role_contract_gates(self):
+        for path in ("partyline/mcp/tools_captain.py", "partyline/mcp/captain_ops.py",
+                     "tests/fixtures/mcp_role_matrix.json"):
+            with self.subTest(path=path):
+                self.assertIn("tests.test_mcp_role_matrix", " ".join(gates_for([path])))
+        for path in ("partyline/mcp/tools_captain.py", "tests/fixtures/mcp_role_matrix.json"):
+            with self.subTest(path=path):
+                self.assertIn("tests.test_tool_names_in_texts", " ".join(gates_for([path])))
+
     def test_chrome_tests_importing_changed_files_are_included(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

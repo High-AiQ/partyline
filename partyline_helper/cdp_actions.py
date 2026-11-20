@@ -70,7 +70,8 @@ async def _act(page, message, timing):
     if action != "set_files":
         await page.call("DOM.scrollIntoViewIfNeeded", {"backendNodeId": backend})
         await page.call("DOM.focus", {"backendNodeId": backend})
-    navigation, released = page.navigations, False
+    navigation, released, mark = page.navigations, False, page.cue.mark()  # the cue belongs to this page
+    clicking = action in ("invoke", "toggle") or (action == "select" and state.get("tag") != "SELECT")
     try:
         extra = {}
         if action == "set_files":
@@ -87,6 +88,8 @@ async def _act(page, message, timing):
                 page.guard()
                 released = kind == "mouseReleased"
                 await page.call("Input.dispatchMouseEvent", {"type": kind, **point})
+                if kind == "mousePressed" and page.action_point:
+                    page.cue.click(page.action_point["x"], page.action_point["y"], mark)
         elif action == "set_value":
             await key(page, "a", 65, 2)  # select existing text using real keyboard input
             value = message.get("value", "")
@@ -100,6 +103,8 @@ async def _act(page, message, timing):
             if message.get("key") not in KEYS:
                 raise CDPError("press requires enter, tab or escape")
             await key(page, *KEYS[message["key"]])
+        if not clicking:
+            page.cue.target(backend, mark)  # sent, with no pointer click: show the real target, not a click
         with timing.phase("settle_wait_ms"):
             settle = await page.quiet.wait()
         counter = page.access.event_status()["event_counter"]

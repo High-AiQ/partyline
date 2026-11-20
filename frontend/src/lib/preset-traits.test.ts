@@ -70,4 +70,10 @@ describe("preset trait helpers", () => {
     expect(traitsFrom({ reads_images: true }).can_manage).toBe(false);
     expect(traitsFrom({ implements: false }).implements).toBe(false);
   });
+
+  it("resolves raw and opted-in presets to exclusive emitter traits", () => {
+    const emitter = { emitter: true, implements: false, reads_images: false, can_manage: false };
+    expect(traitsFrom({ can_manage: true, implements: true }, "raw")).toEqual(emitter);
+    expect(traitsFrom({ emitter: true, reads_images: true })).toEqual(emitter);
+  });
 });

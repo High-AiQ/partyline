@@ -38,7 +38,11 @@ class GuardrailTest(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.runtime = ChatRuntime(self.db)
         self.db.save_preset("fixture-manager", "Fixture", "fixture", "fake", "fake", can_manage=True)
-        self.db.save_preset("fixture-raw", "Fixture raw", "fixture-raw", "raw", "sh", can_manage=True)
+        for mapping, value in ((server.ADAPTERS, SimpleNamespace),
+                               (server.ADAPTER_METADATA, {"command": ["fake"]})):
+            fake = patch.dict(mapping, {"fake": value})
+            fake.start()
+            self.addCleanup(fake.stop)
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
@@ -103,8 +107,8 @@ class GuardrailTest(unittest.TestCase):
     def test_role_traits_refuse_agent_staffing_but_allow_person_attach(self):
         child = self.child('root', 'roles')
         path = f"/api/conversations/{child['id']}/attachments"
-        self.db._exec("UPDATE presets SET implements=0,can_manage=0 WHERE id='fixture-raw'")
-        payload = {'name': 'unassigned', 'adapter': 'raw', 'command': 'sh'}
+        self.db._exec("UPDATE presets SET implements=0,can_manage=0 WHERE id='fixture-manager'")
+        payload = {'name': 'unassigned', 'adapter': 'fake', 'command': 'fake'}
         refused = self.client.post(path, json=payload, headers=self.machine('root-lead'))
         self.assertEqual(refused.status_code, 403, refused.text)
         self.assertIn('Fast implementer', refused.text)
@@ -114,8 +118,8 @@ class GuardrailTest(unittest.TestCase):
     def test_captain_only_preset_can_staff_a_subcaptain(self):
         child = self.child('root', 'roles')
         path = f"/api/conversations/{child['id']}/attachments"
-        self.db._exec("UPDATE presets SET implements=0,can_manage=1 WHERE id='fixture-raw'")
-        payload = {'name': 'leader', 'adapter': 'raw', 'command': 'sh'}
+        self.db._exec("UPDATE presets SET implements=0,can_manage=1 WHERE id='fixture-manager'")
+        payload = {'name': 'leader', 'adapter': 'fake', 'command': 'fake'}
         refused = self.client.post(path, json=payload, headers=self.machine('root-lead'))
         self.assertEqual(refused.status_code, 403, refused.text)
         payload['staffing_role'] = 'captain'
@@ -126,7 +130,7 @@ class GuardrailTest(unittest.TestCase):
     # -- sideways staffing -------------------------------------------------------
 
     def test_a_second_worker_on_a_captained_staffed_line_means_parallel_lines(self):
-        payload = {"name": "luna", "adapter": "raw", "command": "sh"}
+        payload = {"name": "luna", "adapter": "fake", "command": "fake"}
         mid = self.child("root", "mid", self.machine("root-lead"))
         captain = self.captain(mid["id"], "sol")
         first = self.client.post(f"/api/conversations/{mid['id']}/attachments",
@@ -154,7 +158,7 @@ class GuardrailTest(unittest.TestCase):
         self.assertIn("@mimo joins a shared branch", notices[0])
 
     def test_a_person_is_never_refused_but_the_shared_branch_is_flagged(self):
-        payload = {"name": "luna", "adapter": "raw", "command": "sh"}
+        payload = {"name": "luna", "adapter": "fake", "command": "fake"}
         mid = self.child("root", "mid", self.machine("root-lead"))
         captain = self.captain(mid["id"], "sol")
         self.client.post(f"/api/conversations/{mid['id']}/attachments",
@@ -168,7 +172,7 @@ class GuardrailTest(unittest.TestCase):
         self.assertIn("attached by @person", notices[0])
 
     def test_a_line_without_a_captain_takes_a_second_worker_untouched(self):
-        payload = {"name": "luna", "adapter": "raw", "command": "sh"}
+        payload = {"name": "luna", "adapter": "fake", "command": "fake"}
         bare = self.child("root", "bare")
         first = self.client.post(f"/api/conversations/{bare['id']}/attachments",
                                  json=payload)
@@ -180,7 +184,7 @@ class GuardrailTest(unittest.TestCase):
                           if "shared branch" in m["body"]], [])
 
     def test_a_captain_cannot_attach_to_its_own_line_once_it_has_a_child(self):
-        payload = {"name": "grok", "adapter": "raw", "command": "sh"}
+        payload = {"name": "grok", "adapter": "fake", "command": "fake"}
         mid = self.child("root", "mid", self.machine("root-lead"))
         person = self.client.post("/api/conversations/root/attachments", json=payload)
         self.assertEqual(person.status_code, 200, person.text)
@@ -207,7 +211,7 @@ class GuardrailTest(unittest.TestCase):
         import asyncio
 
         child = self.child("root", "mid", self.machine("root-lead"))
-        payload = {"name": "successor", "adapter": "raw", "command": "sh", "successor": True}
+        payload = {"name": "successor", "adapter": "fake", "command": "fake", "successor": True}
         path = "/api/conversations/root/attachments"
         self.assertEqual(self.client.post(path, json=payload).status_code, 403)
         child_lead = self.captain(child["id"], "child-captain")
@@ -243,7 +247,7 @@ class GuardrailTest(unittest.TestCase):
 
         lead = self.machine("root-lead")
         path = "/api/conversations/root/attachments"
-        payload = {"name": "worker", "adapter": "raw", "command": "sh"}
+        payload = {"name": "worker", "adapter": "fake", "command": "fake"}
         self.assertEqual(self.client.post(path, json=payload, headers=lead).status_code, 200)
         refused = self.client.post(path, json={**payload, "name": "other"}, headers=lead)
         self.assertEqual(refused.status_code, 409)
@@ -259,7 +263,7 @@ class GuardrailTest(unittest.TestCase):
         self.assertEqual(denied.exception.status_code, 409)
 
     def test_an_archived_child_no_longer_blocks_its_parent_from_staffing(self):
-        payload = {"name": "grok", "adapter": "raw", "command": "sh"}
+        payload = {"name": "grok", "adapter": "fake", "command": "fake"}
         child = self.child("root", "finished", self.machine("root-lead"))
         archived = self.client.delete(f"/api/conversations/{child['id']}")
         self.assertEqual(archived.status_code, 200, archived.text)
@@ -276,7 +280,7 @@ class GuardrailTest(unittest.TestCase):
         mid = self.child("root", "delivery", self.machine("root-lead"))
         sol = self.captain(mid["id"], "sol")
         worker = self.client.post(f"/api/conversations/{mid['id']}/attachments",
-                                  json={"name": "gemini-flash", "adapter": "raw", "command": "sh"},
+                                  json={"name": "gemini-flash", "adapter": "fake", "command": "fake"},
                                   headers=self.machine("root-lead"))
         self.assertEqual(worker.status_code, 200, worker.text)
         self.db._exec("UPDATE attachments SET status='running' WHERE name='gemini-flash'")
@@ -365,7 +369,7 @@ class GuardrailTest(unittest.TestCase):
         self.assertIn("git worktree on branch line/frontend-polish", notice)
         # A machine attaching there works there, whatever cwd it asks for.
         att = self.client.post(f"/api/conversations/{child['id']}/attachments",
-                               json={"name": "luna", "adapter": "raw", "command": "sh",
+                               json={"name": "luna", "adapter": "fake", "command": "fake",
                                      "cwd": self.directory.name},
                                headers=self.machine("root-lead"))
         self.assertEqual(self.db.get_attachment(att.json()["id"])["cwd"], expected)
@@ -402,7 +406,7 @@ class GuardrailTest(unittest.TestCase):
             captain_mode="orchestrator")  # born before placement existed
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='old-kid'")
         att = self.client.post("/api/conversations/old-kid/attachments",
-                               json={"name": "grok", "adapter": "raw", "command": "sh"},
+                               json={"name": "grok", "adapter": "fake", "command": "fake"},
                                headers=self.machine("root-lead"))
         self.assertEqual(att.status_code, 200, att.text)
         expected = os.path.join(repo, WORKTREES_DIR, "old-kid")
