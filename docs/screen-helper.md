@@ -685,7 +685,54 @@ new snapshot at an event-counter boundary and returns the answer as `after` (als
 together. The next separate `screen_elements` read recaptures again, so a delayed app update is not hidden by the immediate post-action snapshot. The client waits up to 160 s for a call with `then` (100 s without), allowing time for a multi-part pre-action snapshot and action. An empty `then` returns what is new: the topmost elements the new snapshot has that the old one
 did not (ids are stable, so a page change lists the new rows and not the unchanged chrome) and a `diff`
 count `+added -gone`, plus `~updated` for changed state on stable ids. The read needs read access to the line as well as write. If the share ends meanwhile,
-`after` says so and the action result is kept.
+`after` says so and the action result is kept. If an action with a tree-reading `then` refuses because its
+target changed, its stored ID went stale, or the window had to be refreshed, `after` is attached to that failure
+too. A scoped `then.root` therefore supplies the current IDs for recovery instead of requiring another read.
+
+**Fill a stable form section.** Once a read has identified independent fields, one ordinary
+`screen_element_action` call can assign up to eight of them:
+
+```json
+{
+  "action": "set_values",
+  "window": "window-grant-id",
+  "assignments": [
+    {"element_id": "given-id", "value": "Ada"},
+    {"element_id": "family-id", "value": "Lovelace"},
+    {"element_id": "city-id", "value": "London"},
+    {"element_id": "country-id", "value": "United Kingdom", "action": "select"}
+  ],
+  "then": {"root": "section-id", "depth": 1}
+}
+```
+
+`action` defaults to `set_value`; `select` takes the same option name or value as a single select. Use IDs from
+one current stable section and do not repeat an ID in a group. The normal entry point is the same
+`screen_element_action` tool and endpoint as a single action, not a workflow or a JavaScript evaluation. It never
+clicks, presses Enter, submits, uploads files, uses `force`, or takes a screenshot as part of the group. Group
+`then.snapshot` is refused; use a separate explicit snapshot only when a picture is independently needed.
+
+Assignments run sequentially, once each, through the existing element-action implementation. Every attempted
+field gets its own write authorization, stale-target/identity checks, rate-limit spend, helper and standing audit,
+and visible target cue. Read permission for `then` is checked before the first assignment. Between assignments a
+stable CDP page reuses the retained proof without an intermediate full-tree capture; the helper still proves the
+original backend node immediately before input. The next ordinary caller retains the usual forced post-action
+refresh. Older single-action callers and workflow steps are unchanged, and this server-side grouping needs no new
+helper capability.
+
+The response contains one compact entry per **attempted** assignment (ID and outcome, without repeating the input
+value), `completed`, and `remaining`, the count not attempted. Success is `status:"completed"`. A known failure
+before any assignment succeeds is `failed`; after earlier success it is `partial` with `partial:true`. An
+unconfirmed helper outcome is always top-level `unconfirmed` (also with `partial:true` when earlier fields
+succeeded). The group stops immediately on a failure, an unconfirmed outcome, navigation, revocation, or grant
+loss. It never retries an uncertain action or continues to later fields. Reissue only a field known to have been
+refused before dispatch, using the newly returned ID; never repeat an unconfirmed one automatically.
+
+One final `then` read runs after success or failure, not after every field. Prefer `then.root` for the stable
+section: its bounded lines directly list current actionable control IDs, labels, values, enabled/disabled state,
+and available actions, including replacements exposed by a dependent-field rerender. Empty `then` keeps the
+ordinary delta form. The whole action/read answer retains the existing 4 KB budget and long helper errors are
+compacted; no prior trees, markup, or screenshots are accumulated.
 
 The helper rechecks the window, element identity, containment, enabled state and supported pattern
 before dispatch, and refuses an element that lacks the pattern with an error naming the actions

@@ -58,8 +58,13 @@ async ({ token, line }) => {
 
   async function action(message) {
     const element = document.getElementById(message.element_id);
-    if (!element || message.action_token !== `token-${element.id}` ||
-        message.workflow_document !== "document:1" || message.workflow_counter !== counter) {
+    if (!element || message.action_token !== `token-${element.id}`) {
+      const error = new Error("Element action target changed");
+      error.reason = "target_changed";
+      throw error;
+    }
+    if ("workflow_document" in message &&
+        (message.workflow_document !== "document:1" || message.workflow_counter !== counter)) {
       throw new Error("Workflow action did not use current evidence");
     }
     if (message.action === "invoke") element.click();
@@ -119,13 +124,15 @@ async ({ token, line }) => {
         }
         case "window_element_action": {
           let status = "completed";
+          let failure = {};
           try {
             await action(message);
           } catch (error) {
             status = "failed";
+            failure = { reason: error.reason, error: error.message };
             console.error(error);
           }
-          send({ ...reply, type: "window_element_result", status });
+          send({ ...reply, type: "window_element_result", status, ...failure });
           break;
         }
         case "ping":

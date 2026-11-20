@@ -1,0 +1,263 @@
+"""Compact form groups reuse checked actions, bounded reads and fresh recovery IDs."""
+import json
+import time
+import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
+
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from partyline.screen_element_actions import ElementAction, Then, element_action
+from partyline.screen_element_routes import elements_router
+from partyline.screen_elements import ElementsHub
+from partyline.screen_form_actions import act as form_action
+from tests.cdp_fakes import Fixture
+from tests.test_cdp_settle import Clock
+
+GRANT = {"id": "g", "conv_id": "line", "process": "chrome.exe", "title": "Form"}
+FIELDS = (("First name", "given"), ("Last name", "family"), ("City", "city"))
+
+
+def encoded(value):
+    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode())
+
+
+class FormFixture(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.f = Fixture()
+        self.addAsyncCleanup(self.f.close)
+        self.clock = Clock()
+        self.elements = ElementsHub(SimpleNamespace(), clock=self.clock)
+        self.runtime = SimpleNamespace(db=None)
+        self.outer = SimpleNamespace(elements=self.elements, runtime=self.runtime,
+                                     window_grants=SimpleNamespace(spend=Mock()))
+        self.principal = SimpleNamespace(name="agent", conv_id="line")
+        self.device = {"id": "device"}
+        self.reads = self.actions = 0
+        self.inserts = []
+        self.on_insert = None
+        self.elements.exchange = self.exchange
+        self.f.socket.nodes = [
+            dict(nodeId="1", backendDOMNodeId=1, role={"value": "RootWebArea"}, name={"value": "Form"}),
+            dict(nodeId="2", parentId="1", backendDOMNodeId=2, role={"value": "group"},
+                 name={"value": "Details"}),
+            *[dict(nodeId=str(index + 3), parentId="2", backendDOMNodeId=index + 3,
+                   role={"value": "textbox"}, name={"value": name})
+              for index, (name, _) in enumerate(FIELDS)],
+        ]
+        self.f.socket.states = {1: {}, 2: {}, **{index + 3: dict(tag="INPUT", value="", hit=True)
+                                                 for index in range(len(FIELDS))}}
+        self.f.socket.hook = self.edited
+        self.audit = Mock()
+        self.standing = AsyncMock()
+        patches = [
+            patch("partyline.screen_form_actions.audit_call", self.audit),
+            patch("partyline.screen_form_actions.record_standing_window_access", self.standing),
+            patch("partyline.screen_workflow_learning.record_call"),
+            patch("partyline.screen_element_actions.deny_unless"),
+            patch("partyline.screen_element_actions.request_principal", return_value=self.principal),
+            patch("partyline.screen_element_actions.resolve_window", return_value=(GRANT, self.device)),
+            patch("partyline.screen_elements.resolve_window", return_value=(GRANT, self.device)),
+            patch("partyline.screen_elements.require_window"),
+        ]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    def edited(self, message):
+        if message["method"] != "Input.insertText":
+            return
+        backend = self.f.socket.focused
+        self.f.socket.states[backend]["value"] = message["params"]["text"]
+        self.inserts.append((backend, message["params"]["text"]))
+        if self.on_insert:
+            self.on_insert(backend, message["params"]["text"])
+
+    async def exchange(self, principal, grant, device, kind, **fields):
+        if kind == "window_element_action":
+            self.actions += 1
+            return await self.f.chrome.action(self.f.access, fields)
+        if fields.get("event_status"):
+            return self.f.chrome.status(self.f.access)
+        self.reads += 1
+        result = await self.f.read(**fields)
+        page = self.f.chrome.pages[self.f.access]["a"]
+        page.quiet.wait = AsyncMock(return_value="quiet")
+        return result
+
+    async def initial(self):
+        result = await self.elements.read(self.principal, window="g", options={"refresh": True})
+        tree = self.elements.snapshots["g"]
+        ids = {node.name: node.id for node in tree.nodes.values()}
+        return result, ids
+
+    def body(self, ids, values):
+        return ElementAction(action="set_values", window="g", assignments=[
+            {"element_id": ids[name], "value": value} for (name, _), value in zip(FIELDS, values, strict=True)
+        ], then={"root": ids["Details"], "depth": 1})
+
+    async def test_equivalent_worked_form_measures_reads_bytes_and_round_trips(self):
+        before_values = ("Ada", "Lovelace", "London")
+        after_values = ("Grace", "Hopper", "New York")
+        started = time.perf_counter()
+        initial, ids = await self.initial()
+        responses = [initial]
+        for (name, _), value in zip(FIELDS, before_values, strict=True):
+            responses.append(await element_action(self.runtime, self.outer, "line", ElementAction(
+                element_id=ids[name], action="set_value", value=value, window="g",
+                then=Then(root=ids["Details"], depth=1)), None))
+        before = {"tool_calls_measured": 1 + len(FIELDS), "helper_reads_measured": self.reads,
+                  "helper_actions_measured": self.actions, "model_decisions_inferred": len(FIELDS),
+                  "response_bytes_measured": sum(map(encoded, responses)),
+                  "elapsed_ms_measured": round((time.perf_counter() - started) * 1000, 3)}
+        self.assertEqual(before_values, tuple(self.f.socket.states[index + 3]["value"]
+                                              for index in range(len(FIELDS))))
+
+        for index in range(len(FIELDS)):
+            self.f.socket.states[index + 3]["value"] = ""
+        started = time.perf_counter()
+        initial, ids = await self.initial()
+        page = self.f.chrome.pages[self.f.access]["a"]
+        with patch.object(page.cue, "target", wraps=page.cue.target) as cue:
+            grouped = await form_action(self.runtime, self.outer, "line", self.body(ids, after_values),
+                                        self.principal, GRANT)
+        self.assertEqual(3, cue.call_count)  # the existing visible target cue runs for every assignment
+        measured_reads = self.reads - before["helper_reads_measured"]
+        after = {"tool_calls_measured": 2, "helper_reads_measured": measured_reads,
+                 "helper_actions_measured": self.actions - before["helper_actions_measured"],
+                 "model_decisions_inferred": 1,
+                 "response_bytes_measured": encoded(initial) + encoded(grouped),
+                 "elapsed_ms_measured": round((time.perf_counter() - started) * 1000, 3)}
+        print("FORM_ACTION_METRICS " + json.dumps({"before": before, "after": after}, sort_keys=True))
+        self.assertEqual("completed", grouped["status"])
+        self.assertIn("g", self.elements.after_action)
+        self.assertEqual(after_values, tuple(self.f.socket.states[index + 3]["value"]
+                                             for index in range(len(FIELDS))))
+        self.assertTrue(all(value in grouped["after"]["lines"] for value in after_values))
+        self.assertEqual((4, 3), (before["helper_reads_measured"], before["helper_actions_measured"]))
+        self.assertEqual((2, 3), (after["helper_reads_measured"], after["helper_actions_measured"]))
+        self.assertLess(after["response_bytes_measured"], before["response_bytes_measured"])
+        self.assertEqual(3, self.audit.call_count)  # every grouped assignment is independently audited
+        self.assertEqual(6, self.standing.await_count)  # start + outcome for each grouped assignment
+
+    async def test_dependent_rerender_stops_and_returns_current_controls_without_repeating_input(self):
+        _, ids = await self.initial()
+
+        def replace(backend, text):
+            if backend != 3:
+                return
+            replacement = dict(nodeId="6", parentId="2", backendDOMNodeId=6,
+                               role={"value": "textbox"}, name={"value": "Last name updated"})
+            self.f.socket.nodes[2] = replacement
+            self.f.socket.states.pop(4)
+            self.f.socket.states[6] = dict(tag="INPUT", value="", hit=True)
+
+        self.on_insert = replace
+        result = await form_action(self.runtime, self.outer, "line",
+                                   self.body(ids, ("Ada", "Lovelace", "London")), self.principal, GRANT)
+        self.assertEqual(("partial", 1, 1), (result["status"], result["completed"], result["remaining"]))
+        self.assertEqual(["completed", "failed"], [row["status"] for row in result["results"]])
+        self.assertEqual("target_changed", result["results"][1]["reason"])
+        self.assertIn("lines", result["after"], result)
+        lines = result["after"]["lines"].splitlines()
+        line = next((line for line in lines if "Last name updated" in line), None)
+        self.assertIsNotNone(line, result)
+        self.assertIn("set_value", line)
+        self.assertNotIn("disabled", line)
+        self.assertEqual([(3, "Ada")], self.inserts)
+        current = line.split()[0]
+        recovered = await element_action(self.runtime, self.outer, "line", ElementAction(
+            element_id=current, action="set_value", value="Lovelace", window="g"), None)
+        self.assertEqual("completed", recovered["status"])
+        self.assertEqual([(3, "Ada"), (6, "Lovelace")], self.inserts)  # only the refused field was reissued
+
+    async def test_group_can_use_the_existing_select_action(self):
+        self.f.socket.nodes[4]["role"]["value"] = "combobox"
+        self.f.socket.states[5] = dict(tag="SELECT", value="old", selected_index=0,
+                                       selected_count=1, hit=True)
+        _, ids = await self.initial()
+        body = ElementAction(action="set_values", window="g", assignments=[
+            {"element_id": ids["First name"], "value": "Ada"},
+            {"element_id": ids["City"], "value": "New", "action": "select"},
+        ], then={"root": ids["Details"]})
+        result = await form_action(self.runtime, self.outer, "line", body, self.principal, GRANT)
+        self.assertEqual("completed", result["status"])
+        self.assertEqual(("Ada", "New"), (self.f.socket.states[3]["value"],
+                                         self.f.socket.states[5]["value"]))
+
+    async def test_single_stale_action_also_carries_the_requested_scoped_read(self):
+        _, ids = await self.initial()
+        self.f.socket.nodes[2] = dict(nodeId="6", parentId="2", backendDOMNodeId=6,
+                                      role={"value": "textbox"}, name={"value": "Last name updated"})
+        self.f.socket.states.pop(4)
+        self.f.socket.states[6] = dict(tag="INPUT", value="", hit=True)
+        result = await element_action(self.runtime, self.outer, "line", ElementAction(
+            element_id=ids["Last name"], action="set_value", value="Lovelace", window="g",
+            then=Then(root=ids["Details"])), None)
+        self.assertEqual("failed", result["status"])
+        self.assertIn("after", result)
+        self.assertIn("Last name updated", result["after"]["lines"])
+
+    async def test_unconfirmed_assignment_is_not_retried_and_later_fields_are_not_attempted(self):
+        _, ids = await self.initial()
+        outcomes = [{"status": "completed"}, {"status": "unconfirmed", "note": "may have run"}]
+        with patch("partyline.screen_form_actions.perform_element_action",
+                   new=AsyncMock(side_effect=outcomes)) as perform:
+            result = await form_action(self.runtime, self.outer, "line", self.body(ids, ("A", "B", "C")),
+                                       self.principal, GRANT)
+        self.assertEqual(2, perform.await_count)
+        self.assertEqual(("unconfirmed", 1, 1), (result["status"], result["completed"], result["remaining"]))
+        self.assertTrue(result["partial"])
+        self.assertIn("after", result)
+        self.assertIn("g", self.elements.after_action)
+
+
+class ContractTests(unittest.IsolatedAsyncioTestCase):
+    def test_group_validation_and_legacy_single_action_contract(self):
+        with self.assertRaises(ValidationError):
+            ElementAction(action="set_values", assignments=[{"element_id": "a", "value": "1"},
+                                                           {"element_id": "a", "value": "2"}])
+        with self.assertRaises(ValidationError):
+            ElementAction(action="set_values", element_id="a",
+                          assignments=[{"element_id": "a", "value": "1"}])
+        with self.assertRaises(ValidationError):
+            ElementAction(action="set_value", element_id="a", value="1",
+                          assignments=[{"element_id": "b", "value": "2"}])
+        self.assertEqual({"element_id": "a", "action": "set_value", "value": "1"},
+                         ElementAction(element_id="a", action="set_value", value="1").parameters())
+
+    def test_route_delegates_only_the_group_action(self):
+        runtime, hub = SimpleNamespace(db=None), SimpleNamespace()
+        principal = SimpleNamespace(name="agent", conv_id="line")
+        app = FastAPI()
+        app.include_router(elements_router(runtime, hub))
+        client = TestClient(app)
+        grouped = AsyncMock(return_value={"status": "completed", "results": []})
+        with patch("partyline.screen_element_routes.core.request_principal", return_value=principal), \
+             patch("partyline.screen_element_routes.core.deny_unless"), \
+             patch("partyline.screen_element_routes.core.resolve_window", return_value=(GRANT, {})), \
+             patch("partyline.screen_form_actions.act", grouped):
+            response = client.post("/api/conversations/line/screen-control/element-action", json={
+                "action": "set_values", "assignments": [{"element_id": "a", "value": "1"}],
+                "then": {"root": "section"}})
+        self.assertEqual(200, response.status_code)
+        grouped.assert_awaited_once()
+
+    async def test_http_refusal_becomes_a_bounded_partial_result(self):
+        principal = SimpleNamespace(name="agent", conv_id="line")
+        elements = SimpleNamespace(snapshots={}, fresh=Mock(return_value=None))
+        hub = SimpleNamespace(elements=elements)
+        body = ElementAction(action="set_values", assignments=[{"element_id": "a", "value": "1"}])
+        with patch("partyline.screen_form_actions.audit_call"), \
+             patch("partyline.screen_form_actions.record_standing_window_access", new=AsyncMock()), \
+             patch("partyline.screen_workflow_learning.record_call"), \
+             patch("partyline.screen_form_actions.perform_element_action",
+                   new=AsyncMock(side_effect=HTTPException(409, "changing"))):
+            result = await form_action(SimpleNamespace(db=None), hub, "line", body, principal, GRANT)
+        self.assertEqual(("failed", 0, 0), (result["status"], result["completed"], result["remaining"]))
+
+
+if __name__ == "__main__":
+    unittest.main()

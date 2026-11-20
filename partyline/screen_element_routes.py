@@ -52,6 +52,11 @@ def elements_router(runtime, hub, store=None):
                 raise HTTPException(exc.status_code, str(exc.detail) +
                                     "; use the Open dialog path instead") from exc
             raise
+        if body.action == "set_values":
+            if body.then:
+                core.deny_unless(runtime.db, principal, conv_id, "read")
+            from .screen_form_actions import act as form_action
+            return await form_action(runtime, hub, conv_id, body, principal, grant)
         core.audit_call(hub, principal, grant, "screen_element_action", len(body.value or body.key or ""))
         if body.then:
             core.deny_unless(runtime.db, principal, conv_id, "read")

@@ -14,12 +14,11 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 ELEMENT_ACTION_NOTE = (
     "Act on screen_elements IDs or latest screen_window_look mark=n; never reuse marks; never script clicks. "
-    "CDP/UIA actions; unsupported invoke/click marks use guarded points (landed_in). "
-    "Read changes after clicks. "
-    "set_files: 1–10 media IDs/local paths, 200 MiB; helper data refused. select takes value; "
+    "CDP/UIA; other invoke/click marks use guarded points (landed_in). "
+    "set_values fills 1–8 fields; then.root reads controls once; stops on error, never retries. "
+    "set_files: 1–10 media IDs/paths, 200 MiB. select takes value; "
     "set_value edits; press: enter/tab/escape; force overrides disabled. then reads changes; "
-    "then.snapshot adds a picture. Failures carry screenshot marks/snapshot for screen_window_click. "
-    "no-dom: act on its act_on id. "
+    "then.snapshot adds a picture. Failures carry screenshot marks for screen_window_click. "
     'reload/dialog use element_id="page". dialog requires accept; '
     'beforeunload accept=true leaves and discards unsaved changes. '
     'UIA window_* targets the window; drag: screen_drag.')
@@ -33,9 +32,9 @@ ELEMENT_ACTION_PROPERTIES = {
     "mark": {"type": "integer", "minimum": 1, "description": "Latest look box; alternative to element_id."},
     "element_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "action": {"type": "string", "enum": [
-        "click", "invoke", "toggle", "set_value", "set_files", "press", "select", "add_to_selection",
-        "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent", "scroll_into_view",
-        "set_range_value", "window_close",
+        "click", "invoke", "toggle", "set_value", "set_values", "set_files", "press", "select",
+        "add_to_selection", "remove_from_selection", "expand", "collapse", "scroll", "set_scroll_percent",
+        "scroll_into_view", "set_range_value", "window_close",
         "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize",
         "reload", "dialog"]},
     "files": {"type": "array", "minItems": 1, "maxItems": 10,
@@ -46,6 +45,16 @@ ELEMENT_ACTION_PROPERTIES = {
               "description": "For set_files: absolute file paths on the paired computer."},
     "value": {"type": "string", "maxLength": 500,
               "description": "Text for set_value; option name for ComboBox select."},
+    "assignments": {
+        "type": "array", "minItems": 1, "maxItems": 8,
+        "description": "For set_values: ordered independent fields, attempted once until one fails.",
+        "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["element_id", "value"], "properties": {
+                "element_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "value": {"type": "string", "maxLength": 500},
+                "action": {"type": "string", "enum": ["set_value", "select"],
+                           "description": "Defaults to set_value."}}}},
     "accept": {"type": "boolean", "description": "Required for dialog; explicit accept or dismiss."},
     "prompt_text": {"type": "string", "maxLength": 500, "description": "Optional dialog prompt text."},
     "key": {"type": "string", "enum": ["enter", "tab", "escape"], "description": "For press; no modifiers."},
@@ -197,7 +206,7 @@ def call(client, name, args, state):
     if name == "screen_control_request":
         return client.request("POST", base + "/request")
     if name == "screen_element_action":
-        wait = (700 if args.get("action") == "set_files" else
+        wait = (700 if args.get("action") in ("set_files", "set_values") else
                 ELEMENT_ACTION_THEN_TIMEOUT if args.get("then") is not None else ELEMENT_ACTION_TIMEOUT)
         return client.request("POST", base + "/element-action", args, timeout=wait)
     return client.request("POST", base + "/action", {"kind": name.removeprefix("screen_"), **args})
