@@ -20,3 +20,7 @@ not a bare array. `provider-log-quoted.log` keeps the reported 2026-11-04
 redacted command/cwd/account data and valid representative git arguments.
 The parser regression asserts the outer logfmt decode returns a string before
 binding decodes the inner array. Test log writers use that same encoding.
+
+`assistant-2.4.1.json` contains the redacted assistant `data` and ordered
+`session_part.data` rows from a 2.4.1 interactive PTY probe on 2026-11-23;
+identifiers, model, snapshot, reasoning and timestamps are redacted.

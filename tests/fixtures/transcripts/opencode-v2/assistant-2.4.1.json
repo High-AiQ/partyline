@@ -1,0 +1,17 @@
+{
+  "message": {
+    "time": {"created": 1, "firstToken": 2, "streamed": 3, "completed": 4},
+    "agent": "build",
+    "model": {"id": "<redacted>", "providerID": "<redacted>", "variant": "<redacted>"},
+    "content": [],
+    "snapshot": {"start": "<redacted>", "end": "<redacted>", "files": []},
+    "finish": "stop",
+    "rawFinish": "stop",
+    "cost": 0,
+    "tokens": {"input": 4360, "output": 16, "reasoning": 18, "cache": {"read": 6400, "write": 0}}
+  },
+  "parts": [
+    {"type": "reasoning", "text": "<redacted>", "native": {"reasoningField": "reasoning_content"}, "time": {"created": 2, "completed": 3}},
+    {"type": "text", "text": "READY"}
+  ]
+}
