@@ -131,6 +131,41 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
         await self.adapter._poll()
         self.assertEqual(self.post.call_args.args[-1], "finished")
 
+    async def test_v241_assistant_parts_are_relayed_once_in_order(self):
+        fixture = Path(__file__).parent / "fixtures/transcripts/opencode-v2/assistant-2.4.1.json"
+        record = json.loads(fixture.read_text())
+        self.db.execute("CREATE TABLE session_part(message_id TEXT, session_id TEXT, "
+                        "ordinal INTEGER, type TEXT, data TEXT)")
+        self.claim()
+        unfinished = dict(record["message"], time={"created": 1})
+        self.row("answer", "assistant", unfinished, seq=2)
+        for ordinal, part in reversed(list(enumerate(record["parts"]))):
+            self.db.execute("INSERT INTO session_part VALUES(?,?,?,?,?)",
+                            ("answer", "ours", ordinal, part["type"], json.dumps(part)))
+        self.db.commit()
+        await self.adapter._poll()
+        self.post.assert_not_awaited()
+        self.db.execute("UPDATE session_message SET data=? WHERE id='answer'",
+                        (json.dumps(record["message"]),))
+        self.row("idle", "idle", {"outcome": "succeeded"}, seq=3)
+        await self.adapter._poll()
+        await self.adapter._poll()
+        self.post.assert_awaited_once_with("agent", "agent", "READY")
+
+    async def test_parts_and_inline_content_survive_downgrade(self):
+        self.db.execute("CREATE TABLE session_part(message_id TEXT, session_id TEXT, "
+                        "ordinal INTEGER, type TEXT, data TEXT)")
+        self.claim()
+        self.row("answer", "assistant", {"time": {"completed": 1}, "content": [
+            {"type": "text", "text": "inline"}]}, seq=2)
+        self.db.execute("INSERT INTO session_part VALUES(?,?,?,?,?)", (
+            "answer", "ours", 0, "text", json.dumps({"type": "text", "text": "part"})))
+        self.db.execute("INSERT INTO session_part VALUES(?,?,?,?,?)", (
+            "answer", "other", 1, "text", json.dumps({"type": "text", "text": "other session"})))
+        self.db.commit()
+        await self.adapter._poll()
+        self.assertEqual([call.args[-1] for call in self.post.await_args_list], ["part", "inline"])
+
     async def test_a_turn_a_background_job_started_is_a_turn(self):
         """A subagent or background command finishing prompts the model with no user row.
 

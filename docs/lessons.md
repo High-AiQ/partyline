@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## 2026-11-23 — OpenCode assistant content can move into part rows
+
+The false assumption was that a completed assistant row always held its text inline.
+OpenCode 2.4 defaults to ordered `session_part` rows and leaves `content` empty, so
+settling the envelope alone dropped a completed reply. Read both formats, including
+mixed rows after a downgrade, and filter reasoning and tools as before. The redacted
+PTY fixture and isolated-store regression cover the new shape.
+
 ## 2026-11-20 — Callable tool changes reach the MCP role matrix
 
 The task gate mapper missed the role matrix because the captain tools were the second name

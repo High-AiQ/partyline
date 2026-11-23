@@ -13,6 +13,7 @@ class SessionStore:
     _reader = None
     _store_version = None
     _store_open = True
+    _has_parts = None
 
     def _connect(self):
         """The one read-only connection this watcher keeps for its whole life.
@@ -74,6 +75,10 @@ class SessionStore:
             version = db.execute("PRAGMA data_version").fetchone()[0]
             if version == self._store_version:
                 return None
+            if self._has_parts is None:
+                self._has_parts = db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_part'"
+                ).fetchone() is not None
             wanted = [ident for (ident,) in db.execute(
                 "SELECT id FROM session_message WHERE session_id = ? AND seq >= ? ORDER BY seq",
                 (self._session_id, self._claim_seq)) if ident not in self._seen]
@@ -84,5 +89,25 @@ class SessionStore:
                     "SELECT id, type, data, seq FROM session_message WHERE session_id = ? "
                     f"AND id IN ({','.join('?' * len(chunk))})",
                     (self._session_id, *chunk)).fetchall()
+            if self._has_parts:
+                rows = [self._with_parts(db, row) for row in rows]
             self._store_version = version
         return [row[:3] for row in sorted(rows, key=lambda row: row[3])]
+
+    def _with_parts(self, db, row):
+        ident, kind, raw, seq = row
+        data = self._decode(raw)
+        timing = data.get("time")
+        content = data.get("content")
+        if (kind != "assistant" or not isinstance(content, list) or not isinstance(timing, dict)
+                or timing.get("completed") is None):
+            return row
+        parts = db.execute(
+            "SELECT data FROM session_part WHERE session_id = ? AND message_id = ? ORDER BY ordinal",
+            (self._session_id, ident),
+        ).fetchall()
+        if parts:
+            # A downgrade can leave both: upstream reads stored parts before inline parts.
+            data["content"] = [self._decode(part[0]) for part in parts] + content
+            return ident, kind, json.dumps(data), seq
+        return row

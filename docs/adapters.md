@@ -613,7 +613,8 @@ with a 30-second fallback after claim if no idle record arrives. That fallback
 grants neither delivery credit nor an idle receipt.
 
 The v2 adapter reads `session_v2` / `session_message`, relays completed assistant
-text, filters reasoning/tool records from speech, feeds `compaction` records to the
+text from inline `content` and ordered `session_part` rows (used by default in 2.4),
+filters reasoning/tool records from speech, feeds `compaction` records to the
 compaction counter (see *Compaction detection*), and closes turns on structured
 `idle` records, including interruptions. V1 retains its existing `message` / `part`
 reader. V2 defaults `OPENCODE_DB` to `opencode-v2.db` to keep its migrations separate
